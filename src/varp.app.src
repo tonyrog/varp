@@ -1,0 +1,8 @@
+{application, cl,
+ [{description, "VARP"},
+  {vsn, "%VSN%"},
+  {modules, [varp, prover]},
+  {registered, []},
+  {env, []},
+  {applications,[kernel,stdlib]}
+  ]}.

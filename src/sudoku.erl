@@ -1,0 +1,408 @@
+%%% @author Tony Rogvall <tony@rogvall.se>
+%%% @copyright (C) 2012, Tony Rogvall
+%%% @doc
+%%%    Logic formulation(s) of sudoku
+%%% @end
+%%% Created : 13 Oct 2012 by Tony Rogvall <tony@rogvall.se>
+
+-module(sudoku).
+-compile(export_all).
+-import(lists, [foreach/2]).
+
+
+sudoku(X) ->
+    {all,
+     [
+      %% every position must have a uniq value!
+      %%  (A i=1..9)(A j=1..9) (ONE k=1,..9) X(i,j,k)
+      {forall,i,{1,9},
+       {forall,j,{1,9},
+	{eqk,1,{list,k,{1,9},{var,{X,i,j,k}}}}}},
+
+      %% for every row every column must be uniq
+      %%  (A i=1..9 (A k=1..9) (ONE j=1...9) X(i,j,k)
+      {forall,i,{1,9},
+       {forall,k,{1,9},
+	{eqk,1,{list,j,{1,9},{var,{X,i,j,k}}}}}},
+      
+      %% for every column every row must be uniq
+      %%  (A j=1..9) (A k=1..9) (ONE i=1...9) X(i,j,k)
+      {forall,j,{1,9},
+       {forall,k,{1,9},
+	{eqk,1,{list,i,{1,9},{var,{X,i,j,k}}}}}},
+
+      %% for every box every position must be uniq
+      %%  (A s=0..2)(A t=0..2)(A k=1..9)
+      %%    (ONE i=1..3,j=1..3) X(s+i,t+j,k)
+      {forall,s,{0,2},
+       {forall,t,{0,2},
+	{forall,k,{1,9},
+	 {eqk,1, {list,i,{1,3},
+		  {list,j,{1,3},
+		   {var,{X,{'+',{'*',3,s},i},{'+',{'*',3,t},j},k}}}}}}}}
+     ]}.
+
+sudoku0(X) ->
+    %% every position must have a uniq value!
+    %%  (A i=1..9)(A j=1..9) (ONE k=0,..9) X(i,j,k)
+    {forall,i,{1,9},
+     {forall,j,{1,9},
+      {eqk,1,{list,k,{0,9},{var,{X,i,j,k}}}}}}.
+
+    
+
+inst(X,Matrix) ->
+    instr(X,1,Matrix,[]).
+
+instr(X,I,[R|Rs],Acc) ->
+    Acc1 = instc(X,I,1,R,Acc),
+    instr(X,I+1,Rs,Acc1);
+instr(_X,_I,[],Acc) ->
+    {all,lists:reverse(Acc)}.
+
+instc(X,I,J,[x|Ks],Acc) ->
+    instc(X,I,J+1,Ks,Acc);
+instc(X,I,J,[K|Ks],Acc) ->
+    instc(X,I,J+1,Ks,[{var,{X,I,J,K}}|Acc]);
+instc(_X,_I,_J,[],Acc) ->
+    Acc.
+
+install(X,[{{X,_I,_J,0},true}|Rs],D) -> 
+    %% skip A(I,J,0) is a place holder
+    install(X,Rs,D);
+install(X,[{{X,I,J,K},true}|Rs],D) ->
+    D1 = dict:store({I,J}, K, D),
+    install(X,Rs,D1);
+install(X,[_|Rs],D) ->
+    install(X,Rs,D);
+install(_X,[],D) ->
+    D.
+
+fpos(I,J,D) ->
+    case dict:find({I,J}, D) of
+	error ->  [$\s,$x,$\s];
+	{ok,C} -> [$\s,C+$0,$\s]
+    end.
+
+frow(I,D) ->
+    "|"++ 
+	[fpos(I,J,D) || J <- lists:seq(1,3)] ++ "|" ++
+	[fpos(I,J,D) || J <- lists:seq(4,6)] ++ "|" ++
+	[fpos(I,J,D) || J <- lists:seq(7,9)] ++ "|".
+
+print(X, Model) ->
+    D = install(X, Model, dict:new()),
+    io:format("+---------+---------+---------+\n",[]),
+    foreach(fun(I) -> io:format("~s\n", [frow(I,D)]) end, lists:seq(1,3)),
+    io:format("+---------+---------+---------+\n",[]),
+    foreach(fun(I) -> io:format("~s\n", [frow(I,D)]) end, lists:seq(4,6)),
+    io:format("+---------+---------+---------+\n",[]),
+    foreach(fun(I) -> io:format("~s\n", [frow(I,D)]) end, lists:seq(7,9)),
+    io:format("+---------+---------+---------+\n",[]),
+    io:format("\n\n").
+
+puzzle_sudoku17(I) ->
+    case file:open(filename:join(code:priv_dir(varp),"sudoku17.txt"),[read]) of
+	{ok,Fd} ->
+	    case file:pread(Fd, I*82, 81) of
+		{ok,Data} ->
+		    Res = convert_puzzle(Data),
+		    file:close(Fd),
+		    Res;
+		Error ->
+		    Error
+	    end;
+	Error ->
+	    Error
+    end.
+%%
+%% convert a sudoku board on the form [0-9]{81} to 
+%% a matrix form where 'x' represent the empty place
+%%
+convert_puzzle(Data) ->
+    Data1 = lists:map(fun($0) -> x;
+			 (C) -> C-$0 end, Data),
+    convert_puzzle(Data1, []).
+
+convert_puzzle([], Acc) ->
+    lists:reverse(Acc);
+convert_puzzle(List, Acc) ->
+    {R,List1} = lists:split(9, List),
+    convert_puzzle(List1, [R|Acc]).
+
+%% DN vår 2012-10-13
+puzzle1() ->
+    [[x,x,x,x,1,3,x,9,x],
+     [6,4,5,x,2,x,x,x,x],
+     [x,x,x,x,x,5,x,6,x],
+     [x,1,x,x,9,2,x,x,4],
+     [x,5,x,x,x,1,x,x,7],
+     [7,x,x,x,x,x,x,x,x],
+     [x,6,x,3,x,x,x,1,x],
+     [x,x,4,x,x,x,x,x,x],
+     [x,9,x,x,x,x,6,x,x]].
+
+%% SVD generator extra svår.
+puzzle2() ->
+    [[3,x,2,4,8,x,6,x,x],
+     [9,x,x,1,x,x,7,x,x],
+     [x,x,6,x,x,x,2,x,x],
+     [x,8,x,x,5,x,x,7,x],
+     [1,x,x,x,7,2,x,x,x],
+     [x,x,x,x,x,x,x,x,x],
+     [8,x,4,6,x,x,x,x,x],
+     [x,x,x,x,x,7,x,x,x],
+     [x,x,x,x,x,x,x,9,5]].
+
+%% SM 2004 1-4
+%% http://gfx.svd-cdn.se/multimedia/archive/00251/Sudoku_1-4_fr_n_Sud_251935a.pdf
+puzzle_sm_2005_1() ->
+    [[6,7,x,x,x,1,x,x,x],
+     [3,x,x,x,x,9,x,8,6],
+     [x,x,x,x,8,x,x,x,x],
+     [x,x,7,1,x,x,9,x,3],
+     [x,x,x,x,4,x,x,x,x],
+     [8,x,5,x,x,6,4,x,x],
+     [x,x,x,x,6,x,x,x,x],
+     [9,4,x,2,x,x,x,x,7],
+     [x,x,x,7,x,x,x,4,1]].
+
+puzzle_sm_2005_2() ->
+    [[x,x,x,9,1,x,x,3,x],
+     [x,6,x,x,x,2,7,x,9],
+     [x,x,x,x,x,x,x,x,x],
+     [4,x,7,5,x,x,x,1,x],
+     [x,9,x,x,x,3,8,x,2],
+     [x,x,x,x,x,x,x,x,x],
+     [9,x,3,8,x,x,x,2,x],
+     [x,5,x,x,4,6,x,x,x]].
+
+puzzle_sm_2005_3() ->    
+    [[x,x,x,7,x,x,x,x,5],
+     [x,1,x,x,x,x,4,x,x],
+     [x,x,6,x,8,x,x,x,x],
+     [x,x,x,6,x,x,2,x,7],
+     [x,9,x,x,x,x,x,8,x],
+     [3,x,5,x,x,4,x,x,x],
+     [x,x,x,x,2,x,1,x,x],
+     [x,x,4,x,x,x,x,3,x],
+     [7,x,x,x,x,9,x,x,x]].
+
+puzzle_sm_2005_4() ->
+    [[x,x,9,4,x,x,3,x,x],
+     [x,2,x,x,x,x,x,1,x],
+     [4,x,8,x,x,x,7,x,5],
+     [x,5,x,x,7,6,x,x,x],
+     [x,x,x,3,x,9,x,x,x],
+     [x,x,x,2,8,x,x,7,x],
+     [7,x,1,x,x,x,2,x,8],
+     [x,8,x,x,x,x,x,5,x],
+     [x,x,6,x,x,3,1,x,x]].
+
+%% VM : http://www.aftonbladet.se/nyheter/article15054343.ab
+puzzle_vm() ->
+    [[8,x,x,x,x,x,x,x,x],
+     [x,x,3,6,x,x,x,x,x],
+     [x,7,x,x,9,x,2,x,x],
+     [x,5,x,x,x,7,x,x,x],
+     [x,x,x,x,4,5,7,x,x],
+     [x,x,x,1,x,x,x,3,x],
+     [x,x,1,x,x,x,x,6,8],
+     [x,x,8,5,x,x,x,1,x],
+     [x,9,x,x,x,x,4,x,x]].
+
+
+puzzle_bt(P) ->
+    B = sudoku(a1),
+    I = inst(a1,P),
+    case prover:satisfy_formula({'and',B,I}, [print,{max,2},
+					      {method,collect}]) of
+	false ->
+	    false;
+	{_N,Models} ->
+	    lists:foreach(
+	      fun(M) -> print(a1,M) end, Models),
+	    Models
+    end.
+
+puzzle_sat1(P) ->
+    puzzle_satk(1,P).
+
+puzzle_sat2(P) ->
+    puzzle_satk(2,P).
+
+puzzle_satk(K,P) ->
+    B1 = sudoku(a1),
+    I = inst(a1,P),
+    case prover:saturate_formula(K, {'and',B1,I}, 
+				 [{value,true},
+				  {max,2},
+				  {log,info},
+				  {eval_bcp, false},
+				  {method,collect}]) of
+	false ->
+	    false;
+	Bs ->
+	    NV = formula:number_of_variables(Bs),
+	    NB = formula:number_of_bound(Bs),
+	    io:format("NV=~w, NB=~w\n", [NV, NB]),
+	    if NV =:= NB ->
+		    M = formula:model(Bs),
+		    print(a1,M);
+	       true ->
+		    io:format("Backtrack:\n", []),
+		    case prover:backtrack_bs(Bs) of
+			{0,[]} -> false;
+			{_N,Models} ->
+			    lists:foreach(
+			      fun(M) -> print(a1,M) end, Models),
+			    Models
+		    end
+	    end
+    end.
+
+%% 
+puzzle_uniq(N,K) ->
+    A0 = sudoku0(a0),
+    A1 = sudoku(a1),
+    A2 = sudoku(a2),
+    P = 
+	{'all',
+	 [ A0,
+	   %% N = size of the partial solution (81-N = 0)
+	   {eqk,81-N,
+	    {list,i,{1,9},
+	     {list,j,{1,9},
+	      {var,{a0,i,j,0}}}}},
+
+	   A1, A2,
+	   {exists,i,{1,9},
+	    {exists,j,{1,9},
+	     {exists,k,{1,9}, 
+	      {'!=', {var,{a1,i,j,k}}, {var,{a2,i,j,k}}}}}},
+
+	   {forall,i,{1,9},
+	    {forall,j,{1,9},
+	     {forall,k,{1,9},
+	      {'and',
+	       {'->',{var,{a0,i,j,k}}, {var,{a1,i,j,k}}},
+	       {'->',{var,{a0,i,j,k}}, {var,{a2,i,j,k}}}}}}}
+
+	 ]},
+    case prover:saturate_formula(K, P,
+				 [{value,true},
+				  {max,2},
+				  {log,info},
+				  {eval_bcp, false},
+				  {method,collect}]) of
+	false ->
+	    false;
+	Bs ->
+	    NV = formula:number_of_variables(Bs),
+	    NB = formula:number_of_bound(Bs),
+	    io:format("NV=~w, NB=~w\n", [NV,NB]),
+	    if NV =:= NB ->
+		    M = formula:model(Bs),
+		    print(a1,M);
+	       true ->
+		    io:format("Backtrack:\n", []),
+		    case prover:backtrack_bs(Bs) of
+			{0,[]} -> false;
+			{_N,Models} ->
+			    lists:foreach(
+			      fun(M) -> 
+				      print(a0,M),
+				      print(a1,M),
+				      print(a2,M)
+			      end, Models),
+			    Models
+		    end
+	    end
+    end.
+
+puzzle17_loop() ->
+    puzzle17_loop(1).
+
+puzzle17_loop(K) ->
+    Is = shuffle:list(lists:seq(0, 49151)),
+    puzzle17_loop(K, Is).
+
+puzzle17_loop(K, [I|Is]) ->
+    io:format("I:~w\n", [I]),
+    case puzzle17_instance(I, K) of
+	true -> 
+	    ok;
+	false ->
+	    puzzle17_loop(K, Is)
+    end;
+puzzle17_loop(_K, []) ->
+    ok.
+
+puzzle17_instance(I, K) ->
+    P = puzzle_sudoku17(I),
+    A = sudoku(a1),
+    {all,P0} = inst(a1,P),
+    %% find16_random(K, P0, A)
+    find16_loop(K, P0, [], A).
+
+find16_random(K, P0, A) ->
+    {Ps0,[Pi|Ps1]} = lists:split(random:uniform(16), P0),
+    P16 = Ps0++Ps1,
+    case puzzle16_prove(K,Pi,P16,A) of
+	true ->
+	    io:format("SOLUTION: ~p\n", [P16]),
+	    {true, P16};
+	false ->
+	    false
+    end.
+
+find16_loop(K,[Pi|Ps0],Ps1,A) ->
+    P16 = Ps0++Ps1,
+    case puzzle16_prove(K,Pi,P16,A) of
+	true ->
+	    io:format("SOLUTION: ~p\n", [P16]),
+	    {true,P16};
+	false ->
+	    find16_loop(K,Ps0,[Pi|Ps1],A)
+    end;
+find16_loop(_K, [], _Ps1, _A) ->
+    false.
+
+       
+puzzle16_prove(K,Pi,P16,A) ->
+    F = {'->', {'and',A,{all,P16}},Pi},
+    io:format("Pi:~p\n", [Pi]),
+    case prover:saturate_formula(K, F,
+				 [{value,false},
+				  {max,1},
+				  %% {log,info},
+				  {eval_bcp, false},
+				  {method,collect}]) of
+	false ->
+	    true;
+	Bs ->
+	    NV = formula:number_of_variables(Bs),
+	    NB = formula:number_of_bound(Bs),
+	    %% io:format("NV=~w, NB=~w\n", [NV, NB]),
+	    if NV =:= NB ->
+		    %% M = formula:model(Bs),
+		    %% print(a1,M),
+		    false;
+	       true ->
+		    %% io:format("Backtrack:\n", []),
+		    case prover:backtrack_bs(Bs) of
+			{0,[]} ->
+			    true;
+			{_N,_Models} ->
+			    %% lists:foreach(
+			    %% fun(M) -> print(a1,M) end, Models),
+			    %% Models,
+			    false
+		    end
+	    end    
+    end.
+    
+    
+
+
+    
