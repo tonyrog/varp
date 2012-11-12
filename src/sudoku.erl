@@ -122,13 +122,18 @@ puzzle_sudoku17(I) ->
 convert_puzzle(Data) ->
     Data1 = lists:map(fun($0) -> x;
 			 (C) -> C-$0 end, Data),
-    convert_puzzle(Data1, []).
+    split_parts(Data1,9,[]).
 
-convert_puzzle([], Acc) ->
+split_parts([],_N,Acc) ->
     lists:reverse(Acc);
-convert_puzzle(List, Acc) ->
-    {R,List1} = lists:split(9, List),
-    convert_puzzle(List1, [R|Acc]).
+split_parts(List,N,Acc) ->
+    Len = length(List),
+    if Len =< N ->
+	    split_parts([],N,[List|Acc]);
+       true ->
+	    {R,List1} = lists:split(N, List),
+	    split_parts(List1,N,[R|Acc])
+    end.
 
 %% DN vår 2012-10-13
 puzzle1() ->
@@ -327,8 +332,23 @@ puzzle17_loop(K) ->
     Is = shuffle:list(lists:seq(0, 49151)),
     puzzle17_loop(K, Is).
 
+puzzle17_par(K) ->
+    N = erlang:system_info(schedulers_online),
+    puzzle17_par(K, N).
+    
+puzzle17_par(K, N) ->
+    IsL = split_parts(lists:seq(0, 49151),49152 div N,[]),
+    lists:foreach(
+      fun(Is) ->
+	      spawn(fun() ->
+			    io:format("loop: ~w started\n", [self()]),
+			    puzzle17_loop(K, Is),
+			    io:format("loop: ~w stopped\n", [self()])
+		    end)
+      end, IsL).
+
 puzzle17_loop(K, [I|Is]) ->
-    io:format("I:~w\n", [I]),
+    io:format("~w: I:~w\n", [self(),I]),
     case puzzle17_instance(I, K) of
 	true -> 
 	    ok;
@@ -350,7 +370,7 @@ find16_random(K, P0, A) ->
     P16 = Ps0++Ps1,
     case puzzle16_prove(K,Pi,P16,A) of
 	true ->
-	    io:format("SOLUTION: ~p\n", [P16]),
+	    io:format("~w: SOLUTION: ~p\n", [self(),P16]),
 	    {true, P16};
 	false ->
 	    false
@@ -360,7 +380,7 @@ find16_loop(K,[Pi|Ps0],Ps1,A) ->
     P16 = Ps0++Ps1,
     case puzzle16_prove(K,Pi,P16,A) of
 	true ->
-	    io:format("SOLUTION: ~p\n", [P16]),
+	    io:format("~w: SOLUTION: ~p\n", [self(),P16]),
 	    {true,P16};
 	false ->
 	    find16_loop(K,Ps0,[Pi|Ps1],A)
@@ -368,7 +388,6 @@ find16_loop(K,[Pi|Ps0],Ps1,A) ->
 find16_loop(_K, [], _Ps1, _A) ->
     false.
 
-       
 puzzle16_prove(K,Pi,P16,A) ->
     F = {'->', {'and',A,{all,P16}},Pi},
     io:format("Pi:~p\n", [Pi]),

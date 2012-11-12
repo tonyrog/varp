@@ -1,4 +1,4 @@
-{application, cl,
+{application, varp,
  [{description, "VARP"},
   {vsn, "%VSN%"},
   {modules, [varp, prover]},
