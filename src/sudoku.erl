@@ -9,42 +9,49 @@
 -compile(export_all).
 -import(lists, [foreach/2]).
 
+sudoku(S) ->
+    sudoku(S,fun(I) -> I end).
 
-sudoku(X) ->
+sudokux(S) ->
+    sudoku(S,fun(I) -> {f,x,[I]} end).
+
+sudoku(S,F) ->
     {all,
      [
       %% every position must have a uniq value!
-      %%  (A i=1..9)(A j=1..9) (ONE k=1,..9) X(i,j,k)
+      %%  (A i=1..9)(A j=1..9) (E! k=1,..9) S(i,j,k)
       {forall,i,{1,9},
        {forall,j,{1,9},
-	{eqk,1,{list,k,{1,9},{var,{X,i,j,k}}}}}},
+	{eqk,1,{list,k,{1,9},{var,{S,i,j,F(k)}}}}}},
 
       %% for every row every column must be uniq
-      %%  (A i=1..9 (A k=1..9) (ONE j=1...9) X(i,j,k)
+      %%  (A i=1..9 (A k=1..9) (E! j=1...9) S(i,j,k)
       {forall,i,{1,9},
        {forall,k,{1,9},
-	{eqk,1,{list,j,{1,9},{var,{X,i,j,k}}}}}},
+	{eqk,1,{list,j,{1,9},{var,{S,i,j,F(k)}}}}}},
       
       %% for every column every row must be uniq
-      %%  (A j=1..9) (A k=1..9) (ONE i=1...9) X(i,j,k)
+      %%  (A j=1..9) (A k=1..9) (E! i=1...9) S(i,j,k)
       {forall,j,{1,9},
        {forall,k,{1,9},
-	{eqk,1,{list,i,{1,9},{var,{X,i,j,k}}}}}},
+	{eqk,1,{list,i,{1,9},{var,{S,i,j,F(k)}}}}}},
 
       %% for every box every position must be uniq
       %%  (A s=0..2)(A t=0..2)(A k=1..9)
-      %%    (ONE i=1..3,j=1..3) X(s+i,t+j,k)
+      %%    (E! i=1..3,j=1..3) S(3*s+i,3*t+j,k)
       {forall,s,{0,2},
        {forall,t,{0,2},
 	{forall,k,{1,9},
 	 {eqk,1, {list,i,{1,3},
 		  {list,j,{1,3},
-		   {var,{X,{'+',{'*',3,s},i},{'+',{'*',3,t},j},k}}}}}}}}
+		   {var,{S,{'+',{'*',3,s},i},{'+',{'*',3,t},j},F(k)}}}}}}}}
      ]}.
+
+
 
 sudoku0(X) ->
     %% every position must have a uniq value!
-    %%  (A i=1..9)(A j=1..9) (ONE k=0,..9) X(i,j,k)
+    %%  (A i=1..9)(A j=1..9) (E! k=0,..9) X(i,j,k)
     {forall,i,{1,9},
      {forall,j,{1,9},
       {eqk,1,{list,k,{0,9},{var,{X,i,j,k}}}}}}.
@@ -135,7 +142,7 @@ split_parts(List,N,Acc) ->
 	    split_parts(List1,N,[R|Acc])
     end.
 
-%% DN vår 2012-10-13
+%% DN svår 2012-10-13
 puzzle1() ->
     [[x,x,x,x,1,3,x,9,x],
      [6,4,5,x,2,x,x,x,x],
@@ -177,6 +184,7 @@ puzzle_sm_2005_2() ->
      [x,6,x,x,x,2,7,x,9],
      [x,x,x,x,x,x,x,x,x],
      [4,x,7,5,x,x,x,1,x],
+     [x,x,x,x,x,x,x,x,x],
      [x,9,x,x,x,3,8,x,2],
      [x,x,x,x,x,x,x,x,x],
      [9,x,3,8,x,x,x,2,x],
@@ -243,7 +251,9 @@ puzzle_satk(K,P) ->
 				 [{value,true},
 				  {max,2},
 				  {log,info},
+				  {order, depth},
 				  {eval_bcp, false},
+				  {saturate_pair, true},
 				  {method,collect}]) of
 	false ->
 	    false;
@@ -257,47 +267,70 @@ puzzle_satk(K,P) ->
 	       true ->
 		    io:format("Backtrack:\n", []),
 		    case prover:backtrack_bs(Bs) of
-			{0,[]} -> false;
+			{0,[]} -> 
+			    false;
+			{1,[M]} ->
+			    print(a1,M);
 			{_N,Models} ->
 			    lists:foreach(
 			      fun(M) -> print(a1,M) end, Models),
-			    Models
+			    error
 		    end
 	    end
     end.
 
+%%
+%% Pre solutions
+%%
+puzzle_pre() ->
+    [[1,2,3,4,5,6,7,8,9],
+     [4,x,x,x,x,x,x,x,x],
+     [5,x,x,x,x,x,x,x,x],
+     [6,x,x,x,x,x,x,x,x],
+     [7,x,x,x,x,x,x,x,x],
+     [8,x,x,x,x,x,x,x,x],
+     [9,x,x,x,x,x,x,x,x],
+     [2,x,x,x,x,x,x,x,x],
+     [3,x,x,x,x,x,x,x,x]].
+
+
 %% 
-puzzle_uniq(N,K) ->
+%% Puzzle finder
+%%
+puzzle_find() ->
+    puzzle_find(1, 49151).
+
+puzzle_find(K,L) ->
     A0 = sudoku0(a0),
     A1 = sudoku(a1),
-    A2 = sudoku(a2),
-    P = 
+    %% load solutions already found
+    Cs = lists:map(
+	   fun(I) -> 
+		   P = puzzle_sudoku17(I),
+		   S = inst(a0,P),
+		   {'not',S}
+	   end, lists:seq(0, L)),
+    N = 17,
+    F = 
 	{'all',
-	 [ A0,
+	 [ A0, A1,
 	   %% N = size of the partial solution (81-N = 0)
 	   {eqk,81-N,
 	    {list,i,{1,9},
 	     {list,j,{1,9},
 	      {var,{a0,i,j,0}}}}},
 
-	   A1, A2,
-	   {exists,i,{1,9},
-	    {exists,j,{1,9},
-	     {exists,k,{1,9}, 
-	      {'!=', {var,{a1,i,j,k}}, {var,{a2,i,j,k}}}}}},
-
 	   {forall,i,{1,9},
 	    {forall,j,{1,9},
 	     {forall,k,{1,9},
-	      {'and',
-	       {'->',{var,{a0,i,j,k}}, {var,{a1,i,j,k}}},
-	       {'->',{var,{a0,i,j,k}}, {var,{a2,i,j,k}}}}}}}
+	      {'->',{var,{a0,i,j,k}}, {var,{a1,i,j,k}}}}}}
+	 ] ++ Cs },
 
-	 ]},
-    case prover:saturate_formula(K, P,
+    case prover:saturate_formula(K, F,
 				 [{value,true},
 				  {max,2},
 				  {log,info},
+				  {order, [occure,reverse]},
 				  {eval_bcp, false},
 				  {method,collect}]) of
 	false ->
@@ -308,6 +341,7 @@ puzzle_uniq(N,K) ->
 	    io:format("NV=~w, NB=~w\n", [NV,NB]),
 	    if NV =:= NB ->
 		    M = formula:model(Bs),
+		    print(a0,M),
 		    print(a1,M);
 	       true ->
 		    io:format("Backtrack:\n", []),
@@ -317,8 +351,7 @@ puzzle_uniq(N,K) ->
 			    lists:foreach(
 			      fun(M) -> 
 				      print(a0,M),
-				      print(a1,M),
-				      print(a2,M)
+				      print(a1,M)
 			      end, Models),
 			    Models
 		    end

@@ -17,69 +17,84 @@ expand(true,_Bs) ->
     true;
 expand(false,_Bs) ->
     false;
-expand(V, Bs) when is_atom(V) ->
-    {var, expand_meta(V, Bs)};
-expand({var,V},Bs) ->       {var, expand_meta(V, Bs)};
+expand(V, Bs) when is_atom(V) -> 
+    expand_meta({p,V,[]}, Bs);
+expand(_P0={p,P,Vs},Bs) ->
+    P1 = {p,P,eval_meta_list(Vs,Bs)},
+    %% io:format("expand: ~p => ~p\n", [_P0, P1]),
+    expand_meta(P1, Bs);
 expand({'&',A,B},Bs) ->     {'&',expand(A,Bs),expand(B,Bs)};
+expand({'&&',A,B},Bs) ->    {'&&',expand(A,Bs),expand(B,Bs)};
 expand({'and',A,B},Bs) ->   {'and',expand(A,Bs),expand(B,Bs)};
 expand({'#',A,B},Bs) ->     {'#',expand(A,Bs),expand(B,Bs)};
 expand({'|',A,B},Bs) ->     {'|',expand(A,Bs),expand(B,Bs)};
+expand({'||',A,B},Bs) ->    {'||',expand(A,Bs),expand(B,Bs)};
 expand({'or',A,B},Bs) ->    {'or',expand(A,Bs),expand(B,Bs)};
 expand({'->',A,B},Bs) ->    {'->',expand(A,Bs),expand(B,Bs)};
 expand({'imp',A,B},Bs) ->   {'imp',expand(A,Bs),expand(B,Bs)};
 expand({'not',A},Bs) ->     {'not',expand(A,Bs)};
+expand({'~',A},Bs) ->       {'~',expand(A,Bs)};
+expand({'!',A},Bs) ->       {'!',expand(A,Bs)};
+expand({'equ',A,B},Bs) ->   {'equ',expand(A,Bs),expand(B,Bs)};
 expand({'=',A,B},Bs) ->     {'=',expand(A,Bs),expand(B,Bs)};
+expand({'^',A,B},Bs) ->     {'^',expand(A,Bs),expand(B,Bs)};
+expand({'xor',A,B},Bs) ->   {'xor',expand(A,Bs),expand(B,Bs)};
 expand({'<->',A,B},Bs) ->   {'<->',expand(A,Bs),expand(B,Bs)};
 expand({'!=',A,B},Bs) ->    {'!=',expand(A,Bs),expand(B,Bs)};
-expand({all,F}, Bs)   ->    all(expand_args(F,Bs));
-expand({any,F}, Bs)   ->    any(expand_args(F,Bs));
-expand({none,F}, Bs)   ->   {none,expand_args(F,Bs)};
-expand({eqk,K,F}, Bs) ->    {eqk,K,expand_args(F,Bs)};
-expand({neqk,K,F}, Bs) ->   {neqk,K,expand_args(F,Bs)};
-expand({gtk,K,F}, Bs) ->    {gtk,K,expand_args(F,Bs)};
-expand({gtek,K,F}, Bs) ->   {gtek,K,expand_args(F,Bs)};
-expand({ltk,K,F}, Bs) ->    {ltk,K,expand_args(F,Bs)};
-expand({ltek,K,F}, Bs) ->   {ltek,K,expand_args(F,Bs)};
-expand({suchthat,Expr,F},Bs) ->
-    case eval_meta(Expr,Bs) of
-	true  -> expand(F,Bs);
-	false -> undefined
-    end;
+
 expand({subst,Rx,Py,F},Bs) ->
     expand(F, [{Rx,Py}|Bs]);
 expand({subst,SList,F},Bs) ->
     expand(F, SList++Bs);
 
-expand({{forall,Xs,D}, F}, Bs) ->
-    D1 = eval_domain(D, Bs),
-    Ys = expand_quant(F,Xs,D1,Bs),
+%% expand({eqk,K,F}, Bs) ->    {eqk,K,expand_args(F,Bs)};
+%% expand({neqk,K,F}, Bs) ->   {neqk,K,expand_args(F,Bs)};
+%% expand({gtk,K,F}, Bs) ->    {gtk,K,expand_args(F,Bs)};
+%% expand({gtek,K,F}, Bs) ->   {gtek,K,expand_args(F,Bs)};
+%% expand({ltk,K,F}, Bs) ->    {ltk,K,expand_args(F,Bs)};
+%% expand({ltek,K,F}, Bs) ->   {ltek,K,expand_args(F,Bs)};
+%% expand({all,F}, Bs)   ->    all(expand_args(F,Bs));
+%% expand({any,F}, Bs)   ->    any(expand_args(F,Bs));
+%% expand({none,F}, Bs)   ->   {none,expand_args(F,Bs)};
+%% expand({suchthat,Expr,F},Bs) ->
+%%     case eval_meta(Expr,Bs) of
+%% 	true  -> expand(F,Bs);
+%% 	false -> undefined
+%%     end;
+
+expand({{forall,Xs}, F}, Bs) ->
+    Ys = expand_quant(F,Xs,Bs),
     all(Ys);
-expand({{exists,Xs,D},F}, Bs) ->
-    D1 = eval_domain(D, Bs),
-    Ys = expand_quant(F,Xs,D1,Bs),
+expand({{exists,Xs},F}, Bs) ->
+    Ys = expand_quant(F,Xs,Bs),
     any(Ys);
-expand({{list,Xs,D},F}, Bs) ->
-    D1 = eval_domain(D, Bs),
-    expand_quant(F,Xs,D1,Bs);
-expand({{one,Xs,D},F}, Bs) ->
-    D1 = eval_domain(D, Bs),
-    Ys = expand_quant(F,Xs,D1,Bs),
+expand({{eqk,[X1|Xs]},F}, Bs) ->
+    N = eval_meta(X1,Bs),
+    Ys = expand_quant(F,Xs,Bs),
+    {eqk,N,Ys};
+expand({{one,Xs},F}, Bs) ->
+    Ys = expand_quant(F,Xs,Bs),
     {one,Ys}.
 
-expand_quant(F,Xs=[X],[Y|Ys],Bs) ->
-    case expand(F, [{X,Y}|Bs]) of
-	undefined -> expand_quant(F,Xs,Ys,Bs);
-	Fs when is_list(Fs) -> Fs ++ expand_quant(F,Xs,Ys,Bs);
-	F1 -> [F1 | expand_quant(F,Xs,Ys,Bs)]
+expand_quant(F,[{'=',V,D}|Xs], Bs) ->
+    Ds = eval_domain(D, Bs),
+    expand_quant_domain(F, V, Ds, Xs, Bs);
+expand_quant(F, [Expr|Xs], Bs) ->
+    case eval_meta(Expr, Bs) of
+	false -> [];
+	true -> expand_quant(F, Xs, Bs)
     end;
-expand_quant(F,Xs,[Y|Ys],Bs) ->
-    case expand(F, lists:zip(Xs,Y)++Bs) of
-	undefined -> expand_quant(F,Xs,Ys,Bs);
-	Fs when is_list(Fs) -> Fs ++ expand_quant(F,Xs,Ys,Bs);
-	F1 -> [F1 | expand_quant(F,Xs,Ys,Bs)]
-    end;
-expand_quant(_F,_Xs,[],_BS) ->
+expand_quant(F, [], Bs) ->
+    [expand(F,Bs)].
+
+	    
+expand_quant_domain(F, V, [Y|Ys], Xs, Bs) ->
+    expand_quant(F, Xs, [{V,Y}|Bs]) ++ 
+	expand_quant_domain(F, V, Ys, Xs, Bs);
+expand_quant_domain(_F, _V, [], _Xs, _Bs) ->
     [].
+
+
 
 expand_args(Fs,Bs) when is_list(Fs) ->
     expand_args_(Fs,Bs);
@@ -96,31 +111,27 @@ expand_args_([F|Fs],Bs) ->
 expand_args_([],_Bs) ->
     [].
 
-expand_meta(T,Bs) when is_tuple(T), is_atom(element(1,T)) ->
-    [R|Rs] = tuple_to_list(T),
+expand_meta(_Rx={p,P,Rs},Bs) when is_atom(P) ->
     {Rs1,_Bnd1} = bind_meta(Rs,Bs,[],[]),
     %% check for substitution R(x1,..,xn) / P(y1,..,ym)
-    case find_subst(R, Bs) of
-	false -> 
-	    list_to_tuple([R|Rs1]);
-	{Rx,Qy} when is_tuple(Qy), tuple_size(Qy) > 1, element(1,Qy) =/= R ->
-	    [_U|Us] = tuple_to_list(Rx),
-	    Bnd2 = lists:zip(Us,Rs1),
-	    io:format("subst: ~w [~w] => ~w\n", [Rx,Bnd2,Qy]),
-	    expand_meta(Qy, Bnd2++Bs);
-	Q when is_tuple(Q), tuple_size(Q) =:= 1 ->
-	    ok;
-	Q when is_atom(Q) ->
-	    Q
+    %% io:format("expand_meta: ~p in Bs=~p\n", [_Rx, Bs]),
+    Found = find_subst(P, Bs),
+    %% io:format("subst  = ~w\n", [Found]),
+    case Found of
+	false ->
+	    {p,P,Rs1};
+	{{p,Q,[]},{p,_P,_Us}} ->
+	    {p,Q,[]};
+	{{p,Q,Qs},{p,P,Ps}} when P =/= Q, length(Qs) > 0 ->
+	    Bnd2 = lists:zip(Ps,Rs1),
+	    %% io:format("subst: ~w [~w] => ~w\n", [{p,P,Ps},Bnd2,{p,Q,Qs}]),
+	    expand_meta({p,Q,Qs}, Bnd2++Bs)
     end;
-expand_meta(V,_Bs) -> V.
+expand_meta(V,_Bs) ->
+    %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),    
+    V.
 
 
-eval_domain(V, Bs) when is_atom(V) ->
-    V1 = eval_meta(V,Bs),
-    [V1];
-eval_domain(I, _Bs) when is_integer(I) ->
-    [I];
 eval_domain({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
@@ -140,13 +151,16 @@ eval_domain({intersect,A,B}, Bs) ->
 eval_domain({product,A,B}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
-    [ [Ai,Bi] || Ai <- A1, Bi <- B1 ].
+    [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
+eval_domain(Expr, Bs) ->
+    [eval_meta(Expr,Bs)].
 
-
-find_subst(R, [{Rx,Qy}|_]) when R =:= element(1,Rx) ->
-    {Rx,Qy};
-find_subst(R, [_|Bnd]) -> find_subst(R, Bnd);
-find_subst(_R ,[]) -> false.
+find_subst(P, [E={_Qy,{p,P,_}}|_]) ->
+    E;
+find_subst(P, [_|Bnd]) -> 
+    find_subst(P, Bnd);
+find_subst(_P ,[]) -> 
+    false.
 
 %% bind for substitution of function symbols
 bind_meta([V|Vs], Bs, Acc, Bnd) when is_atom(V) ->
@@ -178,13 +192,13 @@ subst(F={var,_}, _X, _Y) -> F;
 subst(true, _, _) -> true;
 subst(false, _, _) -> false;
 subst({'and',A,B},X,Y) -> {'and',subst(A,X,Y),subst(B,X,Y)};
-subst({'or',A,B},X,Y) -> {'or',subst(A,X,Y),subst(B,X,Y)};
-subst({'not',A},X,Y) -> {'not',subst(A,X,Y)}.
+subst({'or',A,B},X,Y)  -> {'or',subst(A,X,Y),subst(B,X,Y)};
+subst({'not',A},X,Y)   -> {'not',subst(A,X,Y)}.
 
 %% peval - partial eval 
 peval(true) -> true;
 peval(false) ->  false;
-peval(V={var,_}) -> V;
+peval(V={p,_P,_}) -> V;
 peval({'and',A,B}) -> 
     case peval(A) of
 	false -> false;
@@ -224,60 +238,69 @@ eval({'and',A,B},Bs) -> eval(A,Bs) andalso eval(B,Bs);
 eval({'or',A,B},Bs) -> eval(A,Bs) orelse eval(B,Bs);
 eval({'not',A},Bs) -> not eval(A,Bs).
 
-
 %% eval function expressions and suchthat expressions
-eval_meta(V, _Bs) when is_integer(V) ->
-    V;
-eval_meta(true, _Bs) ->
-    true;
-eval_meta(false, _Bs) ->
-    false;
+eval_meta(V, _Bs) when is_integer(V) ->  V;
+eval_meta(true, _Bs) ->  true;
+eval_meta(false, _Bs) -> false;
 eval_meta(V, Bs) when is_atom(V) ->
     case lists:keyfind(V,1,Bs) of
-	undefined -> V;
+	false -> V;
 	{_,W} -> W
     end;
-eval_meta({call,F,As},Bs) ->
+eval_meta({f,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
 	{factorial,[N]} -> imath:factorial(N);
 	{binom,[A,B]} -> imath:binom(A,B);
-	{sqrt,[A]} -> math:sqrt(A);
+	{sqrt,[A]}    -> math:sqrt(A);
 	{nroot,[A,N]} -> imath:pow(A,(1/N));
-	{ln,[A]} -> math:log(A);
-	{log,[A,N]} -> math:log(A)/math:log(N);
-	{log2,[A]} -> math:log(A)/math:log(2);
-	{log10,[A]} -> math:log10(A);
-	{pi,[]} -> math:pi();
-	{e,[]} -> math:exp(1);
-	{pow,[A,B]} -> math:pow(A,B);
-	{sin,[A]} -> math:sin(A);
-	{cos,[A]} -> math:cos(A);
-	{trunc,[A]} -> trunc(A);
-	{round,[A]} -> round(A);
-	{abs,[A]} -> abs(A);
-	{max,[A,B]} -> max(A,B);
-	{min,[A,B]} -> min(A,B);
-	{plus,[A,B]} -> A+B;
+	{ln,[A]}      -> math:log(A);
+	{log,[A,N]}   -> math:log(A)/math:log(N);
+	{log2,[A]}    -> math:log(A)/math:log(2);
+	{log10,[A]}   -> math:log10(A);
+	{pi,[]}       -> math:pi();
+	{e,[]}        -> math:exp(1);
+	{pow,[A,B]}   -> math:pow(A,B);
+	{sin,[A]}     -> math:sin(A);
+	{cos,[A]}     -> math:cos(A);
+	{trunc,[A]}   -> trunc(A);
+	{round,[A]}   -> round(A);
+	{abs,[A]}     -> abs(A);
+	{max,[A,B]}   -> max(A,B);
+	{min,[A,B]}   -> min(A,B);
+	{plus,[A,B]}  -> A+B;
+	{'+',[A,B]}   -> A+B;
 	{minus,[A,B]} -> A-B;
+	{'-',[A,B]}   -> A-B;
 	{times,[A,B]} -> A*B;
-	{divide,[A,B]} -> A div B;
+	{'*',[A,B]}   -> A*B;
+	{divide,[A,B]}    -> A div B;
+	{'/',[A,B]}       -> A div B;
 	{remainder,[A,B]} -> A rem B;
-	{negate,[A]} -> -A
+	{'%',[A,B]}       -> A rem B;
+	{negate,[A]} -> -A;
+	{F,As1} -> {f,F,As1}
     end;
 eval_meta({Op,A,B},Bs) ->
-    case {Op,eval_meta(A,Bs),eval_meta(B,Bs)} of
-	{'<',A1,B1} -> A1 < B1;
-	{'<=', A1, B1} -> A1 =< B1;
-	{'>',A1,B1} -> A1 > B1;
-	{'>=', A1, B1} -> A1 >= B1;
-	{'==', A1, B1} -> A1 == B1;
-	{'and',A1,B1} -> A1 and B1;
-	{'or',A1,B1} -> A1 or B1;
-	{'+',A1,B1} -> A1+B1;
-	{'-',A1,B1} -> A1-B1;
-	{'*',A1,B1} -> A1*B1;
-	{'/',A1,B1} -> A1 div B1;
-	{'%',A1,B1} -> A1 rem B1
+    A1 = eval_meta(A,Bs),
+    B1 = eval_meta(B,Bs),
+    if is_number(A1), is_number(B1) ->
+	    case {Op,A1,B1} of
+		{'<',A1,B1} -> A1 < B1;
+		{'<=', A1, B1} -> A1 =< B1;
+		{'>',A1,B1} -> A1 > B1;
+		{'>=', A1, B1} -> A1 >= B1;
+		{'==', A1, B1} -> A1 == B1;
+		{'!=', A1, B1} -> A1 =/= B1;
+		{'and',A1,B1} -> A1 and B1;
+		{'or',A1,B1} -> A1 or B1;
+		{'+',A1,B1} -> A1+B1;
+		{'-',A1,B1} -> A1-B1;
+		{'*',A1,B1} -> A1*B1;
+		{'/',A1,B1} -> A1 div B1;
+		{'%',A1,B1} -> A1 rem B1
+	    end;
+       true ->
+	    {Op,A1,B1}
     end;
 eval_meta({sum,As},Bs) ->
     lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
@@ -290,7 +313,6 @@ eval_meta({Op,A},Bs) ->
 
 eval_meta_list(As,Bs) ->
     map(fun(A) -> eval_meta(A,Bs) end, As).
-
     
 print(F) ->
     io:put_chars([fmt(F),"\n"]).

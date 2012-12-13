@@ -20,8 +20,6 @@ Rules.
 			  S = lists:sublist(TokenChars,2,TokenLen-2),
 			{token,{string, TokenLine, S}}
 		      end.
-{L}({A}|{D}|_)*     : {token,{variable,TokenLine,TokenChars}}.
-{U}({A}|{D}|_)*     : {token,{symbol,TokenLine,TokenChars}}.
 
 0[xX]{H}+           : {token,{hexnum,TokenLine,TokenChars}}.
 0[b]{B}+            : {token,{binnum,TokenLine,TokenChars}}.
@@ -37,6 +35,9 @@ Rules.
 %% words
 unsigned            : {token,{'unsigned',TokenLine}}.
 signed              : {token,{'signed',TokenLine}}.
+
+true                : {token,{'true',TokenLine}}.
+false               : {token,{'false',TokenLine}}.
 
 %% logic operators
 
@@ -96,6 +97,10 @@ equ                 : {token,{equ,TokenLine}}.
 \]		: {token,{']',TokenLine}}.
 \.\.		: {token,{'..',TokenLine}}.
 \.		: {token,{'.',TokenLine}}.
+
+{L}({A}|{D}|_)*     : {token,{variable,TokenLine,TokenChars}}.
+{U}({A}|{D}|_)*     : {token,{symbol,TokenLine,TokenChars}}.
+
 {WS}+		: skip_token .
 
 Erlang code.

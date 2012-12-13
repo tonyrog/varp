@@ -489,46 +489,34 @@ expand_meta(W={int,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
     W;
 expand_meta(W={bit,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
     W;
-expand_meta(T,Bs) when is_tuple(T), is_atom(element(1,T)) ->
-    [R|Rs] = tuple_to_list(T),
-    {Rs1,Bnd} = bind_meta(Rs, Bs, [], []),
-    ?dbg("expand_meta: ~w => ~w\n", [T, list_to_tuple([R|Rs1])]),
+expand_meta(_Rx={p,P,Rs},Bs) when is_atom(P) ->
+    {Rs1,_Bnd} = bind_meta(Rs, Bs, [], []),
     %% check for substitution R(x1,..,xn) / P(y1,..,ym)
-    T1 = list_to_tuple([R|Rs1]),
-    ?dbg("check substs ~w in ~w\n", [T1, Bs#bs.subst]),
-    case lists:keyfind(T1,1,Bs#bs.subst) of %% look for exact subs
+    %% io:format("expand_meta: ~p in Bs=~p\n", [_Rx, Bs]),
+    Found = find_subst(P, Bs#bs.subst),
+    %% io:format("subst  = ~w\n", [Found]),
+    case Found of
 	false ->
-	    ?dbg("check substs ~w in ~w\n", [R, Bs#bs.subst]),
-	    case find_subst(R, Bs#bs.subst) of
-		false ->
-		    T1;
-		{_Rx,Qy} when is_tuple(Qy), tuple_size(Qy) > 1, 
-			      element(1,Qy) =/= R ->
-		    ?dbg("subst: ~w [~w] => ~w\n", [_Rx,Bnd,Qy]),
-		    expand_meta(Qy, Bs#bs { meta=Bnd++Bs#bs.meta});
-		{_R,Q} ->
-		    Q
-	    end;
-	{_,T2} ->
-	    ?dbg("subst: ~w => ~w\n", [T1,T2]),
-	    T2
+	    {p,P,Rs1};
+	{{p,Q,[]},{p,_P,_Us}} ->
+	    {p,Q,[]};
+	{{p,Q,Qs},{p,P,Ps}} when P =/= Q, length(Qs) > 0 ->
+	    Bnd2 = lists:zip(Ps,Rs1),
+	    %% io:format("subst: ~w [~w] => ~w\n", [{p,P,Ps},Bnd2,{p,Q,Qs}]),
+	    Meta = Bnd2 ++ Bs#bs.meta,
+	    expand_meta({p,Q,Qs}, Bs#bs { meta=Meta})
     end;
-expand_meta(R,Bs) ->
-    case lists:keyfind(R,1,Bs#bs.subst) of %% look for exact subs
-	false -> R;
-	{_,Q} -> 
-	    ?dbg("subst: ~w => ~w\n", [R,Q]),
-	    Q
-    end.
+expand_meta(V,_Bs) ->
+    %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),    
+    V.
 
 
-find_subst(R, [{Rx,Qy}|_]) when R =:= element(1,Rx) ->
-    {Rx,Qy};
-find_subst(R, [{R,Q}|_]) ->
-    {R,Q};
-find_subst(R, [_|Bnd]) -> find_subst(R, Bnd);
-find_subst(_R ,[]) -> false.
-
+find_subst(P, [E={_Qy,{p,P,_}}|_]) ->
+    E;
+find_subst(P, [_|Bnd]) -> 
+    find_subst(P, Bnd);
+find_subst(_P ,[]) -> 
+    false.
 
 bind_meta([V|Vs], Bs, Acc, Bnd) when is_atom(V) ->
     W = eval_meta(V,Bs),
@@ -904,7 +892,7 @@ build(F,Opts) ->
 build_(V, Bs) when is_atom(V) ->
     {X,Bs1} = variable(V, Bs),
     {{bool,X},Bs1};
-build_({var,V}, Bs) ->
+build_(V={p,_P,_Ps}, Bs) ->
     {X,Bs1} = variable(V, Bs),
     {{bool,X},Bs1};
 build_({uint,N,V}, Bs) ->
@@ -932,9 +920,6 @@ build_({'any',Fs}, Bs) ->
 build_({'none',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     none(Xs, Bs1);
-build_({'one',Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs, Bs),
-    eqk(1, length(Xs), Xs, Bs1);
 build_({eqk,K,Fs}, Bs) when is_integer(K), K >= 0 ->
     {Xs,Bs1} = args(Fs, Bs),
     eqk(K, length(Xs), Xs, Bs1);
@@ -1038,6 +1023,11 @@ build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
 build_({exists,X,Xs,F}, Bs) when is_list(Xs) ->
     {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
     any(Ys,Bs1);
+
+build_({'one',Fs}, Bs) ->
+    {Xs,Bs1} = args(Fs, Bs),
+    eqk(1, length(Xs), Xs, Bs1);
+
 build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
     build_meta(F,X,lists:seq(A,B,1),[],Bs);
 build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
@@ -1940,7 +1930,9 @@ model_vars([X|Xs],Y,Bs,Ms) when is_integer(Y) ->
 	?TRUE -> 
 	    model_vars(Xs,Y,Bs,[{X,true} | Ms]);
 	?FALSE ->
-	    model_vars(Xs,Y,Bs,[{X,false} | Ms])
+	    model_vars(Xs,Y,Bs,[{X,false} | Ms]);
+	Z -> %% unbound...
+	    model_vars(Xs,Y,Bs,[{X,Z} | Ms])
     end;
 model_vars([],_Y,_Bs,Ms) ->
     Ms.

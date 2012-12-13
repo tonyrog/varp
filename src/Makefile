@@ -4,7 +4,6 @@ MODULES = \
 	varp_parse \
 	prover \
 	varc \
-	varc_prop \
 	varc_test \
 	varp \
 	carp \
@@ -35,7 +34,7 @@ APP_FILE= $(APP_NAME).app
 APP_SRC= $(APP_FILE).src
 APP_TARGET= $(EBIN)/$(APP_FILE)
 
-override ERLC_FLAGS = # +native
+override ERLC_FLAGS = ## +native
 
 
 OBJS = $(MODULES:%=$(EBIN)/%.beam)

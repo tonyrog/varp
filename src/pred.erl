@@ -59,10 +59,10 @@
 %%          [ [P(x),P(y)]  [P(x),P(y)] ]
 %%          => [ [P(x1),P(y1)]  [P(x2),P(y2)] ]
 %%
-%%  Ax P(x) & Q(x) => Ax P(x) & Ax Q(x)
+%%  (Ax) (P(x) & Q(x)) => (Ax) P(x) & (Ax) Q(x)
 %%
 
-%% Ax (Ay P(x,y)) -> ~(Ay Q(x,y) => R(x,y))
+%% (Ax) ( ((Ay) P(x,y)) -> ~((Ay) Q(x,y) => R(x,y)) )
 f(0) ->
     {'A',x,
      {'->',

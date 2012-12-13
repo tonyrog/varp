@@ -344,7 +344,17 @@ next_vector([{I,_Xi}|Vec], Bs) ->
 next_vector([], _Bs) ->
     [].
 
-
+%% add one extra element to "vector"
+expand_vector([{J,Xj}],Bs) ->
+    case formula:next_unbound(J,Bs) of
+	false -> [];
+	{K,Xk} -> [{J,Xj},{K,Xk}]
+    end;
+expand_vector([X|Xs], Bs) ->
+    [X | expand_vector(Xs,Bs)];
+expand_vector([], _Bs) ->
+    [].
+    
 saturate(0,Bs) ->
     eval(Bs);
 saturate(K,Bs) when is_integer(K), K >= 1 ->
@@ -406,17 +416,26 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 	    end
     end.
 
-%% fixme: implement saturate_pair by add one more variable to the
-%% the vector at this point
-saturate_vec([{_,X}|V], Bs) ->
+%% update vector with extra var if wanted and
+%% check vector
+saturate_vec(Vec, Bs) ->
+    case formula:getopt(saturate_pair,Bs) of
+	false ->
+	    saturate_vec_(Vec, Bs);
+	true ->
+	    Vec1 = expand_vector(Vec,Bs),
+	    saturate_vec_(Vec1, Bs)
+    end.
+
+saturate_vec_([{_,X}|V], Bs) ->
     case equal_mark_eval(X,true,Bs) of
 	false ->
 	    case equal_eval(X,false,Bs) of
 		false -> false;
-		BsF -> saturate_vec(V, BsF)
+		BsF -> saturate_vec_(V, BsF)
 	    end;
 	BsT0 ->
-	    case saturate_vec(V, BsT0) of
+	    case saturate_vec_(V, BsT0) of
 		false ->
 		    equal_eval(X,false,Bs);
 		BsT ->
@@ -424,7 +443,7 @@ saturate_vec([{_,X}|V], Bs) ->
 			false -> 
 			    BsT;
 			BsF0 ->
-			    case saturate_vec(V,BsF0) of
+			    case saturate_vec_(V,BsF0) of
 				false -> BsT;
 				BsF ->
 				    Bound = formula:latest_bound(BsT),
@@ -434,7 +453,7 @@ saturate_vec([{_,X}|V], Bs) ->
 		    end
 	    end
     end;
-saturate_vec([], Bs) ->
+saturate_vec_([], Bs) ->
     Bs.
 
 %%

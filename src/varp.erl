@@ -10,105 +10,75 @@
 -compile(export_all).
 -define(SCAN_CHUNK_SIZE, 16).  %% small
 %% -define(SCAN_CHUNK_SIZE, 2048).
+-include_lib("kernel/include/file.hrl").
 
+start() ->
+    start([]).
 
-parse(File) ->
-    case file:open(File, [read]) of
-	{ok,Fd} ->
-	    set_cont({chars,{"", 1}}),
-	    try varp_parse:parse_and_scan({fun scan/1, [Fd]}) of
-		Result -> Result
-	    %%catch 
-	    %%  error:Reason ->
-	    %%	    io:format("varp_parse: error ~p\n", [Reason])
-	    after
-		erase_cont(),
-		file:close(Fd)
+%% require -noshell -noinput? -nouser?
+start([]) ->
+    P = open_port({fd,0,0}, [in,eof]),
+    Res = collect_port_data(P, [], 1000),
+    erlang:port_close(P),
+    case Res of
+	{ok,Data} ->
+	    run_binary("*stdin*", Data);
+	Error ->
+	    io:format("Error: ~p\n", [Error]),
+	    stop(1)
+    end;
+start([File]) ->
+    case file:read_file(File) of
+	{ok,Binary} ->
+	    run_binary(File,Binary);
+	Error ->
+	    io:format("Error: ~p\n", [Error]),
+	    stop(1)
+    end.
+
+stop(Code) ->
+    erlang:halt(Code).
+
+run_binary(_File,Binary) when is_binary(Binary) ->
+    case varp_scan:string(binary_to_list(Binary)) of
+	{ok,Ts,_Ln} ->
+	    case varp_parse:parse(Ts) of
+		{ok,Formula} ->
+		    run(Formula),
+		    stop(0);
+		Error ->
+		    io:format("~s: Error: ~p\n", [_File,Error]),
+		    stop(1)
 	    end;
 	Error ->
-	    Error
-    end.
-%%
-%% scan MUST return 
-%%  {ok, Tokens, Endline}
-%%  {eof, Endline}
-%%  {error, Descriptor, Endline}
-%%
-scan(Fd) ->
-    case get_cont() of
-	{chars,Chars} ->
-	    scan_chars_fd(Fd, [], Chars, []);
-	{cont,Cont} ->
-	    scan_cont_fd(Fd,Cont,[])
+	    io:format("~s: Error: ~p\n", [_File, Error]),
+	    stop(1)
     end.
 
-scan_chars_fd(Fd, Cont0, {Chars0,Line0}, Acc) ->
-    case file:read(Fd, ?SCAN_CHUNK_SIZE) of
-	eof when Acc =:= [] -> {eof,Line0};
-	eof -> {ok, lists:reverse(Acc), Line0};
-	{ok,Chars1} -> scan_chars(Fd,Cont0,{Chars0++Chars1,Line0},Acc);
-	Error -> Error
-    end.
-
-scan_chars(Fd, Cont0, {Chars0,Line0}, Acc) ->
-    case varp_scan:token(Cont0, Chars0, Line0) of
-	{more,Cont1} -> 
-	    if Acc =:= [] -> scan_cont_fd(Fd,{Cont1,Line0}, Acc);
-	       true -> 
-		    set_cont({cont,{Cont1,Line0}}),
-		    {ok,lists:reverse(Acc),Line0}
-	    end;
-	{done,{ok,Token,Line1},Chars1} ->
-	    scan_chars(Fd,[],{Chars1,Line1},[Token|Acc]);
-	{done,{eof,Line1},Chars1} ->
-	    set_cont({chars,{Chars1,Line1}}),
-	    if Acc =:= [] -> {eof,Line1};
-	       true -> {ok,lists:reverse(Acc),Line1}
-	    end;
-	{done,Error,Chars1} ->
-	    set_cont({chars,{Chars1,Line0}}),
-	    Error
-    end.
-
-scan_cont_fd(Fd, {Cont0,Line0}, Acc) ->
-    case file:read(Fd, ?SCAN_CHUNK_SIZE) of
-	eof when Acc =:= [] -> {eof,Line0};
-	eof -> {ok, lists:reverse(Acc), Line0};
-	{ok,Chars1} -> scan_cont_chars(Fd,Cont0,{Chars1,Line0},Acc);
-	Error -> Error
-    end.
-
-scan_cont_chars(Fd,Cont0,{Chars0,Line0},Acc) ->
-    case varp_scan:token(Cont0, Chars0) of
-	{more,Cont1} -> 
-	    if Acc =:= [] -> scan_cont_fd(Fd,{Cont1,Line0},Acc);
-	       true -> 
-		    set_cont({cont,{Cont1,Line0}}),
-		    {ok,lists:reverse(Acc),Line0}
-	    end;
-	{done,{ok,Token,Line1},Chars1} ->
-	    scan_chars(Fd,[],{Chars1,Line1},[Token|Acc]);
-	{done,{eof,Line1},Chars1} ->
-	    set_cont({chars,{Chars1,Line1}}),
-	    if Acc =:= [] -> {eof,Line1};
-	       true ->{ok,lists:reverse(Acc),Line1}
-	    end;
-	{done,Error,Chars1} ->
-	    set_cont({chars,{Chars1,Line0}}),
-	    Error
-    end.    
-
-get_cont() ->
-    case get(varp) of
-	undefined -> {chars,{"", 1}};
-	Cont -> Cont
-    end.
-
-set_cont(Cont) -> put(varp,Cont).
-
-erase_cont() ->
-    erase(varp).
     
+run(Formula) ->
+    Formula1 = form:expand(Formula),
+    io:format("Formula1: ~p\n", [Formula1]),
+    prover:satisfy_formula(Formula1, 
+			   [{saturate, 1},
+			    {max, 2},
+			    {print, true},
+			    {method, collect}]).
+    
+
+
+collect_port_data(P, Acc, Timeout) ->
+    receive
+	{P,{data,Data}} ->
+	    %% io:format("readn_buf: data=~p\n", [Data]),
+	    collect_port_data(P, [Data|Acc], Timeout);
+	{P, eof} ->
+	    {ok, list_to_binary(lists:reverse(Acc))}
+    after Timeout ->
+	    {error, timeout}
+    end.
+
+
 
 string(Binary) when is_binary(Binary) ->
     string(binary_to_list(Binary));
@@ -119,6 +89,3 @@ string(String) when is_list(String) ->
 expand(String) ->
     {ok,F} = string(String),
     form:expand(F).
-
-    
-    
