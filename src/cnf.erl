@@ -62,7 +62,8 @@ normalize_clauses([]) ->
     [].
 
 %%
-%% Remove sub clauses
+%% Remove sub clauses, return clauses and a lists of
+%% removed literals
 %%
 normalize_sub_clauses(Cs) ->
     CsL = map(fun(C) -> {length(C), C} end, Cs),
@@ -161,9 +162,11 @@ var_add(V, Vs) ->
 
 
 rewrite(A) when is_atom(A) -> A;
-rewrite({var,A}) -> {var,A};
+rewrite(A={p,_P,_Vs}) -> A;
+rewrite(A={var,_V}) -> A;
 rewrite({'not',A}) when is_atom(A) -> {'not',A};
-rewrite({'not',{var,A}}) -> {'not',{var,A}};
+rewrite({'not',A={var,_V}}) -> {'not',A};
+rewrite({'not',A={p,_P,_Vs}}) -> {'not',A};
 rewrite({'not', {'not', A}}) -> rewrite(A);
 rewrite({'not', {'and', A, B}}) ->
     {'or', rewrite({'not',A}), rewrite({'not',B})};
@@ -173,6 +176,7 @@ rewrite({'not', F}) -> rewrite({'not',rewrite(F)});
 rewrite({'and', A, B}) -> {'and', rewrite(A), rewrite(B)};
 rewrite({'or', A, B}) ->  {'or', rewrite(A), rewrite(B)};
 rewrite({'imp',A,B}) ->   {'or', rewrite({'not', A}), rewrite(B)};
+rewrite({'->',A,B}) ->    {'or', rewrite({'not', A}), rewrite(B)};
 rewrite({'equ',A,B}) ->
     {'and',
      {'or', rewrite({'not', A}), rewrite(B)},
@@ -185,6 +189,25 @@ rewrite({'any',[]})     -> false;
 rewrite({'any',[F]})    -> rewrite(F);
 rewrite({'any',[F|Fs]}) -> {'or',rewrite(F),rewrite({'any',Fs})};
 rewrite({'none',Fs})    -> rewrite({'not',{any,Fs}}).
+
+format(CLs) ->
+    [[format_clause(C),"\n"] || C <- CLs].
+
+format_clause(C) ->
+    concat([format_literal(L) || L <- C], " # ").
+
+format_literal({'not',V}) -> ["~",format_symbol(V)];
+format_literal(V) ->  format_symbol(V).
+
+format_symbol(true) -> "T";
+format_symbol(false) -> "F";
+format_symbol(A) when is_atom(A) -> atom_to_list(A);
+format_symbol({p,V,As}) ->
+    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+    
+concat([], _) -> [];
+concat([H],_) -> [H];
+concat([H|T],S) -> [H,S | concat(T,S)].
 
 %%
 %% triple to CNF clauses

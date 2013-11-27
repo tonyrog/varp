@@ -694,27 +694,34 @@ eval_enq_bcp(Q, Qset, [], Ts, Bs) ->
 %% eval_bcp:
 %%    Generate binding consequence edge from tripple information.
 %%    The edge {{X,Xv},{Y,Yv}} means that when X/Xv -> Y/Yv
-%%    No equivalnece classes are generated!
+%%    No equivalence classes are generated!
 %% @end
+
 eval_bcp(imp,T={_,Xt,_Yt,_Zt},?FALSE,Y,Z) -> [{T,{Xt,?FALSE},{Y,?TRUE}},
 					      {T,{Xt,?FALSE},{Z,?FALSE}}];
 eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?TRUE,?FALSE) -> [{T,{Yt,?TRUE},{X,?FALSE}}];
-eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?TRUE,?TRUE) -> [{T,{Yt,?TRUE},{X,?TRUE}}];
+eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?TRUE,?TRUE)  -> [{T,{Yt,?TRUE},{X,?TRUE}}];
 eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?FALSE,_Z) -> [{T,{Yt,?FALSE},{X,?TRUE}}];
 eval_bcp(imp,T={_,_Xt,_Yt,Zt},X,_Y,?TRUE)  -> [{T,{Zt,?TRUE},{X,?TRUE}}];
-%% eval_bcp(imp,T={_,_Xt,_Yt,Zt},X,Y,?FALSE)  -> [{T,{Zt,?FALSE},{X,-Y}}];
 eval_bcp(imp,T={_,_Xt,_Yt,Zt},X,Y,Y)       -> [{T,{Zt,Y},{X,?TRUE}}];
-%% eval_bcp(imp,T={_,_Xt,_Yt,Zt},X,Y,Z) when Y =:= -Z -> [{T,{Zt,-Y},{X,Z}}];
 eval_bcp(imp,_T,_X,_Y,_Z) -> [];
+
 %% eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,Z)  -> [{T,{Xt,?TRUE},{Y,Z}}];
-%% eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,Y,Z) -> [{T,{Xt,?FALSE},{Y,-Z}}];
-%% eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?TRUE,Z)  -> [{T,{Yt,?TRUE},{X,Z}}];
-%% eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?FALSE,Z) -> [{T,{Yt,?FALSE},{X,-Z}}];
-%% eval_bcp(equ,T={_,_Xt,_Yt,Zt},X,Y,?TRUE)  -> [{T,{Zt,?TRUE},{X,Y}}];
-%% eval_bcp(equ,T={_,_Xt,_Yt,Zt},X,Y,?FALSE) -> [{T,{Zt,?FALSE},{X,-Y}];
-eval_bcp(equ,T={_,_Xt,_Yt,Zt},X,Y,Y)      -> [{T,{Zt,Y},{X,?TRUE}}];
-eval_bcp(equ,T={_,_Xt,_Yt,Zt},X,Y,Z) when Y =:= -Z -> [{T,{Zt,-Y},{X,?FALSE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,?TRUE) -> [{T,{Xt,?TRUE},{Y,?TRUE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,?FALSE) -> [{T,{Xt,?TRUE},{Y,?FALSE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,?TRUE,Z) -> [{T,{Xt,?TRUE},{Z,?TRUE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,?FALSE,Z) -> [{T,{Xt,?TRUE},{Z,?FALSE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,Y,?TRUE) -> [{T,{Xt,?FALSE},{Y,?FALSE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,Y,?FALSE) -> [{T,{Xt,?FALSE},{Y,?TRUE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,?TRUE,Z) -> [{T,{Xt,?FALSE},{Z,?FALSE}}];
+eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,?FALSE,Z) -> [{T,{Xt,?FALSE},{Z,?TRUE}}];
+
+eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?TRUE,?FALSE) -> [{T,{Yt,?TRUE},{X,?FALSE}}];
+eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?TRUE,?TRUE)  -> [{T,{Yt,?TRUE},{X,?TRUE}}];
+eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?FALSE,?TRUE) -> [{T,{Yt,?FALSE},{X,?TRUE}}];
+eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?FALSE,?FALSE) -> [{T,{Yt,?TRUE},{X,?TRUE}}];
 eval_bcp(equ,_T,_X,_Y,_Z) -> [].
+
 
 %% a bit more high level handle {bool,X} already bound values etc.
 equal(X,Y,Bs) ->

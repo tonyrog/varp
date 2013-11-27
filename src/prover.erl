@@ -7,6 +7,14 @@
 
 -module(prover).
 
+-export([prove_formula/1]).
+-export([falsify_formula/1,falsify_formula/2,falsify/1,falsify/2]).
+-export([satisfy_formula/1,satisfy_formula/2,satisfy/1,satisfy/2]).
+-export([eval_formula/1, eval_formula/2]).
+-export([saturate_formula/1, saturate_formula/2, saturate_formula/3]).
+-export([backtrack_formula/1, backtrack_formula/2, backtrack/1]).
+
+
 -compile(export_all).
 -import(lists, [foldl/3, reverse/1]).
 
@@ -161,8 +169,8 @@ eval(Bs) ->
 	    false;
 	Bs1 ->
 	    formula:info(Bs,"    | bound: ~w\n",
-			[formula:number_of_bound(Bs1) -
-			     formula:number_of_bound(Bs)]),
+			 [formula:number_of_bound(Bs1) -
+			      formula:number_of_bound(Bs)]),
 	    Bs1
     end.
 	    
@@ -287,10 +295,6 @@ bt_next([{I,Xi,[V|Vs],D,Bs0} | Stack]) ->
     end;
 bt_next([]) ->
     false.
-
-
-
-
 
 %%
 %% K-saturate:

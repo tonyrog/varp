@@ -1,0 +1,6 @@
+
+(
+  ((A x=1..n)(E y=1..n)P(x,y)) and
+  ((A x=1..n)(A y=1..n)(A z=1..n,y<x,y<z) ((P(x,y) and P(y,z))->P(x,z))) -> 
+  (E x=1..n)P(x,x)
+)

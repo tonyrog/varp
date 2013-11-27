@@ -7,6 +7,7 @@
 
 -module(form).
 
+-export([expand/1, expand/2]).
 -compile(export_all).
 -import(lists, [map/2, foldl/3]).
 

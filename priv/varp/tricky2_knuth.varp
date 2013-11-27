@@ -1,0 +1,6 @@
+
+(
+  ( (A x=1..n)(A y=1..n,x<y) (not P(x,y) or not P(y,x)) ) and
+  ( (A x=1..n)(E y=1..n,x!=y) P(x,y) ) and
+  ( (A x=1..n)(A y=1..n)(A z=1..n,x!=y,x<z,y<z) ((P(x,y) and P(y,z))->P(x,z)))
+)
