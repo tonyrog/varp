@@ -20,14 +20,9 @@ main(Args) ->
 		_Error ->
 		    halt(1)
 	    end;
-	[F|_Fs] ->
-	    {ok, Data} = file:read_file(F),
-	    case varp:parse(F, Data) of
-		{ok,Formula} ->
-		    run(Mode,Formula,Opts);
-		_Error ->
-		    halt(1)
-	    end
+	Fs ->
+	    Formula = load_files(Fs, 'and'),
+	    run(Mode,Formula,Opts)
     end,
     %% io:format("varp: arguments = ~p\n", [As]),
     halt(0).
@@ -41,6 +36,20 @@ run(prove, Formula, Opts) ->
 run(none, Formula, Opts) ->
     varp:run_formula(Formula,Opts).
 
+%% load files and form a conjunction over all files
+load_files([F|Fs],JoinOp) ->
+    {ok, Data} = file:read_file(F),
+    case varp:parse(F, Data) of
+	{ok,Formula} ->
+	    case load_files(Fs,JoinOp) of
+		undefined -> Formula;
+	 	Formulas  -> {JoinOp,Formula,Formulas}
+	    end;
+	_Error ->
+	    halt(1)
+    end;
+load_files([],_JoinOp) ->
+    undefined.
 
 
 usage() ->
@@ -83,7 +92,8 @@ options() ->
 	     {"alert",alert},{"emergency",emergency},{"none",none}],
     [{"value", value, [{"true",true},{"false",false},
 			 { "none", none}], none},
-     {"print", print, [{"true",true},{"false",false}], false},
+     {"print", print, [{"true",true},{"literal",literal},
+		       {"model",model},{"false",false}], false},
      {"partial", partial, [{"true",true},{"false",false}], false},
      {"method",method,[{"collect", collect}, {"count", count}], collect},
      {"max", max,  unsigned, 0 },  %% (0=all)

@@ -56,20 +56,19 @@
 -type order_t() :: identity | reverse | depth | occure | 
 		   depth_occure | occure_depth.
 
-
 -record(option,
 	{
 	  value = none ::  boolean() | none,   
 	  order = identify :: order_t(),
-	  print = false :: boolean(),     %% print models
+	  print = false :: boolean()|model|literal,  %% print models
 	  partial = false :: boolean(),   %% print partial model (eval/saturate)
 	  log   = ?LOG_NONE :: ?LOG_NONE .. ?DEBUG,
-	  max   = 0 :: unsigned_t(),
-	  method = collect :: count|collect,   %% model collect|count
+	  max   = 0 :: unsigned_t(),            %% max number of models to find
+	  method = collect :: count|collect,    %% model collect|count
 	  carry = ignore  :: true|false|ignore, %% ignore carry condition
 	  borrow = ignore :: true|false|ignore, %% ignore borrow condition
 	  divz   = false  :: true|false|ignore, %% do not accept divide by zero
-	  bcp    = false  :: boolean(),         %% no equvalence classes
+	  bcp    = false  :: boolean(),         %% do not use equvalence classes
 	  saturate = 0 :: unsigned_t(),         %% saturate formula
 	  backtrack = true :: boolean(),        %% find models with backtrack
 	  threshold = 0 :: unsigned_t(),  %% >i variables changed -> loop again
@@ -420,6 +419,8 @@ setopt(value,none,Bs)  -> setopt_(#option.value,none,Bs);
 
 setopt(print,true,Bs)   -> setopt_(#option.print,true,Bs);
 setopt(print,false,Bs)  -> setopt_(#option.print,false,Bs);
+setopt(print,model,Bs)  -> setopt_(#option.print,model,Bs);
+setopt(print,literal,Bs)  -> setopt_(#option.print,literal,Bs);
 setopt(partial,true,Bs)   -> setopt_(#option.partial,true,Bs);
 setopt(partial,false,Bs)  -> setopt_(#option.partial,false,Bs);
 

@@ -22,19 +22,19 @@ sudoku(S,F) ->
       %%  (A i=1..9)(A j=1..9) (E! k=1,..9) S(i,j,k)
       {forall,i,{1,9},
        {forall,j,{1,9},
-	{eqk,1,{list,k,{1,9},{var,{S,i,j,F(k)}}}}}},
+	{eqk,1,{list,k,{1,9},{p,S,[i,j,F(k)]}}}}},
 
       %% for every row every column must be uniq
       %%  (A i=1..9 (A k=1..9) (E! j=1...9) S(i,j,k)
       {forall,i,{1,9},
        {forall,k,{1,9},
-	{eqk,1,{list,j,{1,9},{var,{S,i,j,F(k)}}}}}},
+	{eqk,1,{list,j,{1,9},{p,S,[i,j,F(k)]} }}}},
       
       %% for every column every row must be uniq
       %%  (A j=1..9) (A k=1..9) (E! i=1...9) S(i,j,k)
       {forall,j,{1,9},
        {forall,k,{1,9},
-	{eqk,1,{list,i,{1,9},{var,{S,i,j,F(k)}}}}}},
+	{eqk,1,{list,i,{1,9},{p,S,[i,j,F(k)]}  }}}},
 
       %% for every box every position must be uniq
       %%  (A s=0..2)(A t=0..2)(A k=1..9)
@@ -42,9 +42,10 @@ sudoku(S,F) ->
       {forall,s,{0,2},
        {forall,t,{0,2},
 	{forall,k,{1,9},
-	 {eqk,1, {list,i,{1,3},
-		  {list,j,{1,3},
-		   {var,{S,{'+',{'*',3,s},i},{'+',{'*',3,t},j},F(k)}}}}}}}}
+	 {eqk,1,{list,i,{0,8},
+		 {p,S,[{'+',{'+',{'*',3,s},{'/',i,3}},1},
+		       {'+',{'+',{'*',3,t},{'%',i,3}},1},F(k)]}  }
+	 }}}}
      ]}.
 
 
@@ -54,7 +55,7 @@ sudoku0(X) ->
     %%  (A i=1..9)(A j=1..9) (E! k=0,..9) X(i,j,k)
     {forall,i,{1,9},
      {forall,j,{1,9},
-      {eqk,1,{list,k,{0,9},{var,{X,i,j,k}}}}}}.
+      {eqk,1,{list,k,{0,9},{p,X,[i,j,k]} }}}}.
 
     
 
@@ -70,14 +71,14 @@ instr(_X,_I,[],Acc) ->
 instc(X,I,J,[x|Ks],Acc) ->
     instc(X,I,J+1,Ks,Acc);
 instc(X,I,J,[K|Ks],Acc) ->
-    instc(X,I,J+1,Ks,[{var,{X,I,J,K}}|Acc]);
+    instc(X,I,J+1,Ks,[{p,X,[I,J,K]}|Acc]);
 instc(_X,_I,_J,[],Acc) ->
     Acc.
 
-install(X,[{{X,_I,_J,0},true}|Rs],D) -> 
-    %% skip A(I,J,0) is a place holder
+install(X,[{{p,X,[_I,_J,0]},true} |Rs],D) -> 
+    %% skip A(I,J,0) is a place holder - check me!
     install(X,Rs,D);
-install(X,[{{X,I,J,K},true}|Rs],D) ->
+install(X,[{{p,X,[I,J,K]},true}|Rs],D) ->
     D1 = dict:store({I,J}, K, D),
     install(X,Rs,D1);
 install(X,[_|Rs],D) ->
@@ -228,7 +229,7 @@ puzzle_vm() ->
 puzzle_bt(P) ->
     B = sudoku(a1),
     I = inst(a1,P),
-    case prover:satisfy_formula({'and',B,I}, [print,{max,2},
+    case prover:satisfy_formula({'and',B,I}, [{print,model},{max,2},
 					      {method,collect}]) of
 	false ->
 	    false;
@@ -245,6 +246,9 @@ puzzle_sat2(P) ->
     puzzle_satk(2,P).
 
 puzzle_satk(K,P) ->
+    puzzle_satk(K,P,true).
+
+puzzle_satk(K,P,Backtrack) ->
     B1 = sudoku(a1),
     I = inst(a1,P),
     case prover:saturate_formula(K, {'and',B1,I}, 
@@ -252,7 +256,7 @@ puzzle_satk(K,P) ->
 				  {max,2},
 				  {log,info},
 				  {order, depth},
-				  {eval_bcp, false},
+				  {bcp, false},
 				  {method,collect}]) of
 	false ->
 	    false;
@@ -262,19 +266,23 @@ puzzle_satk(K,P) ->
 	    io:format("NV=~w, NB=~w\n", [NV, NB]),
 	    if NV =:= NB ->
 		    M = formula:model(Bs),
-		    print(a1,M);
-	       true ->
+		    print(a1,M),
+		    true;
+	       Backtrack ->
 		    io:format("Backtrack:\n", []),
 		    case prover:backtrack_bs(Bs) of
 			{0,[]} -> 
 			    false;
 			{1,[M]} ->
-			    print(a1,M);
+			    print(a1,M),
+			    true;
 			{_N,Models} ->
 			    lists:foreach(
 			      fun(M) -> print(a1,M) end, Models),
 			    error
-		    end
+		    end;
+	       true ->
+		    false
 	    end
     end.
 
@@ -317,12 +325,13 @@ puzzle_find(K,L) ->
 	   {eqk,81-N,
 	    {list,i,{1,9},
 	     {list,j,{1,9},
-	      {var,{a0,i,j,0}}}}},
+	      {p,a0,[i,j,0]} 
+	     }}},
 
 	   {forall,i,{1,9},
 	    {forall,j,{1,9},
 	     {forall,k,{1,9},
-	      {'->',{var,{a0,i,j,k}}, {var,{a1,i,j,k}}}}}}
+	      {'->',{p,a0,[i,j,k]}, {p,a1,[i,j,k]} }}}}
 	 ] ++ Cs },
 
     case prover:saturate_formula(K, F,
@@ -330,7 +339,7 @@ puzzle_find(K,L) ->
 				  {max,2},
 				  {log,info},
 				  {order, [occure,reverse]},
-				  {eval_bcp, false},
+				  {bcp, false},
 				  {method,collect}]) of
 	false ->
 	    false;
@@ -427,7 +436,7 @@ puzzle16_prove(K,Pi,P16,A) ->
 				 [{value,false},
 				  {max,1},
 				  %% {log,info},
-				  {eval_bcp, false},
+				  {bcp, false},
 				  {method,collect}]) of
 	false ->
 	    true;

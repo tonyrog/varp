@@ -48,21 +48,6 @@ expand({subst,Rx,Py,F},Bs) ->
 expand({subst,SList,F},Bs) ->
     expand(F, SList++Bs);
 
-%% expand({eqk,K,F}, Bs) ->    {eqk,K,expand_args(F,Bs)};
-%% expand({neqk,K,F}, Bs) ->   {neqk,K,expand_args(F,Bs)};
-%% expand({gtk,K,F}, Bs) ->    {gtk,K,expand_args(F,Bs)};
-%% expand({gtek,K,F}, Bs) ->   {gtek,K,expand_args(F,Bs)};
-%% expand({ltk,K,F}, Bs) ->    {ltk,K,expand_args(F,Bs)};
-%% expand({ltek,K,F}, Bs) ->   {ltek,K,expand_args(F,Bs)};
-%% expand({all,F}, Bs)   ->    all(expand_args(F,Bs));
-%% expand({any,F}, Bs)   ->    any(expand_args(F,Bs));
-%% expand({none,F}, Bs)   ->   {none,expand_args(F,Bs)};
-%% expand({suchthat,Expr,F},Bs) ->
-%%     case eval_meta(Expr,Bs) of
-%% 	true  -> expand(F,Bs);
-%% 	false -> undefined
-%%     end;
-
 expand({{forall,Xs}, F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     all(Ys);
@@ -73,9 +58,32 @@ expand({{eqk,[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {eqk,N,Ys};
+expand({{neqk,[X1|Xs]},F}, Bs) ->
+    N = eval_meta(X1,Bs),
+    Ys = expand_quant(F,Xs,Bs),
+    {neqk,N,Ys};
+expand({{gtk,[X1|Xs]},F}, Bs) ->
+    N = eval_meta(X1,Bs),
+    Ys = expand_quant(F,Xs,Bs),
+    {gtk,N,Ys};
+expand({{gtek,[X1|Xs]},F}, Bs) ->
+    N = eval_meta(X1,Bs),
+    Ys = expand_quant(F,Xs,Bs),
+    {gtek,N,Ys};
+expand({{ltk,[X1|Xs]},F}, Bs) ->
+    N = eval_meta(X1,Bs),
+    Ys = expand_quant(F,Xs,Bs),
+    {ltk,N,Ys};
+expand({{ltek,[X1|Xs]},F}, Bs) ->
+    N = eval_meta(X1,Bs),
+    Ys = expand_quant(F,Xs,Bs),
+    {ltek,N,Ys};
 expand({{one,Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     {one,Ys};
+expand({{none,Xs},F}, Bs) ->
+    Ys = expand_quant(F,Xs,Bs),
+    {none,Ys};
 expand(F, _Bs) ->
     F.
 

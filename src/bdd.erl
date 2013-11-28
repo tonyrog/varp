@@ -53,7 +53,7 @@ construct([V | Vs], F, Free) ->
 	    {Ir0,Free1,Vs0} = construct(Vs, F0, Free),
 	    {Ir1,Free2,Vs1} = construct(Vs, F1, Free1),
 	    Vs2 = [{Free2,V,Ir0,Ir1}]++Vs0++Vs1,
-	    Res={Ir2,Free3,Ws}=reduce(Free2,Vs2,Free),
+	    Res={_Ir2,_Free3,Ws}=reduce(Free2,Vs2,Free),
 	    io:format("reduce: ~w, Vs0=~999p, Vs1=~999p = ~999p\n", 
 		      [{Free2,V,Ir0,Ir1},Vs0,Vs1, Ws]),
 	    Res
@@ -83,7 +83,7 @@ calc([{Ai,Xi,Bi,Ci}|Vs], Vec, D0, Free, Root, Ws) ->
 		    D3 = insert(Ai,I,D2),
 		    calc(Vs, Vec, D3, Free, Root, Ws2)
 	    end;
-	{ok,Wi} ->
+	{ok,_Wi} ->
 	    calc(Vs, Vec, D0, Free, Root, Ws)
 	    %% Bj = fetch(Bi, D0),
 	    %% Cj = fetch(Ci, D0),

@@ -8,14 +8,16 @@ Terminals
         '&' '&&' '|' '||' '#' '^' '!' '~'  '->' '<->'
 	'+' '-' '*' '/' '%' '>>>' '>>' '<<<' '<<'
 	'<=' '>=' '!=' '<' '>' '=' '=='
-	';' '{' '}' ',' ':' '(' ')' '[' ']' '..' '.'
+	'{' '}' ',' ':' '(' ')' '[' ']' '..' 
 	.
+
+%% '.' ';' 
 
 Nonterminals
 	equ_op imp_op or_op and_op not_op
         bor_op band_op bxor_op bnot_op
 	rel_op add_op mul_op prefix_op 
-        integer expr exprs dexpr rexpr vexpr vexprs nexpr vars
+        integer expr exprs dexpr vexpr vexprs nexpr
         qtype quantifier pexpr lexpr lexprs formula .
 
 Rootsymbol formula.
@@ -38,21 +40,20 @@ equ_op -> '='     : '$1'.
 equ_op -> '<->'   : '$1'.
 equ_op -> 'equ'   : '$1'.
 equ_op -> 'xor'   : '$1'.
-imp_op -> '->'   : '$1'.
+imp_op -> '->'    : '$1'.
 imp_op -> 'imp'   : '$1'.
 or_op  -> 'or'    : '$1'.
 or_op  -> '||'    : '$1'.
 or_op  -> '#'     : '$1'.
 and_op -> 'and'   : '$1'.
-and_op -> '&&'   : '$1'.
+and_op -> '&&'    : '$1'.
 not_op -> 'not'   : '$1'.
-not_op -> '!'  : '$1'.
+not_op -> '!'     : '$1'.
 
 bor_op  -> '|' : '$1'.
 band_op -> '&' : '$1'.
 bxor_op -> '^' : '$1'.
 bnot_op -> '~' : '$1'.
-
 
 
 add_op  -> '+' : '$1'.
@@ -121,8 +122,9 @@ nexpr -> variable '/' unsigned : {uint, name('$1')}.
 %% domain expressions
 %%
 dexpr -> expr            : '$1'.
-dexpr -> expr '..' expr  : { range, '$1', '$3' }.
-dexpr -> dexpr '|' dexpr : { union, '$1', '$3' }.
+dexpr -> expr '..' expr  : { range,   '$1', '$3' }.
+dexpr -> dexpr '|' dexpr : { union,   '$1', '$3' }.
+%% dexpr -> dexpr '*' dexpr : { product, '$1', '$3' }.
     
 %%
 %% Arithmetic expression function expression
@@ -156,6 +158,7 @@ qtype -> symbol :
 	 case '$1' of
 	     {_,_,"E"}   -> exists;
 	     {_,_,"A"}   -> forall;
+	     {_,_,"N"}   -> none;
 	     {_,_,"EQ"}  -> eqk;
 	     {_,_,"NEQ"} -> neqk;
 	     {_,_,"GT"}  -> gtk;

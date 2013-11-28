@@ -140,18 +140,42 @@ method(X,Bs) ->
 		false ->
 		    no_models(Bs);
 		Bs2 ->
-		    case formula:getopt(saturate, Bs2) of
-			0 ->
-			    backtrack_bs(Bs2);
-			K ->
-			    case saturate_(K,Bs2) of
-				false -> 
-				    no_models(Bs);
-				Bs3 ->
-				    backtrack_bs(Bs3)
-			    end
+		    case one_model(Bs2) of
+			false ->
+			    case formula:getopt(saturate, Bs2) of
+				0 ->
+				    backtrack_bs(Bs2);
+				K ->
+				    case saturate_(K,Bs2) of
+					false -> 
+					    no_models(Bs);
+					Bs3 ->
+					    case one_model(Bs3) of
+						false ->
+						    backtrack_bs(Bs3);
+						Bs3R-> Bs3R
+					    end
+				    end
+			    end;
+			Bs2R -> Bs2R
 		    end
 	    end
+    end.
+
+%% check if there is already a "unique" model
+one_model(Bs) ->
+    NV = formula:number_of_variables(Bs),
+    NB = formula:number_of_bound(Bs),
+    if NV =:= NB ->
+	    Print = formula:getopt(print, Bs),
+	    Mdl = formula:model(Bs),
+	    print(Print,1,Mdl),
+	    case formula:getopt(method, Bs) of
+		collect -> {1,[Mdl]};
+		count -> 1
+	    end;
+       true ->
+	    false
     end.
 
 no_models(Bs) ->
@@ -186,9 +210,10 @@ eval(Bs) ->
 	    formula:info(Bs,"    | contradiction\n", []),
 	    false;
 	Bs1 ->
-	    formula:info(Bs,"    | bound: ~w\n",
+	    formula:info(Bs,"    | bound: ~w [~w]\n",
 			 [formula:number_of_bound(Bs1) -
-			      formula:number_of_bound(Bs)]),
+			      formula:number_of_bound(Bs),
+			  formula:number_of_unbound(Bs1)]),
 	    Bs1
     end.
 	    
@@ -230,11 +255,7 @@ backtrack_bs(Bs) ->
 		    bt(Bs, fun({Count0,Acc},Bs1) ->
 				   Mdl = formula:model(Bs1),
 				   Count = Count0+1,
-				   if Print -> 
-					   io:format("~w: ~s\n",
-						     [Count,format_model(Mdl)]);
-				      true -> ok
-				   end,
+				   print(Print,Count,Mdl),
 				   Continue = (N =:= 0) orelse (Count < N),
 				   {Continue,{Count,[Mdl|Acc]}}
 			   end, {0,[]});
@@ -251,6 +272,22 @@ backtrack_bs(Bs) ->
 			   end, 0)
 	    end
     end.
+
+print(true,I,Bindings) ->
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || Bound <- Bindings ], ",")]);
+print(literal,I,Bindings) ->
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || Bound <- Bindings ], ",")]);
+print(model,I,Bindings) ->
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || 
+			    Bound <- Bindings,
+			    element(2,Bound) =/= false ], ",")]);
+print(false,_I,_Bindings) ->
+    ok.
+
+    
 
 format_model(Model) ->
     concat([ format_binding(Bound) || Bound <- Model ], ",").
@@ -423,8 +460,9 @@ saturate_(K,Bs) when is_integer(K), K >= 1 ->
 	    formula:info(Bs,"    | contradiction\n", []),
 	    false;
 	Bs1 ->
-	    formula:info(Bs, "    | bound: ~w\n",
-			 [formula:number_of_bound(Bs1) - NB]),
+	    formula:info(Bs, "    | bound: ~w [~w]\n",
+			 [formula:number_of_bound(Bs1) - NB,
+			  formula:number_of_unbound(Bs1)]),
 	    Bs1
     end.
 

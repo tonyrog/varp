@@ -1,6 +1,6 @@
 {application, varp,
  [{description, "VARP"},
-  {vsn, "%VSN%"},
+  {vsn, git},
   {modules, [varp, prover]},
   {registered, []},
   {env, []},
