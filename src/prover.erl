@@ -7,13 +7,13 @@
 
 -module(prover).
 
--export([prove_formula/1]).
+-export([run_formula/1,run_formula/2]).
+-export([prove_formula/1,prove_formula/2]).
 -export([falsify_formula/1,falsify_formula/2,falsify/1,falsify/2]).
 -export([satisfy_formula/1,satisfy_formula/2,satisfy/1,satisfy/2]).
 -export([eval_formula/1, eval_formula/2]).
 -export([saturate_formula/1, saturate_formula/2, saturate_formula/3]).
 -export([backtrack_formula/1, backtrack_formula/2, backtrack/1]).
-
 
 -compile(export_all).
 -import(lists, [foldl/3, reverse/1]).
@@ -41,16 +41,26 @@ apply_opts(F, Bs) ->
 	    false
     end.
 
+run_formula(F) ->
+    run_formula(F, []).
+run_formula(F,Opts) ->
+    run(formula:build(F,Opts)).
+
+run({F,Bs}) ->
+    run(F, Bs).
+run({bool,X}, Bs) ->
+    method(X,Bs).
     
 prove_formula(F) ->
-    case falsify_formula(F,[{method,count},{max,1},{order,reverse_depth}]) of
+    prove_formula(F,[{method,count},{max,1},{order,reverse_depth}]).
+prove_formula(F,Opts) ->
+    case falsify_formula(F,Opts) of
 	0 -> true;
 	_ -> false
     end.
 
 falsify_formula(F) ->
     falsify_formula(F,[{method,collect},{print,true},{order,depth}]).
-	     
 falsify_formula(F,Opts) ->
     falsify(formula:build(F,Opts)).
 
@@ -125,13 +135,13 @@ method(X,Bs) ->
     case apply_opts(X, Bs) of
 	false ->
 	    no_models(Bs);
-	Bs1 -> 
+	Bs1 ->
 	    case eval(Bs1) of
 		false ->
 		    no_models(Bs);
 		Bs2 ->
 		    case formula:getopt(saturate, Bs2) of
-			0 -> 
+			0 ->
 			    backtrack_bs(Bs2);
 			K ->
 			    case saturate_(K,Bs2) of
@@ -145,6 +155,14 @@ method(X,Bs) ->
     end.
 
 no_models(Bs) ->
+    case formula:getopt(partial, Bs) of
+	true ->
+	    %% print partial model, the variables bound
+	    Mdl = formula:model(Bs),
+	    io:format("partial: ~s\n",[format_model(Mdl)]);
+	false ->
+	    ok
+    end,
     case formula:getopt(method, Bs) of
 	collect -> {0,[]};
 	count -> 0
@@ -200,32 +218,57 @@ backtrack(F,Bs) ->
     end.
 
 backtrack_bs(Bs) ->
-    N     = formula:getopt(max, Bs),
-    Print = formula:getopt(print, Bs),
-    case formula:getopt(method, Bs) of
-	collect ->
-	    bt(Bs, fun({Count0,Acc},Bs1) ->
-			   Mdl = formula:model(Bs1),
-			   Count = Count0+1,
-			   if Print -> 
-				   io:format("~w: ~w\n", [Count,Mdl]);
-			      true -> ok
-			   end,
-			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,{Count,[Mdl|Acc]}}
-		   end, {0,[]});
-	count ->
-	    bt(Bs, fun(Count0,_Bs1) -> 
-			   Count = Count0+1,
-			   if Count rem 1000 =:= 0 ->
-				   io:format("~w\n", [Count]);
-			      true -> 
-				   ok
-			   end,
-			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,Count} 
-		   end, 0)
+    case formula:getopt(backtrack, Bs) of
+	false -> 
+	    no_models(Bs),
+	    false;
+	true ->
+	    N     = formula:getopt(max, Bs),
+	    Print = formula:getopt(print, Bs),
+	    case formula:getopt(method, Bs) of
+		collect ->
+		    bt(Bs, fun({Count0,Acc},Bs1) ->
+				   Mdl = formula:model(Bs1),
+				   Count = Count0+1,
+				   if Print -> 
+					   io:format("~w: ~s\n",
+						     [Count,format_model(Mdl)]);
+				      true -> ok
+				   end,
+				   Continue = (N =:= 0) orelse (Count < N),
+				   {Continue,{Count,[Mdl|Acc]}}
+			   end, {0,[]});
+		count ->
+		    bt(Bs, fun(Count0,_Bs1) -> 
+				   Count = Count0+1,
+				   if Count rem 1000 =:= 0 ->
+					   io:format("~w\n", [Count]);
+				      true -> 
+					   ok
+				   end,
+				   Continue = (N =:= 0) orelse (Count < N),
+				   {Continue,Count} 
+			   end, 0)
+	    end
     end.
+
+format_model(Model) ->
+    concat([ format_binding(Bound) || Bound <- Model ], ",").
+
+format_binding({V,true}) -> format_var(V);
+format_binding({V,false}) -> ["~",format_var(V)];
+format_binding({V,N}) -> [format_var(V),"=",integer_to_list(N)].
+
+format_var(V) when is_atom(V) ->
+    [atom_to_list(V)];
+format_var({p,V,[]}) ->
+    [atom_to_list(V)];
+format_var({p,V,As}) ->
+    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+
+concat([], _) -> [];
+concat([H],_) -> [H];
+concat([H|T],S) -> [H,S | concat(T,S)].
 
 %%
 %% Explicit recursion version, allow times backtracking
@@ -369,7 +412,7 @@ saturate(K,Bs) when is_integer(K), K >= 1 ->
 
 saturate_(K,Bs) when is_integer(K), K >= 1 ->
     formula:info(Bs,"Saturate-~w: pair:~w\n", 
-		 [K,formula:getopt(saturate_pair,Bs)]),
+		 [K,formula:getopt(pair,Bs)]),
     erase(last_print),
     Vec = init_vector(K, Bs),
     NB = formula:number_of_bound(Bs),
@@ -403,7 +446,7 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 	    case next_vector(Vec, Bs1) of %% check all elements?
 		[] ->
 		    NB1 = formula:number_of_bound(Bs1),
-		    D = formula:getopt(saturate_threshold, Bs1),
+		    D = formula:getopt(threshold, Bs1),
 		    if NB1 - NB > D ->
 			    case init_vector(K, Bs1) of
 				[] -> Bs1;
@@ -423,7 +466,7 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 %% update vector with extra var if wanted and
 %% check vector
 saturate_vec(Vec, Bs) ->
-    case formula:getopt(saturate_pair,Bs) of
+    case formula:getopt(pair,Bs) of
 	false ->
 	    saturate_vec_(Vec, Bs);
 	true ->

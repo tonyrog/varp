@@ -253,7 +253,6 @@ puzzle_satk(K,P) ->
 				  {log,info},
 				  {order, depth},
 				  {eval_bcp, false},
-				  {saturate_pair, true},
 				  {method,collect}]) of
 	false ->
 	    false;

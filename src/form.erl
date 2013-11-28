@@ -75,7 +75,10 @@ expand({{eqk,[X1|Xs]},F}, Bs) ->
     {eqk,N,Ys};
 expand({{one,Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
-    {one,Ys}.
+    {one,Ys};
+expand(F, _Bs) ->
+    F.
+
 
 expand_quant(F,[{'=',V,D}|Xs], Bs) ->
     Ds = eval_domain(D, Bs),

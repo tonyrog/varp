@@ -52,6 +52,29 @@
 	  qset     %% Ti -> boolean
 	}).
 
+-type unsigned_t() :: non_neg_integer().
+-type order_t() :: identity | reverse | depth | occure | 
+		   depth_occure | occure_depth.
+
+
+-record(option,
+	{
+	  value = none ::  boolean() | none,   
+	  order = identify :: order_t(),
+	  print = false :: boolean(),     %% print models
+	  partial = false :: boolean(),   %% print partial model (eval/saturate)
+	  log   = ?LOG_NONE :: ?LOG_NONE .. ?DEBUG,
+	  max   = 0 :: unsigned_t(),
+	  method = collect :: count|collect,   %% model collect|count
+	  carry = ignore  :: true|false|ignore, %% ignore carry condition
+	  borrow = ignore :: true|false|ignore, %% ignore borrow condition
+	  divz   = false  :: true|false|ignore, %% do not accept divide by zero
+	  bcp    = false  :: boolean(),         %% no equvalence classes
+	  saturate = 0 :: unsigned_t(),         %% saturate formula
+	  backtrack = true :: boolean(),        %% find models with backtrack
+	  threshold = 0 :: unsigned_t(),  %% >i variables changed -> loop again
+	  pair = true :: boolean()        %% saturate pair algoritm	
+	}).
 
 -record(bs,
 	{
@@ -63,23 +86,10 @@
 	  depth :: integer(), %% backtrack/saturate depth
 	  bn :: integer(),  %% number of bound variables
 	  bl :: list(),     %% list of bound variables
-	  options = 
-	      [{value,none},           %% formula value true|false|none
-	       {order,identity},       %% variable order
-	       {print,false},          %% print models when found
-	       {log,?LOG_NONE},
-	       {max,0},                %% max number of models presented
-	       {method,collect},       %% model collect|count
-	       {carry,ignore},         %% ignore carry condition
-	       {borrow,ignore},        %% ignore borrow condition
-	       {divide_by_zero,false}, %% do not accept divide by zero
-	       {eval_bcp, false},      %% simple eval
-	       {saturate, 0},          %% plain eval
-	       {saturate_threshold,0}, %% >i variables changed -> loop again
-	       {saturate_pair, true}], %% saturate pair algoritm
-	  meta=[],  %% meta variable bindings during build
-	  subst=[], %% var/function substitution(s)
-	  ts       %% ::ts triples during build
+	  option = #option {} :: [#option{}],  %% the options
+	  meta=[],          %% meta variable bindings during build
+	  subst=[],         %% var/function substitution(s)
+	  ts                %% ::ts triples during build
 	}).
 
 new() ->
@@ -389,91 +399,97 @@ get_bt_depth(Bs) -> Bs#bs.depth.
 
 set_carry(Value, Bs) -> setopt(carry, Value, Bs).
 set_borrow(Value,Bs) -> setopt(borrow,Value,Bs).
-set_divide_by_zero(Value,Bs) -> setopt(divide_by_zero,Value,Bs).
-set_saturate_pair(Value,Bs) -> setopt(saturate_pair,Value,Bs).
-set_saturate_threshold(Value,Bs) -> setopt(saturate_threshold,Value,Bs).
+set_divz(Value,Bs) -> setopt(divz,Value,Bs).
+set_pair(Value,Bs) -> setopt(pair,Value,Bs).
+set_threshold(Value,Bs) -> setopt(threshold,Value,Bs).
 set_log(Level,Bs) -> setopt(log,Level,Bs).
     
 
 setopts([{Opt,Value}|Opts], Bs) ->
     setopts(Opts, setopt(Opt,Value,Bs));
+setopts([debug|Opts], Bs) ->
+    setopts(Opts, setopt(log, debug, Bs));
 setopts([Opt|Opts], Bs) when is_atom(Opt) ->
     setopts(Opts, setopt(Opt,true,Bs));
 setopts([], Bs) ->
     Bs.
 
-setopt(value,true,Bs)    ->  setopt_(value,true,Bs);
-setopt(value,false,Bs)   -> setopt_(value,false,Bs);
-setopt(value,none,Bs)    -> setopt_(value,none,Bs);
+setopt(value,true,Bs)  -> setopt_(#option.value,true,Bs);
+setopt(value,false,Bs) -> setopt_(#option.value,false,Bs);
+setopt(value,none,Bs)  -> setopt_(#option.value,none,Bs);
 
-setopt(print,true,Bs)    -> setopt_(print,true,Bs);
-setopt(print,false,Bs)    -> setopt_(print,false,Bs);
+setopt(print,true,Bs)   -> setopt_(#option.print,true,Bs);
+setopt(print,false,Bs)  -> setopt_(#option.print,false,Bs);
+setopt(partial,true,Bs)   -> setopt_(#option.partial,true,Bs);
+setopt(partial,false,Bs)  -> setopt_(#option.partial,false,Bs);
 
-setopt(method,collect,Bs) -> setopt_(method,collect,Bs);
-setopt(method,count,Bs) -> setopt_(method,count,Bs);
+setopt(method,collect,Bs) -> setopt_(#option.method,collect,Bs);
+setopt(method,count,Bs) -> setopt_(#option.method,count,Bs);
 
 setopt(max,N,Bs) when is_integer(N), N>=0 ->
-    setopt_(max,N,Bs);
+    setopt_(#option.max,N,Bs);
 %% fixme check all order options! (normalize?)
-setopt(order,Order,Bs) -> setopt_(order,Order,Bs);
+setopt(order,Order,Bs) -> setopt_(#option.order,Order,Bs);
 
-setopt(eval_bcp,Bool,Bs) when is_boolean(Bool) -> setopt_(eval_bcp, Bool, Bs);
+setopt(bcp,Bool,Bs) when is_boolean(Bool) -> 
+    setopt_(#option.bcp, Bool, Bs);
 
 setopt(saturate,K,Bs) when is_integer(K),K>=0 ->
-    setopt_(saturate,K,Bs);
-setopt(saturate_threshold,K,Bs) when is_integer(K),K>=0 ->
-    setopt_(saturate_threshold,K,Bs);
+    setopt_(#option.saturate,K,Bs);
+setopt(threshold,K,Bs) when is_integer(K),K>=0 ->
+    setopt_(#option.threshold,K,Bs);
 
-setopt(saturate_pair,true,Bs) ->    setopt_(saturate_pair,true,Bs);
-setopt(saturate_pair,false,Bs) ->   setopt_(saturate_pair,false,Bs);
+setopt(pair,true,Bs) ->    setopt_(#option.pair,true,Bs);
+setopt(pair,false,Bs) ->   setopt_(#option.pair,false,Bs);
 
-setopt(carry,true,Bs)    ->    setopt_(carry,true,Bs);
-setopt(carry,false,Bs)   ->   setopt_(carry,false,Bs);
-setopt(carry,ignore,Bs)  ->  setopt_(carry,ignore,Bs);
+setopt(carry,true,Bs)    ->    setopt_(#option.carry,true,Bs);
+setopt(carry,false,Bs)   ->   setopt_(#option.carry,false,Bs);
+setopt(carry,ignore,Bs)  ->  setopt_(#option.carry,ignore,Bs);
 
-setopt(borrow,true,Bs)   ->   setopt_(borrow,true,Bs);
-setopt(borrow,false,Bs)  ->  setopt_(borrow,false,Bs);
-setopt(borrow,ignore,Bs) -> setopt_(borrow,ignore,Bs);
+setopt(borrow,true,Bs)   ->   setopt_(#option.borrow,true,Bs);
+setopt(borrow,false,Bs)  ->  setopt_(#option.borrow,false,Bs);
+setopt(borrow,ignore,Bs) -> setopt_(#option.borrow,ignore,Bs);
 
-setopt(divide_by_zero,true,Bs) ->   setopt_(divide_by_zero,true,Bs);
-setopt(divide_by_zero,false,Bs) ->  setopt_(divide_by_zero,false,Bs);
-setopt(divide_by_zero,ignore,Bs) -> setopt_(divide_by_zero,ignore,Bs);
+setopt(divz,true,Bs) ->   setopt_(#option.divz,true,Bs);
+setopt(divz,false,Bs) ->  setopt_(#option.divz,false,Bs);
+setopt(divz,ignore,Bs) -> setopt_(#option.divz,ignore,Bs);
 
-setopt(log,debug,Bs) -> setopt_(log,?DEBUG,Bs);
-setopt(log,info,Bs)  -> setopt_(log,?INFO, Bs);
-setopt(log,notice,Bs) -> setopt_(log,?NOTICE,Bs);
-setopt(log,warning,Bs) -> setopt_(log,?WARNING,Bs);
-setopt(log,error,Bs) -> setopt_(log,?ERROR,Bs);
-setopt(log,critical,Bs) -> setopt_(log,?CRITICAL,Bs);
-setopt(log,alert,Bs) -> setopt_(log,?ALERT,Bs);
-setopt(log,emergency,Bs) -> setopt_(log,?EMERGENCY,Bs);
-setopt(log,none,Bs) -> setopt_(log,?LOG_NONE,Bs);
-setopt(log,Level,Bs) when Level >= -1, Level =< 7 -> setopt_(log,Level,Bs).
+setopt(log,debug,Bs) -> setopt_(#option.log,?DEBUG,Bs);
+setopt(log,info,Bs)  -> setopt_(#option.log,?INFO, Bs);
+setopt(log,notice,Bs) -> setopt_(#option.log,?NOTICE,Bs);
+setopt(log,warning,Bs) -> setopt_(#option.log,?WARNING,Bs);
+setopt(log,error,Bs) -> setopt_(#option.log,?ERROR,Bs);
+setopt(log,critical,Bs) -> setopt_(#option.log,?CRITICAL,Bs);
+setopt(log,alert,Bs) -> setopt_(#option.log,?ALERT,Bs);
+setopt(log,emergency,Bs) -> setopt_(#option.log,?EMERGENCY,Bs);
+setopt(log,none,Bs) -> setopt_(#option.log,?LOG_NONE,Bs);
+setopt(log,Level,Bs) when Level >= ?LOG_NONE, Level =< ?DEBUG -> 
+    setopt_(#option.log,Level,Bs);
+setopt(backtrack,true,Bs) -> setopt_(#option.backtrack,true,Bs);
+setopt(backtrack,false,Bs) -> setopt_(#option.backtrack,false,Bs).
 
-setopt_(Key, Value, Bs) ->
-    Opts = proplists:delete(Key, Bs#bs.options),
-    Bs#bs { options = [{Key,Value}|Opts]}.
+setopt_(KeyPos, Value, Bs) ->
+    Bs#bs { option = setelement(KeyPos, Bs#bs.option, Value) }.
 
 %%
 %% Get options
 %%
-getopt(value,  Bs) -> getopt_(value, Bs);
-getopt(print,  Bs) -> getopt_(print, Bs);
-getopt(debug,  Bs) -> getopt_(debug, Bs);
-getopt(log,    Bs) -> getopt_(log, Bs);
-getopt(method, Bs) -> getopt_(method, Bs);
-getopt(max, Bs)             -> getopt_(max, Bs);
-getopt(order, Bs)          -> getopt_(order, Bs);
-getopt(carry,  Bs)         -> getopt_(carry, Bs);
-getopt(borrow, Bs)         -> getopt_(borrow, Bs);
-getopt(divide_by_zero, Bs) -> getopt_(divide_by_zero, Bs);
-getopt(eval_bcp, Bs)       -> getopt_(eval_bcp, Bs);
-getopt(saturate, Bs)       -> getopt_(saturate, Bs);
-getopt(saturate_threshold, Bs) -> getopt_(saturate_threshold, Bs);
-getopt(saturate_pair, Bs)  -> getopt_(saturate_pair, Bs).
-
-getopt_(Key, Bs) ->
-    proplists:get_value(Key, Bs#bs.options).
+getopt(value,  Bs)    -> (Bs#bs.option)#option.value;
+getopt(print,  Bs)    -> (Bs#bs.option)#option.print;
+getopt(partial, Bs)    -> (Bs#bs.option)#option.partial;
+getopt(log,    Bs)    -> (Bs#bs.option)#option.log;
+getopt(debug,  Bs)    -> (Bs#bs.option)#option.log =:= ?DEBUG;
+getopt(method, Bs)    -> (Bs#bs.option)#option.method;
+getopt(max, Bs)       -> (Bs#bs.option)#option.max;
+getopt(order, Bs)     -> (Bs#bs.option)#option.order;
+getopt(carry,  Bs)    -> (Bs#bs.option)#option.carry;
+getopt(borrow, Bs)    -> (Bs#bs.option)#option.borrow;
+getopt(divz, Bs)      -> (Bs#bs.option)#option.divz;
+getopt(eval_bcp, Bs)  -> (Bs#bs.option)#option.bcp;
+getopt(saturate, Bs)  -> (Bs#bs.option)#option.saturate;
+getopt(threshold, Bs) -> (Bs#bs.option)#option.threshold;
+getopt(pair, Bs)      -> (Bs#bs.option)#option.pair;
+getopt(backtrack,Bs)  -> (Bs#bs.option)#option.backtrack.
 
 %%
 %%  {r,f1,..fn} => {q,eval(f1),...,eval(fn)}
@@ -1457,7 +1473,7 @@ operation('/',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {Qs,_Rs,DivZero,Bs1} = vdivrem(Ys1,Zs1,Bs),
-    Bs2 = set_carry_(DivZero,getopt(divide_by_zero,Bs1),Bs1),
+    Bs2 = set_carry_(DivZero,getopt(divz,Bs1),Bs1),
     {{uint,K,Qs},Bs2};
 
 %% DivZero  coould be used to generate a Exception output
@@ -1466,7 +1482,7 @@ operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {_Qs,Rs,DivZero,Bs1} = vdivrem(Ys1,Zs1,Bs), %% fixme vrem! 
-    Bs2 = set_carry_(DivZero,getopt(divide_by_zero,Bs1),Bs1),
+    Bs2 = set_carry_(DivZero,getopt(divz,Bs1),Bs1),
     {{uint,K,Rs},Bs2};
 
 operation('min',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
@@ -1938,8 +1954,9 @@ model_vars([X|Xs],Y,Bs,Ms) when is_integer(Y) ->
 	    model_vars(Xs,Y,Bs,[{X,true} | Ms]);
 	?FALSE ->
 	    model_vars(Xs,Y,Bs,[{X,false} | Ms]);
-	Z -> %% unbound...
-	    model_vars(Xs,Y,Bs,[{X,Z} | Ms])
+	_Z -> %% unbound...
+	    %%model_vars(Xs,Y,Bs,[{X,Z} | Ms])
+	    model_vars(Xs,Y,Bs,Ms)
     end;
 model_vars([],_Y,_Bs,Ms) ->
     Ms.

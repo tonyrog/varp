@@ -117,7 +117,6 @@ solve(Data, Spec) ->
     %% Order = [occure_depth],
     Bs7 = formula:setopts([{order,Order},
 			   {saturate,1},
-			   {saturate_pair,true},
 			   {method,collect},
 			   {print,true},
 			   {log,info},

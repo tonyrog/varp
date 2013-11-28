@@ -104,11 +104,16 @@ vexpr -> '{' vexprs '}'        : {vec, '$2'}.
 vexprs -> lexpr : ['$1'].
 vexprs -> lexpr ',' vexprs : ['$1' | '$3'].
 
-nexpr -> expr              : {uint,'$1'}.
-nexpr -> expr '/' signed   : {int,'$1'}.
-nexpr -> expr '/' unsigned : {uint,'$1'}.
-%% nexpr -> integer      : {uint,value('$1')}.
-%% nexpr -> '-' integer  : {int, value('$2')}.
+%% nexpr -> expr              : {uint,'$1'}.
+%% nexpr -> expr '/' signed   : {int,'$1'}.
+%% nexpr -> expr '/' unsigned : {uint,'$1'}.
+nexpr -> integer              : {uint,value('$1')}.
+nexpr -> integer '/' signed   : {int, value('$1')}.
+nexpr -> integer '/' unsigned : {uint, value('$1')}.
+
+nexpr -> variable              : {uint,name('$1')}.
+nexpr -> variable '/' signed   : {int, name('$1')}.
+nexpr -> variable '/' unsigned : {uint, name('$1')}.
 %% nexpr -> variable     : {uint,name('$1')}.
 %% nexpr -> '-' variable : {int,name('$2')}.
 

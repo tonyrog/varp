@@ -27,7 +27,7 @@ hex(Binary) when is_binary(Binary) ->
     [hd(erlang:integer_to_list(X,16)) || <<X:4>> <= Binary].
     
 sha1_hex(IOList) ->
-    hex(crypto:sha(IOList)).
+    hex(crypto:hash(sha,IOList)).
 
 
 pre_process_bitstring(Bits) ->
@@ -103,7 +103,8 @@ solve(3) ->
 
 solve(Data,Spec) ->
     %% Ai,Bi,Ci,Di,Ei is the output to match
-    <<Ai:32/big,Bi:32/big,Ci:32/big,Di:32/big,Ei:32/big>> = crypto:sha(Data),
+    <<Ai:32/big,Bi:32/big,Ci:32/big,Di:32/big,Ei:32/big>> = 
+	crypto:hash(sha,Data),
     {Vs,Bs00} = bit_vector(Spec, formula:new()),
     {Ws,Bs01} = group32_list(w,16,Vs,Bs00),
     %% {Ws,Bs0} = var32_list(w,16,formula:new(),[]),
@@ -127,7 +128,6 @@ solve(Data,Spec) ->
 
     Bs8 = formula:setopts([{order,Order},
 			   {saturate,1},
-			   {saturate_pair,true},
 			   {method,collect},
 			   {print,true},
 			   {log,info},
