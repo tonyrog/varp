@@ -31,15 +31,10 @@ prime_check(T,V) ->
 	  {'<=', X, Y},             %% only solution where X <= Y
 	  {'>',  X, {uint,N,1}}     %% and X > 1  (implies Y > 1 of course)
 	 ]},
-    {Fx, Bs0} = varp:formula(F),
-    case varp:ev(Fx,1,Bs0) of
-	{false,_Bs1} ->
-	    {true, ev};
-	{true,Bs1} ->
-	    case varp:test(T, Bs1) of
-		{false, _Bs2} ->
-		    {true, test};
-		{true, _Bs2} ->
-		    error
-	    end
-    end.
+    prover:satisfy_formula(F, [{saturate,T},
+			       {log,info},
+			       {pair,false},
+			       {backtrack,false},
+			       {print,model},
+			       {method,count}]).
+

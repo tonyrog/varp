@@ -48,81 +48,74 @@ clauses(A) ->
     A1 = rewrite(A),
     Cs1 = clause_form(A1),
     Cs2 = normalize_clauses(Cs1),
-    normalize_sub_clauses(Cs2).
+%%    {Cs2, []}.
+    subsume_clauses(Cs2).
 
 %%
 %% Normalize all clauses
 %%
-normalize_clauses([C|Cs]) ->
+normalize_clauses(Cs) ->
+    normalize_clauses_(Cs,[]).
+
+normalize_clauses_([C|Cs],Acc) ->
     case normalize_clause(C) of
-	[] -> normalize_clauses(Cs);
-	D -> [D | normalize_clauses(Cs)]
+	[] -> normalize_clauses_(Cs,Acc);
+	D  -> normalize_clauses_(Cs,[D|Acc])
     end;
-normalize_clauses([]) ->
-    [].
+normalize_clauses_([],Acc) ->
+    Acc.
+
+%% Normalize a clause.
+%%  Rule (after usort, where multiple literals are removed)
+%%      ~A ... A => []
+%%      A true B => []
+%%      A false B => A B
+%%
+normalize_clause(CL) ->
+    lists:usort(CL).
+%% FIXME: handle cases when variables are removed from formula
+%%    normalize_clause_(lists:usort(CL),[]).
+
+normalize_clause_([false|As],CL) ->   normalize_clause_(As,CL);
+normalize_clause_([true|_],_CL)  ->   [];
+normalize_clause_([NA={'not',A}|As], CL) ->
+    case lists:member(A, As) of
+	false -> normalize_clause_(As, [NA|CL]);
+	true -> []
+    end;
+normalize_clause_(As, C) -> %% only potive literals should remain
+    reverse(C) ++ As.
 
 %%
 %% Remove sub clauses, return clauses and a lists of
 %% removed literals
 %%
-normalize_sub_clauses(Cs) ->
+subsume_clauses(Cs) ->
     CsL = map(fun(C) -> {length(C), C} end, Cs),
     CsL1 = lists:keysort(1, CsL),
-    {DLs,Ls} = normalize_sub_clauses_(CsL1,[],[]),
+    {DLs,Ls} = subsume_clauses_(CsL1,[],[]),
     {map(fun({_,C}) -> C end, DLs), Ls}.
 		  
 
-normalize_sub_clauses_([CL|CLs],DLs,Ls) ->
-    CLs1 = normalize_sub_clause_(CL,CLs),
+subsume_clauses_([CL|CLs],DLs,Ls) ->
+    CLs1 = subsume_clause_(CL,CLs),
     case CL of
-	{1,[L]} -> normalize_sub_clauses_(CLs1,DLs,[L|Ls]);
-	_ -> normalize_sub_clauses_(CLs1,[CL|DLs],Ls)
+	{1,[L]} -> subsume_clauses_(CLs1,DLs,[L|Ls]);
+	_ -> subsume_clauses_(CLs1,[CL|DLs],Ls)
     end;
-normalize_sub_clauses_([],DLs,Ls) ->
+subsume_clauses_([],DLs,Ls) ->
     {DLs,Ls}.
 
-normalize_sub_clause_(CL={N,_},[DL={N,_}|CLs]) ->
-    [DL | normalize_sub_clause_(CL, CLs)];
-normalize_sub_clause_(CL={_N,C},[DL={_M,D}|CLs]) ->
+
+%% remove clauses DL that are subsumed by CL
+subsume_clause_(CL={_N,C},[DL={_M,D}|CLs]) ->
     case C -- D of
-	[] -> normalize_sub_clause_(CL, CLs);
-	_ -> [DL | normalize_sub_clause_(CL, CLs)]
+	[] -> subsume_clause_(CL, CLs);
+	_ -> [DL | subsume_clause_(CL, CLs)]
     end;
-normalize_sub_clause_(_CL, []) ->
+subsume_clause_(_CL, []) ->
     [].
-    
 
-%% Normalize a clause.
-%%  Rule (after usort, where multiple literals are removed)
-%%      ~A ... A => []
-%%      A true B => A B
-%%      A false B => []
-%%
-normalize_clause(C) ->
-    normalize_clause_(lists:usort(C),[]).
-
-normalize_clause_(As0=[A|As], C) when is_integer(A) ->
-    if A < 0 ->
-	    case lists:member(-A, As) of
-		false -> normalize_clause_(As, [A|C]);
-		true -> []
-	    end;
-       A > 0 ->
-	    reverse(C) ++ As0
-    end;
-normalize_clause_([false|As],C) ->
-    normalize_clause_(As,C);
-normalize_clause_([true|_],_C) ->
-    [];
-normalize_clause_(As=[{'not',_}|_], C) ->
-    reverse(C) ++ As;
-normalize_clause_([A|As], C) ->
-    case lists:member({'not',A}, As) of
-	false -> normalize_clause_(As, [A|C]);
-	true -> []
-    end;
-normalize_clause_([], C) ->
-    reverse(C).
 
 
 clause_form({'and',A,B}) ->

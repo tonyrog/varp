@@ -39,6 +39,20 @@ signed              : {token,{'signed',TokenLine}}.
 true                : {token,{'true',TokenLine}}.
 false               : {token,{'false',TokenLine}}.
 
+%% key words
+FORALL              : {token,{'forall',TokenLine}}.
+EXISTS              : {token,{'exists',TokenLine}}.
+ALL                 : {token,{'all',TokenLine}}.
+ANY                 : {token,{'any',TokenLine}}.
+ONE                 : {token,{'one',TokenLine}}.
+NONE                : {token,{'none',TokenLine}}.
+EQ                  : {token,{'eqk',TokenLine}}.
+NEQ                 : {token,{'neqk',TokenLine}}.
+GT                  : {token,{'gtk',TokenLine}}.
+GTE                 : {token,{'gtek',TokenLine}}.
+LT                  : {token,{'ltk',TokenLine}}.
+LTE                 : {token,{'ltek',TokenLine}}.
+
 %% logic operators
 
 AND                 : {token,{'and',TokenLine}}.
@@ -47,7 +61,6 @@ and                 : {token,{'and',TokenLine}}.
 &                   : {token,{'&',TokenLine}}.
 OR                  : {token,{'or',TokenLine}}.
 or                  : {token,{'or',TokenLine}}.
-#                   : {token,{'#',TokenLine}}.
 \|\|		    : {token,{'||',TokenLine}}.
 \|                  : {token,{'|',TokenLine}}.
 XOR                 : {token,{'xor',TokenLine}}.

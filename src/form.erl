@@ -27,7 +27,6 @@ expand(_P0={p,P,Vs},Bs) ->
 expand({'&',A,B},Bs) ->     {'&',expand(A,Bs),expand(B,Bs)};
 expand({'&&',A,B},Bs) ->    {'&&',expand(A,Bs),expand(B,Bs)};
 expand({'and',A,B},Bs) ->   {'and',expand(A,Bs),expand(B,Bs)};
-expand({'#',A,B},Bs) ->     {'#',expand(A,Bs),expand(B,Bs)};
 expand({'|',A,B},Bs) ->     {'|',expand(A,Bs),expand(B,Bs)};
 expand({'||',A,B},Bs) ->    {'||',expand(A,Bs),expand(B,Bs)};
 expand({'or',A,B},Bs) ->    {'or',expand(A,Bs),expand(B,Bs)};

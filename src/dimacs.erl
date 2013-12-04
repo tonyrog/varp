@@ -19,9 +19,12 @@ file(File) ->
 		    Data
 	    catch
 		_:Reason ->
-		    file:close(Fd),
 		    {error,Reason}
-	    end
+	    after
+		file:close(Fd)
+	    end;
+	Error ->
+	    Error
     end.
 
 %% File format:
@@ -33,8 +36,8 @@ file(File) ->
 %%   (signed are negated variables)
 %% Each clause constist of a list of integers and is terminate by number 0
 %%
-%% Each integer I > 0 is mapped to {var,{x,I}}
-%% ande I < 0 is mapped to {'not',{var,{x,I}}}
+%% Each integer I > 0 is mapped to {p,x,[I]}}
+%% ande I < 0 is mapped to {'not',{p,x,[I]}}
 %% 
 load(Fd) ->
     preamble(Fd,1).
@@ -85,8 +88,8 @@ cnf_(Fd,L,Acc,Cs) ->
 add_literals([Var|Vs], Acc) ->
     case list_to_integer(Var) of
 	0 -> {true,Acc};
-	I when I < 0 -> add_literals(Vs, [{'not',{var,{x,-I}}}|Acc]);
-	I -> add_literals(Vs, [{var,{x,I}}|Acc])
+	I when I < 0 -> add_literals(Vs, [{'not',{p,x,[-I]}}|Acc]);
+	I -> add_literals(Vs, [{p,x,[I]}|Acc])
     end;
 add_literals([], Acc) ->
     {false, Acc}.

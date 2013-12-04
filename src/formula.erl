@@ -21,7 +21,7 @@
 -export([get_bt_depth/1]).
 
 -compile(export_all).
--import(lists, [map/2, reverse/1]).
+-import(lists, [map/2, reverse/1, foldl/3]).
 
 -define(TRUE,   1).
 -define(FALSE, -1).
@@ -416,6 +416,14 @@ setopts([], Bs) ->
 setopt(value,true,Bs)  -> setopt_(#option.value,true,Bs);
 setopt(value,false,Bs) -> setopt_(#option.value,false,Bs);
 setopt(value,none,Bs)  -> setopt_(#option.value,none,Bs);
+
+setopt(env,Env,Bs) when is_list(Env) -> 
+    Meta = lists:foldl(
+	     fun({X,V},E0) ->
+		     E1 = proplists:delete(X,E0),
+		     [{X,V} | E1]
+	     end, Bs#bs.meta, Env),
+    Bs#bs { meta = Meta };
 
 setopt(print,true,Bs)   -> setopt_(#option.print,true,Bs);
 setopt(print,false,Bs)  -> setopt_(#option.print,false,Bs);
@@ -935,49 +943,6 @@ build_({':=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build_(F, Bs),
     operation(':=', V, Y, Bs1);
 
-build_({'all',Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs,Bs),
-    all(Xs, Bs1);
-build_({'any',Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs,Bs),
-    any(Xs, Bs1);
-build_({'none',Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs,Bs),
-    none(Xs, Bs1);
-build_({eqk,K,Fs}, Bs) when is_integer(K), K >= 0 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    eqk(K, length(Xs), Xs, Bs1);
-build_({neqk,K,Fs}, Bs) when is_integer(K), K >= 0 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    {X,Bs2} = eqk(K, length(Xs), Xs, Bs1),
-    {negate(X),Bs2};
-build_({gtk,K,Fs}, Bs) when is_integer(K), K >= 0 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    gtk(K, length(Xs), Xs, Bs1);
-build_({gtek,0,Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs, Bs),
-    any(Xs,Bs1);
-build_({gtek,K,Fs}, Bs) when is_integer(K), K >= 1 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    gtk(K-1, length(Xs), Xs, Bs1);
-build_({ltk,1,Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs, Bs),
-    none(Xs,Bs1);
-build_({ltk,K,Fs}, Bs) when is_integer(K), K > 1 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    N = length(Xs),
-    gtk(N-K, N, map(fun(X) -> negate(X) end, Xs), Bs1);
-build_({ltek,0,Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs, Bs),
-    none(Xs,Bs1);
-build_({ltek,K,Fs}, Bs) when is_integer(K), K > 0 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    N = length(Xs),
-    gtk(N-K-1, N, map(fun(X) -> negate(X) end, Xs), Bs1);
-build_({ltk,K,Fs}, Bs) when is_integer(K), K > 1 ->
-    {Xs,Bs1} = args(Fs, Bs),
-    N = length(Xs),
-    gtk(N-K, N, map(fun(X) -> negate(X) end, Xs), Bs1);
 build_({'-',F}, Bs) ->
     {Y,Bs1} = build_(F, Bs),
     operation('-', Y, Bs1);
@@ -1003,17 +968,22 @@ build_({'>>',A,K},Bs) when is_integer(K), K >= 0 ->
 build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
     {Y,Bs1} = build_(A,Bs),
     operation('>>>',Y,K,Bs1);
+
+build_({cnf,{[],[]}},Bs) ->
+    build_(false, Bs);
 build_({cnf,{Cs,Ls}},Bs) when is_list(Cs), is_list(Ls) ->
     build_({'and',{all,Ls},cnf_to_formula(Cs)},Bs);
 build_({cnf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
     build_(cnf_to_formula(Cs),Bs);
 build_({cnf,Cs},Bs) ->
     build_(cnf_to_formula(Cs),Bs);
-build_({suchthat,Expr,F},Bs) ->
-    case eval_meta(Expr,Bs) of
-	true -> build_(F,Bs);
-	false -> {0,Bs}
-    end;
+
+%% build_({suchthat,Expr,F},Bs) ->
+%%    case eval_meta(Expr,Bs) of
+%%	true -> build_(F,Bs);
+%%	false -> {0,Bs}
+%%    end;
+
 build_({subst,Rx,Py,F},Bs) ->
     Bs1 = Bs#bs { subst = [{Rx,Py}|Bs#bs.subst]},
     build_(F, Bs1);
@@ -1029,35 +999,137 @@ build_({ite,C,T,E}, Bs) ->
     {Tf,Bs2} = build_(T, Bs1),
     {Ef,Bs3} = build_(E, Bs2),
     ite(Cf, Tf, Ef, Bs3);
-build_({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-    {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,1),[],Bs),
-    all(Ys,Bs1);
-build_({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A>B ->
-    {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,-1),[],Bs),
-    all(Ys,Bs1);
-build_({forall,X,Xs,F}, Bs) when is_list(Xs) ->
-    {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
-    all(Ys,Bs1);
-build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-    {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,1),[],Bs),
-    any(Ys,Bs1);
-build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
-    {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,-1),[],Bs),
-    any(Ys,Bs1);
-build_({exists,X,Xs,F}, Bs) when is_list(Xs) ->
-    {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
-    any(Ys,Bs1);
 
+
+build_({'all',Fs}, Bs) ->
+    {Xs,Bs1} = args(Fs,Bs),
+    all(Xs, Bs1);
+build_({'any',Fs}, Bs) ->
+    {Xs,Bs1} = args(Fs,Bs),
+    any(Xs, Bs1);
+build_({'none',Fs}, Bs) ->
+    {Xs,Bs1} = args(Fs,Bs),
+    none(Xs, Bs1);
 build_({'one',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs, Bs),
     eqk(1, length(Xs), Xs, Bs1);
 
-build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-    build_meta(F,X,lists:seq(A,B,1),[],Bs);
-build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
-    build_meta(F,X,lists:seq(A,B,-1),[],Bs);
-build_({list,X,Xs,F}, Bs) when is_list(Xs) ->
-    build_meta(F,X,Xs,[],Bs).
+build_({{forall,Xs}, F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    %% io:format("Ys=~w\n", [Ys]),
+    all(Ys,Bs1);
+build_({{exists,Xs},F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    any(Ys,Bs1);
+
+build_({{one,Xs},F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    eqk(1, length(Ys), Ys, Bs1);
+build_({{eqk,[X1|Xs]},F}, Bs) ->
+    K = eval_meta(X1,Bs),
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    if is_integer(K),K >= 0 ->
+	    eqk(K, length(Ys), Ys, Bs1)
+    end;
+build_({{neqk,[X1|Xs]},F}, Bs) ->
+    K = eval_meta(X1,Bs),
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    if is_integer(K),K >= 0 ->
+	    {X,Bs2} = eqk(K, length(Ys), Ys, Bs1),
+	    {negate(X),Bs2}
+    end;
+build_({{gtk,[X1|Xs]},F}, Bs) ->
+    K = eval_meta(X1,Bs),
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    if is_integer(K),K >= 0 ->
+	    gtk(K, length(Ys), Ys, Bs1)
+    end;
+build_({{gtek,[X1|Xs]},F}, Bs) ->
+    K = eval_meta(X1,Bs),
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    if K =:= 0 ->
+	    any(Ys,Bs1);
+       is_integer(K),K >= 0 ->
+	    gtk(K-1, length(Ys), Ys, Bs1)
+    end;
+build_({{ltk,[X1|Xs]},F}, Bs) ->
+    K = eval_meta(X1,Bs),
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    if K =:= 1 ->
+	    none(Xs,Bs1);
+       is_integer(K),K > 1 ->
+	    N = length(Ys),
+	    gtk(N-K, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
+    end;
+build_({{ltek,[X1|Xs]},F}, Bs) ->
+    K = eval_meta(X1,Bs),
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    if K =:= 0 ->
+	    none(Xs,Bs1);
+       is_integer(K),K > 0 ->
+	    N = length(Ys),
+	    gtk(N-K-1, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
+    end.
+
+%% build_({'one',F}, Bs) ->
+%%    {Xs,Bs1} = args(F, Bs),
+%%    eqk(1, length(Xs), Xs, Bs1);
+
+%% build_({eqk,K,F}, Bs) when is_integer(K), K >= 0 ->
+%%    {Xs,Bs1} = args(F, Bs),
+%%    eqk(K, length(Xs), Xs, Bs1);
+
+%% build_({gtk,K,F}, Bs) when is_integer(K), K >= 0 ->
+%%     {Xs,Bs1} = args(F, Bs),
+%%     gtk(K, length(Xs), Xs, Bs1);
+%% build_({gtek,0,F}, Bs) ->
+%%     {Xs,Bs1} = args(F, Bs),
+%%     any(Xs,Bs1);
+%% build_({gtek,K,F}, Bs) when is_integer(K), K >= 1 ->
+%%    {Xs,Bs1} = args(F, Bs),
+%%    gtk(K-1, length(Xs), Xs, Bs1);
+
+%% build_({ltk,1,F}, Bs) ->
+%%     {Xs,Bs1} = args(F, Bs),
+%%     none(Xs,Bs1);
+%% build_({ltk,K,F}, Bs) when is_integer(K), K > 1 ->
+%%     {Xs,Bs1} = args(F, Bs),
+%%     N = length(Xs),
+%%     gtk(N-K, N, map(fun(X) -> negate(X) end, Xs), Bs1);
+%% build_({ltek,0,F}, Bs) ->
+%%     {Xs,Bs1} = args(F, Bs),
+%%     none(Xs,Bs1);
+%% build_({ltek,K,F}, Bs) when is_integer(K), K > 0 ->
+%%     {Xs,Bs1} = args(F, Bs),
+%%     N = length(Xs),
+%%     gtk(N-K-1, N, map(fun(X) -> negate(X) end, Xs), Bs1);
+
+%% build_({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A=<B ->
+%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,1),[],Bs),
+%%     all(Ys,Bs1);
+%% build_({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A>B ->
+%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,-1),[],Bs),
+%%     all(Ys,Bs1);
+%% build_({forall,X,Xs,F}, Bs) when is_list(Xs) ->
+%%     {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
+%%     all(Ys,Bs1);
+%% build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
+%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,1),[],Bs),
+%%     any(Ys,Bs1);
+%% build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
+%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,-1),[],Bs),
+%%     any(Ys,Bs1);
+%% build_({exists,X,Xs,F}, Bs) when is_list(Xs) ->
+%%     {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
+%%     any(Ys,Bs1);
+
+
+%% build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
+%%     build_meta(F,X,lists:seq(A,B,1),[],Bs);
+%% build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
+%%     build_meta(F,X,lists:seq(A,B,-1),[],Bs);
+%% build_({list,X,Xs,F}, Bs) when is_list(Xs) ->
+%%     build_meta(F,X,Xs,[],Bs).
 
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
     Bs1 = push_meta(X, Xi, Bs),
@@ -1076,6 +1148,64 @@ build_meta(_F,_X,[],Acc,Bs) ->
     {Acc,Bs}.
 
 
+build_quant(Fs, Xs, Bs) when is_list(Fs) ->
+    build_quant_list(Fs, Xs, Bs);
+build_quant(F, Xs, Bs) ->
+    build_quant_(F, Xs, Bs).
+
+build_quant_(F,[{'=',V,D}|Xs], Bs) ->
+    Ds = eval_domain(D, Bs),
+    build_quant_domain(F, V, Ds, Xs, Bs);
+build_quant_(F, [Expr|Xs], Bs) ->
+    case eval_meta(Expr, Bs) of
+	false -> {[],Bs};
+	true -> build_quant_(F, Xs, Bs)
+    end;
+build_quant_(F, [], Bs) ->
+    {X,Bs1} = build_(F, Bs),
+    {[X],Bs1}.
+
+build_quant_domain(F, V, [Y|Ys], Xs, Bs) ->
+    Bs1 = push_meta(V, Y, Bs),
+    {Zs1,Bs2} = build_quant_(F, Xs, Bs1),
+    Bs3 = pop_meta(Bs2),
+    {Zs2,Bs4} = build_quant_domain(F, V, Ys, Xs, Bs3),
+    {Zs1++Zs2,Bs4};
+build_quant_domain(_F, _V, [], _Xs, Bs) ->
+    {[], Bs}.
+
+build_quant_list([F|Fs], Xs, Bs) ->
+    {Xs0,Bs1} = build_quant(F, Xs, Bs),
+    {Xs1,Bs2} = build_quant_list(Fs,Xs,Bs1),
+    {Xs0++Xs1,Bs2};
+build_quant_list([], _Xs, Bs) ->
+    {[],Bs}.
+
+%% expand domain expressions
+eval_domain({range,A,B}, Bs) ->
+    A1 = eval_meta(A,Bs),
+    B1 = eval_meta(B,Bs),
+    lists:seq(A1, B1);
+eval_domain({union,A,B}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    B1 = eval_domain(B,Bs),
+    ordsets:union(A1,B1);
+eval_domain({subtract,A,B}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    B1 = eval_domain(B,Bs),
+    ordsets:subtract(A1,B1);
+eval_domain({intersect,A,B}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    B1 = eval_domain(B,Bs),
+    ordsets:intersection(A1,B1);
+eval_domain({product,A,B}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    B1 = eval_domain(B,Bs),
+    [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
+eval_domain(Expr, Bs) ->
+    [eval_meta(Expr,Bs)].
+
+
 eval_meta(V, _Bs) when is_integer(V) ->
     V;
 eval_meta(true, _Bs) ->
@@ -1083,8 +1213,48 @@ eval_meta(true, _Bs) ->
 eval_meta(false, _Bs) ->
     false;
 eval_meta(V, Bs) when is_atom(V) ->
-    {_,W} = lists:keyfind(V,1,Bs#bs.meta),
-    W;
+    case proplists:lookup(V,Bs#bs.meta) of
+	none ->
+	    io:format("variable '~s' is not bound\n", [V]),
+	    error({unbound, V});
+	{_,W} -> W
+    end;
+eval_meta({f,F,As},Bs) ->
+    case {F,eval_meta_list(As,Bs)} of
+	{factorial,[N]} -> imath:factorial(N);
+	{binom,[A,B]} -> imath:binom(A,B);
+	{sqrt,[A]}    -> math:sqrt(A);
+	{nroot,[A,N]} -> imath:pow(A,(1/N));
+	{ln,[A]}      -> math:log(A);
+	{log,[A,N]}   -> math:log(A)/math:log(N);
+	{log2,[A]}    -> math:log(A)/math:log(2);
+	{log10,[A]}   -> math:log10(A);
+	{pi,[]}       -> math:pi();
+	{e,[]}        -> math:exp(1);
+	{pow,[A,B]}   -> math:pow(A,B);
+	{sin,[A]}     -> math:sin(A);
+	{cos,[A]}     -> math:cos(A);
+	{trunc,[A]}   -> trunc(A);
+	{round,[A]}   -> round(A);
+	{abs,[A]}     -> abs(A);
+	{max,[A,B]}   -> max(A,B);
+	{min,[A,B]}   -> min(A,B);
+	{plus,[A,B]}  -> A+B;
+	{'+',[A,B]}   -> A+B;
+	{minus,[A,B]} -> A-B;
+	{'-',[A,B]}   -> A-B;
+	{times,[A,B]} -> A*B;
+	{'*',[A,B]}   -> A*B;
+	{divide,[A,B]}    -> A div B;
+	{'/',[A,B]}       -> A div B;
+	{remainder,[A,B]} -> A rem B;
+	{'%',[A,B]}       -> A rem B;
+	{negate,[A]} -> -A;
+	{sum,As} -> foldl(fun(Ai,Sum) -> Ai+Sum end, 0, As);
+	{product,As} -> foldl(fun(Ai,Prod) -> Ai*Prod end, 1, As);
+	{F,As1} -> {f,F,As1}
+    end;
+
 eval_meta({Op,A,B},Bs) ->
     case {Op,eval_meta(A,Bs),eval_meta(B,Bs)} of
 	{'<',A1,B1} -> A1 < B1;
@@ -1100,14 +1270,19 @@ eval_meta({Op,A,B},Bs) ->
 	{'/',A1,B1} -> A1 div B1;
 	{'%',A1,B1} -> A1 rem B1
     end;
+%% replace this with {f,sum,As} !
 eval_meta({sum,As},Bs) ->
     lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
+
 eval_meta({Op,A},Bs) ->
     case {Op,eval_meta(A,Bs)} of
 	{'-',A1} -> -A1;
 	{'+',A1} -> +A1;
 	{'not',A1} -> not A1
     end.
+
+eval_meta_list(As,Bs) ->
+    map(fun(A) -> eval_meta(A,Bs) end, As).
 
 uint64(I,Bs) when is_integer(I) ->
     const_vector(uint,I,64,Bs);
@@ -1130,38 +1305,40 @@ uint8(V,Bs) when is_atom(V) ->
     var_vector(uint,V,8,Bs).
 
 %% generate a constant vector
-const_vector(Type,Value,N,Bs) when is_integer(Value) ->
-    const_vector(N-1,Type,N,[],Value,Bs).
+const_vector(Type,Value,Size,Bs) when is_integer(Value) ->
+    N = eval_meta(Size,Bs),
+    const_vector_(N-1,Type,N,[],Value,Bs).
 
-const_vector(-1,Type,N,Cs,_Value,Bs) ->
+const_vector_(-1,Type,N,Cs,_Value,Bs) ->
     {{Type,N,reverse(Cs)},Bs};
-const_vector(I,Type,N,Cs,Value,Bs) ->
+const_vector_(I,Type,N,Cs,Value,Bs) ->
     if Value band 1 =:= 1 ->
-	    const_vector(I-1,Type,N,[?TRUE|Cs],Value bsr 1, Bs);
+	    const_vector_(I-1,Type,N,[?TRUE|Cs],Value bsr 1, Bs);
        true ->
-	    const_vector(I-1,Type,N,[?FALSE|Cs],Value bsr 1, Bs)
+	    const_vector_(I-1,Type,N,[?FALSE|Cs],Value bsr 1, Bs)
     end.
 
 %% Install alias vector
-alias_vector(T,V,N,Xs,Bs) ->
-    alias_vector(0,T,N,Xs,V,Bs).
+alias_vector(T,V,Size,Xs,Bs) ->
+    N = eval_meta(Size,Bs),
+    alias_vector_(0,T,N,Xs,V,Bs).
 
-alias_vector(I,T,N,[X|Xs],V,Bs) ->
+alias_vector_(I,T,N,[X|Xs],V,Bs) ->
     Bs1 = alias({T,V,N,I}, X, Bs),
-    alias_vector(I+1,T,N,Xs,V,Bs1);
-alias_vector(_I,_T,_N,[],_V,Bs) ->
+    alias_vector_(I+1,T,N,Xs,V,Bs1);
+alias_vector_(_I,_T,_N,[],_V,Bs) ->
     Bs.
     
 %% generate a variable vector
-var_vector(Type,V,N,Bs) ->
-    var_vector(N-1,Type,N,[],V,Bs).
+var_vector(Type,V,Size,Bs) ->
+    N = eval_meta(Size,Bs),
+    var_vector_(N-1,Type,N,[],V,Bs).
 
-var_vector(-1,Type,N,Xs,_V,Bs) -> 
+var_vector_(-1,Type,N,Xs,_V,Bs) -> 
     {{Type,N,Xs},Bs};
-var_vector(I,Type,N,Xs,V,Bs) ->
+var_vector_(I,Type,N,Xs,V,Bs) ->
     {Xi,Bs1} = variable({Type,V,N,I},Bs),
-    var_vector(I-1,Type,N,[Xi|Xs],V,Bs1).
-
+    var_vector_(I-1,Type,N,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector
 vfold_op(_Op,_D,[A],Bs) ->
@@ -1241,18 +1418,21 @@ vset_size([X|Xs],I,D) -> [X|vset_size(Xs,I-1,D)].
 
 
 args(Fs,Bs) when is_list(Fs) ->
-    args(Fs,[],Bs);
+    build_list(Fs,Bs);
 args(F,Bs) ->
     case build_(F, Bs) of
 	{Fs,Bs1} when is_list(Fs) ->
 	    {Fs,Bs1}
     end.
 
-args([F|Fs],Xs,Bs) ->
+build_list(Fs, Bs) ->
+    build_list_(Fs, [], Bs).
+    
+build_list_([F|Fs],Acc,Bs) ->
     {X,Bs1} = build_(F,Bs),
-    args(Fs,[X|Xs],Bs1);
-args([],Xs,Bs) ->
-    {reverse(Xs),Bs}.
+    build_list_(Fs,[X|Acc],Bs1);
+build_list_([],Acc,Bs) ->
+    {reverse(Acc),Bs}.
 %%
 %% Unary operator
 %%
@@ -1326,8 +1506,8 @@ operation('||', A, B, Bs) ->
 %%
 %% Alias operation
 %%
-operation(':=',V,X={T,N,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
-    {X, alias_vector(T,V,N,Xs,Bs)};
+operation(':=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
+    {X, alias_vector(T,V,Size,Xs,Bs)};
 operation(':=',V,X={bool,Xb},Bs) when is_atom(V) ->
     {X, alias(V, Xb, Bs)};
 

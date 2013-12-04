@@ -28,25 +28,48 @@ main(Args) ->
     halt(0).
 
 run(satisfy, Formula, Opts) ->
-    varp:run_formula(Formula,Opts++[{value,true}]);
+    R = varp:run_formula(Formula,Opts++[{value,true}]),
+    result(R, satisfy);
 run(falsify, Formula, Opts) ->
-    varp:run_formula(Formula,Opts++[{value,false}]);
+    R = varp:run_formula(Formula,Opts++[{value,false}]),
+    result(R, falsify);
 run(prove, Formula, Opts) ->
-    varp:prove_formula(Formula,Opts);
+    case varp:prove_formula(Formula,Opts) of
+	true -> io:format("TRUE\n",[]);
+	false -> io:format("FALSE\n",[])
+    end;
 run(none, Formula, Opts) ->
-    varp:run_formula(Formula,Opts).
+    R = varp:run_formula(Formula,Opts),
+    result(R, none).
+
+result(N, _) when is_integer(N) ->
+    io:format("~w\n", [N]);
+result({N,_Mdls}, _) ->
+    io:format("~w\n", [N]).
+
 
 %% load files and form a conjunction over all files
 load_files([F|Fs],JoinOp) ->
-    {ok, Data} = file:read_file(F),
-    case varp:parse(F, Data) of
-	{ok,Formula} ->
-	    case load_files(Fs,JoinOp) of
-		undefined -> Formula;
-	 	Formulas  -> {JoinOp,Formula,Formulas}
+    case filename:extension(F) of
+	".cnf" ->
+	    case dimacs:file(F) of
+		{error,_Reason} ->
+		    io:format("~s: error: ~p\n", [F,_Reason]),
+		    halt(1);
+		Cnf ->
+		    Cnf
 	    end;
-	_Error ->
-	    halt(1)
+	_ ->
+	    {ok, Data} = file:read_file(F),
+	    case varp:parse(F, Data) of
+		{ok,Formula} ->
+		    case load_files(Fs,JoinOp) of
+			undefined -> Formula;
+			Formulas  -> {JoinOp,Formula,Formulas}
+		    end;
+		_Error ->
+		    halt(1)
+	    end
     end;
 load_files([],_JoinOp) ->
     undefined.

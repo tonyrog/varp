@@ -16,18 +16,18 @@
 run_formula(Formula) ->
     run_formula(Formula,[]).
 run_formula(Formula,Opts) ->
-    MetaBind = proplists:get_value(env, Opts, []),
-    Opts1    = proplists:delete(env, Opts),
-    Formula1 = form:expand(Formula,MetaBind),
-    prover:run_formula(Formula1, Opts1).
+    %% MetaBind = proplists:get_value(env, Opts, []),
+    %% Opts1    = proplists:delete(env, Opts),
+    %% Formula1 = form:expand(Formula,MetaBind),
+    prover:run_formula(Formula, Opts).
 
 prove_formula(Formula) ->
     prove_formula(Formula,[]).
 prove_formula(Formula,Opts) ->
-    MetaBind = proplists:get_value(env, Opts, []),
-    Opts1    = proplists:delete(env, Opts),
-    Formula1 = form:expand(Formula,MetaBind),
-    prover:prove_formula(Formula1, Opts1++[{max,2}]).
+    %% MetaBind = proplists:get_value(env, Opts, []),
+    %% Opts1    = proplists:delete(env, Opts),
+    %% Formula1 = form:expand(Formula,MetaBind),
+    prover:prove_formula(Formula, Opts++[{max,2}]).
 
 file(File) ->
     case file:read_file(File) of
