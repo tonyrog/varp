@@ -1,7 +1,7 @@
 
 (E n=4)
 (
-  ((A x=1..n)(E y=1..n)P(x,y)) and
-  ((A x=1..n)(A y=1..n)(A z=1..n) ((P(x,y) and P(y,z))->P(x,z))) -> 
-  (E x=1..n)P(x,x)
+  ((FORALL x=1..n)(EXISTS y=1..n)P(x,y)) and
+  ((FORALL x=1..n)(FORALL y=1..n)(FORALL z=1..n)
+     ((P(x,y) and P(y,z))->P(x,z))) -> (EXISTS x=1..n)P(x,x)
 )

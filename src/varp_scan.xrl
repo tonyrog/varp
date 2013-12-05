@@ -40,6 +40,8 @@ true                : {token,{'true',TokenLine}}.
 false               : {token,{'false',TokenLine}}.
 
 %% key words
+A                   : {token,{'A',TokenLine}}.
+E                   : {token,{'E',TokenLine}}.
 FORALL              : {token,{'forall',TokenLine}}.
 EXISTS              : {token,{'exists',TokenLine}}.
 ALL                 : {token,{'all',TokenLine}}.

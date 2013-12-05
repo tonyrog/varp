@@ -978,12 +978,6 @@ build_({cnf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
 build_({cnf,Cs},Bs) ->
     build_(cnf_to_formula(Cs),Bs);
 
-%% build_({suchthat,Expr,F},Bs) ->
-%%    case eval_meta(Expr,Bs) of
-%%	true -> build_(F,Bs);
-%%	false -> {0,Bs}
-%%    end;
-
 build_({subst,Rx,Py,F},Bs) ->
     Bs1 = Bs#bs { subst = [{Rx,Py}|Bs#bs.subst]},
     build_(F, Bs1);
@@ -1000,7 +994,6 @@ build_({ite,C,T,E}, Bs) ->
     {Ef,Bs3} = build_(E, Bs2),
     ite(Cf, Tf, Ef, Bs3);
 
-
 build_({'all',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     all(Xs, Bs1);
@@ -1014,17 +1007,19 @@ build_({'one',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs, Bs),
     eqk(1, length(Xs), Xs, Bs1);
 
-build_({{forall,Xs}, F}, Bs) ->
+build_({{'all',Xs}, F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Xs,Bs),
-    %% io:format("Ys=~w\n", [Ys]),
     all(Ys,Bs1);
-build_({{exists,Xs},F}, Bs) ->
+build_({{'any',Xs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Xs,Bs),
     any(Ys,Bs1);
-
-build_({{one,Xs},F}, Bs) ->
+build_({{'none',Xs},F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    none(Ys,Bs1);
+build_({{'one',Xs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Xs,Bs),
     eqk(1, length(Ys), Ys, Bs1);
+
 build_({{eqk,[X1|Xs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Xs,Bs),
@@ -1071,65 +1066,6 @@ build_({{ltek,[X1|Xs]},F}, Bs) ->
 	    gtk(N-K-1, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end.
 
-%% build_({'one',F}, Bs) ->
-%%    {Xs,Bs1} = args(F, Bs),
-%%    eqk(1, length(Xs), Xs, Bs1);
-
-%% build_({eqk,K,F}, Bs) when is_integer(K), K >= 0 ->
-%%    {Xs,Bs1} = args(F, Bs),
-%%    eqk(K, length(Xs), Xs, Bs1);
-
-%% build_({gtk,K,F}, Bs) when is_integer(K), K >= 0 ->
-%%     {Xs,Bs1} = args(F, Bs),
-%%     gtk(K, length(Xs), Xs, Bs1);
-%% build_({gtek,0,F}, Bs) ->
-%%     {Xs,Bs1} = args(F, Bs),
-%%     any(Xs,Bs1);
-%% build_({gtek,K,F}, Bs) when is_integer(K), K >= 1 ->
-%%    {Xs,Bs1} = args(F, Bs),
-%%    gtk(K-1, length(Xs), Xs, Bs1);
-
-%% build_({ltk,1,F}, Bs) ->
-%%     {Xs,Bs1} = args(F, Bs),
-%%     none(Xs,Bs1);
-%% build_({ltk,K,F}, Bs) when is_integer(K), K > 1 ->
-%%     {Xs,Bs1} = args(F, Bs),
-%%     N = length(Xs),
-%%     gtk(N-K, N, map(fun(X) -> negate(X) end, Xs), Bs1);
-%% build_({ltek,0,F}, Bs) ->
-%%     {Xs,Bs1} = args(F, Bs),
-%%     none(Xs,Bs1);
-%% build_({ltek,K,F}, Bs) when is_integer(K), K > 0 ->
-%%     {Xs,Bs1} = args(F, Bs),
-%%     N = length(Xs),
-%%     gtk(N-K-1, N, map(fun(X) -> negate(X) end, Xs), Bs1);
-
-%% build_({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,1),[],Bs),
-%%     all(Ys,Bs1);
-%% build_({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A>B ->
-%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,-1),[],Bs),
-%%     all(Ys,Bs1);
-%% build_({forall,X,Xs,F}, Bs) when is_list(Xs) ->
-%%     {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
-%%     all(Ys,Bs1);
-%% build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,1),[],Bs),
-%%     any(Ys,Bs1);
-%% build_({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
-%%     {Ys,Bs1} = build_meta(F,X,lists:seq(A,B,-1),[],Bs),
-%%     any(Ys,Bs1);
-%% build_({exists,X,Xs,F}, Bs) when is_list(Xs) ->
-%%     {Ys,Bs1} = build_meta(F,X,Xs,[],Bs),
-%%     any(Ys,Bs1);
-
-
-%% build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-%%     build_meta(F,X,lists:seq(A,B,1),[],Bs);
-%% build_({list,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
-%%     build_meta(F,X,lists:seq(A,B,-1),[],Bs);
-%% build_({list,X,Xs,F}, Bs) when is_list(Xs) ->
-%%     build_meta(F,X,Xs,[],Bs).
 
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
     Bs1 = push_meta(X, Xi, Bs),
@@ -1264,6 +1200,9 @@ eval_meta({Op,A,B},Bs) ->
 	{'==', A1, B1} -> A1 == B1;
 	{'and',A1,B1} -> A1 and B1;
 	{'or',A1,B1} -> A1 or B1;
+	{'&',A1,B1} -> A1 band B1;
+	{'|',A1,B1} -> A1 bor B1;
+	{'^',A1,B1} -> A1 bxor B1;
 	{'+',A1,B1} -> A1+B1;
 	{'-',A1,B1} -> A1-B1;
 	{'*',A1,B1} -> A1*B1;
@@ -1278,6 +1217,7 @@ eval_meta({Op,A},Bs) ->
     case {Op,eval_meta(A,Bs)} of
 	{'-',A1} -> -A1;
 	{'+',A1} -> +A1;
+	{'~',A1} ->  bnot A1;
 	{'not',A1} -> not A1
     end.
 
@@ -1421,8 +1361,11 @@ args(Fs,Bs) when is_list(Fs) ->
     build_list(Fs,Bs);
 args(F,Bs) ->
     case build_(F, Bs) of
-	{Fs,Bs1} when is_list(Fs) ->
-	    {Fs,Bs1}
+	{Fs,Bs1} when is_list(Fs) -> {Fs,Bs1};
+	%% experimental 
+	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
+	{{int,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
+	{{bit,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1}
     end.
 
 build_list(Fs, Bs) ->

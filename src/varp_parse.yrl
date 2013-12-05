@@ -5,7 +5,7 @@ Terminals
 	symbol variable hexnum binnum octnum decnum
         signed unsigned true false forall exists 
         eqk neqk gtk gtek ltk ltek all any none one
-	'and' 'or' 'xor' 'not' imp equ
+	'and' 'or' 'xor' 'not' imp equ 'A' 'E'
         '&' '&&' '|' '||' '^' '!' '~'  '->' '<->'
 	'+' '-' '*' '/' '%' '>>>' '>>' '<<<' '<<'
 	'<=' '>=' '!=' '<' '>' '=' '=='
@@ -18,9 +18,9 @@ Nonterminals
 	equ_op imp_op or_op and_op not_op
         bor_op band_op bxor_op bnot_op
 	rel_op add_op mul_op prefix_op 
-        range_op
+        range_op 
         integer expr exprs vexpr vexprs nexpr
-        qtype quantifier pexpr lexpr lexprs
+        qtype quantifier psymbol pexpr lexpr lexprs
         formula .
 
 Rootsymbol formula.
@@ -95,7 +95,7 @@ formula  -> lexpr  : '$1'.
 %%
 %% vexpr -> '(' vexpr ')'         : '$2'.
 vexpr -> integer ':' nexpr     : {S,N} = '$3',{S,N,value('$1')}.
-vexpr -> symbol  ':' nexpr     : {S,N} = '$3',{S,N,name('$1')}.
+vexpr -> psymbol  ':' nexpr     : {S,N} = '$3',{S,N,'$1'}.
 %% vexpr -> integer               : value('$1').
 vexpr -> vexpr band_op vexpr   : {op('$2'), '$1', '$3' }.
 vexpr -> vexpr bor_op vexpr    : {op('$2'), '$1', '$3' }.
@@ -104,7 +104,7 @@ vexpr -> bnot_op vexpr         : {op('$1'), '$2' }.
 vexpr -> vexpr add_op vexpr    : {op('$2'), '$1', '$3'}.
 vexpr -> vexpr mul_op vexpr    : {op('$2'), '$1', '$3'}.
 vexpr -> prefix_op vexpr       : {op('$1'), '$2'}.
-vexpr -> '{' vexprs '}'        : {vec, '$2'}.
+vexpr -> '{' vexprs '}'        : '$2'.
 
 vexprs -> lexpr : ['$1'].
 vexprs -> lexpr ',' vexprs : ['$1' | '$3'].
@@ -126,8 +126,9 @@ nexpr -> variable '/' unsigned : {uint,name('$1')}.
 %%
 %% Arithmetic expression function expression
 %%
-expr -> variable                   : name('$1').
-expr -> integer                    : value('$1').
+expr -> variable          : name('$1').
+expr -> integer           : value('$1').
+expr -> bnot_op expr      : {op('$1'), '$2' }.
 expr -> prefix_op expr : 
 	    case op('$1') of
 	       '-' when is_integer('$2') -> -('$2');
@@ -138,6 +139,9 @@ expr -> variable '(' exprs ')' : { f, name('$1'), '$3'}.
 expr -> expr add_op expr   : { op('$2'), '$1', '$3' }.
 expr -> expr mul_op expr   : { op('$2'), '$1', '$3' }.
 expr -> expr rel_op expr   : { op('$2'), '$1', '$3' }.
+expr -> expr band_op expr  : {op('$2'), '$1', '$3' }.
+expr -> expr bor_op  expr  : {op('$2'), '$1', '$3' }.
+expr -> expr bxor_op expr  : {op('$2'), '$1', '$3' }.
 expr -> expr range_op expr : { '$2', '$1', '$3' }.
 %% dexpr -> dexpr '|' dexpr : { union,   '$1', '$3' }.
 %% dexpr -> dexpr '*' dexpr : { product, '$1', '$3' }.
@@ -150,23 +154,30 @@ exprs -> expr ',' exprs : ['$1' | '$3'].
 %%
 %% Formulas
 %%
-qtype -> exists '!' : one.
-qtype -> exists : exists.
-qtype -> forall : forall.
-qtype -> eqk    : eqk.
-qtype -> neqk   : neqk.
-qtype -> gtk    : gtk.
-qtype -> gtek   : gtek.
-qtype -> ltk    : ltk.
-qtype -> ltek   : ltek.
+qtype -> 'E' '!' : one.
+qtype -> 'E'     : any.
+qtype -> 'A'     : all.
+qtype -> exists  '!' : one.
+qtype -> exists  : any.
+qtype -> forall  : all.
+qtype -> all     : all.
+qtype -> any     : any.
+qtype -> one     : one.
+qtype -> none    : none.
+qtype -> eqk     : eqk.
+qtype -> neqk    : neqk.
+qtype -> gtk     : gtk.
+qtype -> gtek    : gtek.
+qtype -> ltk     : ltk.
+qtype -> ltek    : ltek.
 
-%% qcmp -> '(' eqk expr ')'   : {eqk,['$3']}.
-%% qcmp -> '(' neqk expr ')'  : {neqk,['$3']}.
-%% qcmp -> '(' gtk expr ')'   : {gtk,['$3']}.
-%% qcmp -> '(' gtek expr ')'  : {gtek,['$3']}.
-%% qcmp -> '(' ltk expr ')'   : {gtk,['$3']}.
-%% qcmp -> '(' ltek expr ')'  : {gtek,['$3']}.
-     
+quantifier -> '[' all ']'     : all.
+quantifier -> '[' any ']'     : any.
+quantifier -> '[' none ']'    : none.
+quantifier -> '[' one  ']'    : one.
+quantifier -> '[' 'E' ']'     : any.
+quantifier -> '[' 'E' '!' ']' : one.
+quantifier -> '[' 'A' ']'     : all.
 quantifier -> '[' qtype exprs ']' : {'$2','$3'}.
 
 %% Logic expression
@@ -180,19 +191,19 @@ lexpr -> lexpr equ_op lexpr        : { op('$2'), '$1', '$3' }.
 lexpr -> not_op lexpr              : { op('$1'), '$2' }.
 lexpr -> '(' lexpr ')'             : '$2'.
 lexpr -> vexpr rel_op vexpr        : { op('$2'), '$1', '$3' }.
-%% lexpr -> quantifier '(' lexprs ')' : {'$1','$3'}.
+lexpr -> quantifier '(' lexprs ')' : {'$1','$3'}.
 lexpr -> quantifier lexpr          : {'$1','$2'}.
-%% lexpr -> quantifier vexpr          : {'$1','$2'}.
-lexpr -> all  vexpr       : {'all','$2'}.
-lexpr -> any  vexpr       : {'any','$2'}.
-lexpr -> none vexpr      : {'none','$2'}.
-lexpr -> one  vexpr      : {'one','$2'}.
-%% lexpr -> qcmp vexpr      : {'$1','$2'}.
+lexpr -> quantifier vexpr          : {'$1','$2'}.
 %% lexpr -> lexpr '[' pexpr '/' pexpr ']' : {subst,'$3','$5','$1'}.
 
-pexpr -> symbol                    : { p, name('$1'), []}.
+pexpr -> psymbol                    : { p, '$1', []}.
 %% pexpr -> symbol '(' ')'            : { p, name('$1'), []}.
-pexpr -> symbol '(' exprs ')'      : { p, name('$1'), '$3'}.
+pexpr -> psymbol '(' exprs ')'      : { p, '$1', '$3'}.
+
+psymbol -> 'A' : 'A'.
+psymbol -> 'E' : 'E'.
+psymbol -> symbol : name('$1').
+    
     
 lexprs -> lexpr ',' lexprs : ['$1' | '$3'].
 lexprs -> lexpr : ['$1'].
