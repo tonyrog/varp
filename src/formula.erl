@@ -1291,13 +1291,27 @@ vfold_op(_Op,D,[],Bs) ->
     {D,Bs}.
 
 %% Fold operator Op over a list of bool variables
-fold_op(_Op,_D,[A],Bs) ->
+fold_op(Op,A0,As,Bs) ->
+    %% fixme option to select left or right bind
+    foldr_op(Op,A0,As,Bs).
+    
+%% maybe select between left,right,balanced (tree)
+
+foldl_op(_Op,_A0,[A],Bs) ->
     {A,Bs};
-fold_op(Op,D,[Y|As],Bs) ->
-    {Z,Bs1} = fold_op(Op,D,As,Bs),
+foldl_op(Op,A0,[Y|As],Bs) ->
+    {Z,Bs1} = foldl_op(Op,A0,As,Bs),
     operation(Op,Y,Z,Bs1);
-fold_op(_Op,D,[],Bs) ->
-    {D,Bs}.
+foldl_op(_Op,A0,[],Bs) ->
+    {A0,Bs}.
+
+foldr_op(_Op,_A0,[A],Bs) ->
+    {A,Bs};
+foldr_op(Op,A0,[Y,Z|As],Bs) ->
+    {Z1,Bs1} = operation(Op,Y,Z,Bs),
+    foldr_op(Op,A0,[Z1|As],Bs1);
+foldr_op(_Op,A0,[],Bs) ->
+    {A0,Bs}.
 
 all(As, Bs) -> 
     fold_op('and',{bool,?TRUE},As,Bs).

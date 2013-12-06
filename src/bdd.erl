@@ -37,7 +37,7 @@ construct(F) ->
     construct_(form:expand(F)).
 
 construct_(F) ->
-    case variables(F) of
+    case form:variables(F) of
 	[] ->
 	    peval(F, undefined, undefined);
 	Vs ->
@@ -247,26 +247,3 @@ peval({one,[F|Fs]},V,Vx) ->
 		     {'and',{'not',W2},{'and',W1,W3}}}
 	    end
     end.
-
-%%
-%% Extract all variables from F
-%%
-variables(F) ->
-    sets:to_list(vars(F,sets:new())).
-
-vars(true, Set) -> Set;
-vars(false, Set) -> Set;
-vars(V={p,_,_}, Set) -> sets:add_element(V, Set);
-vars({all,Fs}, Set) -> vars_list(Fs, Set);
-vars({any,Fs}, Set) -> vars_list(Fs, Set);
-vars({one,Fs}, Set) -> vars_list(Fs, Set);
-vars({none,Fs}, Set) -> vars_list(Fs, Set);
-vars({'and',F1,F2}, Set) ->  vars(F2, vars(F1,Set));
-vars({'or',F1,F2},  Set)  ->  vars(F2, vars(F1,Set));
-vars({'xor',F1,F2}, Set) ->  vars(F2, vars(F1,Set));
-vars({'not',F},Set) -> vars(F,Set).
-
-vars_list([F|Fs],Set) -> vars_list(Fs, vars(F,Set));
-vars_list([],Set) -> Set.
-
-    

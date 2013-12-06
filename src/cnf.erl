@@ -10,7 +10,6 @@
 -export([clauses/1]).
 -export([succ_dimacs/2, succ/2]).
 -export([normalize_clause/1, normalize_clauses/1]).
--export([vars/1]).
 
 -compile(export_all).
 
@@ -19,8 +18,9 @@
 %%
 %%
 %%
-satisfy(F) ->
-    Vs = lists:sort(vars(F)),
+satisfy(F0) ->
+    F = form:expand(F0),
+    Vs = lists:sort(form:variables(F)),
     {A, Ls} = clauses(F),
     io:format("literals=~w\n",[Ls]),
     Af = {all, map(fun(Cp) -> {any,Cp} end, A)},
@@ -73,9 +73,8 @@ normalize_clauses_([],Acc) ->
 %%
 normalize_clause(CL) ->
     lists:usort(CL).
-%% FIXME: handle cases when variables are removed from formula
-%%    normalize_clause_(lists:usort(CL),[]).
 
+%% fixme: handle true,false and removed literals !
 normalize_clause_([false|As],CL) ->   normalize_clause_(As,CL);
 normalize_clause_([true|_],_CL)  ->   [];
 normalize_clause_([NA={'not',A}|As], CL) ->
@@ -130,35 +129,9 @@ clause_form({'not',V}) ->
 clause_form(V) ->
     [[V]].
 
-
-%% collect all variables in formula
-vars(F) ->
-    vars(F,[]).
-
-vars(A,Vs) when is_atom(A) -> var_add(A,Vs);
-vars({var,A},Vs) -> var_add({var,A},Vs);
-vars({'not',F},Vs) -> vars(F,Vs);
-vars({'and',A,B},Vs) -> vars(A,vars(B,Vs));
-vars({'or',A,B},Vs) -> vars(A,vars(B,Vs));
-vars({'imp',A,B},Vs) -> vars(A,vars(B,Vs));
-vars({'equ',A,B},Vs) -> vars(A,vars(B,Vs));
-vars({'xor',A,B},Vs) -> vars(A,vars(B,Vs));
-vars({'all',Fs},Vs) -> foldl(fun(G,Ws) -> vars(G,Ws) end, Vs, Fs);
-vars({'any',Fs},Vs) -> foldl(fun(G,Ws) -> vars(G,Ws) end, Vs, Fs);
-vars({'none',Fs},Vs) -> foldl(fun(G,Ws) -> vars(G,Ws) end, Vs, Fs).
-
-var_add(V, Vs) ->    
-    case member(V, Vs) of
-	true -> Vs;
-	false -> [V|Vs]
-    end.
-
-
 rewrite(A) when is_atom(A) -> A;
 rewrite(A={p,_P,_Vs}) -> A;
-rewrite(A={var,_V}) -> A;
 rewrite({'not',A}) when is_atom(A) -> {'not',A};
-rewrite({'not',A={var,_V}}) -> {'not',A};
 rewrite({'not',A={p,_P,_Vs}}) -> {'not',A};
 rewrite({'not', {'not', A}}) -> rewrite(A);
 rewrite({'not', {'and', A, B}}) ->
@@ -201,6 +174,7 @@ format_symbol({p,V,As}) ->
 concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].
+
 
 %%
 %% triple to CNF clauses

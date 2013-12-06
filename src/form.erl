@@ -32,22 +32,17 @@ expand({'||',A,B},Bs) ->    {'||',expand(A,Bs),expand(B,Bs)};
 expand({'or',A,B},Bs) ->    {'or',expand(A,Bs),expand(B,Bs)};
 expand({'->',A,B},Bs) ->    {'->',expand(A,Bs),expand(B,Bs)};
 expand({'imp',A,B},Bs) ->   {'imp',expand(A,Bs),expand(B,Bs)};
+expand({'!',A},Bs) ->       {'!',expand(A,Bs)};
 expand({'not',A},Bs) ->     {'not',expand(A,Bs)};
 expand({'~',A},Bs) ->       {'~',expand(A,Bs)};
-expand({'!',A},Bs) ->       {'!',expand(A,Bs)};
 expand({'equ',A,B},Bs) ->   {'equ',expand(A,Bs),expand(B,Bs)};
 expand({'=',A,B},Bs) ->     {'=',expand(A,Bs),expand(B,Bs)};
 expand({'^',A,B},Bs) ->     {'^',expand(A,Bs),expand(B,Bs)};
 expand({'xor',A,B},Bs) ->   {'xor',expand(A,Bs),expand(B,Bs)};
 expand({'<->',A,B},Bs) ->   {'<->',expand(A,Bs),expand(B,Bs)};
 expand({'!=',A,B},Bs) ->    {'!=',expand(A,Bs),expand(B,Bs)};
-
-expand({subst,Rx,Py,F},Bs) ->
-    expand(F, [{Rx,Py}|Bs]);
-expand({subst,SList,F},Bs) ->
-    expand(F, SList++Bs);
-
-
+expand({subst,Rx,Py,F},Bs) ->  expand(F, [{Rx,Py}|Bs]);
+expand({subst,SList,F},Bs) ->  expand(F, SList++Bs);
 expand({all,Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     all(Ys);
@@ -274,7 +269,9 @@ eval_meta(true, _Bs) ->  true;
 eval_meta(false, _Bs) -> false;
 eval_meta(V, Bs) when is_atom(V) ->
     case lists:keyfind(V,1,Bs) of
-	false -> V;
+	false -> 
+	    io:format("variable '~s' is not bound\n", [V]),
+	    error({unbound, V});
 	{_,W} -> W
     end;
 eval_meta({f,F,As},Bs) ->
@@ -379,6 +376,37 @@ fmt_var({var,X}, Q) when is_tuple(X) ->
      string:join([if is_integer(T) -> integer_to_list(T);
 		     is_atom(T) -> atom_to_list(T)
 		  end ||  T <- Ps ], ","), ")", Q].
+
+%%
+%% Extract all variables from F
+%%
+variables(F) ->
+    sets:to_list(vars(F,sets:new())).
+
+vars(true, Set)  -> Set;
+vars(false, Set) -> Set;
+vars(V={p,_,_}, Set) -> sets:add_element(V, Set);
+vars({'imp',F1,F2}, Set) -> vars(F2, vars(F1,Set));
+vars({'->',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
+vars({'equ',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
+vars({'<->',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
+vars({'and',F1,F2}, Set) -> vars(F2, vars(F1,Set));
+vars({'&&',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
+vars({'or',F1,F2},  Set)  ->  vars(F2, vars(F1,Set));
+vars({'||',F1,F2},  Set)  ->  vars(F2, vars(F1,Set));
+vars({'xor',F1,F2}, Set) ->  vars(F2, vars(F1,Set));
+vars({'!',F},Set) -> vars(F,Set);
+vars({'not',F},Set) -> vars(F,Set);
+%% may be present in some partially expanded forms
+vars({all,Fs}, Set) -> vars_list(Fs, Set);
+vars({any,Fs}, Set) -> vars_list(Fs, Set);
+vars({one,Fs}, Set) -> vars_list(Fs, Set);
+vars({none,Fs}, Set) -> vars_list(Fs, Set).
+
+vars_list([F|Fs],Set) -> vars_list(Fs, vars(F,Set));
+vars_list([],Set) -> Set.
+
+
 %%
 %% Test case
 %% 

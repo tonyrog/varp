@@ -40,7 +40,24 @@ run(prove, Formula, Opts) ->
     end;
 run(none, Formula, Opts) ->
     R = varp:run_formula(Formula,Opts),
-    result(R, none).
+    result(R, none);
+run(cnf, Formula, Opts) ->
+    %% generate dimacs cnf from a formula
+    Bs = proplists:get_value(env,Opts,[]),
+    F = form:expand(Formula,Bs),
+    %% Cs=clauses and Ls=literals eliminated
+    {Cs,_Ls} = cnf:clauses(F),
+    Data = dimacs:format(Cs),
+    %% io:format("Ls=~p\n", [_Ls]),
+    case proplists:get_value(output,Opts,"") of
+	"" ->
+	    io:put_chars(Data);
+	FileName ->
+	    file:write_file(FileName, Data)
+    end,
+    ok.
+
+
 
 result(false,_) ->
     io:format("\n", []);
@@ -54,7 +71,7 @@ result({N,_Mdls}, _) ->
 load_files([F|Fs],JoinOp) ->
     case filename:extension(F) of
 	".cnf" ->
-	    case dimacs:file(F) of
+	    case dimacs:load(F) of
 		{error,_Reason} ->
 		    io:format("~s: error: ~p\n", [F,_Reason]),
 		    halt(1);
@@ -79,7 +96,7 @@ load_files([],_JoinOp) ->
 
 usage() ->
     io:format("varp: usage: varp [<Mode>] [Options] [Bindings] [files]\n"),
-    io:format("  <Mode> = satisfy|falsify|prove\n"),
+    io:format("  <Mode> = satisfy|falsify|prove|cnf\n"),
     io:format("Options\n"),
     lists:foreach(
       fun({Opt,_,Spec,Def}) ->
@@ -137,6 +154,7 @@ options() ->
      {"borrow",borrow,[{"true",true},{"false",false},{"ignore",ignore}],ignore},
      {"divz",divz,[{"true",true},{"false",false},{"ignore",ignore}],false},
      {"log", log, Level, none},
+     {"output", output, string, ""},
      {"help", help, undefined, undefined}
     ].
 
@@ -148,6 +166,8 @@ process_args0(["falsify"|As], _Mode, Opts, Bound) ->
     process_args(As, falsify, Opts, Bound);
 process_args0(["prove"|As], _Mode, Opts, Bound) ->
     process_args(As, prove, Opts, Bound);
+process_args0(["cnf"|As], _Mode, Opts, Bound) ->
+    process_args(As, cnf, Opts, Bound);
 process_args0(As, Mode, Opts, Bound) ->
     process_args(As, Mode, Opts, Bound).
 
@@ -222,6 +242,8 @@ match_value(unsigned, Val) ->
 	{N, ""} when N>=0 -> {ok,N};
 	_ -> false
     end;
+match_value(string, Val) ->
+    {ok,Val};
 match_value(undefined, "") ->
     {ok, true};
 match_value([{Value,Enum}|_Vs], Value) ->
