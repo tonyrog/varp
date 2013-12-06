@@ -1004,8 +1004,8 @@ build_({'none',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     none(Xs, Bs1);
 build_({'one',Fs}, Bs) ->
-    {Xs,Bs1} = args(Fs, Bs),
-    eqk(1, length(Xs), Xs, Bs1);
+    {Xs,Bs1} = args(Fs,Bs),
+    one(Xs, Bs1);
 
 build_({{'all',Xs}, F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Xs,Bs),
@@ -1198,6 +1198,7 @@ eval_meta({Op,A,B},Bs) ->
 	{'>',A1,B1} -> A1 > B1;
 	{'>=', A1, B1} -> A1 >= B1;
 	{'==', A1, B1} -> A1 == B1;
+	{'!=', A1, B1} -> A1 =/= B1;
 	{'and',A1,B1} -> A1 and B1;
 	{'or',A1,B1} -> A1 or B1;
 	{'&',A1,B1} -> A1 band B1;
@@ -1307,6 +1308,26 @@ any(As, Bs) ->
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
     operation('not',A,Bs1).
+
+one(Xs, Bs) ->
+    eqk(1,length(Xs),Xs,Bs).
+
+%% Not used - size = 5n
+%% special version of eqk(1,length(Xs),Xs,Bs)
+one_(Xs, Bs) ->
+    {{One,_},Bs1} = one__(Xs, Bs),
+    {One,Bs1}.
+
+one__([], Bs) -> {{{bool,?FALSE},{bool,?FALSE}},Bs};
+one__([A],Bs) -> {{A,A}, Bs};
+one__([A|As],Bs) ->
+    {{One,Or},Bs1} = one__(As,Bs),
+    {A1,Bs2} = operation('and',negate(A),One,Bs1),
+    {A2,Bs3} = operation('and',negate(One),negate(Or),Bs2),
+    {A3,Bs4} = operation('and',A,A2,Bs3),
+    {One1,Bs5} = operation('or',A1,A3,Bs4),
+    {O1,Bs6} = operation('or',A,Or,Bs5),
+    {{One1,O1},Bs6}.
 
 
 %% Generate a formula where exact K out of N formulas are true.

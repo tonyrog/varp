@@ -47,16 +47,30 @@ expand({subst,Rx,Py,F},Bs) ->
 expand({subst,SList,F},Bs) ->
     expand(F, SList++Bs);
 
+
+expand({all,Fs}, Bs) when is_list(Fs) ->
+    Ys = expand_args(Fs, Bs),
+    all(Ys);
+expand({any,Fs}, Bs) when is_list(Fs) ->
+    Ys = expand_args(Fs, Bs),
+    any(Ys);
+expand({one,Fs}, Bs) when is_list(Fs) ->
+    Ys = expand_args(Fs, Bs),
+    one(Ys);
+
 expand({{all,Xs}, F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     all(Ys);
 expand({{any,Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     any(Ys);
+
 expand({{eqk,[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
-    {eqk,N,Ys};
+    if N =:= 1 -> one(Ys);
+       true -> {eqk,N,Ys}
+    end;
 expand({{neqk,[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
@@ -86,7 +100,6 @@ expand({{none,Xs},F}, Bs) ->
 expand(F, _Bs) ->
     F.
 
-
 expand_quant(F,[{'=',V,D}|Xs], Bs) ->
     Ds = eval_domain(D, Bs),
     expand_quant_domain(F, V, Ds, Xs, Bs);
@@ -104,7 +117,6 @@ expand_quant_domain(F, V, [Y|Ys], Xs, Bs) ->
 	expand_quant_domain(F, V, Ys, Xs, Bs);
 expand_quant_domain(_F, _V, [], _Xs, _Bs) ->
     [].
-
 
 
 expand_args(Fs,Bs) when is_list(Fs) ->
@@ -187,8 +199,6 @@ bind_meta([V|Vs], Bs, Acc, Bnd) ->
 bind_meta([], _Bs, Acc, Bnd) ->
     {lists:reverse(Acc),lists:reverse(Bnd)}.
 
-
-
 all([])     -> true;
 all([A])    -> A;
 all([A|As]) -> {'and',A,all(As)}.
@@ -196,6 +206,15 @@ all([A|As]) -> {'and',A,all(As)}.
 any([])     -> false;
 any([A])    -> A;
 any([A|As]) -> {'or',A,any(As)}.
+
+one([A]) -> A;
+one(As) ->
+    {'and', {all, [{'not',{'and',A,B}} || {A,B} <- pairs(As)]},
+     {any, As}}.
+
+pairs([]) -> [];
+pairs([_]) -> [];
+pairs([A|As]) -> [{A,Ai} || Ai <- As] ++ pairs(As).
 
 %% F[X/Y]  (forall/exist quantifier not allowed)
 subst({var,X}, X, Y) -> Y;
