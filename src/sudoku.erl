@@ -20,24 +20,24 @@ sudoku(S,F) ->
      [
       %% every position must have a uniq value!
       %%  (FORALL i=1..9)(FORALL j=1..9) (EXISTS! k=1,..9) S(i,j,k)
-      {{forall,[{'=',i,{range,1,9}}]},
-       {{forall,[{'=',j,{range,1,9}}]},
+      {{all,[{'=',i,{range,1,9}}]},
+       {{all,[{'=',j,{range,1,9}}]},
 	{{eqk,[1,{'=',k,{range,1,9}}]}, {p,S,[i,j,F(k)]}}
        }
       },
 
       %% for every row every column must be uniq
       %%  (FORALL i=1..9 (FORALL k=1..9) (EXISTS! j=1...9) S(i,j,k)
-      {{forall,[{'=',i,{range,1,9}}]},
-       {{forall,[{'=',k,{range,1,9}}]},
+      {{all,[{'=',i,{range,1,9}}]},
+       {{all,[{'=',k,{range,1,9}}]},
 	{{eqk,[1,{'=',j,{range,1,9}}]}, {p,S,[i,j,F(k)]}}
        }
       },
       
       %% for every column every row must be uniq
       %%  (A j=1..9) (A k=1..9) (E! i=1...9) S(i,j,k)
-      {{forall,[{'=',j,{range,1,9}}]},
-       {{forall,[{'=',k,{range,1,9}}]},
+      {{all,[{'=',j,{range,1,9}}]},
+       {{all,[{'=',k,{range,1,9}}]},
 	{{eqk,[1,{'=',i,{range,1,9}}]},{p,S,[i,j,F(k)]} }
        }
       },
@@ -45,9 +45,9 @@ sudoku(S,F) ->
       %% for every box every position must be uniq
       %%  (A s=0..2)(A t=0..2)(A k=1..9)
       %%    (E! i=1..3,j=1..3) S(3*s+i,3*t+j,k)
-      {{forall,[{'=',s,{range,0,2}}]},
-       {{forall,[{'=',t,{range,0,2}}]},
-	{{forall,[{'=',k,{range,1,9}}]},
+      {{all,[{'=',s,{range,0,2}}]},
+       {{all,[{'=',t,{range,0,2}}]},
+	{{all,[{'=',k,{range,1,9}}]},
 	 {{eqk,[1,{'=',i,{range,0,8}}]},
 	  {p,S,[{'+',{'+',{'*',3,s},{'/',i,3}},1},
 		{'+',{'+',{'*',3,t},{'%',i,3}},1},F(k)]}}
@@ -59,8 +59,8 @@ sudoku(S,F) ->
 sudoku0(X) ->
     %% every position must have a uniq value!
     %%  (A i=1..9)(A j=1..9) (E! k=0,..9) X(i,j,k)
-    {{forall,[{'=',i,{range,1,9}}]},
-     {{forall,[{'=',j,{range,1,9}}]},
+    {{all,[{'=',i,{range,1,9}}]},
+     {{all,[{'=',j,{range,1,9}}]},
       {{eqk,[1,{'=',k,{range,0,9}}]},{p,X,[i,j,k]}}
      }}.
 
@@ -305,6 +305,26 @@ puzzle_pre() ->
      [2,x,x,x,x,x,x,x,x],
      [3,x,x,x,x,x,x,x,x]].
 
+%%
+%% Test if all 17 pzzles are 1-easy
+%%
+puzzle_test17() ->
+    puzzle_test17_(1, 49152).
+
+puzzle_test17_(I, N) when I < N ->
+    B = sudoku('S'),
+    P = puzzle_sudoku17(I),
+    A = inst('S',P),
+    case prover:run_formula({'and',B,A}, 
+			    [{value,true},{saturate,1},
+			     {backtrack,false},{method,count}]) of
+	false -> io:format("~w: NOT easy!\n", [I]),
+		 error({not_easy,I});
+	1 -> io:format("~w: OK\n", [I])
+    end,
+    puzzle_test17_(I+1,N);
+puzzle_test17_(N,N) ->
+    ok.
 
 %% 
 %% Puzzle finder

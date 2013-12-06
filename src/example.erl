@@ -25,81 +25,79 @@ ps(N) ->
 
 %% N pigeons in N-1 pigeon holes
 pigeon(N) ->
+    D = {range,1,N},
+    D1 = {range,1,N},
     %% All pigeons must be in a hole
-    F1 = {forall,p,{1,N},
-	  {exists,h,{1,N-1}, ph(p,h) }},
+    F1 = {{all,rs(p,D)},
+	  {{any,rs(h,D1)}, ph(p,h) }},
     %% Any two pigeons must be in different holes
-    F2 = {forall,h,{1,N-1},
-	  {forall,pi,{1,N},
-	   {forall,pj,{1,N},
-	    {suchthat,{'<',pi,pj},
-	     {'not',{'and',ph(pi,h),ph(pj,h)}}}}}},
+    F2 = {{all,rs(h,D1)},
+	  {{all,rs(pi,D)},
+	   {{all,rs(pj,D)++[{'<',pi,pj}]},
+	    {'not',{'and',ph(pi,h),ph(pj,h)}}}}},
     {'and',F1,F2}.
 
-ph(Pi,Hj) -> {var,{ph,Pi,Hj}}.    
-
+ph(Pi,Hj) -> {p,'P',[Pi,Hj]}.    
 
 %% 
-%% AxEy ( (p[x,y] & r[x]) v (q[x,y] & ~r[x]) )
+%% AxEy ( (P(x,y) & R(x)) v (Q(x,y) & ~R(x)) )
 %% 
 rsat(N) ->
-    {forall,x,{1,N},
-     {exists,y,{1,N},
+    {{all,rs(x,1,N)},
+     {{any,rs(y,1,N)},
       {'or',{'and',p(x,y),r(x)}, {'and',q(x,y),{'not',r(x)}}}}}.
 
 %% 
 %% AxEy ( (p[x,y] & r[y]) v (q[x,y] & ~r[y]) )
 %% 
 ysat(N) ->
-    {forall,x,{1,N},
-     {exists,y,{1,N},
+    {{all,rs(x,1,N)},
+     {{any,rs(y,1,N)},
       {'or',{'and',p(x,y),r(y)}, {'and',q(x,y),{'not',r(y)}}}}}.
 
 
 %% 
-%% ExAy ( (p[x,y] & r[x]) v (q[x,y] & ~r[x]) )
+%% ExAy ( (P(x,y) & R(x)) v (Q(x,y) & ~R(x)) )
 %% 
 xsat(N) ->
-    {exists,x,{1,N},
-     {forall,y,{1,N},
+    {{any,rs(x,1,N)},
+     {{all,rs(y,1,N)},
       {'or',{'and',p(x,y),r(x)}, {'and',q(x,y),{'not',r(x)}}}}}.
 
-
-
-p(X,Y) -> {var,{p,X,Y}}.
-q(X,Y) -> {var,{q,X,Y}}.
-r(X) -> {var,{r,X}}.
     
 %%
-%%  ExAy p(x,y) -> AyEx p(x,y)
+%%  ExAy P(x,y) -> AyEx P(x,y)
 %% 
 ae(N) ->
     {imp,
-     {exists,x,{1,N}, {forall,y,{1,N}, p(x,y)}},
-     {forall,y,{1,N}, {exists,x,{1,N}, p(x,y)}}}.
+     {{any,rs(x,1,N)}, {{all,rs(y,1,N)}, p(x,y)}},
+     {{all,rs(y,1,N)}, {{any,rs(x,1,N)}, p(x,y)}}}.
      
-%% AxEy p(x,y) & r(y)
+%% AxEy P(x,y) & R(y)
 xy(N) ->
-    {forall,x,{1,N},
-     {exists,y,{1,N},
+    {{all,rs(x,1,N)},
+     {{any,rs(y,1,N)},
       {'and', p(x,y), r(y)}}}.
 
-%% AxEy p(x,y) & r(x)
+%% AxEy P(x,y) & R(x)
 xy2(N) ->
-    {forall,x,{1,N},
-     {exists,y,{1,N},
+    {{all,rs(x,1,N)},
+     {{any,rs(y,1,N)},
       {'and', p(x,y), r(x)}}}.
 %%
-%% AxEy p(x,y) & AxAyAz (p(x,y)&p(y,z) -> p(x,z)) -> Ex p(x,x)
+%% AxEy P(x,y) & AxAyAz (P(x,y)&P(y,z) -> P(x,z)) -> Ex P(x,x)
 %%
 fe(N) ->
+    D = {range,1,N},
     {'imp',
      {'and', 
-      {forall,x,{1,N},{exists,y,{1,N}, {var,p(x,y)}}},
-      {forall,x,{1,N},
-       {forall,y,{1,N},
-	{forall,z,{1,N}, {'imp',{'and',p(x,y),p(y,z)}, p(x,z) }}}}},
-     {exists,x,{1,N}, p(x,x) }}.
+      {{all,rs(x,D)},
+       {{any,rs(y,D)}, p(x,y)}},
+      {{all,rs(x,D)},
+       {{all,rs(y,D)},
+	{{all,rs(z,D)},
+	 {'imp',{'and',p(x,y),p(y,z)}, p(x,z) }}}}},
+     {{any,rs(x,D)}, p(x,x) }}.
 
 
 %% N = X*Y, X <= Y, X > 1
@@ -149,7 +147,6 @@ first_none_k_saturated_prime(K,P,Opts) ->
     end.
     
 
-
 count_models(F,N) ->
     F0 = apply(?MODULE, F, [N]),
     {Y,Ts,Bs} = prover:skolem(F0, true, [{r,I}||I <- lists:seq(1,N)]),
@@ -166,62 +163,59 @@ count_models(F,N) ->
 
 cantor_2() ->
     N = 2,
-    D = {0,N-1},
+    D = {range,0,N-1},
     %% Fxy = (x^2+2xy+y^2+3x+y)/2
     Fxy = {'/',{sum,[{'*',x,x},{'*',2,{'*',x,y}},{'*',y,y},
 		     {'*',3,x}, y]}, 2},
-    F = form:expand({forall,x,D,
-		     {forall,y,D,
-		      {exists,z,D,
-		       {exists,u,D,
-			{all,[{var,{r,x,z}},
-			      {var,{r,z,u}},
-			      {var,{r,u,y}}]}
+    F = form:expand({{all,rs(x,D)},
+		     {{all,rs(y,D)},
+		      {{any,rs(z,D)},
+		       {{any,rs(u,D)},
+			{all,[r(x,z),r(z,u),r(u,y)]}
 		       }}}}),
-    F1 = form:expand({subst,{r,x,y},{p,Fxy},F}),
+    F1 = form:expand({subst,r(x,y),{p,'F',Fxy},F}),
     F2 = form:peval(F1),
     io:format("2:D=~w, F=~s\n\n", [D,form:fmt(F2)]).
 
 cantor_3() ->
     N = 3,
-    D = {0,N-1},
+    D = {range,0,N-1},
     %% Fxy = (x^2+2xy+y^2+3x+y)/2
     Fxy = {'/',{sum,[{'*',x,x},{'*',2,{'*',x,y}},{'*',y,y},
 		     {'*',3,x}, y]}, 2},
-    F = form:expand({forall,x,D,
-		     {forall,y,D,
-		      {exists,z,D,
-		       {exists,u,D,
-			{exists,w,D,
-			 {all,[{var,{r,x,z}},
-			       {var,{r,z,u}},
-			       {var,{r,u,w}},
-			       {var,{r,w,y}}]}
+    F = form:expand({{all,rs(x,D)},
+		     {{all,rs(y,D)},
+		      {{any,rs(z,D)},
+		       {{any,rs(u,D)},
+			{{any,rs(w,D)},
+			 {all,[r(x,z),r(z,u),r(u,w),r(w,y)]}
 			}}}}}),
-    F1 = form:expand({subst,{r,x,y},{p,Fxy},F}),
+    F1 = form:expand({subst,r(x,y),{p,'F',Fxy},F}),
     F2 = form:peval(F1),
     io:format("~w:D=~w, F=~s\n\n", [N,D,form:fmt(F2)]).
-
 
 cantor_4() ->
     N = 4,
-    D = {0,N-1},
+    D = {range,0,N-1},
     %% Fxy = (x^2+2xy+y^2+3x+y)/2
     Fxy = {'/',{sum,[{'*',x,x},{'*',2,{'*',x,y}},{'*',y,y},
 		     {'*',3,x}, y]}, 2},
-    F = form:expand({forall,x,D,
-		    {forall,y,D,
-		     {exists,z,D,
-		      {exists,u,D,
-		       {exists,w,D,
-			{exists,v,D,
-			 {all,[{var,{r,x,z}},
-			       {var,{r,z,u}},
-			       {var,{r,u,v}},
-			       {var,{r,v,w}},
-			       {var,{r,w,y}}]}
-			}}}}}}),
-    F1 = form:expand({subst,{r,x,y},{p,Fxy},F}),
+    F = form:expand({{all,rs(x,D)},
+		     {{all,rs(y,D)},
+		      {{any,rs(z,D)},
+		       {{any,rs(u,D)},
+			{{any,rs(w,D)},
+			 {{any,rs(v,D)},
+			  {all,[r(x,z),r(z,u),r(u,v),r(v,w),r(w,y)]}
+			 }}}}}}),
+    F1 = form:expand({subst,r(x,y),{p,'F',Fxy},F}),
     F2 = form:peval(F1),
     io:format("~w:D=~w, F=~s\n\n", [N,D,form:fmt(F2)]).
 
+rs(X,A,B) -> rs(X,{range,A,B}).
+rs(X,D) -> [{'=',X,D}].
+
+p(X,Y) -> {p,'P',[X,Y]}.
+q(X,Y) -> {p,'Q',[X,Y]}.
+r(X,Y) -> {p,'R',[X,Y]}.
+r(X)   -> {p,'R',[X]}.

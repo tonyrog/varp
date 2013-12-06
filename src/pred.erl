@@ -36,8 +36,8 @@
 %%               {not, {not, A}}  == A
 %%               {not, {and,A,B}} == {or,{not,A},{not,B}}
 %%               {not, {or,A,B}}  == {and,{not,A},{not,B}}
-%%               {not, {all,X,p(X)}}    == {exists,X,{not,p(X)}}
-%%               {not, {exists,X,p(X)}} == {all,X,{not,p(X)}}
+%%               {not, {all,X,p(X)}}    == {any,X,{not,p(X)}}
+%%               {not, {any,X,p(X)}} == {all,X,{not,p(X)}}
 %%
 %%     3. Uniq variables 
 %%               Rename variables so no quantifier use the same variable

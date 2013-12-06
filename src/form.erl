@@ -47,10 +47,10 @@ expand({subst,Rx,Py,F},Bs) ->
 expand({subst,SList,F},Bs) ->
     expand(F, SList++Bs);
 
-expand({{forall,Xs}, F}, Bs) ->
+expand({{all,Xs}, F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     all(Ys);
-expand({{exists,Xs},F}, Bs) ->
+expand({{any,Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     any(Ys);
 expand({{eqk,[X1|Xs]},F}, Bs) ->

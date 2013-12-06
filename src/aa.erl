@@ -35,18 +35,12 @@ b({'xor',A,B},Bs) -> b({'not',{'equ',A,B}},Bs);
 b({'imp',A,B},Bs) -> b({'or',{'not',A},B},Bs);
 b({'all',As},Bs)    -> c('all',map(fun (Ai) -> b(Ai,Bs) end, As));
 b({'any',As},Bs)    -> c('any',map(fun (Ai) -> b(Ai,Bs) end, As));
-b({forall,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
+b({{all,[{'=',X,{range,A,B}}]},F}, Bs) 
+  when is_integer(A), is_integer(B), A=<B ->
     c('all', bs(F,X,lists:seq(A,B,1),[],Bs));
-b({forall,X,{A,B}, F}, Bs) when is_integer(A), is_integer(B), A>B ->
-    c('all', bs(F,X,lists:seq(A,B,-1),[],Bs));
-b({forall,X,Xs,F}, Bs) when is_list(Xs) ->
-    c('all', bs(F,X,Xs,[],Bs));
-b({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A=<B ->
-    c('any', bs(F,X,lists:seq(A,B,1),[],Bs));
-b({exists,X,{A,B},F}, Bs) when is_integer(A), is_integer(B), A>B ->
-    c('any', bs(F,X,lists:seq(A,B,-1),[],Bs));
-b({exists,X,Xs,F}, Bs) when is_list(Xs) ->
-    c('any', bs(F,X,Xs,[],Bs)).
+b({{any,[{'=',X,{range,A,B}}]},F}, Bs) 
+  when is_integer(A), is_integer(B), A=<B ->
+    c('any', bs(F,X,lists:seq(A,B,1),[],Bs)).
 
 bs(F,X,[Xi|Xs],Acc,Bs) ->
     bs(F,X,Xs,[b(F,[{X,Xi}|Bs])|Acc],Bs);
