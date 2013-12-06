@@ -19,35 +19,35 @@ sudoku(S,F) ->
     {all,
      [
       %% every position must have a uniq value!
-      %%  (FORALL i=1..9)(FORALL j=1..9) (EXISTS! k=1,..9) S(i,j,k)
-      {{forall,[{'=',i,{range,1,9}}]},
-       {{forall,[{'=',j,{range,1,9}}]},
+      %%  [A i=1..9][A j=1..9][E! k=1,..9] S(i,j,k)
+      {{all,[{'=',i,{range,1,9}}]},
+       {{all,[{'=',j,{range,1,9}}]},
 	{{eqk,[1,{'=',k,{range,1,9}}]}, {p,S,[i,j,F(k)]}}
        }
       },
 
       %% for every row every column must be uniq
-      %%  (FORALL i=1..9 (FORALL k=1..9) (EXISTS! j=1...9) S(i,j,k)
-      {{forall,[{'=',i,{range,1,9}}]},
-       {{forall,[{'=',k,{range,1,9}}]},
+      %%  [A i=1..9][A k=1..9][E! j=1...9] S(i,j,k)
+      {{all,[{'=',i,{range,1,9}}]},
+       {{all,[{'=',k,{range,1,9}}]},
 	{{eqk,[1,{'=',j,{range,1,9}}]}, {p,S,[i,j,F(k)]}}
        }
       },
       
       %% for every column every row must be uniq
-      %%  (A j=1..9) (A k=1..9) (E! i=1...9) S(i,j,k)
-      {{forall,[{'=',j,{range,1,9}}]},
-       {{forall,[{'=',k,{range,1,9}}]},
+      %%  [A j=1..9][A k=1..9][E! i=1...9] S(i,j,k)
+      {{all,[{'=',j,{range,1,9}}]},
+       {{all,[{'=',k,{range,1,9}}]},
 	{{eqk,[1,{'=',i,{range,1,9}}]},{p,S,[i,j,F(k)]} }
        }
       },
 
       %% for every box every position must be uniq
-      %%  (A s=0..2)(A t=0..2)(A k=1..9)
-      %%    (E! i=1..3,j=1..3) S(3*s+i,3*t+j,k)
-      {{forall,[{'=',s,{range,0,2}}]},
-       {{forall,[{'=',t,{range,0,2}}]},
-	{{forall,[{'=',k,{range,1,9}}]},
+      %%  [A s=0..2][A t=0..2][A k=1..9]
+      %%    [E! i=0..8] S(3*s+i/3+1,3*t+i%3+1,k)
+      {{all,[{'=',s,{range,0,2}}]},
+       {{all,[{'=',t,{range,0,2}}]},
+	{{all,[{'=',k,{range,1,9}}]},
 	 {{eqk,[1,{'=',i,{range,0,8}}]},
 	  {p,S,[{'+',{'+',{'*',3,s},{'/',i,3}},1},
 		{'+',{'+',{'*',3,t},{'%',i,3}},1},F(k)]}}
@@ -59,8 +59,8 @@ sudoku(S,F) ->
 sudoku0(X) ->
     %% every position must have a uniq value!
     %%  (A i=1..9)(A j=1..9) (E! k=0,..9) X(i,j,k)
-    {{forall,[{'=',i,{range,1,9}}]},
-     {{forall,[{'=',j,{range,1,9}}]},
+    {{all,[{'=',i,{range,1,9}}]},
+     {{all,[{'=',j,{range,1,9}}]},
       {{eqk,[1,{'=',k,{range,0,9}}]},{p,X,[i,j,k]}}
      }}.
 
@@ -330,9 +330,9 @@ puzzle_find(K,L) ->
 	   {{eqk,[81-N,{'=',i,{range,1,9}},{'=',j,{range,1,9}}]},
 	    {p,a0,[i,j,0]}},
 
-	   {{forall,[{'=',i,{range,1,9}}]},
-	    {{forall,[{'=',j,{range,1,9}}]},
-	     {{forall,[{'=',k,{range,1,9}}]},
+	   {{all,[{'=',i,{range,1,9}}]},
+	    {{all,[{'=',j,{range,1,9}}]},
+	     {{all,[{'=',k,{range,1,9}}]},
 	      {'->',{p,a0,[i,j,k]},{p,a1,[i,j,k]} }}}}
 	 ] ++ Cs },
 

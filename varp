@@ -42,6 +42,8 @@ run(none, Formula, Opts) ->
     R = varp:run_formula(Formula,Opts),
     result(R, none).
 
+result(false,_) ->
+    io:format("\n", []);
 result(N, _) when is_integer(N) ->
     io:format("~w\n", [N]);
 result({N,_Mdls}, _) ->
