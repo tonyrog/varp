@@ -80,6 +80,7 @@ equ                 : {token,{equ,TokenLine}}.
 <->                 : {token,{'<->',TokenLine}}.
 ==                  : {token,{'==',TokenLine}}.
 =		    : {token,{'=',TokenLine}}.
+:=		    : {token,{':=',TokenLine}}.
 
 %% arithmetic operators    
 
@@ -101,6 +102,7 @@ equ                 : {token,{equ,TokenLine}}.
 >		: {token,{'>',TokenLine}}.
 
 %% separators
+#		: {token,{'#',TokenLine}}.
 ;		: {token,{';',TokenLine}}.
 {		: {token,{'{',TokenLine}}.
 }		: {token,{'}',TokenLine}}.

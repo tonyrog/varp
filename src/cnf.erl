@@ -45,10 +45,12 @@ test_succ(C,Vs) ->
 %% return {Clauses, Literals}
 %%
 clauses(A) ->
+    %% io:format("A=~p\n", [A]),
     A1 = rewrite(A),
+    %% io:format("A1=~p\n", [A1]),
     Cs1 = clause_form(A1),
+    %% io:format("Cs1=~p\n", [Cs1]),
     Cs2 = normalize_clauses(Cs1),
-%%    {Cs2, []}.
     subsume_clauses(Cs2).
 
 %%
@@ -98,10 +100,11 @@ subsume_clauses(Cs) ->
 
 subsume_clauses_([CL|CLs],DLs,Ls) ->
     CLs1 = subsume_clause_(CL,CLs),
-    case CL of
-	{1,[L]} -> subsume_clauses_(CLs1,DLs,[L|Ls]);
-	_ -> subsume_clauses_(CLs1,[CL|DLs],Ls)
-    end;
+%%    case CL of
+%%	{1,[L]} -> subsume_clauses_(CLs1,DLs,[L|Ls]);
+%%	_ -> subsume_clauses_(CLs1,[CL|DLs],Ls)
+%%    end;
+    subsume_clauses_(CLs1,[CL|DLs],Ls);
 subsume_clauses_([],DLs,Ls) ->
     {DLs,Ls}.
 
@@ -129,52 +132,82 @@ clause_form({'not',V}) ->
 clause_form(V) ->
     [[V]].
 
-rewrite(A) when is_atom(A) -> A;
+%%
+%% rewrite into and-or form, also move negation to the literals
+%%
+rewrite(true) -> true;
+rewrite(false) -> false;
 rewrite(A={p,_P,_Vs}) -> A;
-rewrite({'not',A}) when is_atom(A) -> {'not',A};
-rewrite({'not',A={p,_P,_Vs}}) -> {'not',A};
+rewrite(A={'not',{p,_P,_Vs}}) -> A;
 rewrite({'not', {'not', A}}) -> rewrite(A);
-rewrite({'not', {'and', A, B}}) ->
-    {'or', rewrite({'not',A}), rewrite({'not',B})};
-rewrite({'not', {'or', A, B}}) ->
-    {'and', rewrite({'not',A}),rewrite({'not',B})};
-rewrite({'not', F}) -> rewrite({'not',rewrite(F)});
-rewrite({'and', A, B}) -> {'and', rewrite(A), rewrite(B)};
-rewrite({'or', A, B}) ->  {'or', rewrite(A), rewrite(B)};
-rewrite({'imp',A,B}) ->   {'or', rewrite({'not', A}), rewrite(B)};
-rewrite({'->',A,B}) ->    {'or', rewrite({'not', A}), rewrite(B)};
+rewrite({'not', {'and', A, B}}) -> r('or',{'not',A},{'not',B});
+rewrite({'not', {'or', A, B}})  -> r('and', {'not',A},{'not',B});
+rewrite({'not', F}) -> rewrite(r('not',F));
+rewrite({'!', F})  -> rewrite(r('not',F));
+rewrite({'and', A, B}) -> r('and', A, B);
+rewrite({'&&', A, B}) ->  r('and', A, B);
+rewrite({'or', A, B}) ->  r('or', A, B);
+rewrite({'||', A, B}) ->  r('or', A, B);
+rewrite({'imp',A,B}) ->   r('or', {'not', A}, B);
+rewrite({'->',A,B}) ->    r('or', {'not', A}, B);
+rewrite({'<->',A,B}) ->   rewrite({'equ',A,B});
 rewrite({'equ',A,B}) ->
+    A1 = rewrite(A), B1 = rewrite(B),
     {'and',
-     {'or', rewrite({'not', A}), rewrite(B)},
-     {'or', rewrite({'not', B}), rewrite(A)}};
+     {'or', rewrite({'not', A1}), B1},
+     {'or', rewrite({'not', B1}), A1}};
 rewrite({'xor',A,B})    -> rewrite({'not',{'equ',A,B}});
-rewrite({'all',[]})     -> true;
-rewrite({'all',[F]})    -> rewrite(F);
-rewrite({'all',[F|Fs]}) -> {'and',rewrite(F),rewrite({'all',Fs})};
-rewrite({'any',[]})     -> false;
-rewrite({'any',[F]})    -> rewrite(F);
-rewrite({'any',[F|Fs]}) -> {'or',rewrite(F),rewrite({'any',Fs})};
-rewrite({'none',Fs})    -> rewrite({'not',{any,Fs}}).
+
+rewrite({'all',Fs})  -> fold('and',true,[rewrite(F) || F <- Fs]);
+rewrite({'any',Fs})  -> fold('or',false,[rewrite(F) || F <- Fs]);
+rewrite({'none',Fs}) -> fold('and',true,[rewrite({'not',F}) || F <- Fs]);
+rewrite({'one',[]})  -> false;
+rewrite({'one',[F]}) -> rewrite(F);
+rewrite({'one',Fs})  ->
+    rewrite({'and', {all, [{'not',{'and',A,B}} || {A,B} <- pairs(Fs)]},
+	     {any, Fs}}).
+
+fold(_Op,Init,[]) -> Init;
+fold(_Op,_Init,[A]) -> A;
+fold(Op,Init,[A|As]) -> {Op,A,fold(Op,Init,As)}.
+    
+r(Op,A,B) -> {Op,rewrite(A),rewrite(B)}.
+r(Op,A) -> {Op,rewrite(A)}.
+
+pairs([]) -> [];
+pairs([_]) -> [];
+pairs([A|As]) -> [{A,Ai} || Ai <- As] ++ pairs(As).
+
+%%
+%% Fixme: should probably output in a kind of
+%% dimacs format, but with symbols
+%%
 
 format(CLs) ->
-    [[format_clause(C),"\n"] || C <- CLs].
+    NClauses = length(CLs),
+    Vs = lists:usort(lists:flatten(CLs)),
+    NVars = length(Vs),
+    [["c auto generated from <file>\n"],
+     ["p snf ", integer_to_list(NVars), " ", integer_to_list(NClauses), "\n"],
+     [[format_clause(C)," .","\n"] || C <- CLs],
+     ["%\n"],
+     [".\n"]].
 
 format_clause(C) ->
-    concat([format_literal(L) || L <- C], " # ").
+    concat([format_literal(L) || L <- C], " ").
 
-format_literal({'not',V}) -> ["~",format_symbol(V)];
+format_literal({'not',V}) -> ["!",format_symbol(V)];
 format_literal(V) ->  format_symbol(V).
 
-format_symbol(true) -> "T";
-format_symbol(false) -> "F";
-format_symbol(A) when is_atom(A) -> atom_to_list(A);
+format_symbol(true) -> "true";
+format_symbol(false) -> "false";
+format_symbol({p,V,[]}) -> atom_to_list(V);
 format_symbol({p,V,As}) ->
     [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
     
 concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].
-
 
 %%
 %% triple to CNF clauses

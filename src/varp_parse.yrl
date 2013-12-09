@@ -8,22 +8,21 @@ Terminals
 	'and' 'or' 'xor' 'not' imp equ 'A' 'E'
         '&' '&&' '|' '||' '^' '!' '~'  '->' '<->'
 	'+' '-' '*' '/' '%' '>>>' '>>' '<<<' '<<'
-	'<=' '>=' '!=' '<' '>' '=' '=='
-	'{' '}' ',' ':' '(' ')' '[' ']' '..' 
+	'<=' '>=' '!=' '<' '>' '=' '==' ':='
+	'{' '}' ',' ':' ';' '(' ')' '[' ']' '..'  '#'
 	.
 
-%% '.' ';' 
+%% '.'
 
 Nonterminals
 	equ_op imp_op or_op and_op not_op
         bor_op band_op bxor_op bnot_op
 	rel_op add_op mul_op prefix_op 
-        range_op 
         integer expr exprs vexpr vexprs nexpr
         qtype quantifier psymbol pexpr lexpr lexprs
-        formula .
+        file definition definitions.
 
-Rootsymbol formula.
+Rootsymbol file.
 
 Left 300 equ_op.
 Left 400 imp_op.
@@ -34,11 +33,12 @@ Left 601 band_op.
 Unary 750 not_op.
 Unary 751 bnot_op.
 Left 700 rel_op.
-Left 750 range_op.
+Left 750 '..'.
 Left 800 add_op.
 Left 900 mul_op.
 Unary 1000 prefix_op.
 Unary 1100 quantifier.
+Right 100 ':='.
 
 %% equ_op -> '='     : '$1'.
 equ_op -> '<->'   : '$1'.
@@ -57,7 +57,6 @@ bor_op  -> '|' : '$1'.
 band_op -> '&' : '$1'.
 bxor_op -> '^' : '$1'.
 bnot_op -> '~' : '$1'.
-
 
 add_op  -> '+' : '$1'.
 add_op  -> '-' : '$1'.
@@ -79,23 +78,29 @@ rel_op -> '>=' : '$1'.
 rel_op -> '==' : '$1'.
 rel_op -> '!=' : '$1'.
 
-range_op -> '..' : range.
-
 integer -> binnum : '$1'.
 integer -> octnum : '$1'.
 integer -> decnum : '$1'.
 integer -> hexnum : '$1'.
     
-formula  -> lexpr  : '$1'.
+
+definitions -> '$empty' : [].
+definitions -> definition ';' definitions : ['$1'|'$3'].
+
+definition -> '#' pexpr ':=' lexpr : {'$2','$4'}.
+definition -> '#' pexpr ':=' vexpr : {'$2','$4'}.
+
+file  -> definitions : {'$1',undefined}.
+file  -> definitions lexpr  : {'$1','$2'}.
 
 %%
 %% Bit vector expressions
 %% X:32  bit vector of 32 variables
 %% I:32  bit constant of 32
 %%
-%% vexpr -> '(' vexpr ')'         : '$2'.
+%% vexpr -> '(' vexpr ')'      : '$2'.
 vexpr -> integer ':' nexpr     : {S,N} = '$3',{S,N,value('$1')}.
-vexpr -> psymbol  ':' nexpr     : {S,N} = '$3',{S,N,'$1'}.
+vexpr -> pexpr   ':' nexpr    : {S,N} = '$3',{S,N,'$1'}.
 %% vexpr -> integer               : value('$1').
 vexpr -> vexpr band_op vexpr   : {op('$2'), '$1', '$3' }.
 vexpr -> vexpr bor_op vexpr    : {op('$2'), '$1', '$3' }.
@@ -142,7 +147,7 @@ expr -> expr rel_op expr   : { op('$2'), '$1', '$3' }.
 expr -> expr band_op expr  : {op('$2'), '$1', '$3' }.
 expr -> expr bor_op  expr  : {op('$2'), '$1', '$3' }.
 expr -> expr bxor_op expr  : {op('$2'), '$1', '$3' }.
-expr -> expr range_op expr : { '$2', '$1', '$3' }.
+expr -> expr '..' expr : { range, '$1', '$3' }.
 %% dexpr -> dexpr '|' dexpr : { union,   '$1', '$3' }.
 %% dexpr -> dexpr '*' dexpr : { product, '$1', '$3' }.
 expr -> variable '=' expr  : { '=', name('$1'), '$3' }.
@@ -197,17 +202,16 @@ lexpr -> quantifier vexpr          : {'$1','$2'}.
 %% lexpr -> lexpr '[' pexpr '/' pexpr ']' : {subst,'$3','$5','$1'}.
 
 pexpr -> psymbol                    : { p, '$1', []}.
-%% pexpr -> symbol '(' ')'            : { p, name('$1'), []}.
+pexpr -> psymbol '(' ')'            : { p, '$1', []}.
 pexpr -> psymbol '(' exprs ')'      : { p, '$1', '$3'}.
 
 psymbol -> 'A' : 'A'.
 psymbol -> 'E' : 'E'.
 psymbol -> symbol : name('$1').
     
-    
 lexprs -> lexpr ',' lexprs : ['$1' | '$3'].
 lexprs -> lexpr : ['$1'].
-    
+
 Erlang code.
 
 op({Op,_Ln}) -> Op.

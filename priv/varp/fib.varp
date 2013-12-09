@@ -1,0 +1,7 @@
+
+#FIB(0) := 1:8/unsigned ;
+#FIB(1) := 1:8/unsigned ;
+#FIB(n) := FIB(n-1):8 + FIB(n-2):8 ;
+
+FIB(n)
+

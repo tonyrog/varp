@@ -55,7 +55,8 @@ prove_formula(F) ->
     prove_formula(F,[{method,count},{max,1},{order,reverse_depth}]).
 prove_formula(F,Opts) ->
     case falsify_formula(F,Opts) of
-	0 -> true;
+	{0,_} -> true;
+	0     -> true;
 	_ -> false
     end.
 
@@ -489,10 +490,12 @@ saturate_loop(K, Bs) ->
 	    NB = formula:number_of_bound(Bs),
 	    NU = formula:number_of_unbound(Bs),
 	    N  = imath:binom(NU, length(Vec)),
+	    %% io:format("Loop ~w vector estimate=~w\n", [K,N]),
 	    saturate_loop(Vec,1,N,K,NB,Bs)
     end.
 
 saturate_loop(Vec,I,N,K,NB,Bs) ->
+    %% io:format("step: ~w [~w]\n", [I,N]),
     case saturate_perm_vec(Vec, Bs) of
 	false -> false;
 	Bs1 ->
@@ -507,7 +510,8 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 			    Bs1
 		    end;
 		Vec1 ->
-		    saturate_loop(Vec1,I+1,N,K,NB,Bs1)
+		    Ks = imath:factorial(K),
+		    saturate_loop(Vec1,I+Ks,N,K,NB,Bs1)
 	    end
     end.
 
@@ -546,9 +550,11 @@ saturate_vec(Vec, Bs) ->
     case formula:getopt(pair,Bs) of
 	false ->
 	    %% io:format("saturate_vec: ~w\n", [Vec]),
+	    formula:debug(Bs, "vector: ~p\n", [Vec]),
 	    saturate_vec_(Vec, Bs);
 	true ->
 	    Vec1 = expand_vector(Vec,Bs),
+	    formula:debug(Bs, "vector: ~p\n", [Vec1]),
 	    %% io:format("saturate_vec: ~w\n", [Vec1]),
 	    saturate_vec_(Vec1, Bs)
     end.

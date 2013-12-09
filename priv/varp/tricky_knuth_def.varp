@@ -1,0 +1,10 @@
+
+#R(i,n) :=
+         ( [A x=(n-i)..n][A y=(n-i)..n,x<y] (not P(x,y) or not P(y,x)) ) and
+	 ( [A x=(n-i)..n][E y=(n-i)..n,x!=y] P(y,x) ) and
+	 ( [A x=(n-i)..n][A y=(n-i)..n][A z=(n-i)..n,x!=y,x<z,y<z]
+	      ((P(x,y) and P(y,z)) -> P(x,z)) )
+	 ;
+
+R(i,n) -> R(i+1,n)
+

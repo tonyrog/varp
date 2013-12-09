@@ -15,14 +15,14 @@ main(Args) ->
 	[] ->
 	    {ok,Data} = read_in(),
 	    case varp:parse("*stdin*", Data) of
-		{ok,Formula} ->
-		    run(Mode,Formula,Opts);
+		{ok,{Defs,Formula}} ->
+		    run(Mode,Formula,[{defs,Defs}|Opts]);
 		_Error ->
 		    halt(1)
 	    end;
 	Fs ->
-	    Formula = load_files(Fs, 'and'),
-	    run(Mode,Formula,Opts)
+	    {Defs,Formula} = load_files(Fs, 'and'),
+	    run(Mode,Formula,[{defs,Defs}|Opts])
     end,
     %% io:format("varp: arguments = ~p\n", [As]),
     halt(0).
@@ -34,10 +34,8 @@ run(falsify, Formula, Opts) ->
     R = varp:run_formula(Formula,Opts++[{value,false}]),
     result(R, falsify);
 run(prove, Formula, Opts) ->
-    case varp:prove_formula(Formula,Opts) of
-	true -> io:format("TRUE\n",[]);
-	false -> io:format("FALSE\n",[])
-    end;
+    R = varp:prove_formula(Formula,Opts),
+    result(R, prove);
 run(none, Formula, Opts) ->
     R = varp:run_formula(Formula,Opts),
     result(R, none);
@@ -47,8 +45,7 @@ run(cnf, Formula, Opts) ->
     F = form:expand(Formula,Bs),
     %% Cs=clauses and Ls=literals eliminated
     {Cs,_Ls} = cnf:clauses(F),
-    Data = dimacs:format(Cs),
-    %% io:format("Ls=~p\n", [_Ls]),
+    Data = cnf:format(Cs),
     case proplists:get_value(output,Opts,"") of
 	"" ->
 	    io:put_chars(Data);
@@ -58,7 +55,10 @@ run(cnf, Formula, Opts) ->
     ok.
 
 
-
+result(true,prove) ->
+    io:format("TRUE\n", []);
+result(false,prove) ->
+    io:format("FALSE\n", []);
 result(false,_) ->
     io:format("\n", []);
 result(N, _) when is_integer(N) ->
@@ -69,29 +69,34 @@ result({N,_Mdls}, _) ->
 
 %% load files and form a conjunction over all files
 load_files([F|Fs],JoinOp) ->
-    case filename:extension(F) of
-	".cnf" ->
+    Ext = filename:extension(F),
+    if Ext =:= ".cnf"; Ext =:= ".snf" ->
 	    case dimacs:load(F) of
 		{error,_Reason} ->
 		    io:format("~s: error: ~p\n", [F,_Reason]),
 		    halt(1);
-		Cnf ->
-		    Cnf
+		Cnf = {cnf,{_NVars,_NClauses,_CLs}} ->
+		    io:format("loaded: ~s\n", [F]),
+		    {Defs0,Formulas} =load_files(Fs,JoinOp),
+		    {Defs0,join_f(JoinOp,Cnf,Formulas)}
 	    end;
-	_ ->
+       true ->
 	    {ok, Data} = file:read_file(F),
 	    case varp:parse(F, Data) of
-		{ok,Formula} ->
-		    case load_files(Fs,JoinOp) of
-			undefined -> Formula;
-			Formulas  -> {JoinOp,Formula,Formulas}
-		    end;
+		{ok,{Defs,Formula}} ->
+		    io:format("loaded: ~s\n", [F]),
+		    {Defs0,Formulas} =load_files(Fs,JoinOp),
+		    {Defs++Defs0,join_f(JoinOp,Formula,Formulas)};
 		_Error ->
 		    halt(1)
 	    end
     end;
 load_files([],_JoinOp) ->
-    undefined.
+    {[],undefined}.
+
+join_f(_JoinOp,undefined,B) -> B;
+join_f(_JoinOp,A,undefined) -> A;
+join_f(JoinOp,A,B) -> {JoinOp,A,B}.
 
 
 usage() ->
@@ -149,6 +154,7 @@ options() ->
      {"saturate", saturate, unsigned, 0 },
      {"backtrack", backtrack, [{"true",true},{"false",false}], true},
      {"pair", pair, [{"true",true},{"false",false}], true},
+     {"assoc", assoc, [{"left",left},{"right",right},{"middle",middle}], left},
      {"threshold", threshold, unsigned, 0 },
      {"carry",carry,[{"true",true},{"false",false},{"ignore",ignore}],ignore},
      {"borrow",borrow,[{"true",true},{"false",false},{"ignore",ignore}],ignore},

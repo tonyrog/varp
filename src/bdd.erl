@@ -54,6 +54,7 @@ construct_([V | Vs], F, Free) ->
        true ->
 	    {Ir0,Free1,Vs0} = construct_(Vs, F0, Free),
 	    {Ir1,Free2,Vs1} = construct_(Vs, F1, Free1),
+	    io:format("."),
 	    Vs2 = [{Free2,V,Ir0,Ir1}]++Vs0++Vs1,
 	    Res = {_R,_Free3,_Vs3} = reduce(Free2,Vs2,Free),
 	    Res
@@ -150,6 +151,10 @@ peval(false,_,_) -> 0;
 peval(true,_,_)  -> 1;
 peval(V,V,Vx)    -> Vx;
 peval(W={p,_,_},_V,_Vx) -> W;
+peval({'&&',F1,F2}, V, Vx) -> peval({'and',F1,F2}, V, Vx);
+peval({'||',F1,F2}, V, Vx) -> peval({'or',F1,F2}, V, Vx);
+peval({'->',F1,F2}, V, Vx) -> peval({'or',{'not',F1},F2}, V, Vx);
+peval({'<->',F1,F2}, V, Vx) -> peval({'not',{'xor',F1,F2}}, V, Vx);
 peval({'and',F1,F2}, V, Vx) ->
     case peval(F1, V, Vx) of
 	1 -> peval(F2,V,Vx);

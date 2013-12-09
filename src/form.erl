@@ -43,6 +43,7 @@ expand({'<->',A,B},Bs) ->   {'<->',expand(A,Bs),expand(B,Bs)};
 expand({'!=',A,B},Bs) ->    {'!=',expand(A,Bs),expand(B,Bs)};
 expand({subst,Rx,Py,F},Bs) ->  expand(F, [{Rx,Py}|Bs]);
 expand({subst,SList,F},Bs) ->  expand(F, SList++Bs);
+
 expand({all,Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     all(Ys);
@@ -52,6 +53,9 @@ expand({any,Fs}, Bs) when is_list(Fs) ->
 expand({one,Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     one(Ys);
+expand({none,Fs}, Bs) when is_list(Fs) ->
+    Ys = expand_args(Fs, Bs),
+    none(Ys);
 
 expand({{all,Xs}, F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
@@ -59,6 +63,12 @@ expand({{all,Xs}, F}, Bs) ->
 expand({{any,Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     any(Ys);
+expand({{one,Xs},F}, Bs) ->
+    Ys = expand_quant(F,Xs,Bs),
+    one(Ys);
+expand({{none,Xs},F}, Bs) ->
+    Ys = expand_quant(F,Xs,Bs),
+    none(Ys);
 
 expand({{eqk,[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
@@ -86,12 +96,7 @@ expand({{ltek,[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {ltek,N,Ys};
-expand({{one,Xs},F}, Bs) ->
-    Ys = expand_quant(F,Xs,Bs),
-    {one,Ys};
-expand({{none,Xs},F}, Bs) ->
-    Ys = expand_quant(F,Xs,Bs),
-    {none,Ys};
+
 expand(F, _Bs) ->
     F.
 
@@ -202,6 +207,9 @@ any([])     -> false;
 any([A])    -> A;
 any([A|As]) -> {'or',A,any(As)}.
 
+none(As) -> {'not',any(As)}.
+    
+
 one([A]) -> A;
 one(As) ->
     {'and', {all, [{'not',{'and',A,B}} || {A,B} <- pairs(As)]},
@@ -258,7 +266,7 @@ peval({'not',A}) ->
 %% eval - evaluate 
 eval(true,_Bs) -> true;
 eval(false,_Bs) ->  false;
-eval({var,X},Bs) -> dict:fetch(X, Bs);
+eval(X={p,_S,_Vs},Bs) -> dict:fetch(X, Bs);
 eval({'and',A,B},Bs) -> eval(A,Bs) andalso eval(B,Bs);
 eval({'or',A,B},Bs) -> eval(A,Bs) orelse eval(B,Bs);
 eval({'not',A},Bs) -> not eval(A,Bs).
@@ -347,8 +355,7 @@ print(F) ->
 %% format formula.
 fmt(true) -> "true";
 fmt(false) -> "false";
-fmt(X) when is_atom(X) -> fmt_var(X);
-fmt({var,X}) -> fmt_var({var,X});
+fmt(X={p,_Nm,_Vs}) -> fmt_var(X);
 fmt({Op,A,B}) ->
     ["(",fmt(A)," ",atom_to_list(Op)," ",fmt(B),")"];
 fmt({Op,As}) when is_list(As) -> 
@@ -366,17 +373,14 @@ fmtq(X) ->
 fmt_var(X) ->
     fmt_var(X, "").
 
-fmt_var(true, _Q)  -> "true";
-fmt_var(false, _Q) -> "false";
-fmt_var(X, Q) when is_atom(X) -> [Q,io_lib:format("~s", [X]),Q];
-fmt_var({var,X}, Q) when is_atom(X) -> [Q,io_lib:format("~s", [X]),Q];
-fmt_var({var,X}, Q) when is_tuple(X) ->
-    [P|Ps] = tuple_to_list(X),
-    [Q,atom_to_list(P),"(",
-     string:join([if is_integer(T) -> integer_to_list(T);
-		     is_atom(T) -> atom_to_list(T)
-		  end ||  T <- Ps ], ","), ")", Q].
+fmt_var({p,V,[]}, Q) -> 
+    [Q,atom_to_list(V),Q];
+fmt_var({p,V,As},Q) ->
+    [Q,atom_to_list(V),"(",concat([io_lib:format("~w",[X])||X<-As], ","),")",Q].
 
+concat([], _) -> [];
+concat([H],_) -> [H];
+concat([H|T],S) -> [H,S | concat(T,S)].
 %%
 %% Extract all variables from F
 %%

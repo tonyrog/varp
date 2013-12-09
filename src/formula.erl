@@ -72,7 +72,8 @@
 	  saturate = 0 :: unsigned_t(),         %% saturate formula
 	  backtrack = true :: boolean(),        %% find models with backtrack
 	  threshold = 0 :: unsigned_t(),  %% >i variables changed -> loop again
-	  pair = true :: boolean()        %% saturate pair algoritm	
+	  pair = true :: boolean(),       %% saturate pair algoritm	
+	  assoc = left :: left|right|middle  %% fold op
 	}).
 
 -record(bs,
@@ -87,6 +88,7 @@
 	  bl :: list(),     %% list of bound variables
 	  option = #option {} :: [#option{}],  %% the options
 	  meta=[],          %% meta variable bindings during build
+	  defs=[],          %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
 	  subst=[],         %% var/function substitution(s)
 	  ts                %% ::ts triples during build
 	}).
@@ -357,9 +359,30 @@ make_variable(V, Bs) ->
 
 variable(V, Bs) ->
     W = expand_meta(V, Bs),
+    ?dbg("variable expand: ~w -> ~w\n", [V,W]),
     case dict:find(W, Bs#bs.vs) of
 	error ->
-	    make_variable(W, Bs);
+	    case W of
+		{p,P,Rs} ->
+		    %% check for a definition of P(x1,..xn)
+		    case find_def(P, Bs#bs.defs) of
+			false ->
+			    make_variable(W, Bs);
+			{_W1={p,_,Ps},Def} ->
+			    ?dbg("~w = ~p\n", [_W1,Def]),
+			    Bnd2 = lists:zip(Ps,Rs),
+			    Meta = Bnd2 ++ Bs#bs.meta,
+			    ?dbg("meta bind: ~p\n", [Meta]),
+			    {R,Bs1} = build_(Def, Bs#bs { meta=Meta}),
+			    Meta1 = lists:nthtail(length(Bnd2),Bs1#bs.meta),
+			    case R of
+				{bool,N} ->
+				    {N,Bs1#bs { meta=Meta1}}
+			    end
+		    end;
+		_ ->
+		    make_variable(W, Bs)
+	    end;
 	{ok,N} ->
 	    {N,Bs}
     end.
@@ -425,6 +448,14 @@ setopt(env,Env,Bs) when is_list(Env) ->
 	     end, Bs#bs.meta, Env),
     Bs#bs { meta = Meta };
 
+setopt(defs,Ds,Bs) when is_list(Ds) -> 
+    Defs = lists:foldl(
+	      fun({Px,Def},E0) ->
+		      E1 = proplists:delete(Px,E0),
+		      [{Px,Def} | E1]
+	      end, Bs#bs.defs, Ds),
+    Bs#bs { defs = Defs };
+
 setopt(print,true,Bs)   -> setopt_(#option.print,true,Bs);
 setopt(print,false,Bs)  -> setopt_(#option.print,false,Bs);
 setopt(print,model,Bs)  -> setopt_(#option.print,model,Bs);
@@ -450,6 +481,10 @@ setopt(threshold,K,Bs) when is_integer(K),K>=0 ->
 
 setopt(pair,true,Bs) ->    setopt_(#option.pair,true,Bs);
 setopt(pair,false,Bs) ->   setopt_(#option.pair,false,Bs);
+
+setopt(assoc,left,Bs) ->    setopt_(#option.assoc,left,Bs);
+setopt(assoc,right,Bs) ->   setopt_(#option.assoc,right,Bs);
+setopt(assoc,middle,Bs) ->   setopt_(#option.assoc,middle,Bs);
 
 setopt(carry,true,Bs)    ->    setopt_(#option.carry,true,Bs);
 setopt(carry,false,Bs)   ->   setopt_(#option.carry,false,Bs);
@@ -498,6 +533,7 @@ getopt(eval_bcp, Bs)  -> (Bs#bs.option)#option.bcp;
 getopt(saturate, Bs)  -> (Bs#bs.option)#option.saturate;
 getopt(threshold, Bs) -> (Bs#bs.option)#option.threshold;
 getopt(pair, Bs)      -> (Bs#bs.option)#option.pair;
+getopt(assoc, Bs)     -> (Bs#bs.option)#option.assoc;
 getopt(backtrack,Bs)  -> (Bs#bs.option)#option.backtrack.
 
 %%
@@ -515,16 +551,15 @@ expand_meta(W={int,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
 expand_meta(W={bit,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
     W;
 expand_meta(_Rx={p,P,Rs},Bs) when is_atom(P) ->
-    {Rs1,_Bnd} = bind_meta(Rs, Bs, [], []),
+    %% eval "arguments"
+    {Rs1,_Bnd} = bind_meta(Rs, Bs, [], []), 
     %% check for substitution R(x1,..,xn) / P(y1,..,ym)
     %% io:format("expand_meta: ~p in Bs=~p\n", [_Rx, Bs]),
     Found = find_subst(P, Bs#bs.subst),
     %% io:format("subst  = ~w\n", [Found]),
     case Found of
-	false ->
-	    {p,P,Rs1};
-	{{p,Q,[]},{p,_P,_Us}} ->
-	    {p,Q,[]};
+	false -> {p,P,Rs1};
+	{{p,Q,[]},{p,_P,_Us}} -> {p,Q,[]};
 	{{p,Q,Qs},{p,P,Ps}} when P =/= Q, length(Qs) > 0 ->
 	    Bnd2 = lists:zip(Ps,Rs1),
 	    %% io:format("subst: ~w [~w] => ~w\n", [{p,P,Ps},Bnd2,{p,Q,Qs}]),
@@ -535,13 +570,13 @@ expand_meta(V,_Bs) ->
     %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),    
     V.
 
+find_def(P, [Def={{p,P,_Vs},_}|_]) -> Def;
+find_def(P, [_|Defs]) -> find_def(P, Defs);
+find_def(_P, []) -> false.
 
-find_subst(P, [E={_Qy,{p,P,_}}|_]) ->
-    E;
-find_subst(P, [_|Bnd]) -> 
-    find_subst(P, Bnd);
-find_subst(_P ,[]) -> 
-    false.
+find_subst(P, [E={_Qy,{p,P,_}}|_]) -> E;
+find_subst(P, [_|Bnd]) -> find_subst(P, Bnd);
+find_subst(_P ,[]) -> false.
 
 bind_meta([V|Vs], Bs, Acc, Bnd) when is_atom(V) ->
     W = eval_meta(V,Bs),
@@ -914,15 +949,14 @@ build(F,Opts) ->
     ?dbg("Formula: ~w\n", [F]),
     Bs = new(Opts),
     try build_(F, Bs) of
-	{X,Bs1} -> 
-	    {X,Bs1}
+     	Value -> Value
     catch
-	throw:contradiction -> 
+     	throw:contradiction -> 
 	    {{bool,?FALSE},Bs}
     end.
 
-build_(V, Bs) when is_atom(V) ->
-    {X,Bs1} = variable(V, Bs),
+build_(V, Bs) when is_atom(V) -> %% keep
+    {X,Bs1} = variable({p,V,[]},Bs),
     {{bool,X},Bs1};
 build_(V={p,_P,_Ps}, Bs) ->
     {X,Bs1} = variable(V, Bs),
@@ -1292,10 +1326,13 @@ vfold_op(_Op,D,[],Bs) ->
 
 %% Fold operator Op over a list of bool variables
 fold_op(Op,A0,As,Bs) ->
-    %% fixme option to select left or right bind
-    foldr_op(Op,A0,As,Bs).
+    case getopt(assoc,Bs) of
+	left ->  foldl_op(Op,A0,As,Bs);
+	right -> foldr_op(Op,A0,As,Bs);
+	middle -> foldm_op(Op,A0,As,Bs)
+    end.
     
-%% maybe select between left,right,balanced (tree)
+%% maybe select between left,right,middle
 
 foldl_op(_Op,_A0,[A],Bs) ->
     {A,Bs};
@@ -1312,6 +1349,15 @@ foldr_op(Op,A0,[Y,Z|As],Bs) ->
     foldr_op(Op,A0,[Z1|As],Bs1);
 foldr_op(_Op,A0,[],Bs) ->
     {A0,Bs}.
+
+%% fold in middle (balanced tree)
+foldm_op(_Op,_A0,[A],Bs) -> {A,Bs};
+foldm_op(_Op,A0,[],Bs) -> {A0,Bs};
+foldm_op(Op,A0,As,Bs) ->
+    {As1,As2} = lists:split(length(As) div 2, As),
+    {Z1,Bs1} = foldm_op(Op,A0,As1,Bs),
+    {Z2,Bs2} = foldm_op(Op,A0,As2,Bs1),
+    operation(Op,Z1,Z2,Bs2).
 
 all(As, Bs) -> 
     fold_op('and',{bool,?TRUE},As,Bs).
@@ -1990,7 +2036,7 @@ minmax2(X1,X2,Bs) ->
     {Min,Max,Bs2}.
 
 cnf_to_formula(Cs) ->
-    {all, map(fun(C) -> {any, C} end, Cs)}.    
+    {all, [{any, C} || C <- Cs]}.
 
 triple(Op,X,Y,Z,Bs) ->
     debug(Bs, "Triple: ~w:~w ~w ~w\n", [X,Y,Op,Z]),

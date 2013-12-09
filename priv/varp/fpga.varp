@@ -1,0 +1,25 @@
+
+X  Y  0 1 2 3 4 5 6 7 8 9 A B C D E F
+0  0  0 1 0 1 0 1 0 1 0 1 0 1 0 1 0 1 
+0  1  0 0 1 1 0 0 1 1 0 0 1 1 0 0 1 1 
+1  0  0 0 0 0 1 1 1 1 0 0 0 0 1 1 1 1 
+1  1  0 0 0 0 0 0 0 0 1 1 1 1 1 1 1 1 
+
+E(i,j,f)   (f&1==1) (f&2==2) (f&4==4) (f&8==8)
+
+FPGA(0,X,Y)  <-> false
+FPGA(1,X,Y)  <-> (not X) and (not Y)
+FPGA(2,X,Y)  <-> (not X) and Y
+FPGA(4,X,Y)  <-> X and (not Y)
+FPGA(8,X,Y)  <-> X and Y
+FPGA(3,X,Y)  <-> FPGA(1,X,Y) or FPGA(2,X,Y)
+FPGA(5,X,Y)  <-> FPGA(1,X,Y) or FPGA(4,X,Y)
+FPGA(6,X,Y)  <->  X xor Y
+FPGA(7,X,Y)  <-> FPGA(1,X,Y) or FPGA(2,X,Y) or FPGA(4,X,Y)
+FPGA(9,X,Y)  <-> FPGA(1,X,Y) or FPGA(8,X,Y)
+FPGA(10,X,Y) <-> FPGA(2,X,Y) or FPGA(8,X,Y)
+FPGA(11,X,Y) <-> FPGA(1,X,Y) or FPGA(2,X,Y) or FPGA(8,X,Y)
+FPGA(12,X,Y) <-> FPGA(4,X,Y) or FPGA(8,X,Y)
+FPGA(13,X,Y) <-> FPGA(1,X,Y) or FPGA(4,X,Y) or FPGA(8,X,Y)
+FPGA(14,X,Y) <-> X or Y
+FPGA(15,X,Y) <-> true

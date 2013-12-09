@@ -12,10 +12,12 @@
 -export([from_cnf/1]).
 -import(lists, [reverse/1]).
 
+-define(l2a(X), list_to_atom((X))).
+
 load(File) ->
     case file:open(File,[read]) of
 	{ok,Fd} ->
-	    try load_(Fd) of
+	    try load_(Fd,File) of
 		Data ->
 		    file:close(Fd),
 		    Data
@@ -41,21 +43,24 @@ load(File) ->
 %% Each integer I > 0 is mapped to {p,x,[I]}}
 %% ande I < 0 is mapped to {'not',{p,x,[I]}}
 %% 
-load_(Fd) ->
-    preamble(Fd,1).
+load_(Fd,File) ->
+    preamble(Fd,File,1).
 
-preamble(Fd,L) ->
+preamble(Fd,File,L) ->
     case file:read_line(Fd) of
 	eof -> [];
-	{ok,[$c|Comment]} -> 
-	    io:format("~s", [Comment]),
-	    preamble(Fd, L+1);
+	{ok,[$c|_Comment]} -> 
+	    %% io:format("~s", [Comment]),
+	    preamble(Fd,File,L+1);
 	{ok,[$p|Line]} ->
-	    io:format("~s", [Line]),
+	    %% io:format("~s", [Line]),
 	    case string:tokens(Line, " \n") of
+		["snf", Variables, Clauses] ->
+		    to_snf(Fd,File,L,list_to_integer(Variables),
+			   list_to_integer(Clauses));
 		["cnf", Variables, Clauses] ->
-		    to_cnf(Fd,L,list_to_integer(Variables),
-			list_to_integer(Clauses));
+		    to_cnf(Fd,File,L,list_to_integer(Variables),
+			   list_to_integer(Clauses));
 		["sat", Variables] ->
 		    sat(Fd,L,list_to_integer(Variables));
 		_ ->
@@ -64,15 +69,15 @@ preamble(Fd,L) ->
     end.
 
 %% CNF format
-to_cnf(Fd,L, Vars, Clauses) ->
-    case to_cnf_(Fd,L,[], []) of
+to_cnf(Fd,File,L,Vars,Clauses) ->
+    case to_cnf_(Fd,File,L,[], []) of
 	{ok,Cs} ->
 	    {cnf,{Vars,Clauses,Cs}};
 	Error ->
 	    Error
     end.
 
-to_cnf_(Fd,L,Acc,Cs) ->
+to_cnf_(Fd,File,L,Acc,Cs) ->
     case file:read_line(Fd) of
 	eof ->
 	    {ok,reverse(Cs)};
@@ -81,9 +86,9 @@ to_cnf_(Fd,L,Acc,Cs) ->
 	{ok,Line} ->
 	    case add_literals(string:tokens(Line, " \n"),Acc) of
 		{false,Acc1} ->
-		    to_cnf_(Fd,L+1,Acc1,Cs);
+		    to_cnf_(Fd,File,L+1,Acc1,Cs);
 		{true,Acc1} ->
-		    to_cnf_(Fd,L+1,[],[reverse(Acc1) | Cs])
+		    to_cnf_(Fd,File,L+1,[],[reverse(Acc1) | Cs])
 	    end
     end.
 
@@ -99,6 +104,47 @@ add_literals([], Acc) ->
 %% SAT format
 sat(_Fd, _L, _Vars) ->
     {error, not_implemented}.
+
+%% SNF (Symbolc CNF format)
+to_snf(Fd,File,L, Vars, Clauses) ->
+    case to_snf_(Fd,File,L,[], []) of
+	{ok,Cs} ->
+	    {cnf,{Vars,Clauses,Cs}};
+	Error ->
+	    Error
+    end.
+
+%% collect tokens until . is found then call varp_snf parse
+to_snf_(Fd,File,Ln,Ts0,CLs) ->
+    case file:read_line(Fd) of
+	eof ->
+	    {ok,reverse(CLs)};
+	{ok,[$%|_]} ->  %% ????
+	    {ok,reverse(CLs)};
+	{ok,Line} ->
+	    case varp_scan:string(Line) of
+		{ok,Ts1,Ln1} ->
+		    %% io:format("Ts0=~p, Ts1=~p\n", [Ts0,Ts1]),
+		    Ts2 = Ts0 ++ Ts1,
+		    Eol = lists:keymember('.',1,Ts1),
+		    if Eol =:= true ->
+			    case varp_snf:parse(Ts2) of
+				{ok,CL} ->
+				    to_snf_(Fd,File,Ln1,[],[CL|CLs]);
+				Error ->
+				    io:format("~s:~w: Error: ~p\n", 
+					      [File,Ln1,Error]),
+				    Error
+			    end;
+		       true ->
+			    to_snf_(Fd,File,Ln1,Ts2,CLs)
+		    end;
+		Error ->
+		    io:format("~s~w: Error: ~p\n", [File,Ln,Error]),
+		    Error
+	    end
+    end.
+
 
 save(File, Cs) ->
     file:write_file(File, format(Cs)).
@@ -120,7 +166,7 @@ format_clause([L]) -> [integer_to_list(L)];
 format_clause([L|Ls]) -> [integer_to_list(L)," " | format_clause(Ls)].
 
 %%
-%% Translate clauses to dimac form 
+%% Translate clauses to dimacs form 
 %%
 from_cnf(Cs) ->
     D0 = dict:from_list([{'$fresh',2}]),

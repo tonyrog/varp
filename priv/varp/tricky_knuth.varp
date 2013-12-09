@@ -1,7 +1,17 @@
 
-(EXISTS n=3)
+
 (
-  ((FORALL x=1..n)(EXISTS y=1..n)P(x,y)) and
-  ((FORALL x=1..n)(FORALL y=1..n)(FORALL z=1..n,x<z,y<z)
-    ((P(x,y) and P(y,z))->P(x,z))) ->  (EXISTS x=1..n)P(x,x)
+  ( [A x=(n-i)..n][A y=(n-i)..n,x<y] (not P(x,y) or not P(y,x)) ) and
+  ( [A x=(n-i)..n][E y=(n-i)..n,x!=y] P(y,x) ) and
+  ( [A x=(n-i)..n][A y=(n-i)..n][A z=(n-i)..n,x!=y,x<z,y<z]
+    ((P(x,y) and P(y,z))->P(x,z)))
+)
+
+->
+
+(
+  ( [A x=(n-(i+1))..n][A y=(n-(i+1))..n,x<y] (not P(x,y) or not P(y,x)) ) and
+  ( [A x=(n-(i+1))..n][E y=(n-(i+1))..n,x!=y] P(y,x) ) and
+  ( [A x=(n-(i+1))..n][A y=(n-(i+1))..n][A z=(n-(i+1))..n,x!=y,x<z,y<z]
+    ((P(x,y) and P(y,z))->P(x,z)))
 )
