@@ -1,0 +1,7 @@
+
+#FUNC(i) := X(i) or Y(i) ;
+
+(FPGA(1) <-> FUNC(1))
+
+
+

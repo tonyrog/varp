@@ -544,13 +544,22 @@ getopt(backtrack,Bs)  -> (Bs#bs.option)#option.backtrack.
 %%  unsigned/integer variable bits
 %%  {bit,xi,N,i} is used for bitvector
 %%
-expand_meta(W={uint,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
-    W;
-expand_meta(W={int,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
-    W;
-expand_meta(W={bit,V,N,I},_Bs) when is_atom(V), is_integer(N), is_integer(I) ->
-    W;
-expand_meta(_Rx={p,P,Rs},Bs) when is_atom(P) ->
+expand_meta(W={uint,V,N,I},Bs) when is_integer(N), is_integer(I) ->
+    case expand_meta(V,Bs) of
+	V -> W;
+	VV -> {uint,VV,N,I}
+    end;
+expand_meta(W={int,V,N,I},Bs) when is_integer(N), is_integer(I) ->
+    case expand_meta(V,Bs) of
+	V -> W;
+	VV -> {int,VV,N,I}
+    end;
+expand_meta(W={bit,V,N,I},Bs) when is_integer(N), is_integer(I) ->
+    case expand_meta(V,Bs) of
+	V -> W;
+	VV -> {bit,VV,N,I}
+    end;
+expand_meta(_Rx={p,P,Rs},Bs) ->
     %% eval "arguments"
     {Rs1,_Bnd} = bind_meta(Rs, Bs, [], []), 
     %% check for substitution R(x1,..,xn) / P(y1,..,ym)
@@ -955,23 +964,24 @@ build(F,Opts) ->
 	    {{bool,?FALSE},Bs}
     end.
 
-build_(V, Bs) when is_atom(V) -> %% keep
-    {X,Bs1} = variable({p,V,[]},Bs),
-    {{bool,X},Bs1};
+build_(true, Bs) ->
+    {{bool,?TRUE}, Bs};
+build_(false, Bs) ->
+    {{bool,?FALSE}, Bs};
 build_(V={p,_P,_Ps}, Bs) ->
     {X,Bs1} = variable(V, Bs),
     {{bool,X},Bs1};
 build_({uint,N,V}, Bs) ->
-    if is_atom(V)    -> var_vector(uint,V,N,Bs);
-       is_integer(V) -> const_vector(uint,V,N,Bs)
+    if is_integer(V) -> const_vector(uint,V,N,Bs);
+       true          -> var_vector(uint,V,N,Bs)
     end;
 build_({int,N,V}, Bs) ->
-    if is_atom(V)    -> var_vector(int,V,N,Bs);
-       is_integer(V) -> const_vector(int,V,N,Bs)
+    if is_integer(V) -> const_vector(int,V,N,Bs);
+       true          -> var_vector(int,V,N,Bs)
     end;
 build_({bit,N,V}, Bs) ->
-    if is_atom(V)    -> var_vector(bit,V,N,Bs);
-       is_integer(V) -> const_vector(bit,V,N,Bs)
+    if  is_integer(V) -> const_vector(bit,V,N,Bs);
+	true          -> var_vector(bit,V,N,Bs)
     end;
 build_({':=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build_(F, Bs),
@@ -1175,13 +1185,9 @@ eval_domain({product,A,B}, Bs) ->
 eval_domain(Expr, Bs) ->
     [eval_meta(Expr,Bs)].
 
-
-eval_meta(V, _Bs) when is_integer(V) ->
-    V;
-eval_meta(true, _Bs) ->
-    true;
-eval_meta(false, _Bs) ->
-    false;
+eval_meta(V, _Bs) when is_integer(V) -> V;
+eval_meta(true, _Bs)  -> true;
+eval_meta(false, _Bs) -> false;
 eval_meta(V, Bs) when is_atom(V) ->
     case proplists:lookup(V,Bs#bs.meta) of
 	none ->
@@ -1261,22 +1267,22 @@ eval_meta_list(As,Bs) ->
 
 uint64(I,Bs) when is_integer(I) ->
     const_vector(uint,I,64,Bs);
-uint64(V,Bs) when is_atom(V) ->
+uint64(V,Bs) ->
     var_vector(uint,V,64,Bs).
 
 uint32(I,Bs) when is_integer(I) ->
     const_vector(uint,I,32,Bs);
-uint32(V,Bs) when is_atom(V) ->
+uint32(V,Bs) ->
     var_vector(uint,V,32,Bs).
 
 uint16(I,Bs) when is_integer(I) ->
     const_vector(uint,I,16,Bs);
-uint16(V,Bs) when is_atom(V) ->
+uint16(V,Bs) ->
     var_vector(uint,V,16,Bs).
 
 uint8(I,Bs) when is_integer(I) ->
     const_vector(uint,I,8,Bs);
-uint8(V,Bs) when is_atom(V) ->
+uint8(V,Bs) ->
     var_vector(uint,V,8,Bs).
 
 %% generate a constant vector
@@ -1306,8 +1312,9 @@ alias_vector_(_I,_T,_N,[],_V,Bs) ->
     
 %% generate a variable vector
 var_vector(Type,V,Size,Bs) ->
+    VV = expand_meta(V,Bs),
     N = eval_meta(Size,Bs),
-    var_vector_(N-1,Type,N,[],V,Bs).
+    var_vector_(N-1,Type,N,[],VV,Bs).
 
 var_vector_(-1,Type,N,Xs,_V,Bs) -> 
     {{Type,N,Xs},Bs};
