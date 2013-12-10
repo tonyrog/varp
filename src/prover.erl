@@ -48,8 +48,16 @@ run_formula(F,Opts) ->
 
 run({F,Bs}) ->
     run(F, Bs).
+
+run(undefined, Bs) ->
+    no_models(Bs);
 run({bool,X}, Bs) ->
-    method(X,Bs).
+    method(X,Bs);
+run({_Sign,_N,Xs}, Bs) ->
+    %% or just a dummy variable?
+    {X,Bs1} = formula:vfold_op('or',{bool,?FALSE},Xs,Bs),
+    method(X,Bs1).
+
     
 prove_formula(F) ->
     prove_formula(F,[{method,count},{max,1},{order,reverse_depth}]).

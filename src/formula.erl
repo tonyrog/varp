@@ -964,6 +964,8 @@ build(F,Opts) ->
 	    {{bool,?FALSE},Bs}
     end.
 
+build_(undefined, Bs) ->
+    {undefined, Bs};
 build_(true, Bs) ->
     {{bool,?TRUE}, Bs};
 build_(false, Bs) ->
@@ -983,9 +985,9 @@ build_({bit,N,V}, Bs) ->
     if  is_integer(V) -> const_vector(bit,V,N,Bs);
 	true          -> var_vector(bit,V,N,Bs)
     end;
-build_({':=', V, F}, Bs) when is_atom(V) ->
+build_({'=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build_(F, Bs),
-    operation(':=', V, Y, Bs1);
+    operation('=', V, Y, Bs1);
 
 build_({'-',F}, Bs) ->
     {Y,Bs1} = build_(F, Bs),
@@ -1241,9 +1243,14 @@ eval_meta({Op,A,B},Bs) ->
 	{'!=', A1, B1} -> A1 =/= B1;
 	{'and',A1,B1} -> A1 and B1;
 	{'or',A1,B1} -> A1 or B1;
+	{'xor',A1,B1} -> (A1 =/= B1);
+	{'&&',A1,B1} -> A1 and B1;
+	{'||',A1,B1} -> A1 or B1;
 	{'&',A1,B1} -> A1 band B1;
 	{'|',A1,B1} -> A1 bor B1;
 	{'^',A1,B1} -> A1 bxor B1;
+	{'<<',A1,B1} -> A1 bsl B1;
+	{'>>',A1,B1} -> A1 bsr B1;
 	{'+',A1,B1} -> A1+B1;
 	{'-',A1,B1} -> A1-B1;
 	{'*',A1,B1} -> A1*B1;
@@ -1433,7 +1440,24 @@ vextend(int,Xs,N,K) ->
 vextend(uint,Xs,_N,K) ->
     vset_size(Xs,K,?FALSE);
 vextend(bit,Xs,_N,K) ->
+    vset_size(Xs,K,?FALSE);
+vextend(bool,Xs,1,K) ->
     vset_size(Xs,K,?FALSE).
+
+vtype({uint,_,_}) -> uint;
+vtype({int,_,_})  -> int;
+vtype({bit,_,_})  -> bit;
+vtype({bool,_})   -> bool.
+
+vsize({uint,N,_}) -> N;
+vsize({int,N,_})  -> N;
+vsize({bit,N,_})  -> N;
+vsize({bool,_})   -> 1.
+
+varg(V={uint,_,_}) -> V;
+varg(V={int,_,_}) -> V;
+varg(V={bit,_,_}) -> V;
+varg({bool,X}) -> {bool,1,[X]}.
 
 
 %% set vector size to N  extend (with FALSE) at end / cut at end
@@ -1469,6 +1493,12 @@ build_list_([],Acc,Bs) ->
 %%
 operation('not',{bool,Y},Bs) ->
     {{bool,-Y},Bs};
+operation('~',Y={bool,_Y},Bs) ->
+    operation('not',Y,Bs);
+operation('~', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
+    Ys1 = vnot(Ys),
+    {{Type,N,Ys1}, Bs};
+
 operation('-', {Type,N,Ys}, Bs) when ?is_int_type(Type) ->
     %% Fix me.
     Ys1 = vnot(Ys),
@@ -1476,9 +1506,6 @@ operation('-', {Type,N,Ys}, Bs) when ?is_int_type(Type) ->
     {{bool,_Co},Xs,Bs1} = vadd(Ys1,Zs1,Bs),
     %% ignore carry
     {{Type,N,Xs}, Bs1};
-operation('~', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
-    Ys1 = vnot(Ys),
-    {{Type,N,Ys1}, Bs};
 operation('abs', {int,N,Ys}, Bs) ->
     Sign = sign_bit({int,N,Ys}),
     {{_,_,Zs},Bs1} = operation('-',{int,N,Ys},Bs),
@@ -1493,10 +1520,28 @@ operation('abs', {uint,N,Ys}, Bs) ->
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,-X,Y,-Z,Bs1)};
+operation('&',Y={bool,_Y},Z={bool,_Z}, Bs) ->
+    operation('and',Y,Z,Bs);
+operation('&',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
+    K = erlang:max(N,M),
+    Ys1 = vextend(Type1,Ys,N,K),
+    Zs1 = vextend(Type2,Zs,M,K),
+    {Xs,Bs1} = vmap_op('and',Ys1,Zs1,Bs),
+    Type = mix_type(Type1,Type2),
+    {{Type,K,Xs},Bs1};
 
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,X,-Y,Z,Bs1)};
+operation('|',Y={bool,_Y},Z={bool,_Z}, Bs) ->
+    operation('or',Y,Z, Bs);
+operation('|',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
+    K = erlang:max(N,M),
+    Ys1 = vextend(Type1,Ys,N,K),
+    Zs1 = vextend(Type2,Zs,M,K),
+    {Xs,Bs1} = vmap_op('or',Ys1,Zs1,Bs),
+    Type = mix_type(Type1,Type2),
+    {{Type,K,Xs},Bs1};
 
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
@@ -1509,12 +1554,54 @@ operation('equ',{bool,Y},{bool,Z},Bs) ->
 operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(equ,X,-Y,Z,Bs1)};
+operation('^',Y={bool,_Y},Z={bool,_Z},Bs) ->
+    operation('xor',Y,Z,Bs);
+operation('+',Y={bool,_Y},Z={bool,_Z},Bs) ->
+    operation('xor',Y,Z,Bs);
+operation('+',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Carry,Cx,Bs1} = vadd(Ax1,Bx1,Bs),
+    Bs2 = set_carry_(Carry,getopt(carry,Bs1),Bs1),
+    Ct = mix_type(At,Bt),
+    {{Ct,Cn,Cx},Bs2};
+
+
 
 operation('<',{bool,Y},{bool,Z},Bs) ->  %% Y < Z
     operation('and', negate({bool,Y}),{bool,Z}, Bs);
-
+operation('<',{int,N,Ys},{int,M,Zs},Bs) when N>1, M>1 ->
+    K = erlang:max(N,M),
+    Ys0 = vextend(int,Ys,N,K),
+    Zs0 = vextend(int,Zs,M,K),
+    {Ys1,[Yk]} = lists:split(K-1,Ys0),
+    {Zs1,[Zk]} = lists:split(K-1,Zs0),
+    %% abs(X) < abs(Y)
+    {Q,Bs1} = operation('equ',{bool,Yk},{bool,Zk},Bs),
+    {Lt,Bs2} = vless(Ys1,Zs1,Bs1),
+    {A1,Bs3} = operation('and',Q,Lt,Bs2),
+    %%  Y<0  AND Z>=0
+    {L,Bs4} = operation('<',{bool,Zk},{bool,Yk},Bs3),
+    any([A1,L],Bs4);
+operation('<',{Type1,N,Ys},{Type2,M,Zs},Bs) when 
+      ?is_int_type(Type1), ?is_int_type(Type2) ->
+    K = erlang:max(N,M),
+    Ys1 = vextend(Type1,Ys,N,K),
+    Zs1 = vextend(Type2,Zs,M,K),
+    vless(Ys1,Zs1,Bs);
 operation('>',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
     operation('and', {bool,Y}, negate({bool,Z}), Bs);
+operation('>',Y,Z,Bs) ->
+    operation('<', Z, Y, Bs);
+operation('<=',Y,Z,Bs) ->
+    {C,Bs1} = operation('<', Z, Y, Bs),
+    {negate(C),Bs1};
+operation('>=',Y,Z,Bs) ->
+    operation('<=',Z,Y,Bs);
+
 
 operation('!=',{bool,Y},{bool,Z},Bs) ->
     operation('xor',{bool,Y},{bool,Z},Bs);
@@ -1537,16 +1624,11 @@ operation('||', A, B, Bs) ->
 %%
 %% Alias operation
 %%
-operation(':=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
+operation('=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
     {X, alias_vector(T,V,Size,Xs,Bs)};
-operation(':=',V,X={bool,Xb},Bs) when is_atom(V) ->
+operation('=',V,X={bool,Xb},Bs) when is_atom(V) ->
     {X, alias(V, Xb, Bs)};
 
-%%    
-%% comparison over bool-vector 
-%%   '=='  '!='
-%%   '<' '<=' '>' '>='
-%%
 
 operation('==',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
     %% fixme: warn about different sign (uint == int)
@@ -1559,56 +1641,6 @@ operation('!=',Y,Z,Bs) ->
     {C,Bs1} = operation('==', Y, Z, Bs),
     {negate(C),Bs1};
 
-operation('<',{int,N,Ys},{int,M,Zs},Bs) when N>1, M>1 ->
-    K = erlang:max(N,M),
-    Ys0 = vextend(int,Ys,N,K),
-    Zs0 = vextend(int,Zs,M,K),
-    {Ys1,[Yk]} = lists:split(K-1,Ys0),
-    {Zs1,[Zk]} = lists:split(K-1,Zs0),
-    
-    %% abs(X) < abs(Y)
-    {Q,Bs1} = operation('equ',{bool,Yk},{bool,Zk},Bs),
-    {Lt,Bs2} = vless(Ys1,Zs1,Bs1),
-    {A1,Bs3} = operation('and',Q,Lt,Bs2),
-
-    %%  Y<0  AND Z>=0
-    {L,Bs4} = operation('<',{bool,Zk},{bool,Yk},Bs3),
-
-    any([A1,L],Bs4);
-
-operation('<',{Type1,N,Ys},{Type2,M,Zs},Bs) when 
-      ?is_int_type(Type1), ?is_int_type(Type2) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    vless(Ys1,Zs1,Bs);
-
-operation('<=',Y,Z,Bs) ->
-    {C,Bs1} = operation('<', Z, Y, Bs),
-    {negate(C),Bs1};
-
-operation('>',Y,Z,Bs) ->
-    operation('<', Z, Y, Bs);
-
-operation('>=',Y,Z,Bs) ->
-    operation('<=',Z,Y,Bs);
-
-%% bit-vector operations
-operation('|',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Xs,Bs1} = vmap_op('or',Ys1,Zs1,Bs),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs1};
-
-operation('&',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Xs,Bs1} = vmap_op('and',Ys1,Zs1,Bs),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs1};
 
 operation('^',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
     K = erlang:max(N,M),
@@ -1649,27 +1681,16 @@ operation('>>>',X={Type,N,_Xs},K,Bs0) when
     {X2, Bs2} = operation('<<',X,(N-C),Bs1),
     operation('|', X1, X2, Bs2);
 
-
-%% arithmetic over bool-vector
-operation('+',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    %% integer type?
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Co,Xs,Bs1} = vadd(Ys1,Zs1,Bs),
-    Bs2 = set_carry_(Co,getopt(carry,Bs1),Bs1),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs2};
-
-operation('-',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    %% integer type?
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Borrow,Xs,Bs1} = vsub(Ys1,Zs1,Bs),
+operation('-',A, B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Borrow,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
     Bs2 = set_carry_(Borrow,getopt(borrow,Bs1),Bs1),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs}, Bs2};
+    Ct = mix_type(At,Bt),
+    {{Ct,Cn,Cx},Bs2};
 
 operation('*',{uint,N,Ys},{uint,M,Zs},Bs) ->
     %% integer type?
@@ -1697,6 +1718,8 @@ operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Bs2 = set_carry_(DivZero,getopt(divz,Bs1),Bs1),
     {{uint,K,Rs},Bs2};
 
+operation('min',Y={bool,_Y},Z={bool,_Z},Bs) ->
+    operation('and',Y,Z,Bs);
 operation('min',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
     %% integer type?
     K = erlang:max(N,M),
@@ -1707,6 +1730,8 @@ operation('min',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
     Type = mix_type(Type1,Type2),
     {{Type,K,Xs},Bs2};
 
+operation('max',Y={bool,_Y},Z={bool,_Z},Bs) ->
+    operation('or',Y,Z,Bs);
 operation('max',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
     %% integer type?
     K = erlang:max(N,M),
@@ -1732,14 +1757,22 @@ sign_bit({Type,N,Xs}) when ?is_int_type(Type) ->
     {bool,lists:nth(N,Xs)}.
 
 %% Mix integer type (cast?)
-
-mix_type(int,int)   -> int;
-mix_type(bit,bit)   -> bit;
-mix_type(uint,uint) -> uint;
-mix_type(int,uint)  -> uint;
+mix_type(T,T) -> T;
 mix_type(uint,int)  -> uint;
 mix_type(uint,bit)  -> uint;
-mix_type(bit,uint)  -> uint.
+mix_type(uint,bool) -> uint;
+
+mix_type(int,uint)  -> uint;
+mix_type(int,bit)   -> int;
+mix_type(int,bool)  -> uint;
+
+mix_type(bit,uint)  -> uint;
+mix_type(bit,int)   -> int;
+mix_type(bit,bool)  -> bit;
+
+mix_type(bool,uint) -> uint;
+mix_type(bool,int)  -> int;
+mix_type(bool,bit)  -> bit.
 
 %%
 %% Multiplier circuit: Y*Z
