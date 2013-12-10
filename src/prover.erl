@@ -497,7 +497,7 @@ saturate_loop(K, Bs) ->
 	Vec ->
 	    NB = formula:number_of_bound(Bs),
 	    NU = formula:number_of_unbound(Bs),
-	    N  = imath:binom(NU, length(Vec)),
+	    N  = varp_math:binom(NU, length(Vec)),
 	    %% io:format("Loop ~w vector estimate=~w\n", [K,N]),
 	    saturate_loop(Vec,1,N,K,NB,Bs)
     end.
@@ -518,7 +518,7 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 			    Bs1
 		    end;
 		Vec1 ->
-		    Ks = imath:factorial(K),
+		    Ks = varp_math:factorial(K),
 		    saturate_loop(Vec1,I+Ks,N,K,NB,Bs1)
 	    end
     end.

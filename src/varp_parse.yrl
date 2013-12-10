@@ -16,7 +16,7 @@ Terminals
 
 Nonterminals
         prefix_op sign
-        integer expr exprs
+        integer expr exprs sexpr
         qtype quantifier psymbol pexpr lexpr lexprs
         file definition definitions.
 
@@ -37,7 +37,7 @@ Left 700 '<' '<=' '>' '>=' '==' '!='.
 Left 750 '..'.
 Left 800 '+' '-'.
 Left 900 '*' '/' '%' '<<' '>>' '<<<' '>>>'.
-Left 950 ':'.
+Left 650 ':'.
 Unary 1000 prefix_op.
 Unary 1100 quantifier.
 Right 100 ':='.
@@ -132,10 +132,13 @@ quantifier -> '[' qtype exprs ']' : {'$2','$3'}.
 lexpr -> true                     : true.
 lexpr -> false                    : false.
 lexpr -> integer                  : constant(value('$1')).
-lexpr -> '-' integer              : constant(-value('$2')).
-lexpr -> lexpr ':' expr '/' sign  : {'$5','$3','$1'}.
-lexpr -> lexpr ':' expr           : {uint,'$3','$1'}.
+lexpr -> '-' lexpr                : {'-', '$2'}.
+
 lexpr -> pexpr                    : '$1'.
+lexpr -> lexpr ':' sexpr '/' signed  : {int,'$3','$1'}.
+lexpr -> lexpr ':' sexpr '/' unsigned : {uint,'$3','$1'}.
+lexpr -> lexpr ':' sexpr           : {uint,'$3','$1'}.
+
 lexpr -> lexpr '+' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '-' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '*' lexpr          : {op('$2'), '$1', '$3'}.
@@ -180,6 +183,15 @@ lexprs -> lexpr : ['$1'].
 sign -> signed   : int.
 sign -> unsigned : uint.
 
+%% sexpr -> '-' sexpr : {'-','$2'}.
+%% sexpr -> sexpr '*' sexpr : {'*','$1','$3'}.
+%% sexpr -> sexpr '+' sexpr : {'+','$1','$3'}.
+%% sexpr -> sexpr '-' sexpr : {'-','$1','$3'}.
+sexpr -> '(' expr ')' : '$2'.
+sexpr -> integer  : value('$1').
+sexpr -> variable : name('$1').
+     
+
 pexpr -> psymbol                    : { p, '$1', []}.
 pexpr -> psymbol '(' ')'            : { p, '$1', []}.
 pexpr -> psymbol '(' exprs ')'      : { p, '$1', '$3'}.
@@ -191,9 +203,8 @@ psymbol -> symbol : name('$1').
 
 Erlang code.
 
-constant(N) when N > 0   -> {uint,imath:ilog2(N)+1,N};
-constant(N) when N =:= 0 -> {uint,1,0};
-constant(N) when N < 0   -> {int,imath:ilog2(-N)+2,N}.
+constant(N) when N >= 0   -> {uint,varp_math:integer_size(N),N};
+constant(N) when N < 0   -> {int,varp_math:integer_size(N),N}.
 
 op({Op,_Ln}) -> Op.
 

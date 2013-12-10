@@ -284,10 +284,10 @@ eval_meta(V, Bs) when is_atom(V) ->
     end;
 eval_meta({f,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
-	{factorial,[N]} -> imath:factorial(N);
-	{binom,[A,B]} -> imath:binom(A,B);
+	{factorial,[N]} -> varp_math:factorial(N);
+	{binom,[A,B]} -> varp_math:binom(A,B);
 	{sqrt,[A]}    -> math:sqrt(A);
-	{nroot,[A,N]} -> imath:pow(A,(1/N));
+	{nroot,[A,N]} -> varp_math:nroot(A,N);
 	{ln,[A]}      -> math:log(A);
 	{log,[A,N]}   -> math:log(A)/math:log(N);
 	{log2,[A]}    -> math:log(A)/math:log(2);
