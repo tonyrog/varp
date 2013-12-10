@@ -131,6 +131,7 @@ usage(Opt) when is_atom(Opt) ->
 
 format_spec(unsigned) -> "unsigned integer";
 format_spec(integer) -> "integer";
+format_spec(string) -> "string";
 format_spec(undefined) -> "undefined";
 format_spec(Vs) when is_list(Vs) ->
     string:join([Name || {Name,_Enum} <- Vs], "|").
