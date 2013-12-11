@@ -18,6 +18,8 @@
 main(Args) ->
     {Mode,Opts,Files} = process_args0(Args, none, [], []),
     case Files of
+	[] when Mode =:= help ->
+	    run(Mode, undefined, Opts);
 	[] ->
 	    {ok,Data} = read_in(),
 	    case parse("*stdin*", Data) of
@@ -58,7 +60,9 @@ run(cnf, Formula, Opts) ->
 	FileName ->
 	    file:write_file(FileName, Data)
     end,
-    ok.
+    ok;
+run(help, _Formula, _Opts) ->
+    usage().
 
 
 result(true,prove) ->
@@ -106,12 +110,22 @@ join_f(JoinOp,A,B) -> {JoinOp,A,B}.
 
 usage() ->
     io:format("varp: usage: varp [<Mode>] [Options] [Bindings] [files]\n"),
-    io:format("  <Mode> = satisfy|falsify|prove|cnf\n"),
+    io:format("  <Mode> = satisfy|falsify|prove|cnf|help\n"),
     io:format("Options\n"),
     lists:foreach(
-      fun({Opt,_,Spec,Def}) ->
-	      io:format("  --~s = ~s (~s)\n",
-			[Opt,format_spec(Spec),format_value(Def)])
+      fun({LongOpt,ShortOpt,_,Spec,Def}) ->
+	      Names = [["--",LongOpt],"|",["-",LongOpt],
+		       if ShortOpt =:= "" -> "";
+			  true -> ["|","-",ShortOpt]
+		       end],
+	      if Spec =:= undefined ->
+		      io:format("  ~s\n", 
+				[Names]);
+		 true ->
+		      io:format("  ~s = ~s (~s)\n", 
+				[Names,format_spec(Spec),
+				 format_value(Def)])
+	      end
       end, options()),
     halt(1).
 
@@ -119,13 +133,24 @@ usage(Opt) when is_list(Opt) ->
     io:format("varp: unknown option ~s\n", [Opt]),
     halt(1);    
 usage(Opt) when is_atom(Opt) ->
-    case lists:keyfind(Opt, 2, options()) of
+    case lists:keyfind(Opt, 3, options()) of
 	false -> 
 	    io:format("varp: unknown option '~s'\n", [Opt]),
 	    halt(1);
-	{OptName,_,Spec,_Def} ->
-	    io:format("varp: bad argument to option '--~s', allowed values are ~s\n", 
-		      [OptName,format_spec(Spec)]),
+	{_Long,_Short,_,Spec,_Def} ->
+	    io:format("varp: bad argument to option '~s', allowed values are ~s\n", 
+		      [Opt,format_spec(Spec)]),
+	    halt(1)
+    end.
+
+usage(Opt,Value) when is_atom(Opt) ->
+    case lists:keyfind(Opt, 3, options()) of
+	false ->
+	    io:format("varp: unknown option '~s'\n", [Opt]),
+	    halt(1);
+	{_Long,_Short,_,Spec,_Def} ->
+	    io:format("varp: bad argument ~s to option '~s', allowed values are ~s\n", 
+		      [Value,Opt,format_spec(Spec)]),
 	    halt(1)
     end.
 
@@ -137,37 +162,52 @@ format_spec(Vs) when is_list(Vs) ->
     string:join([Name || {Name,_Enum} <- Vs], "|").
 
 format_value(N) when is_integer(N) -> integer_to_list(N);
-format_value(A) when is_atom(A) -> atom_to_list(A).
+format_value(A) when is_atom(A) -> atom_to_list(A);
+format_value(L) when is_list(L) -> L.
+
     
+%%
+%% Option format
+%%  {Long, Short, Name, ValueSpec, Default}
+%%
+%%  Long may be given as
+%%  --long 123
+%%  --long=123
+%%  -long 123
+%%  Short Name
+%%  -l 123
+%%
+%%    
 options() ->
     Level = [{"debug",debug},{"info",info},{"notice",notice},
 	     {"warning",warning},{"error",error},{"critical",critical},
 	     {"alert",alert},{"emergency",emergency},{"none",none}],
-    [{"value", value, [{"true",true},{"false",false},
-			 { "none", none}], none},
-     {"print", print, [{"true",true},{"literal",literal},
-		       {"model",model},{"false",false}], false},
-     {"partial", partial, [{"true",true},{"false",false}], false},
-     {"method",method,[{"collect", collect}, {"count", count}], collect},
-     {"max", max,  unsigned, 0 },  %% (0=all)
-     {"order", order, [{"identity",identity},
-			 {"reverse", reverse},
-			 {"depth",depth},
-			 {"occure",occure},
-			 {"depth_occure",depth_occure},
-			 {"occure_depth",occure_depth}], identify},
-     {"bcp", bcp, [{"true",true},{"false",false}], false},
-     {"saturate", saturate, unsigned, 0 },
-     {"backtrack", backtrack, [{"true",true},{"false",false}], true},
-     {"pair", pair, [{"true",true},{"false",false}], true},
-     {"assoc", assoc, [{"left",left},{"right",right},{"middle",middle}], left},
-     {"threshold", threshold, unsigned, 0 },
-     {"carry",carry,[{"true",true},{"false",false},{"ignore",ignore}],ignore},
-     {"borrow",borrow,[{"true",true},{"false",false},{"ignore",ignore}],ignore},
-     {"divz",divz,[{"true",true},{"false",false},{"ignore",ignore}],false},
-     {"log", log, Level, none},
-     {"output", output, string, ""},
-     {"help", help, undefined, undefined}
+    [{"value", "v", value, [{"true",true},{"false",false},
+			    {"none", none}], none},
+     {"print", "p", print, [{"true",true},{"literal",literal},
+			    {"model",model},{"false",false}], false},
+     {"partial", "", partial, [{"true",true},{"false",false}], false},
+     {"method", "", method,[{"collect", collect}, {"count", count}], collect},
+     {"max", "n", max,  unsigned, 0 },  %% (0=all)
+     {"order", "", order, [{"identity",identity},
+			   {"reverse", reverse},
+			   {"depth",depth},
+			   {"occure",occure},
+			   {"depth_occure",depth_occure},
+			   {"occure_depth",occure_depth}], identify},
+     {"bcp", "", bcp, [{"true",true},{"false",false}], false},
+     {"saturate", "s", saturate, unsigned, 0 },
+     {"backtrack", "b", backtrack, [{"true",true},{"false",false}], true},
+     {"pair", "", pair, [{"true",true},{"false",false}], true},
+     {"assoc", "", assoc, [{"left",left},{"right",right},
+			   {"middle",middle}], left},
+     {"threshold", "", threshold, unsigned, 0 },
+     {"carry","",carry,[{"true",true},{"false",false},{"ignore",ignore}],ignore},
+     {"borrow","",borrow,[{"true",true},{"false",false},{"ignore",ignore}],ignore},
+     {"divz","",divz,[{"true",true},{"false",false},{"ignore",ignore}],false},
+     {"log", "", log, Level, none},
+     {"output", "o", output, string, ""},
+     {"help", "h", help, undefined, undefined}
     ].
 
 
@@ -180,6 +220,8 @@ process_args0(["prove"|As], _Mode, Opts, Bound) ->
     process_args(As, prove, Opts, Bound);
 process_args0(["cnf"|As], _Mode, Opts, Bound) ->
     process_args(As, cnf, Opts, Bound);
+process_args0(["help"|As], _Mode, Opts, Bound) ->
+    process_args(As, help, Opts, Bound);
 process_args0(As, Mode, Opts, Bound) ->
     process_args(As, Mode, Opts, Bound).
 
@@ -188,28 +230,40 @@ process_args(["--"++LongOpt|As],Mode,Opts,Bound) ->
     case match_long_opt(LongOpt,As,options()) of
 	false ->
 	    usage(LongOpt);
-	{{_,help,_,_},_Val,_As1} ->
+	{{_,_,help,_,_},_Val,_As1} ->
 	    usage();
-	{{_,Opt,ValSpec,_Default},Val,As1} ->
+	{{_,_Short,Key,ValSpec,_Default},Val,As1} ->
 	    case match_value(ValSpec,Val) of
 		false ->
-		    usage(Opt);
+		    usage(Key,Val);
 		{ok,Value} ->
-		    process_args(As1,Mode,[{Opt,Value}|Opts],Bound)
+		    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
 	    end
     end;
-process_args(["-"++LongOpt|As],Mode,Opts,Bound) -> %% fixme short opts
+process_args(["-"++LongOpt|As],Mode,Opts,Bound) ->
     case match_long_opt(LongOpt,As,options()) of
 	false ->
-	    usage(LongOpt);
-	{{_,help,_,_},_Val,_As1} ->
+	    case match_short_opt(LongOpt,As,options()) of
+		false ->
+		    usage();
+		{{_,_,help,_,_},_Val,_As1} ->
+		    usage();
+		{{_,_,Key,ValSpec,_Default},Val,As1} ->
+		    case match_value(ValSpec,Val) of
+			false ->
+			    usage(Key,Val);
+			{ok,Value} ->
+			    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
+		    end
+	    end;
+	{{_,_,help,_,_},_Val,_As1} ->
 	    usage();
-	{{_,Opt,ValSpec,_Default},Val,As1} ->
+	{{_,_,Key,ValSpec,_Default},Val,As1} ->
 	    case match_value(ValSpec,Val) of
 		false ->
-		    usage(Opt);
+		    usage(Key,Val);
 		{ok,Value} ->
-		    process_args(As1,Mode,[{Opt,Value}|Opts],Bound)
+		    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
 	    end
     end;
 process_args([Var,"=",Value|As],Mode,Opts,Bound) ->
@@ -265,7 +319,7 @@ match_value([_|Vs], Value) ->
 match_value([], _) ->
     false.
 
-match_long_opt(LongOpt,As,[Opt={OptName,_,Spec,_}|Opts]) ->
+match_long_opt(LongOpt,As,[Opt={OptName,_Short,_Name,Spec,_Default}|Opts]) ->
     case match_string(OptName, LongOpt) of
 	false ->
 	    match_long_opt(LongOpt,As,Opts);
@@ -288,9 +342,30 @@ match_long_opt(LongOpt,As,[Opt={OptName,_,Spec,_}|Opts]) ->
 	_ ->
 	    usage(LongOpt)
     end;
-match_long_opt(LongOpt,_As,[]) ->
-    usage(LongOpt).
+match_long_opt(_LongOpt,_As,[]) ->
+    false.
 
+
+match_short_opt(ShortOpt,As,[{_,"",_Name,_Spec,_Default}|Opts]) ->
+    match_short_opt(ShortOpt,As,Opts);
+match_short_opt(ShortOpt,As,[Opt={_,OptName,_Name,Spec,_Default}|Opts]) ->
+    case match_string(OptName, ShortOpt) of
+	false ->
+	    match_short_opt(ShortOpt,As,Opts);
+	"" when Spec == undefined -> %% no value!
+	    {Opt,"",As};
+	More when Spec == undefined -> %% multi option
+	    {Opt,"",[[$-|More]|As]};
+	"" ->
+	    case As of
+		[Value|As1] -> {Opt,Value,As1};
+		[] -> {Opt,"",[]}
+	    end;
+	Value ->
+	    {Opt,Value,As}
+    end;
+match_short_opt(_ShortOpt,_As,[]) ->
+    false.
 
 match_string([C|Cs], [C|Ds]) ->
     match_string(Cs, Ds);
@@ -310,21 +385,14 @@ collect_in(Acc) ->
 	    collect_in([Line|Acc])
     end.
 
-
 run_formula(Formula) ->
     run_formula(Formula,[]).
 run_formula(Formula,Opts) ->
-    %% MetaBind = proplists:get_value(env, Opts, []),
-    %% Opts1    = proplists:delete(env, Opts),
-    %% Formula1 = form:expand(Formula,MetaBind),
     prover:run_formula(Formula, Opts).
 
 prove_formula(Formula) ->
     prove_formula(Formula,[]).
 prove_formula(Formula,Opts) ->
-    %% MetaBind = proplists:get_value(env, Opts, []),
-    %% Opts1    = proplists:delete(env, Opts),
-    %% Formula1 = form:expand(Formula,MetaBind),
     prover:prove_formula(Formula, Opts++[{max,2}]).
 
 file(File) ->

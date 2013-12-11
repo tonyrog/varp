@@ -416,17 +416,8 @@ level(Level) when Level >= -1, Level =< 7 -> Level.
 
 set_bt_depth(D, Bs) when is_integer(D), D>=0 ->
     Bs#bs { depth=D }.
-
 get_bt_depth(Bs) -> Bs#bs.depth.
-
-set_carry(Value, Bs) -> setopt(carry, Value, Bs).
-set_borrow(Value,Bs) -> setopt(borrow,Value,Bs).
-set_divz(Value,Bs) -> setopt(divz,Value,Bs).
-set_pair(Value,Bs) -> setopt(pair,Value,Bs).
-set_threshold(Value,Bs) -> setopt(threshold,Value,Bs).
-set_log(Level,Bs) -> setopt(log,Level,Bs).
     
-
 setopts([{Opt,Value}|Opts], Bs) ->
     setopts(Opts, setopt(Opt,Value,Bs));
 setopts([debug|Opts], Bs) ->
@@ -1199,10 +1190,10 @@ eval_meta(V, Bs) when is_atom(V) ->
     end;
 eval_meta({f,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
-	{factorial,[N]} -> imath:factorial(N);
-	{binom,[A,B]} -> imath:binom(A,B);
+	{factorial,[N]} -> varp_math:factorial(N);
+	{binom,[A,B]} -> varp_math:binom(A,B);
 	{sqrt,[A]}    -> math:sqrt(A);
-	{nroot,[A,N]} -> imath:pow(A,(1/N));
+	{nroot,[A,N]} -> varp_math:nroot(A,N);
 	{ln,[A]}      -> math:log(A);
 	{log,[A,N]}   -> math:log(A)/math:log(N);
 	{log2,[A]}    -> math:log(A)/math:log(2);
@@ -1554,8 +1545,30 @@ operation('equ',{bool,Y},{bool,Z},Bs) ->
 operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(equ,X,-Y,Z,Bs1)};
-operation('^',Y={bool,_Y},Z={bool,_Z},Bs) ->
-    operation('xor',Y,Z,Bs);
+%% operation('^',Y={bool,_Y},Z={bool,_Z},Bs) ->
+%%     operation('xor',Y,Z,Bs);
+operation('^',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cx,Bs1} = vmap_op('xor',Ax1,Bx1,Bs),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {{bool,C1},Bs1};
+       true ->
+	    {{Ct,Cn,Cx},Bs1}
+    end;
+%%    K = erlang:max(N,M),
+%%    Ys1 = vextend(Type1,Ys,N,K),
+%%    Zs1 = vextend(Type2,Zs,M,K),
+%%    {Xs,Bs1} = vmap_op('xor',Ys1,Zs1,Bs),
+%%    Type = mix_type(Type1,Type2),
+%%    {{Type,K,Xs},Bs1};
+
+
 operation('+',Y={bool,_Y},Z={bool,_Z},Bs) ->
     operation('xor',Y,Z,Bs);
 operation('+',A,B,Bs) ->
@@ -1573,25 +1586,30 @@ operation('+',A,B,Bs) ->
 
 operation('<',{bool,Y},{bool,Z},Bs) ->  %% Y < Z
     operation('and', negate({bool,Y}),{bool,Z}, Bs);
-operation('<',{int,N,Ys},{int,M,Zs},Bs) when N>1, M>1 ->
-    K = erlang:max(N,M),
-    Ys0 = vextend(int,Ys,N,K),
-    Zs0 = vextend(int,Zs,M,K),
-    {Ys1,[Yk]} = lists:split(K-1,Ys0),
-    {Zs1,[Zk]} = lists:split(K-1,Zs0),
+operation('<',{int,An,Ax},{int,Bn,Bx},Bs) when An>1, Bn>1 ->
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(int,Ax,An,Cn),
+    Bx1 = vextend(int,Bx,Bn,Cn),
+    {Ax2,[Ak]} = lists:split(Cn-1,Ax1),
+    {Bx2,[Bk]} = lists:split(Cn-1,Bx1),
     %% abs(X) < abs(Y)
-    {Q,Bs1} = operation('equ',{bool,Yk},{bool,Zk},Bs),
-    {Lt,Bs2} = vless(Ys1,Zs1,Bs1),
+    {Q,Bs1}  = operation('equ',{bool,Ak},{bool,Bk},Bs),
+    {Lt,Bs2} = vless(Ax2,Bx2,Bs1),
     {A1,Bs3} = operation('and',Q,Lt,Bs2),
     %%  Y<0  AND Z>=0
-    {L,Bs4} = operation('<',{bool,Zk},{bool,Yk},Bs3),
+    {L,Bs4} = operation('<',{bool,Bk},{bool,Ak},Bs3),
     any([A1,L],Bs4);
-operation('<',{Type1,N,Ys},{Type2,M,Zs},Bs) when 
-      ?is_int_type(Type1), ?is_int_type(Type2) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    vless(Ys1,Zs1,Bs);
+operation('<',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    vless(Ax1,Bx1,Bs);
+%%    K = erlang:max(N,M),
+%%    Ys1 = vextend(Type1,Ys,N,K),
+%%    Zs1 = vextend(Type2,Zs,M,K),
+%%    vless(Ys1,Zs1,Bs);
 operation('>',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
     operation('and', {bool,Y}, negate({bool,Z}), Bs);
 operation('>',Y,Z,Bs) ->
@@ -1608,6 +1626,14 @@ operation('!=',{bool,Y},{bool,Z},Bs) ->
 
 operation('==',{bool,Y},{bool,Z},Bs) ->
     operation('equ',{bool,Y},{bool,Z},Bs);
+operation('==',A,B,Bs) ->
+    %% fixme: warn about different sign (uint == int) ?
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    veq(Ax1,Bx1,Bs);
 
 operation('<->', A, B, Bs) ->
     operation('==', A, B, Bs);
@@ -1630,25 +1656,13 @@ operation('=',V,X={bool,Xb},Bs) when is_atom(V) ->
     {X, alias(V, Xb, Bs)};
 
 
-operation('==',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    %% fixme: warn about different sign (uint == int)
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    veq(Ys1,Zs1,Bs);
 
 operation('!=',Y,Z,Bs) ->
     {C,Bs1} = operation('==', Y, Z, Bs),
     {negate(C),Bs1};
 
 
-operation('^',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Xs,Bs1} = vmap_op('xor',Ys1,Zs1,Bs),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs1};
+
 
 operation('<<',{Type,N,Xs},K,Bs) 
   when ?is_vec_type(Type), is_integer(K), K >= 0 ->
@@ -1681,14 +1695,14 @@ operation('>>>',X={Type,N,_Xs},K,Bs0) when
     {X2, Bs2} = operation('<<',X,(N-C),Bs1),
     operation('|', X1, X2, Bs2);
 
-operation('-',A, B,Bs) ->
+operation('-',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
-    {Borrow,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
-    Bs2 = set_carry_(Borrow,getopt(borrow,Bs1),Bs1),
+    {BorrowNot,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
+    Bs2 = set_carry_(negate(BorrowNot),getopt(borrow,Bs1),Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
@@ -1848,8 +1862,8 @@ vdivrem(X, Y, R, N, I, Bs) ->
     {{bool,Lt},Bs2} = vless(R1, Y, Bs1),
     X2 = [-Lt|X1],
     %% R = R - Y
-    {Borrow,R2,Bs3} = vsub(R1, Y, Bs2),
-    Bs4 = set_carry_(Borrow,ignore,Bs3),
+    {BorrowNot,R2,Bs3} = vsub(R1, Y, Bs2),
+    Bs4 = set_carry_(negate(BorrowNot),ignore,Bs3),
     %% if (R < Y) R=R; R = R - Y
     {R3,Bs5} = vite({bool,Lt}, R1, R2, Bs4),
     vdivrem(X2, Y, R3, N, I-1, Bs5).
@@ -1887,8 +1901,8 @@ vrem(X, Y, R, N, I, Bs) ->
     R1 = [R00|Rs],
     {{bool,Lt},Bs2} = vless(R1, Y, Bs1),
     %% R = R - Y
-    {Borrow,R2,Bs3} = vsub(R1, Y, Bs2),
-    Bs4 = set_carry_(Borrow,ignore,Bs3),
+    {BorrowNot,R2,Bs3} = vsub(R1, Y, Bs2),
+    Bs4 = set_carry_(negate(BorrowNot),ignore,Bs3),
     %% if (R < Y) R=R; R = R - Y
     {R3,Bs5} = vite({bool,Lt}, R1, R2, Bs4),
     vrem(tl(X), Y, R3, N, I-1, Bs5).
@@ -1896,7 +1910,7 @@ vrem(X, Y, R, N, I, Bs) ->
 %%
 %% Subtraction 
 %%
-vsub(Ys, Zs, Bs) ->    
+vsub(Ys, Zs, Bs) ->
     Zs1 = vnot(Zs),
     vadd(Ys,Zs1,[],{bool,?TRUE},Bs).
 

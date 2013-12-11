@@ -36,8 +36,11 @@ Unary 751 '~'.
 Left 700 '<' '<=' '>' '>=' '==' '!='.
 Left 750 '..'.
 Left 800 '+' '-'.
-Left 900 '*' '/' '%' '<<' '>>' '<<<' '>>>'.
-Left 650 ':'.
+Left 900 '*' '<<' '>>' '<<<' '>>>'.
+Left 910 ':'.
+Left 920 '/' '%'.
+
+
 Unary 1000 prefix_op.
 Unary 1100 quantifier.
 Right 100 ':='.
@@ -139,8 +142,8 @@ lexpr -> lexpr ':' sexpr '/' signed  : {int,'$3','$1'}.
 lexpr -> lexpr ':' sexpr '/' unsigned : {uint,'$3','$1'}.
 lexpr -> lexpr ':' sexpr           : {uint,'$3','$1'}.
 
-lexpr -> lexpr '+' lexpr          : { op('$2'), '$1', '$3' }.
-lexpr -> lexpr '-' lexpr          : { op('$2'), '$1', '$3' }.
+lexpr -> lexpr '+' lexpr          : {op('$2'), '$1', '$3' }.
+lexpr -> lexpr '-' lexpr          : {op('$2'), '$1', '$3' }.
 lexpr -> lexpr '*' lexpr          : {op('$2'), '$1', '$3'}.
 lexpr -> lexpr '/' lexpr          : {op('$2'), '$1', '$3'}.
 lexpr -> lexpr '%' lexpr          : {op('$2'), '$1', '$3'}.

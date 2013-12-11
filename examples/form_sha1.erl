@@ -61,11 +61,11 @@ eval(Data) ->
     Vs       = format_block(iolist_to_binary(Data)),
     {Ws,Bs1} = uint32_list(Vs, Bs0, []),
     {{A,B,C,D,E},Bs2} = sha1_block(list_to_tuple(Ws), Bs1),
-    {_,Bs3} = formula:operation(':=', a, A, Bs2),
-    {_,Bs4} = formula:operation(':=', b, B, Bs3),
-    {_,Bs5} = formula:operation(':=', c, C, Bs4),
-    {_,Bs6} = formula:operation(':=', d, D, Bs5),
-    {_,Bs7} = formula:operation(':=', e, E, Bs6),
+    {_,Bs3} = formula:operation('=', a, A, Bs2),
+    {_,Bs4} = formula:operation('=', b, B, Bs3),
+    {_,Bs5} = formula:operation('=', c, C, Bs4),
+    {_,Bs6} = formula:operation('=', d, D, Bs5),
+    {_,Bs7} = formula:operation('=', e, E, Bs6),
     try prover:eval(Bs7) of
 	false ->
 	    false;
