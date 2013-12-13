@@ -963,19 +963,58 @@ build_(false, Bs) ->
     {{bool,?FALSE}, Bs};
 build_(V={p,_P,_Ps}, Bs) ->
     {X,Bs1} = variable(V, Bs),
-    {{bool,X},Bs1};
+    {{bool,X},Bs1};    
+build_({uint,N,{var,V}}, Bs) ->
+    case proplists:lookup(V,Bs#bs.meta) of
+	none ->
+	    io:format("variable '~s' is not bound\n", [V]),
+	    error({unbound, V});
+	{_,W} ->
+	    const_vector(uint,W,N,Bs)
+    end;
 build_({uint,N,V}, Bs) ->
     if is_integer(V) -> const_vector(uint,V,N,Bs);
        true          -> var_vector(uint,V,N,Bs)
+    end;
+build_({int,N,{var,V}}, Bs) ->
+    case proplists:lookup(V,Bs#bs.meta) of
+	none ->
+	    io:format("variable '~s' is not bound\n", [V]),
+	    error({unbound, V});
+	{_,W} ->
+	    const_vector(int,W,N,Bs)
     end;
 build_({int,N,V}, Bs) ->
     if is_integer(V) -> const_vector(int,V,N,Bs);
        true          -> var_vector(int,V,N,Bs)
     end;
+build_({bit,N,{var,V}}, Bs) ->
+    case proplists:lookup(V,Bs#bs.meta) of
+	none ->
+	    io:format("variable '~s' is not bound\n", [V]),
+	    error({unbound, V});
+	{_,W} ->
+	    const_vector(bit,W,N,Bs)
+    end;
 build_({bit,N,V}, Bs) ->
     if  is_integer(V) -> const_vector(bit,V,N,Bs);
 	true          -> var_vector(bit,V,N,Bs)
     end;
+build_({var,V}, Bs) ->
+    case proplists:lookup(V,Bs#bs.meta) of
+	none ->
+	    io:format("variable '~s' is not bound\n", [V]),
+	    error({unbound, V});
+	{_,W} when W >=0 ->
+	    N = varp_math:integer_size(W),
+	    const_vector(uint,W,N,Bs);
+	{_,W} when W < 0 ->
+	    N = varp_math:integer_size(W),
+	    const_vector(int,W,N,Bs)
+    end;
+build_({vec,Fs}, Bs) ->
+    {Xs,Bs1} = build_list(Fs, Bs),
+    {{bit,length(Xs),[X||{bool,X} <- Xs]},Bs1};
 build_({'=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build_(F, Bs),
     operation('=', V, Y, Bs1);
@@ -983,15 +1022,13 @@ build_({'=', V, F}, Bs) when is_atom(V) ->
 build_({'-',F}, Bs) ->
     {Y,Bs1} = build_(F, Bs),
     operation('-', Y, Bs1);
-build_({'abs',F}, Bs) ->
-    {Y,Bs1} = build_(F, Bs),
-    operation('abs', Y, Bs1);
 build_({'not',A}, Bs) ->
     {Y,Bs1} = build_(A, Bs),
     operation('not', Y, Bs1);
 build_({'~',A}, Bs) ->
     {Y,Bs1} = build_(A, Bs),
     operation('~', Y, Bs1);
+
 %% Fixme: implement shift for variable argument
 build_({'<<',A,K},Bs) when is_integer(K), K>=0 ->
     {Y,Bs1} = build_(A,Bs),
@@ -1031,6 +1068,17 @@ build_({ite,C,T,E}, Bs) ->
     {Ef,Bs3} = build_(E, Bs2),
     ite(Cf, Tf, Ef, Bs3);
 
+build_({'abs',[A]}, Bs) ->
+    {Y,Bs1} = build_(A, Bs),
+    operation('abs', Y, Bs1);
+build_({'min',[A,B]}, Bs) ->
+    {A1,Bs1} = build_(A, Bs),
+    {B1,Bs2} = build_(B, Bs1),
+    operation('min', A1, B1, Bs2);
+build_({'max',[A,B]}, Bs) ->
+    {A1,Bs1} = build_(A, Bs),
+    {B1,Bs2} = build_(B, Bs1),
+    operation('max', A1, B1, Bs2);
 build_({'all',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     all(Xs, Bs1);
@@ -1044,60 +1092,61 @@ build_({'one',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     one(Xs, Bs1);
 
-build_({{'all',Xs}, F}, Bs) ->
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+%% Quatifer version
+build_({{'all',Qs}, F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     all(Ys,Bs1);
-build_({{'any',Xs},F}, Bs) ->
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+build_({{'any',Qs},F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     any(Ys,Bs1);
-build_({{'none',Xs},F}, Bs) ->
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+build_({{'none',Qs},F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     none(Ys,Bs1);
-build_({{'one',Xs},F}, Bs) ->
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+build_({{'one',Qs},F}, Bs) ->
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     eqk(1, length(Ys), Ys, Bs1);
 
-build_({{eqk,[X1|Xs]},F}, Bs) ->
+build_({{eqk,[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
 	    eqk(K, length(Ys), Ys, Bs1)
     end;
-build_({{neqk,[X1|Xs]},F}, Bs) ->
+build_({{neqk,[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
 	    {X,Bs2} = eqk(K, length(Ys), Ys, Bs1),
 	    {negate(X),Bs2}
     end;
-build_({{gtk,[X1|Xs]},F}, Bs) ->
+build_({{gtk,[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
 	    gtk(K, length(Ys), Ys, Bs1)
     end;
-build_({{gtek,[X1|Xs]},F}, Bs) ->
+build_({{gtek,[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 0 ->
 	    any(Ys,Bs1);
        is_integer(K),K >= 0 ->
 	    gtk(K-1, length(Ys), Ys, Bs1)
     end;
-build_({{ltk,[X1|Xs]},F}, Bs) ->
+build_({{ltk,[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 1 ->
-	    none(Xs,Bs1);
+	    none(Ys,Bs1);
        is_integer(K),K > 1 ->
 	    N = length(Ys),
 	    gtk(N-K, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
-build_({{ltek,[X1|Xs]},F}, Bs) ->
+build_({{ltek,[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
-    {Ys,Bs1} = build_quant(F,Xs,Bs),
+    {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 0 ->
-	    none(Xs,Bs1);
+	    none(Ys,Bs1);
        is_integer(K),K > 0 ->
 	    N = length(Ys),
 	    gtk(N-K-1, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
@@ -1120,23 +1169,26 @@ build_meta(F,X,[Xi|Xs],Acc,Bs) ->
 build_meta(_F,_X,[],Acc,Bs) ->
     {Acc,Bs}.
 
+build_quant(Fs, Qs, Bs) when is_list(Fs) ->
+    build_quant_list(Fs, Qs, Bs);
+build_quant(F, Qs, Bs) ->
+    build_quant_(F, Qs, Bs).
 
-build_quant(Fs, Xs, Bs) when is_list(Fs) ->
-    build_quant_list(Fs, Xs, Bs);
-build_quant(F, Xs, Bs) ->
-    build_quant_(F, Xs, Bs).
-
-build_quant_(F,[{'=',V,D}|Xs], Bs) ->
+build_quant_(F,[{'=',V,D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
-    build_quant_domain(F, V, Ds, Xs, Bs);
-build_quant_(F, [Expr|Xs], Bs) ->
+    build_quant_domain(F, V, Ds, Qs, Bs);
+build_quant_(F, [Expr|Qs], Bs) ->
     case eval_meta(Expr, Bs) of
 	false -> {[],Bs};
-	true -> build_quant_(F, Xs, Bs)
+	true -> build_quant_(F, Qs, Bs)
     end;
 build_quant_(F, [], Bs) ->
-    {X,Bs1} = build_(F, Bs),
-    {[X],Bs1}.
+    case build_(F, Bs) of
+	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
+	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
+	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
+	{X,Bs1} -> {[X],Bs1}
+    end.
 
 build_quant_domain(F, V, [Y|Ys], Xs, Bs) ->
     Bs1 = push_meta(V, Y, Bs),
@@ -1200,7 +1252,12 @@ eval_meta({f,F,As},Bs) ->
 	{log10,[A]}   -> math:log10(A);
 	{pi,[]}       -> math:pi();
 	{e,[]}        -> math:exp(1);
-	{pow,[A,B]}   -> math:pow(A,B);
+	{pow,[A,B]}   -> 
+	    if is_integer(A), is_integer(B) ->
+		    varp_math:pow(A,B);
+	       true ->
+		    math:pow(A,B)
+	    end;
 	{sin,[A]}     -> math:sin(A);
 	{cos,[A]}     -> math:cos(A);
 	{trunc,[A]}   -> trunc(A);
@@ -1208,19 +1265,6 @@ eval_meta({f,F,As},Bs) ->
 	{abs,[A]}     -> abs(A);
 	{max,[A,B]}   -> max(A,B);
 	{min,[A,B]}   -> min(A,B);
-	{plus,[A,B]}  -> A+B;
-	{'+',[A,B]}   -> A+B;
-	{minus,[A,B]} -> A-B;
-	{'-',[A,B]}   -> A-B;
-	{times,[A,B]} -> A*B;
-	{'*',[A,B]}   -> A*B;
-	{divide,[A,B]}    -> A div B;
-	{'/',[A,B]}       -> A div B;
-	{remainder,[A,B]} -> A rem B;
-	{'%',[A,B]}       -> A rem B;
-	{negate,[A]} -> -A;
-	{sum,As} -> foldl(fun(Ai,Sum) -> Ai+Sum end, 0, As);
-	{product,As} -> foldl(fun(Ai,Prod) -> Ai*Prod end, 1, As);
 	{F,As1} -> {f,F,As1}
     end;
 
@@ -1257,7 +1301,8 @@ eval_meta({Op,A},Bs) ->
 	{'-',A1} -> -A1;
 	{'+',A1} -> +A1;
 	{'~',A1} ->  bnot A1;
-	{'not',A1} -> not A1
+	{'not',A1} -> not A1;
+	{'!',A1} -> not A1
     end.
 
 eval_meta_list(As,Bs) ->
@@ -1450,6 +1495,26 @@ varg(V={int,_,_}) -> V;
 varg(V={bit,_,_}) -> V;
 varg({bool,X}) -> {bool,1,[X]}.
 
+vconst({uint,_,Xs}) -> vunsigned(Xs);
+vconst({int,_,Xs}) -> vsigned(Xs);
+vconst({bit,_,Xs}) -> vunsigned(Xs);
+vconst({bool,X}) -> vunsigned([X]).
+
+vsigned(Xs) ->
+    N = (1 bsl (length(Xs)-1)),
+    R = vunsigned(Xs),
+    if R =:= false -> false;
+       R < N -> R;
+       true -> R - 2*N
+    end.
+
+vunsigned(Xs) ->
+    vunsigned_(reverse(Xs), 0).
+
+vunsigned_([?TRUE|Xs],N)  -> vunsigned_(Xs,(N bsl 1)+1);
+vunsigned_([?FALSE|Xs],N) -> vunsigned_(Xs,(N bsl 1)+0);
+vunsigned_([_|_],_N) -> false;
+vunsigned_([],N) -> N.
 
 %% set vector size to N  extend (with FALSE) at end / cut at end
 vset_size(Xs,N) ->
@@ -1459,16 +1524,13 @@ vset_size(_Xs,0,_D) -> [];
 vset_size([],I,D) -> lists:duplicate(I,D);
 vset_size([X|Xs],I,D) -> [X|vset_size(Xs,I-1,D)].
 
-
 args(Fs,Bs) when is_list(Fs) ->
-    build_list(Fs,Bs);
+    build_list(Fs, Bs);
 args(F,Bs) ->
     case build_(F, Bs) of
-	{Fs,Bs1} when is_list(Fs) -> {Fs,Bs1};
-	%% experimental 
 	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
-	{{int,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
-	{{bit,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1}
+	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
+	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1}
     end.
 
 build_list(Fs, Bs) ->
@@ -1484,6 +1546,8 @@ build_list_([],Acc,Bs) ->
 %%
 operation('not',{bool,Y},Bs) ->
     {{bool,-Y},Bs};
+operation('!',{bool,Y},Bs) ->
+    {{bool,-Y},Bs};
 operation('~',Y={bool,_Y},Bs) ->
     operation('not',Y,Bs);
 operation('~', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
@@ -1497,56 +1561,91 @@ operation('-', {Type,N,Ys}, Bs) when ?is_int_type(Type) ->
     {{bool,_Co},Xs,Bs1} = vadd(Ys1,Zs1,Bs),
     %% ignore carry
     {{Type,N,Xs}, Bs1};
-operation('abs', {int,N,Ys}, Bs) ->
-    Sign = sign_bit({int,N,Ys}),
-    {{_,_,Zs},Bs1} = operation('-',{int,N,Ys},Bs),
+operation('abs', A={int,N,Ys}, Bs) ->
+    Sign = sign_bit(A),
+    {{_,_,Zs},Bs1} = operation('-',A,Bs),
     {Xs,Bs2} = vite(Sign, Zs, Ys, Bs1),
     {{int,N,Xs},Bs2};
-operation('abs', {uint,N,Ys}, Bs) ->
-    {{uint,N,Ys},Bs}.
+operation('abs', A={uint,_N,_Ys}, Bs) ->
+    {A,Bs}.
     
 %%
 %% Binary operator
 %%
+operation('&&', A, B, Bs) ->
+    operation('and', A, B, Bs);
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,-X,Y,-Z,Bs1)};
-operation('&',Y={bool,_Y},Z={bool,_Z}, Bs) ->
-    operation('and',Y,Z,Bs);
-operation('&',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Xs,Bs1} = vmap_op('and',Ys1,Zs1,Bs),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs1};
+operation('and',A,B,Bs) ->
+    operation('&',A,B,Bs);
+operation('&',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cx,Bs1} = vmap_op('and',Ax1,Bx1,Bs),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {{bool,C1},Bs1};
+       true ->
+	    {{Ct,Cn,Cx},Bs1}
+    end;
 
+operation('||', A, B, Bs) ->
+    operation('or', A, B, Bs);
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,X,-Y,Z,Bs1)};
-operation('|',Y={bool,_Y},Z={bool,_Z}, Bs) ->
-    operation('or',Y,Z, Bs);
-operation('|',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Xs,Bs1} = vmap_op('or',Ys1,Zs1,Bs),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs1};
+operation('or',A,B,Bs) ->
+    operation('|',A,B,Bs);
+operation('|',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cx,Bs1} = vmap_op('or',Ax1,Bx1,Bs),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {{bool,C1},Bs1};
+       true ->
+	    {{Ct,Cn,Cx},Bs1}
+    end;
 
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,X,Y,Z,Bs1)};
+operation('imp',A,B,Bs) ->
+    {An,Bs1} = operation('~',A,Bs),
+    operation('|',An,B,Bs1);
 
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(equ,X,Y,Z,Bs1)};
+operation('equ',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cx,Bs1} = vmap_op('equ',Ax1,Bx1,Bs),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {{bool,C1},Bs1};
+       true ->
+	    {{Ct,Cn,Cx},Bs1}
+    end;
 
 operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(equ,X,-Y,Z,Bs1)};
-%% operation('^',Y={bool,_Y},Z={bool,_Z},Bs) ->
-%%     operation('xor',Y,Z,Bs);
+operation('xor',A,B,Bs) ->
+    operation('^',A,B,Bs);
 operation('^',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1561,16 +1660,7 @@ operation('^',A,B,Bs) ->
        true ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
-%%    K = erlang:max(N,M),
-%%    Ys1 = vextend(Type1,Ys,N,K),
-%%    Zs1 = vextend(Type2,Zs,M,K),
-%%    {Xs,Bs1} = vmap_op('xor',Ys1,Zs1,Bs),
-%%    Type = mix_type(Type1,Type2),
-%%    {{Type,K,Xs},Bs1};
 
-
-operation('+',Y={bool,_Y},Z={bool,_Z},Bs) ->
-    operation('xor',Y,Z,Bs);
 operation('+',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1582,8 +1672,8 @@ operation('+',A,B,Bs) ->
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
-
-
+%% FIXME:
+%% A < B  <=>  A - B < 0
 operation('<',{bool,Y},{bool,Z},Bs) ->  %% Y < Z
     operation('and', negate({bool,Y}),{bool,Z}, Bs);
 operation('<',{int,An,Ax},{int,Bn,Bx},Bs) when An>1, Bn>1 ->
@@ -1620,9 +1710,11 @@ operation('<=',Y,Z,Bs) ->
 operation('>=',Y,Z,Bs) ->
     operation('<=',Z,Y,Bs);
 
-
 operation('!=',{bool,Y},{bool,Z},Bs) ->
     operation('xor',{bool,Y},{bool,Z},Bs);
+operation('!=',Y,Z,Bs) ->
+    {C,Bs1} = operation('==', Y, Z, Bs),
+    {negate(C),Bs1};
 
 operation('==',{bool,Y},{bool,Z},Bs) ->
     operation('equ',{bool,Y},{bool,Z},Bs);
@@ -1641,11 +1733,7 @@ operation('<->', A, B, Bs) ->
 operation('->', A, B, Bs) ->
     operation('imp', A, B, Bs);
 
-operation('&&', A, B, Bs) ->
-    operation('and', A, B, Bs);
 
-operation('||', A, B, Bs) ->
-    operation('or', A, B, Bs);
 
 %%
 %% Alias operation
@@ -1655,45 +1743,63 @@ operation('=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
 operation('=',V,X={bool,Xb},Bs) when is_atom(V) ->
     {X, alias(V, Xb, Bs)};
 
+operation('<<',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    K = vconst(B),
+    Ax1 = if K =:= false ->
+		  error({shift_not_constant, B});
+	     K >=0 ->
+		  vshift_left(K,An,Ax);
+	     At =:= int ->
+		  vshift_right(-K,An,Ax);
+	     true ->
+		  vushift_right(-K,An,Ax)
+	  end,
+    {{At,An,Ax1}, Bs};
 
-
-operation('!=',Y,Z,Bs) ->
-    {C,Bs1} = operation('==', Y, Z, Bs),
-    {negate(C),Bs1};
-
-
-
-
-operation('<<',{Type,N,Xs},K,Bs) 
-  when ?is_vec_type(Type), is_integer(K), K >= 0 ->
-    Xs1 = vshift_left(K,N,Xs),
-    {{Type,N,Xs1}, Bs};
-
-operation('>>',{uint,N,Xs},K,Bs) when is_integer(K), K >= 0 ->
-    Xs1 = vushift_right(K,N,Xs),
-    {{uint,N,Xs1}, Bs};
-operation('>>',{bit,N,Xs},K,Bs) when is_integer(K), K >= 0 ->
-    Xs1 = vushift_right(K,N,Xs),
-    {{bit,N,Xs1}, Bs};
-operation('>>',{int,N,Xs},K,Bs) when is_integer(K), K >= 0 ->
-    Xs1 = vshift_right(K,N,Xs),
-    {{int,N,Xs1}, Bs};
-
+operation('>>',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    K = vconst(B),
+    Ax1 = if K =:= false ->
+		  error({shift_not_constant, B});
+	     K >=0, At =:= int ->
+		  vshift_right(K,An,Ax);
+	     K >= 0 ->
+		  vushift_right(K,An,Ax);
+	     K < 0 ->
+		  vshift_left(-K,An,Ax)
+	  end,
+    {{At,An,Ax1}, Bs};
+	    
 %% rotate left
-operation('<<<',X={Type,N,_Xs},K,Bs0) when 
-      is_integer(N), ?is_vec_type(Type), is_integer(K), K >= 0 ->
-    C = K rem N,
-    {X1, Bs1} = operation('<<',X,C,Bs0),
-    {X2, Bs2} = operation('>>',X,(N-C),Bs1),
-    operation('|', X1, X2, Bs2);
+operation('<<<',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    K = vconst(B),
+    if K =:= false ->
+	    error({shift_not_constant, B});
+       K >= 0 ->
+	    K1 = K rem An,
+	    Ax1 = vshift_left(K1,An,Ax),
+	    Ax2 = vushift_right(An-K,An,Ax),
+	    %% fixme: permute bits (or is not needed here)	    
+	    {Ax3,Bs1} = vmap_op('or',Ax1,Ax2,Bs),
+	    {{At,An,Ax3},Bs1}
+    end;
 
 %% rotate right
-operation('>>>',X={Type,N,_Xs},K,Bs0) when 
-      is_integer(N), ?is_vec_type(Type), is_integer(K), K >= 0 ->
-    C = K rem N,
-    {X1, Bs1} = operation('>>',X,C,Bs0),
-    {X2, Bs2} = operation('<<',X,(N-C),Bs1),
-    operation('|', X1, X2, Bs2);
+operation('>>>',A,B,Bs) ->
+    {At,An,Ax} = varg(A),
+    K = vconst(B),
+    if K =:= false ->
+	    error({shift_not_constant, B});
+       K >= 0 ->
+	    K1 = K rem An,
+	    Ax1 = vushift_right(K1,An,Ax),
+	    Ax2 = vshift_left(An-K,An,Ax),
+	    %% fixme: permute bits (or is not needed here)
+	    {Ax3,Bs1} = vmap_op('or',Ax1,Ax2,Bs),
+	    {{At,An,Ax3},Bs1}
+    end;
 
 operation('-',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1706,13 +1812,17 @@ operation('-',A,B,Bs) ->
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
-operation('*',{uint,N,Ys},{uint,M,Zs},Bs) ->
-    %% integer type?
-    K = erlang:max(N,M),
-    Ys1 = vextend(uint,Ys,N,K),
-    Zs1 = vextend(uint,Zs,M,K),
-    {Xs,Bs1} = vmul(Ys1,Zs1,Bs),
-    {{uint,K+K,Xs},Bs1};
+operation('*',A,B,Bs) ->
+    %% integer type? 
+    %% FIXME: abs(A) * abs(B) !!
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cx,Bs1} = vmul(Ax1,Bx1,Bs),
+    Ct = mix_type(At,Bt),
+    {{Ct,Cn+Cn,Cx},Bs1};
 
 %% DivZero  coould be used to generate a Exception output
 operation('/',{uint,N,Ys},{uint,M,Zs},Bs) ->
@@ -1734,31 +1844,34 @@ operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
 
 operation('min',Y={bool,_Y},Z={bool,_Z},Bs) ->
     operation('and',Y,Z,Bs);
-operation('min',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
+operation('min',A,B,Bs) ->
     %% integer type?
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Cond,Bs1} = operation('<',{Type1,K,Ys1},{Type2,K,Zs1},Bs),
-    {Xs,Bs2} = vite(Cond, Ys1, Zs1, Bs1),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs2};
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cond,Bs1} = vless(Ax1,Bx1,Bs),
+    {Cx,Bs2} = vite(Cond, Ax1, Bx1, Bs1),
+    Ct = mix_type(At,Bt),
+    {{Ct,Cn,Cx},Bs2};
 
 operation('max',Y={bool,_Y},Z={bool,_Z},Bs) ->
     operation('or',Y,Z,Bs);
-operation('max',{Type1,N,Ys},{Type2,M,Zs},Bs) ->
+operation('max',A,B,Bs) ->
     %% integer type?
-    K = erlang:max(N,M),
-    Ys1 = vextend(Type1,Ys,N,K),
-    Zs1 = vextend(Type2,Zs,M,K),
-    {Cond,Bs1} = operation('>',{Type1,K,Ys1},{Type2,K,Zs1},Bs),
-    {Xs,Bs2} = vite(Cond, Ys1, Zs1, Bs1),
-    Type = mix_type(Type1,Type2),
-    {{Type,K,Xs},Bs2}.
-    
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    {Cond,Bs1} = vless(Bx1,Ax1,Bs),
+    {Cx,Bs2} = vite(Cond, Ax1, Bx1, Bs1),
+    Ct = mix_type(At,Bt),
+    {{Ct,Cn,Cx},Bs2}.
+
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
-
 set_carry_({bool,Carry}, false, Bs) ->    %% never overflow
     triple(equ,?TRUE,Carry,?FALSE,Bs);
 set_carry_({bool,Carry}, true, Bs) ->     %% only overflow

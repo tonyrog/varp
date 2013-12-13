@@ -3,7 +3,7 @@
 %%
 Terminals
 	symbol variable hexnum binnum octnum decnum
-        signed unsigned true false forall exists 
+        signed unsigned true false 
         eqk neqk gtk gtek ltk ltek all any none one
 	'and' 'or' 'xor' 'not' imp equ 'A' 'E'
         '&' '&&' '|' '||' '^' '!' '~'  '->' '<->'
@@ -108,9 +108,6 @@ exprs -> expr ',' exprs : ['$1' | '$3'].
 qtype -> 'E' '!' : one.
 qtype -> 'E'     : any.
 qtype -> 'A'     : all.
-qtype -> exists  '!' : one.
-qtype -> exists  : any.
-qtype -> forall  : all.
 qtype -> all     : all.
 qtype -> any     : any.
 qtype -> one     : one.
@@ -135,22 +132,23 @@ quantifier -> '[' qtype exprs ']' : {'$2','$3'}.
 lexpr -> true                     : true.
 lexpr -> false                    : false.
 lexpr -> integer                  : constant(value('$1')).
+lexpr -> variable                 : {var,name('$1')}.
 lexpr -> '-' lexpr                : {'-', '$2'}.
 
 lexpr -> pexpr                    : '$1'.
-lexpr -> lexpr ':' sexpr '/' signed  : {int,'$3','$1'}.
+lexpr -> lexpr ':' sexpr '/' signed   : {int,'$3','$1'}.
 lexpr -> lexpr ':' sexpr '/' unsigned : {uint,'$3','$1'}.
-lexpr -> lexpr ':' sexpr           : {uint,'$3','$1'}.
+lexpr -> lexpr ':' sexpr              : {uint,'$3','$1'}.
 
-lexpr -> lexpr '+' lexpr          : {op('$2'), '$1', '$3' }.
-lexpr -> lexpr '-' lexpr          : {op('$2'), '$1', '$3' }.
-lexpr -> lexpr '*' lexpr          : {op('$2'), '$1', '$3'}.
-lexpr -> lexpr '/' lexpr          : {op('$2'), '$1', '$3'}.
-lexpr -> lexpr '%' lexpr          : {op('$2'), '$1', '$3'}.
-lexpr -> lexpr '<<' lexpr         : {op('$2'), '$1', '$3'}.
-lexpr -> lexpr '>>' lexpr         : {op('$2'), '$1', '$3'}.
-lexpr -> lexpr '<<<' lexpr        : {op('$2'), '$1', '$3'}.
-lexpr -> lexpr '>>>' lexpr        : {op('$2'), '$1', '$3'}.
+lexpr -> lexpr '+' lexpr          : { op('$2'), '$1', '$3' }.
+lexpr -> lexpr '-' lexpr          : { op('$2'), '$1', '$3' }.
+lexpr -> lexpr '*' lexpr          : { op('$2'), '$1', '$3'}.
+lexpr -> lexpr '/' lexpr          : { op('$2'), '$1', '$3'}.
+lexpr -> lexpr '%' lexpr          : { op('$2'), '$1', '$3'}.
+lexpr -> lexpr '<<' lexpr         : { op('$2'), '$1', '$3'}.
+lexpr -> lexpr '>>' lexpr         : { op('$2'), '$1', '$3'}.
+lexpr -> lexpr '<<<' lexpr        : { op('$2'), '$1', '$3'}.
+lexpr -> lexpr '>>>' lexpr        : { op('$2'), '$1', '$3'}.
 lexpr -> lexpr 'and' lexpr        : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '&&'  lexpr        : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '&'   lexpr        : { op('$2'), '$1', '$3' }.
@@ -164,10 +162,12 @@ lexpr -> lexpr '^'   lexpr        : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr 'equ' lexpr        : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '<->' lexpr        : { op('$2'), '$1', '$3' }.
 
-lexpr -> 'not' lexpr               : { op('$1'), '$2' }.
-lexpr -> '!' lexpr                 : { op('$1'), '$2' }.
-lexpr -> '~' lexpr                 : { op('$1'), '$2' }.
-lexpr -> '(' lexpr ')'             : '$2'.
+lexpr -> 'not' lexpr              : { op('$1'), '$2' }.
+lexpr -> '!' lexpr                : { op('$1'), '$2' }.
+lexpr -> '~' lexpr                : { op('$1'), '$2' }.
+lexpr -> '(' lexpr ')'            : '$2'.
+lexpr -> variable '(' lexprs ')'  : { name('$1'), '$3'}.
+    
 lexpr -> lexpr '<'  lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '<=' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '>'  lexpr          : { op('$2'), '$1', '$3' }.
@@ -176,7 +176,7 @@ lexpr -> lexpr '==' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '!=' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> quantifier '(' lexprs ')' : {'$1','$3'}.
 lexpr -> quantifier lexpr          : {'$1','$2'}.
-lexpr -> '{' lexprs '}'            : '$2'.
+lexpr -> '{' lexprs '}'            : {vec,'$2'}.
 %% fixme?
 %% lexpr -> lexpr '[' pexpr '/' pexpr ']' : {subst,'$3','$5','$1'}.
 

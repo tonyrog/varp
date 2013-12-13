@@ -1,0 +1,230 @@
+VARP Syntax 
+
+
+constants
+	true false
+	
+propositional variables
+	P
+	Q(1)
+	R(1,2,3)
+
+connectives
+	A AND B,  A and B, A && B
+	A OR  B,  A or B,  A || B
+	A XOR B,  A xor B
+	A IMP B,  A imp B, A -> B
+	A EQU B,  A equ B, A <-> B
+	
+Quantifiers
+	[A x=1..n] P(x)	 <->   [ALL x=1..n]P(x)
+	[E x=1..n] P(x)  <->   [ANY x=1..n]P(x)
+	[E! x=1..n] P(x) <->   [ONE x=1..n]P(x)  <-> [EQ 1,x=1..n]P(x)
+	[NONE x=1..4]
+	[EQ k,x=1..n] P(x)
+	[NEQ k,x=1..n] P(x)
+	[GT k,x=1..n] P(x)
+	[GTE k,x=1..n] P(x)
+	[LT k,x=1..n] P(x)
+	[LTE k,x=1..n] P(x)
+
+Quantifier variable iterator expressions
+   	x=from .. to
+	x=1..n
+	x=(i+1)..(i+7)
+
+Quantifer relation (restrictions)
+	x < y
+	x <= y
+	x > y
+	x >= y
+	x == y
+	x != y
+	x && y   (x and y )
+	x || y   (x or y)
+	x xor y
+	!x       (not x)
+	not x
+
+Quantifer calculatations
+	-x
+	+x
+	~x
+	x + y
+	x - y
+	x * y
+	x / y
+	x % y
+	x << n
+	x >> n
+	x & y
+	x | y
+	x ^ y
+	factorial(x)
+	binom(x,y)
+	sqrt(x)    (float)
+	ln(x)      (float)
+	log2(x)    (float)
+	log10(x)   (float)
+	log(x,n)   (float)
+	pi()	   (float)
+	e()	   (float)
+	pow(a,b)   (integer when a,b integer)
+	pow(a,b)   (float otherwise)
+	sin(a)
+	cos(a)
+	trunc(a)   (convert float to integer)
+	round(a)   (convert float to integer)
+	abs(a)
+	min(a,b)
+	max(a,b)
+
+Quantifier lists
+	[A x=1..n][E y=1..n,x<y] P(x,y)
+	[A x=1..4][A y=1..4](P(x,y)->Q(y)) <-> [A x=1..4,y=1..4](P(x,y)->Q(y))
+
+Integer constants
+	0 1 2 ...
+	0b0101
+	0xabcd
+
+Integer variables (bit vectors)
+	X:n
+	X:n/signed
+	X:n/unsigned
+	Const:n
+	
+	X:4 + 12
+	X:4/signed - 1
+	
+Integer (bit vector) expressions
+	-X:n
+	X:n + Y:m
+	X:n - Y:m
+	X:n * Y:m
+	X:n / Y:m
+	X:n % Y:m
+	X:n << K	(shift left, muliply by 2^K)
+	X:n >> K	(shift right, divide by 2^K)
+	X:n <<< K	(rotate left)
+	X:n >>> K	(rotate right)
+	min(A:n,B:m)
+	max(A:n,B:m)
+	abs(A:n)
+	y		quantifier bound constant
+	y:n		quantifier bound constant with size
+
+
+Integer (bit vector) comparision
+	A:n < B:m
+	A:n <= B:m
+	A:n > B:m
+	A:n >= B:m
+	A:n == B:m
+	A:n != B:m
+	
+Bit vector
+    Construct vectors from propositional constant, variables
+    and formulas:
+
+	{A1,A2,A2,,,,An}
+
+Bit vectors operations
+
+    A:n & B:m		component wise and
+    A:n | B:m		component wise or
+    A:n ^ B:m		component wise xor
+    ~ A:n 		component wise not
+
+Alternate forms:
+    [ALL](A,B,C,D) <-> [ALL]{A,B,C,D} <-> A & B & C & D
+
+    [ALL](A:3)
+
+    ([ALL] A:3  binds like ([ALL] A):3 which is a synax error )
+
+    [ONE](A:3) <-> (A:3==4) or (A:3==2) or (A:3==1)
+
+    	One bit is set in integer A (3 bit)
+
+    [GT 2](B:4)
+    	
+	More than 2 bits set in B (4 bits)
+	Yield (B=15, B=14, B=13, B=11, B=7)
+
+    [GT 2](B:4/signed)
+
+    	(B=-1, B=-2, B=-3, B=-5, B=7)
+
+
+Mixing integer, bit vectors and propositionals
+
+It is possible to mix types (upto a certain point). Propostional 
+variables behaves like A:1 declared variabels when applied to 
+integer operators:
+
+   A + 0
+   A & 1
+   A & B	
+   A + B
+   
+   max(A, B:3) > 2
+   min(A, B:3) == 1
+
+   [A x=1..10] (A:4 + x:4 < 12)
+
+      1: A=15  (wrap)
+      2: A=1
+      3: A=0
+      3
+
+   (P(0) <-> false) && (P(1) <-> true) && [A x=0..1] (P(x) -> R)
+   	 same as:
+   [A x=0..1] (x -> R)
+      1: P(0),P(1),R
+      2: P(0),R
+      3: P(1),R
+      4: R
+      5: 
+      5
+
+Examples
+
+Formula that express the sudoku board 
+S(i,j,k) means that sudoku puzzle possition (i,j) contains value k
+
+( [A i=1..9,j=1..9] [E! k=1..9]  S(i,j,k) ) &&
+( [A i=1..9,k=1..9] [E! j=1..9]  S(i,j,k) ) &&
+( [A j=1..9,k=1..9] [E! i=1..9]  S(i,j,k) ) &&
+( [A s=0..2,t=0..2,k=1..9] [E! i=0..8]
+   S(3*s+(i/3)+1, 3*t+(i%3)+1, k) )
+
+The knuth formula (knuth.varp)
+
+(
+  ( [A x=1..n][A y=1..n,x<y] (not P(x,y) or not P(y,x)) ) and
+  ( [A x=1..n][E y=1..n,x!=y] P(y,x) ) and
+  ( [A x=1..n][A y=1..n][A z=1..n,x!=y,x<z,y<z]
+    ((P(x,y) and P(y,z))->P(x,z)))
+)
+
+run like:
+    varp satisfy n=5 knuth.varp
+
+if the above formula is save and called knuth.varp
+
+If P (8 bit) is prime then the following formula
+
+( A:8 * B:8 == P ) && (A:8 < B:8) && (A:8 > 1)
+
+do not have any models
+
+Example:
+
+varp satisfy --print model
+( A:8 * B:8 == 221 ) && (A:8 < B:8) && (A:8 > 1)
+^D
+1: A=13,B=17
+1
+
+In other words 221 is not primes since 221 = 13*17
