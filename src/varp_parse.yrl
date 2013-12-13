@@ -140,6 +140,10 @@ lexpr -> lexpr ':' sexpr '/' signed   : {int,'$3','$1'}.
 lexpr -> lexpr ':' sexpr '/' unsigned : {uint,'$3','$1'}.
 lexpr -> lexpr ':' sexpr              : {uint,'$3','$1'}.
 
+lexpr -> lexpr '[' expr ']'           : { bit_index, '$1', '$3'}.
+lexpr -> lexpr '[' expr ':' expr ']'  : { bit_range, '$1', '$3', '$5'}.
+    
+
 lexpr -> lexpr '+' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '-' lexpr          : { op('$2'), '$1', '$3' }.
 lexpr -> lexpr '*' lexpr          : { op('$2'), '$1', '$3'}.

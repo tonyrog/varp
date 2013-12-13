@@ -1028,6 +1028,28 @@ build_({'not',A}, Bs) ->
 build_({'~',A}, Bs) ->
     {Y,Bs1} = build_(A, Bs),
     operation('~', Y, Bs1);
+build_({'!',A}, Bs) ->
+    {Y,Bs1} = build_(A, Bs),
+    operation('!', Y, Bs1);
+
+build_({bit_index,A,I},Bs) ->
+    I1 = eval_meta(I,Bs),
+    case build_(A, Bs) of
+	{{uint,N,Xs}, Bs1} -> {select_bool(I1,N,Xs), Bs1};
+	{{int,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+	{{bit,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+	{X,Bs1} -> {select_bool(I1,1,[X]),Bs1}
+    end;
+
+build_({bit_range,A,I,J},Bs) ->
+    I1 = eval_meta(I,Bs),
+    J1 = eval_meta(J,Bs),
+    case build_(A, Bs) of
+	{{uint,N,Xs}, Bs1} -> {select_range(I1,J1,N,Xs), Bs1};
+	{{int,N,Xs}, Bs1}  -> {select_range(I1,J1,N,Xs), Bs1};
+	{{bit,N,Xs}, Bs1}  -> {select_range(I1,J1,N,Xs), Bs1};
+	{X,Bs1} -> {select_range(I1,J1,1,[X]),Bs1}
+    end;
 
 %% Fixme: implement shift for variable argument
 build_({'<<',A,K},Bs) when is_integer(K), K>=0 ->
@@ -1533,6 +1555,23 @@ args(F,Bs) ->
 	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1}
     end.
 
+%% select the I'th bit in a bit vector
+select_bool(I,N,Xs) when I >= 0, I < N ->
+    {bool,lists:nth(I+1,Xs)};
+select_bool(_I,_N,_Xs) ->
+    {bool,?FALSE}.
+
+select_range(J,I,N,Xs) when J >= I, I>=0, J<N ->
+    N1 = (J-I)+1,
+    {uint,N1,lists:sublist(Xs,I+1,N1)};
+select_range(I,J,N,Xs) when J >= I, I>=0, J<N ->
+    N1 = (J-I)+1,
+    {uint,N1,lists:reverse(lists:sublist(Xs,I+1,N1))};
+select_range(I,J,_N,_Xs) ->
+    N1 = abs(I-J)+1,
+    {uint,N1,lists:duplicate(N1,?FALSE)}.
+
+
 build_list(Fs, Bs) ->
     build_list_(Fs, [], Bs).
     
@@ -1779,11 +1818,9 @@ operation('<<<',A,B,Bs) ->
 	    error({shift_not_constant, B});
        K >= 0 ->
 	    K1 = K rem An,
-	    Ax1 = vshift_left(K1,An,Ax),
-	    Ax2 = vushift_right(An-K,An,Ax),
-	    %% fixme: permute bits (or is not needed here)	    
-	    {Ax3,Bs1} = vmap_op('or',Ax1,Ax2,Bs),
-	    {{At,An,Ax3},Bs1}
+	    {Ax1,Ax2} = lists:split(K1, Ax),
+	    Ax3 = Ax2++Ax1,
+	    {{At,An,Ax3},Bs}
     end;
 
 %% rotate right
@@ -1794,11 +1831,9 @@ operation('>>>',A,B,Bs) ->
 	    error({shift_not_constant, B});
        K >= 0 ->
 	    K1 = K rem An,
-	    Ax1 = vushift_right(K1,An,Ax),
-	    Ax2 = vshift_left(An-K,An,Ax),
-	    %% fixme: permute bits (or is not needed here)
-	    {Ax3,Bs1} = vmap_op('or',Ax1,Ax2,Bs),
-	    {{At,An,Ax3},Bs1}
+	    {Ax1,Ax2} = lists:split(An-K1, Ax),
+	    Ax3 = Ax2++Ax1,
+	    {{At,An,Ax3},Bs}
     end;
 
 operation('-',A,B,Bs) ->
