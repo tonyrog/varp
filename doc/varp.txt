@@ -113,7 +113,8 @@ Integer (bit vector) expressions
 	abs(A:n)
 	y		quantifier bound constant
 	y:n		quantifier bound constant with size
-
+	X[n]		select the n:th bit, 2^n
+	X[n:m]		select a bit sub-vector X[0:size-1] result = reverse
 
 Integer (bit vector) comparision
 	A:n < B:m

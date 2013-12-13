@@ -1493,6 +1493,12 @@ negate({bool,X}) -> {bool,-X}.
 vnot(Xs) ->
     map(fun(X) -> -X end, Xs).
 
+%% negate "high" bit
+vsnot([X]) -> [-X];
+vsnot([X|Xs]) -> [X|vsnot(Xs)];
+vsnot([]) -> [].
+
+
 vextend(int,Xs,N,K) ->
     vset_size(Xs,K,lists:nth(N,Xs));
 vextend(uint,Xs,_N,K) ->
@@ -1613,9 +1619,17 @@ operation('abs', A={uint,_N,_Ys}, Bs) ->
 %%
 operation('&&', A, B, Bs) ->
     operation('and', A, B, Bs);
+
+operation('and',{bool,?TRUE},{bool,?TRUE}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('and',{bool,?FALSE},{bool,_Z}, Bs) ->
+    {{bool,?FALSE},Bs};
+operation('and',{bool,_Y},{bool,?FALSE}, Bs) ->
+    {{bool,?FALSE},Bs};
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,-X,Y,-Z,Bs1)};
+
 operation('and',A,B,Bs) ->
     operation('&',A,B,Bs);
 operation('&',A,B,Bs) ->
@@ -1635,9 +1649,17 @@ operation('&',A,B,Bs) ->
 
 operation('||', A, B, Bs) ->
     operation('or', A, B, Bs);
+
+operation('or',{bool,?FALSE},{bool,?FALSE}, Bs) ->
+    {{bool,?FALSE},Bs};
+operation('or',{bool,?TRUE},{bool,_Z}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
+    {{bool,?FALSE},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,X,-Y,Z,Bs1)};
+
 operation('or',A,B,Bs) ->
     operation('|',A,B,Bs);
 operation('|',A,B,Bs) ->
@@ -1655,6 +1677,12 @@ operation('|',A,B,Bs) ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
 
+operation('imp',{bool,?FALSE},{bool,_Z}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('imp',{bool,?TRUE},{bool,?TRUE}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('imp',{bool,?TRUE},{bool,?FALSE}, Bs) ->
+    {{bool,?FALSE},Bs};
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,X,Y,Z,Bs1)};
@@ -1662,9 +1690,18 @@ operation('imp',A,B,Bs) ->
     {An,Bs1} = operation('~',A,Bs),
     operation('|',An,B,Bs1);
 
+operation('equ',{bool,?TRUE},{bool,?FALSE},Bs) ->
+    {{bool,?FALSE},Bs};    
+operation('equ',{bool,?FALSE},{bool,?TRUE},Bs) ->
+    {{bool,?FALSE},Bs};
+operation('equ',{bool,?TRUE},{bool,?TRUE},Bs) ->
+    {{bool,?TRUE},Bs};
+operation('equ',{bool,?FALSE},{bool,?FALSE},Bs) ->
+    {{bool,?TRUE},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(equ,X,Y,Z,Bs1)};
+
 operation('equ',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1855,8 +1892,13 @@ operation('*',A,B,Bs) ->
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
-    {Cx,Bs1} = vmul(Ax1,Bx1,Bs),
     Ct = mix_type(At,Bt),
+    {Cx,Bs1} = 
+	if Ct =:= int ->
+		vsmul(Ax1,Bx1,Bs);
+	   true ->
+		vmul(Ax1,Bx1,Bs)
+	end,
     {{Ct,Cn+Cn,Cx},Bs1};
 
 %% DivZero  coould be used to generate a Exception output
@@ -1955,19 +1997,38 @@ mix_type(bool,bit)  -> bit.
 %% 3: [1,1,1,1,0] + [0,0,1,0,1] = [1,1,0,0,0,1]
 %%
 vmul(Ys, Zs, Bs) ->
-    Xs = vextend(uint,[],0,length(Ys)),
+    N = length(Ys),
+    Xs = vextend(uint,[],0,N),
     vmul(Ys, Zs, Xs, Bs).
 
-vmul([?FALSE|Ys], Zs, Xs, Bs) ->
-     vmul(Ys, [?FALSE|Zs], Xs++[?FALSE], Bs);
-vmul([?TRUE|Ys], Zs, Xs, Bs) ->
-    {{bool,Co},Xs1,Bs1} = vadd(Xs,Zs,Bs),
-    vmul(Ys, [?FALSE|Zs], Xs1++[Co], Bs1);
 vmul([Y|Ys], Zs, Xs, Bs) ->
+    %% optimize to only run 'and' over the first N Zs!
     {YZs,Bs1} = vmap_opx('and',Zs,Y,Bs),
     {{bool,Co},Xs1,Bs2} = vadd(Xs,YZs,Bs1),
     vmul(Ys, [?FALSE|Zs], Xs1++[Co], Bs2);
 vmul([], _Zs, Xs, Bs) ->
+    {Xs, Bs}.
+
+
+vsmul([Y|Ys], Zs, Bs) ->
+    %% N = length(Ys)+1,
+    {Xs0,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    Xs1 = vnot(Xs0)++[?TRUE],
+    vsmul(Ys, [?FALSE|Zs], Xs1, Bs1).
+
+vsmul([Y], Zs, Xs, Bs) ->
+    %% optimize to only run and over the first N Zs!
+    {YZs0,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    YZs = vsnot(vnot(YZs0))++[?TRUE],
+    {{bool,Co},Xs1,Bs2} = vadd(Xs,[?FALSE|YZs],Bs1),
+    {Xs1++[Co], Bs2};
+vsmul([Y|Ys], Zs, Xs, Bs) ->
+    %% optimize to only run and over the first N Zs!
+    {YZs0,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    YZs = vsnot(YZs0),
+    {{bool,Co},Xs1,Bs2} = vadd(Xs,YZs,Bs1),
+    vsmul(Ys, [?FALSE|Zs], Xs1++[Co], Bs2);
+vsmul([], _Zs, Xs, Bs) ->
     {Xs, Bs}.
 
 %%
@@ -2205,7 +2266,7 @@ vmap_opx(Op,[Y|Ys],Z,Xs,Bs) ->
     vmap_opx(Op,Ys,Z,[X|Xs],Bs1);
 vmap_opx(_Op,[],_Z,Xs,Bs) ->
     {reverse(Xs),Bs}.
-    
+
 
 %% circuit for Ys < Zs
 %% vless([Y|Ys],[Z|Zs],Xs,Bs) ->

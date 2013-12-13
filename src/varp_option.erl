@@ -23,7 +23,7 @@
 -record(option,
 	{
 	  long,
-	  short = "",
+	  short,
 	  key,
 	  spec,
 	  default,
