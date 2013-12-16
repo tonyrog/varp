@@ -20,10 +20,13 @@ expand(false,_Bs) ->
     false;
 expand(V, Bs) when is_atom(V) -> 
     expand_meta({p,V,[]}, Bs);
+expand({expr,E},Bs) ->
+    eval_meta(E,Bs);
 expand(_P0={p,P,Vs},Bs) ->
     P1 = {p,P,eval_meta_list(Vs,Bs)},
     %% io:format("expand: ~p => ~p\n", [_P0, P1]),
     expand_meta(P1, Bs);
+
 expand({'&',A,B},Bs) ->     {'&',expand(A,Bs),expand(B,Bs)};
 expand({'&&',A,B},Bs) ->    {'&&',expand(A,Bs),expand(B,Bs)};
 expand({'and',A,B},Bs) ->   {'and',expand(A,Bs),expand(B,Bs)};
@@ -294,7 +297,12 @@ eval_meta({f,F,As},Bs) ->
 	{log10,[A]}   -> math:log10(A);
 	{pi,[]}       -> math:pi();
 	{e,[]}        -> math:exp(1);
-	{pow,[A,B]}   -> math:pow(A,B);
+	{pow,[A,B]}   -> 
+	    if is_integer(A), is_integer(B) ->
+		    varp_math:pow(A,B);
+	       true ->
+		    math:pow(A,B)
+	    end;
 	{sin,[A]}     -> math:sin(A);
 	{cos,[A]}     -> math:cos(A);
 	{trunc,[A]}   -> trunc(A);
@@ -302,17 +310,6 @@ eval_meta({f,F,As},Bs) ->
 	{abs,[A]}     -> abs(A);
 	{max,[A,B]}   -> max(A,B);
 	{min,[A,B]}   -> min(A,B);
-	{plus,[A,B]}  -> A+B;
-	{'+',[A,B]}   -> A+B;
-	{minus,[A,B]} -> A-B;
-	{'-',[A,B]}   -> A-B;
-	{times,[A,B]} -> A*B;
-	{'*',[A,B]}   -> A*B;
-	{divide,[A,B]}    -> A div B;
-	{'/',[A,B]}       -> A div B;
-	{remainder,[A,B]} -> A rem B;
-	{'%',[A,B]}       -> A rem B;
-	{negate,[A]} -> -A;
 	{F,As1} -> {f,F,As1}
     end;
 eval_meta({Op,A,B},Bs) ->
@@ -328,6 +325,11 @@ eval_meta({Op,A,B},Bs) ->
 		{'!=', A1, B1} -> A1 =/= B1;
 		{'and',A1,B1} -> A1 and B1;
 		{'or',A1,B1} -> A1 or B1;
+		{'&',A1,B1} -> A1 band B1;
+		{'|',A1,B1} -> A1 bor B1;
+		{'^',A1,B1} -> A1 bxor B1;
+		{'<<',A1,B1} -> A1 bsl B1;
+		{'>>',A1,B1} -> A1 bsr B1;
 		{'+',A1,B1} -> A1+B1;
 		{'-',A1,B1} -> A1-B1;
 		{'*',A1,B1} -> A1*B1;
@@ -343,7 +345,9 @@ eval_meta({Op,A},Bs) ->
     case {Op,eval_meta(A,Bs)} of
 	{'-',A1} -> -A1;
 	{'+',A1} -> +A1;
-	{'not',A1} -> not A1
+	{'~',A1} ->  bnot A1;
+	{'not',A1} -> not A1;
+	{'!',A1} -> not A1
     end.
 
 eval_meta_list(As,Bs) ->

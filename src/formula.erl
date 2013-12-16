@@ -1261,7 +1261,7 @@ eval_meta(V, Bs) when is_atom(V) ->
 	    error({unbound, V});
 	{_,W} -> W
     end;
-eval_meta({f,F,As},Bs) ->
+eval_meta(_A1={f,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
 	{factorial,[N]} -> varp_math:factorial(N);
 	{binom,[A,B]} -> varp_math:binom(A,B);
