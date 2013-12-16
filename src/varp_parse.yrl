@@ -8,7 +8,7 @@ Terminals
 	'and' 'or' 'xor' 'not' imp equ 'A' 'E'
         '&' '&&' '|' '||' '^' '!' '~'  '->' '<->'
 	'+' '-' '*' '/' '%' '>>>' '>>' '<<<' '<<'
-	'<=' '>=' '!=' '<' '>' '=' '==' ':='
+	'<=' '>=' '!=' '<' '>' '=' '==' ':=' '$'
 	'{' '}' ',' ':' ';' '(' ')' '[' ']' '..'  '#'
 	.
 
@@ -76,23 +76,23 @@ expr -> prefix_op expr :
 	    end.
 expr -> '(' expr ')' : '$2'.
 expr -> variable '(' exprs ')' : { f, name('$1'), '$3'}.
-expr -> expr '+' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '-' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '*' expr   : {op('$2'), '$1', '$3'}.
-expr -> expr '/' expr   : {op('$2'), '$1', '$3'}.
-expr -> expr '%' expr   : {op('$2'), '$1', '$3'}.
-expr -> expr '<<' expr  : {op('$2'), '$1', '$3'}.
-expr -> expr '>>' expr  : {op('$2'), '$1', '$3'}.
-expr -> expr '<' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '<=' expr  : { op('$2'), '$1', '$3' }.
-expr -> expr '>' expr   : { op('$2'), '$1', '$3' }.
+expr -> expr '+' expr    : { op('$2'), '$1', '$3' }.
+expr -> expr '-' expr    : { op('$2'), '$1', '$3' }.
+expr -> expr '*' expr    : { op('$2'), '$1', '$3'}.
+expr -> expr '/' expr    : { op('$2'), '$1', '$3'}.
+expr -> expr '%' expr    : { op('$2'), '$1', '$3'}.
+expr -> expr '<<' expr   : { op('$2'), '$1', '$3'}.
+expr -> expr '>>' expr   : { op('$2'), '$1', '$3'}.
+expr -> expr '<' expr    : { op('$2'), '$1', '$3' }.
+expr -> expr '<=' expr   : { op('$2'), '$1', '$3' }.
+expr -> expr '>' expr    : { op('$2'), '$1', '$3' }.
 expr -> expr '>=' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '==' expr  : { op('$2'), '$1', '$3' }.
-expr -> expr '!=' expr  : { op('$2'), '$1', '$3' }.
-expr -> expr '&' expr  : {op('$2'), '$1', '$3' }.
-expr -> expr '|' expr  : {op('$2'), '$1', '$3' }.
-expr -> expr '^' expr  : {op('$2'), '$1', '$3' }.
-expr -> expr '..' expr : { range, '$1', '$3' }.
+expr -> expr '==' expr   : { op('$2'), '$1', '$3' }.
+expr -> expr '!=' expr   : { op('$2'), '$1', '$3' }.
+expr -> expr '&' expr    : {op('$2'), '$1', '$3' }.
+expr -> expr '|' expr    : {op('$2'), '$1', '$3' }.
+expr -> expr '^' expr    : {op('$2'), '$1', '$3' }.
+expr -> expr '..' expr   : { range, '$1', '$3' }.
 expr -> variable '=' expr  : { '=', name('$1'), '$3' }.
 
 %% list of expr
@@ -132,7 +132,8 @@ quantifier -> '[' qtype exprs ']' : {'$2','$3'}.
 lexpr -> true                     : true.
 lexpr -> false                    : false.
 lexpr -> integer                  : constant(value('$1')).
-lexpr -> variable                 : {var,name('$1')}.
+lexpr -> variable                 : {'expr',name('$1')}.
+lexpr -> '$' '(' expr ')'         : {'expr','$3'}.
 lexpr -> '-' lexpr                : {'-', '$2'}.
 
 lexpr -> pexpr                    : '$1'.

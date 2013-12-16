@@ -101,6 +101,7 @@ equ                 : {token,{equ,TokenLine}}.
 
 %% separators
 #		: {token,{'#',TokenLine}}.
+\$		: {token,{'$',TokenLine}}.
 ;		: {token,{';',TokenLine}}.
 {		: {token,{'{',TokenLine}}.
 }		: {token,{'}',TokenLine}}.

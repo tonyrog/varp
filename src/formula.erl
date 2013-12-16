@@ -964,51 +964,48 @@ build_(false, Bs) ->
 build_(V={p,_P,_Ps}, Bs) ->
     {X,Bs1} = variable(V, Bs),
     {{bool,X},Bs1};    
-build_({uint,N,{var,V}}, Bs) ->
-    case proplists:lookup(V,Bs#bs.meta) of
-	none ->
-	    io:format("variable '~s' is not bound\n", [V]),
-	    error({unbound, V});
-	{_,W} ->
-	    const_vector(uint,W,N,Bs)
-    end;
 build_({uint,N,V}, Bs) ->
-    if is_integer(V) -> const_vector(uint,V,N,Bs);
+    if  is_atom(V) ->
+	    case proplists:lookup(V,Bs#bs.meta) of
+		none ->
+		    io:format("variable '~s' is not bound\n", [V]),
+		    error({unbound, V});
+		{_,W} ->
+		    const_vector(uint,W,N,Bs)
+	    end;
+	is_integer(V) -> const_vector(uint,V,N,Bs);
        true          -> var_vector(uint,V,N,Bs)
     end;
-build_({int,N,{var,V}}, Bs) ->
-    case proplists:lookup(V,Bs#bs.meta) of
-	none ->
-	    io:format("variable '~s' is not bound\n", [V]),
-	    error({unbound, V});
-	{_,W} ->
-	    const_vector(int,W,N,Bs)
-    end;
 build_({int,N,V}, Bs) ->
-    if is_integer(V) -> const_vector(int,V,N,Bs);
+    if is_atom(V) ->
+	    case proplists:lookup(V,Bs#bs.meta) of
+		none ->
+		    io:format("variable '~s' is not bound\n", [V]),
+		    error({unbound, V});
+		{_,W} ->
+		    const_vector(int,W,N,Bs)
+	    end;
+       is_integer(V) -> const_vector(int,V,N,Bs);
        true          -> var_vector(int,V,N,Bs)
     end;
-build_({bit,N,{var,V}}, Bs) ->
-    case proplists:lookup(V,Bs#bs.meta) of
-	none ->
-	    io:format("variable '~s' is not bound\n", [V]),
-	    error({unbound, V});
-	{_,W} ->
-	    const_vector(bit,W,N,Bs)
-    end;
 build_({bit,N,V}, Bs) ->
-    if  is_integer(V) -> const_vector(bit,V,N,Bs);
+    if  is_atom(V) -> 
+	    case proplists:lookup(V,Bs#bs.meta) of
+		none ->
+		    io:format("variable '~s' is not bound\n", [V]),
+		    error({unbound, V});
+		{_,W} ->
+		    const_vector(bit,W,N,Bs)
+	    end;
+	is_integer(V) -> const_vector(bit,V,N,Bs);
 	true          -> var_vector(bit,V,N,Bs)
     end;
-build_({var,V}, Bs) ->
-    case proplists:lookup(V,Bs#bs.meta) of
-	none ->
-	    io:format("variable '~s' is not bound\n", [V]),
-	    error({unbound, V});
-	{_,W} when W >=0 ->
+build_({expr,Expr}, Bs) ->
+    W = eval_meta(Expr,Bs),
+    if W >=0 ->
 	    N = varp_math:integer_size(W),
 	    const_vector(uint,W,N,Bs);
-	{_,W} when W < 0 ->
+       W < 0 ->
 	    N = varp_math:integer_size(W),
 	    const_vector(int,W,N,Bs)
     end;
