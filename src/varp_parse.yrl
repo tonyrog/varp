@@ -76,23 +76,23 @@ expr -> prefix_op expr :
 	    end.
 expr -> '(' expr ')' : '$2'.
 expr -> variable '(' exprs ')' : { f, name('$1'), '$3'}.
-expr -> expr '+' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '-' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '*' expr   : {op('$2'), '$1', '$3'}.
-expr -> expr '/' expr   : {op('$2'), '$1', '$3'}.
-expr -> expr '%' expr   : {op('$2'), '$1', '$3'}.
-expr -> expr '<<' expr  : {op('$2'), '$1', '$3'}.
-expr -> expr '>>' expr  : {op('$2'), '$1', '$3'}.
-expr -> expr '<' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '<=' expr  : { op('$2'), '$1', '$3' }.
-expr -> expr '>' expr   : { op('$2'), '$1', '$3' }.
+expr -> expr '+' expr   :  { op('$2'), '$1', '$3' }.
+expr -> expr '-' expr   :  { op('$2'), '$1', '$3' }.
+expr -> expr '*' expr   :  { op('$2'), '$1', '$3'}.
+expr -> expr '/' expr   :  { op('$2'), '$1', '$3'}.
+expr -> expr '%' expr   :  { op('$2'), '$1', '$3'}.
+expr -> expr '<<' expr  :  { op('$2'), '$1', '$3'}.
+expr -> expr '>>' expr  :  { op('$2'), '$1', '$3'}.
+expr -> expr '<' expr   :  { op('$2'), '$1', '$3' }.
+expr -> expr '<=' expr  :  { op('$2'), '$1', '$3' }.
+expr -> expr '>' expr   :  { op('$2'), '$1', '$3' }.
 expr -> expr '>=' expr   : { op('$2'), '$1', '$3' }.
-expr -> expr '==' expr  : { op('$2'), '$1', '$3' }.
-expr -> expr '!=' expr  : { op('$2'), '$1', '$3' }.
-expr -> expr '&' expr  : {op('$2'), '$1', '$3' }.
-expr -> expr '|' expr  : {op('$2'), '$1', '$3' }.
-expr -> expr '^' expr  : {op('$2'), '$1', '$3' }.
-expr -> expr '..' expr : { range, '$1', '$3' }.
+expr -> expr '==' expr  :  { op('$2'), '$1', '$3' }.
+expr -> expr '!=' expr  :  { op('$2'), '$1', '$3' }.
+expr -> expr '&' expr  :   { op('$2'), '$1', '$3' }.
+expr -> expr '|' expr  :   { op('$2'), '$1', '$3' }.
+expr -> expr '^' expr  :   { op('$2'), '$1', '$3' }.
+expr -> expr '..' expr :   { range, '$1', '$3' }.
 expr -> variable '=' expr  : { '=', name('$1'), '$3' }.
 
 %% list of expr

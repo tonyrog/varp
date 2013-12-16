@@ -1232,7 +1232,9 @@ build_quant_list([], _Xs, Bs) ->
 eval_domain({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
-    lists:seq(A1, B1);
+    if A1 =< B1 -> lists:seq(A1, B1);
+       true -> lists:reverse(lists:seq(B1,A1))
+    end;
 eval_domain({union,A,B}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
@@ -1599,13 +1601,20 @@ operation('~', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
     Ys1 = vnot(Ys),
     {{Type,N,Ys1}, Bs};
 
-operation('-', {Type,N,Ys}, Bs) when ?is_int_type(Type) ->
-    %% Fix me.
-    Ys1 = vnot(Ys),
-    Zs1 = vset_size([?TRUE],N),
-    {{bool,_Co},Xs,Bs1} = vadd(Ys1,Zs1,Bs),
-    %% ignore carry
-    {{Type,N,Xs}, Bs1};
+operation('-', A, Bs) ->
+    {_At,An,Ax} = varg(A),
+    case vconst(A) of
+	false ->
+	    Ax1 = vnot(Ax),
+	    Zs1 = vset_size([?TRUE],An),
+	    {{bool,_Co},Xs,Bs1} = vadd(Ax1,Zs1,Bs),
+	    {{int,An,Xs},Bs1};
+	Av ->
+	    Av1 = -Av,
+	    An1 = varp_math:integer_size(Av1),
+	    const_vector_(An1-1,int,An1,[],Av1,Bs)
+    end;
+
 operation('abs', A={int,N,Ys}, Bs) ->
     Sign = sign_bit(A),
     {{_,_,Zs},Bs1} = operation('-',A,Bs),
@@ -1655,7 +1664,7 @@ operation('or',{bool,?FALSE},{bool,?FALSE}, Bs) ->
 operation('or',{bool,?TRUE},{bool,_Z}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
-    {{bool,?FALSE},Bs};
+    {{bool,?TRUE},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},triple(imp,X,-Y,Z,Bs1)};
@@ -1677,7 +1686,9 @@ operation('|',A,B,Bs) ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
 
-operation('imp',{bool,?FALSE},{bool,_Z}, Bs) ->
+operation('imp',{bool,?FALSE},{bool,?TRUE}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('imp',{bool,?FALSE},{bool,?FALSE}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('imp',{bool,?TRUE},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
@@ -1996,39 +2007,38 @@ mix_type(bool,bit)  -> bit.
 %% 2: [1,0,1,0]   + [0,1,0,1]   = [1,1,1,1,0]
 %% 3: [1,1,1,1,0] + [0,0,1,0,1] = [1,1,0,0,0,1]
 %%
-vmul(Ys, Zs, Bs) ->
-    N = length(Ys),
-    Xs = vextend(uint,[],0,N),
-    vmul(Ys, Zs, Xs, Bs).
+vmul([Y|Ys], Zs, Bs) ->
+    {Xs,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    vmul(Ys, Zs, 1, Xs++[?FALSE], Bs1).
 
-vmul([Y|Ys], Zs, Xs, Bs) ->
-    %% optimize to only run 'and' over the first N Zs!
+vmul([Y|Ys], Zs, I, Xs, Bs) ->
     {YZs,Bs1} = vmap_opx('and',Zs,Y,Bs),
-    {{bool,Co},Xs1,Bs2} = vadd(Xs,YZs,Bs1),
-    vmul(Ys, [?FALSE|Zs], Xs1++[Co], Bs2);
-vmul([], _Zs, Xs, Bs) ->
+    YZs1 = lists:duplicate(I,?FALSE)++YZs,
+    {{bool,Co},Xs1,Bs2} = vadd(Xs,YZs1,Bs1),
+    vmul(Ys, Zs, I+1, Xs1++[Co], Bs2);
+vmul([], _Zs, _I, Xs, Bs) ->
     {Xs, Bs}.
 
-
+%%
+%% Signed multiply
+%%
 vsmul([Y|Ys], Zs, Bs) ->
     %% N = length(Ys)+1,
-    {Xs0,Bs1} = vmap_opx('and',Zs,Y,Bs),
-    Xs1 = vnot(Xs0)++[?TRUE],
-    vsmul(Ys, [?FALSE|Zs], Xs1, Bs1).
+    {YZs,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    Xs1 = vsnot(YZs)++[?TRUE],
+    vsmul(Ys, Zs, 1, Xs1, Bs1).
 
-vsmul([Y], Zs, Xs, Bs) ->
-    %% optimize to only run and over the first N Zs!
-    {YZs0,Bs1} = vmap_opx('and',Zs,Y,Bs),
-    YZs = vsnot(vnot(YZs0))++[?TRUE],
-    {{bool,Co},Xs1,Bs2} = vadd(Xs,[?FALSE|YZs],Bs1),
+vsmul([Y], Zs, I, Xs, Bs) ->
+    {YZs,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    YZs1 = lists:duplicate(I,?FALSE)++vsnot(vnot(YZs))++[?TRUE],
+    {{bool,Co},Xs1,Bs2} = vadd(Xs++[?FALSE],YZs1,Bs1),
     {Xs1++[Co], Bs2};
-vsmul([Y|Ys], Zs, Xs, Bs) ->
-    %% optimize to only run and over the first N Zs!
-    {YZs0,Bs1} = vmap_opx('and',Zs,Y,Bs),
-    YZs = vsnot(YZs0),
-    {{bool,Co},Xs1,Bs2} = vadd(Xs,YZs,Bs1),
-    vsmul(Ys, [?FALSE|Zs], Xs1++[Co], Bs2);
-vsmul([], _Zs, Xs, Bs) ->
+vsmul([Y|Ys], Zs, I, Xs, Bs) ->
+    {YZs,Bs1} = vmap_opx('and',Zs,Y,Bs),
+    YZs1 = lists:duplicate(I,?FALSE)++vsnot(YZs),
+    {{bool,Co},Xs1,Bs2} = vadd(Xs,YZs1,Bs1),
+    vsmul(Ys, Zs, I+1, Xs1++[Co], Bs2);
+vsmul([], _Zs, _I, Xs, Bs) ->
     {Xs, Bs}.
 
 %%

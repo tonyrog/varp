@@ -296,9 +296,6 @@ match_long_opt(LongOpt,As,[Opt|Opts]) ->
 match_long_opt(_LongOpt,_As,[]) ->
     false.
 
-
-match_short_opt(ShortOpt,As,[Opt|Opts]) when Opt#option.short =:= undefined ->
-    match_short_opt(ShortOpt,As,Opts);
 match_short_opt(ShortOpt,As,[Opt|Opts]) ->
     case match_string(Opt#option.short, ShortOpt) of
 	false ->
@@ -345,7 +342,7 @@ usage() ->
       fun(#option{long=LongOpt,short=ShortOpt,spec=Spec,
 		  default=Def,description=Desc }) ->
 	      Names = [["--",LongOpt],"|",["-",LongOpt],
-		       if ShortOpt =:= "" -> "";
+		       if ShortOpt =:= undefined -> "";
 			  true -> ["|","-",ShortOpt]
 		       end],
 	      if Spec =:= undefined ->

@@ -69,16 +69,12 @@ run(version, _Formula, _Opts) ->
     varp_option:version().
 
 
-result(true,prove) ->
-    io:format("TRUE\n", []);
-result(false,prove) ->
-    io:format("FALSE\n", []);
-result(false,_) ->
-    io:format("\n", []);
-result(N, _) when is_integer(N) ->
-    io:format("~w\n", [N]);
-result({N,_Mdls}, _) ->
-    io:format("~w\n", [N]).
+result(true,prove) ->       io:format("TRUE\n", []);
+result(false,prove) ->      io:format("FALSE\n", []);
+result(undefined,prove) ->  io:format("UNKNOWN\n", []);
+result(undefined,_) ->      io:format("\n", []);
+result(N, _) when is_integer(N) -> io:format("~w\n", [N]);
+result({N,_Mdls}, _) -> io:format("~w\n", [N]).
 
 
 %% load files and form a conjunction over all files
@@ -148,7 +144,7 @@ run_formula(Formula,Opts) ->
 prove_formula(Formula) ->
     prove_formula(Formula,[]).
 prove_formula(Formula,Opts) ->
-    prover:prove_formula(Formula, Opts++[{max,2}]).
+    prover:prove_formula(Formula, [{max,2}|Opts]).
 
 file(File) ->
     case file:read_file(File) of
