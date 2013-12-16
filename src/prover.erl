@@ -65,6 +65,7 @@ prove_formula(F,Opts) ->
     case falsify_formula(F,Opts) of
 	{0,_} -> true;
 	0     -> true;
+	undefined -> undefined;
 	_ -> false
     end.
 
@@ -142,12 +143,10 @@ backtrack({F,Bs}) ->
 %% Basic run
 method(X,Bs) ->
     case apply_opts(X, Bs) of
-	false ->
-	    no_models(Bs);
+	false -> no_models(Bs);
 	Bs1 ->
 	    case eval(Bs1) of
-		false ->
-		    no_models(Bs);
+		false -> no_models(Bs);
 		Bs2 ->
 		    case one_model(Bs2) of
 			false ->
@@ -156,8 +155,7 @@ method(X,Bs) ->
 				    backtrack_bs(Bs2);
 				K ->
 				    case saturate_(K,Bs2) of
-					false -> 
-					    no_models(Bs);
+					false -> no_models(Bs);
 					Bs3 ->
 					    case one_model(Bs3) of
 						false ->
@@ -255,7 +253,7 @@ backtrack_bs(Bs) ->
     case formula:getopt(backtrack, Bs) of
 	false -> 
 	    no_models(Bs),
-	    false;
+	    undefined;
 	true ->
 	    N     = formula:getopt(max, Bs),
 	    Print = formula:getopt(print, Bs),
@@ -504,7 +502,8 @@ saturate_loop(K, Bs) ->
 
 saturate_loop(Vec,I,N,K,NB,Bs) ->
     %% io:format("step: ~w [~w]\n", [I,N]),
-    case saturate_perm_vec(Vec, Bs) of
+    %% case saturate_perm_vec(Vec, Bs) of
+    case saturate_vec(Vec, Bs) of
 	false -> false;
 	Bs1 ->
 	    saturate_info(I,N,Bs1),
@@ -518,7 +517,8 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 			    Bs1
 		    end;
 		Vec1 ->
-		    Ks = varp_math:factorial(K),
+		    %% Ks = varp_math:factorial(K),
+		    Ks = 1,
 		    saturate_loop(Vec1,I+Ks,N,K,NB,Bs1)
 	    end
     end.
@@ -580,7 +580,7 @@ saturate_vec_([{_,X}|V], Bs) ->
 		    equal_eval(X,false,Bs);
 		BsT ->
 		    case equal_mark_eval(X,false,Bs) of
-			false -> 
+			false ->
 			    BsT;
 			BsF0 ->
 			    case saturate_vec_(V,BsF0) of

@@ -1,0 +1,4 @@
+
+(A:size * B:size == p:size) &&
+(A:size > B:size) &&
+(B:size != 1)
