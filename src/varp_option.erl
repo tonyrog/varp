@@ -18,16 +18,18 @@
 %%  -long 123
 %%  Short Name
 %%  -l 123
-%%    
+%%
+-type option_type() :: unsigned | string | undefined | [{string(),atom()}].
+-type option_spec() :: option_type() | {multiple,option_type()}.
 
 -record(option,
 	{
-	  long,
-	  short,
-	  key,
-	  spec,
-	  default,
-	  description
+	  long  :: string(),
+	  short :: string(),
+	  key   :: atom(),
+	  spec :: option_spec(),
+	  default :: term(),
+	  description :: string()
 	}).
 
 options() ->
@@ -153,6 +155,13 @@ options() ->
 		default="",
 		description="Output file name."
 	      },
+      #option { long="formula",
+		short="f",
+		key=formula,
+		spec={multiple,string},
+		default=[],
+		description="Command line formula."
+	      },
       #option { long="version",
 		short="v", 
 		key=version,
@@ -163,7 +172,7 @@ options() ->
       #option { long="help",
 		short="h", 
 		key=help,
-		spec=undefined,
+		spec=void,
 		default=undefined,
 		description="This help."
 	      }
@@ -249,6 +258,8 @@ process_args(_, _Mode, _Opts, _Bound) ->
     usage().
 
 
+match_value({multiple,Type}, Val) ->
+    match_value(Type, Val);
 match_value(integer, Val) ->
     case string:to_integer(Val) of
 	{N, ""} -> {ok,N};
@@ -261,7 +272,7 @@ match_value(unsigned, Val) ->
     end;
 match_value(string, Val) ->
     {ok,Val};
-match_value(undefined, "") ->
+match_value(void, "") ->
     {ok, true};
 match_value([{Value,Enum}|_Vs], Value) ->
     {ok, Enum};
@@ -274,7 +285,7 @@ match_long_opt(LongOpt,As,[Opt|Opts]) ->
     case match_string(Opt#option.long, LongOpt) of
 	false ->
 	    match_long_opt(LongOpt,As,Opts);
-	"" when Opt#option.spec == undefined -> %% no value!
+	"" when Opt#option.spec == void -> %% no value!
 	    {Opt,"",As};
 	"" ->
 	    case As of
@@ -300,9 +311,9 @@ match_short_opt(ShortOpt,As,[Opt|Opts]) ->
     case match_string(Opt#option.short, ShortOpt) of
 	false ->
 	    match_short_opt(ShortOpt,As,Opts);
-	"" when Opt#option.spec == undefined -> %% no value!
+	"" when Opt#option.spec == void -> %% no value!
 	    {Opt,"",As};
-	More when Opt#option.spec == undefined -> %% multi option
+	More when Opt#option.spec == void -> %% multi option
 	    {Opt,"",[[$-|More]|As]};
 	"" ->
 	    case As of
@@ -382,10 +393,11 @@ usage(Key,Value) when is_atom(Key) ->
 	    halt(1)
     end.
 
+format_spec({multiple,T}) -> "{"++format_spec(T)++"}*";
 format_spec(unsigned) -> "unsigned integer";
-format_spec(integer) -> "integer";
-format_spec(string) -> "string";
-format_spec(undefined) -> "undefined";
+format_spec(integer)  -> "integer";
+format_spec(string)   -> "string";
+format_spec(void)     -> "void";
 format_spec(Vs) when is_list(Vs) ->
     string:join([Name || {Name,_Enum} <- Vs], "|").
 

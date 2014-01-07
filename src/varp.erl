@@ -19,20 +19,36 @@ main(Args) ->
     application:start(varp),
     {Mode,Bound,Opts0,Files} = process_args0(Args, none, [], []),
     Opts = [{env,Bound}|Opts0],
+    {Defs0, Formula0} =
+	case load_formulas(Opts, undefined, 'and') of
+	    {ok,R0 = {_D0,_F0}} -> R0;
+	    __Error -> halt(1)
+	end,
     case Files of
 	[] when Mode =:= help; Mode =:= version ->
 	    run(Mode, undefined, Opts);
 	[] ->
-	    {ok,Data} = read_in(),
-	    case parse("*stdin*", Data) of
-		{ok,{Defs,Formula}} ->
-		    run(Mode,Formula,[{defs,Defs}|Opts]);
+	    case read_in() of
+		{ok,<<>>} ->
+		    run(Mode,Formula0,[{defs,Defs0}|Opts]);
+		{ok,Data} ->
+		    case parse("*stdin*", Data) of
+			{ok,{Defs,Formula}} ->
+			    Formula1 = join_f(Formula0,Formula,'and'),
+			    run(Mode,Formula1,[{defs,Defs0++Defs}|Opts]);
+			_Error ->
+			    halt(1)
+		    end;
 		_Error ->
 		    halt(1)
 	    end;
 	Fs ->
-	    {Defs,Formula} = load_files(Fs, 'and'),
-	    run(Mode,Formula,[{defs,Defs}|Opts])
+	    case load_files(Fs,Formula0,Defs0,'and') of
+		{ok,{Defs,Formula}} ->
+		    run(Mode,Formula,[{defs,Defs}|Opts]);
+		_Error ->
+		    halt(1)
+	    end
     end,
     %% io:format("varp: arguments = ~p\n", [As]),
     halt(0).
@@ -78,31 +94,51 @@ result({N,_Mdls}, _) -> io:format("~w\n", [N]).
 
 
 %% load files and form a conjunction over all files
-load_files([F|Fs],JoinOp) ->
+load_files([F|Fs],Formula0,Defs0,JoinOp) ->
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf" ->
 	    case dimacs:load(F) of
-		{error,_Reason} ->
+		Error={error,_Reason} ->
 		    io:format("~s: error: ~p\n", [F,_Reason]),
-		    halt(1);
+		    Error;
 		Cnf = {cnf,{_NVars,_NClauses,_CLs}} ->
 		    io:format("loaded: ~s\n", [F]),
-		    {Defs0,Formulas} =load_files(Fs,JoinOp),
-		    {Defs0,join_f(JoinOp,Cnf,Formulas)}
+		    Formula1 = join_f(JoinOp,Cnf,Formula0),
+		    load_files(Fs,Formula1,Defs0,JoinOp)
 	    end;
        true ->
 	    {ok, Data} = file:read_file(F),
 	    case parse(F, Data) of
 		{ok,{Defs,Formula}} ->
 		    io:format("loaded: ~s\n", [F]),
-		    {Defs0,Formulas} =load_files(Fs,JoinOp),
-		    {Defs++Defs0,join_f(JoinOp,Formula,Formulas)};
-		_Error ->
-		    halt(1)
+		    Formula1 = join_f(JoinOp,Formula,Formula0),
+		    load_files(Fs,Formula1,Defs++Defs,JoinOp);
+		Error ->
+		    Error
 	    end
     end;
-load_files([],_JoinOp) ->
-    {[],undefined}.
+load_files([],Formula,Defs,_JoinOp) ->
+    {ok,{Defs,Formula}}.
+
+
+%% load/parse formulas given on command line like -f "A && B"
+load_formulas(Opts, A, JoinOp) ->
+    case proplists:get_all_values(formula, Opts) of
+	[] -> {ok,{[],A}};
+	Fs -> parse_formulas(Fs, A, [], JoinOp)
+    end.
+
+parse_formulas([F|Fs], Formula, Defs, JoinOp) ->
+    case parse("*command-line*", F) of
+	{ok,{Defs1,Formula1}} ->
+	    parse_formulas(Fs, join_f(JoinOp, Formula, Formula1),
+			   Defs++Defs1, JoinOp);
+	Error ->
+	    Error
+    end;
+parse_formulas([], Formula, Defs, _JoinOp) ->
+    {ok,{Defs,Formula}}.
+    
 
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;
@@ -156,6 +192,7 @@ file(File) ->
 
 parse(String) ->
     parse("*internal*", String).
+
 parse(File, Binary) when is_binary(Binary) ->
     parse(File, binary_to_list(Binary));
 parse(File, String) ->

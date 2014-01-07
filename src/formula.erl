@@ -501,7 +501,8 @@ setopt(log,none,Bs) -> setopt_(#option.log,?LOG_NONE,Bs);
 setopt(log,Level,Bs) when Level >= ?LOG_NONE, Level =< ?DEBUG -> 
     setopt_(#option.log,Level,Bs);
 setopt(backtrack,true,Bs) -> setopt_(#option.backtrack,true,Bs);
-setopt(backtrack,false,Bs) -> setopt_(#option.backtrack,false,Bs).
+setopt(backtrack,false,Bs) -> setopt_(#option.backtrack,false,Bs);
+setopt(formula,_,Bs) -> Bs.  %% not used internally
 
 setopt_(KeyPos, Value, Bs) ->
     Bs#bs { option = setelement(KeyPos, Bs#bs.option, Value) }.
