@@ -47,11 +47,14 @@ test_succ(C,Vs) ->
 clauses(A) ->
     %% io:format("A=~p\n", [A]),
     A1 = rewrite(A),
-    %% io:format("A1=~p\n", [A1]),
+    io:format("A1=~p\n", [A1]),
     Cs1 = clause_form(A1),
-    %% io:format("Cs1=~p\n", [Cs1]),
+    io:format("Cs1=~p\n", [Cs1]),
     Cs2 = normalize_clauses(Cs1),
-    subsume_clauses(Cs2).
+    io:format("Cs2=~p\n", [Cs2]),
+    Cs3 = subsume_clauses(Cs2),
+    io:format("Cs3=~p\n", [Cs3]),
+    Cs3.
 
 %%
 %% Normalize all clauses
@@ -136,7 +139,9 @@ clause_form(V) ->
 %% rewrite into and-or form, also move negation to the literals
 %%
 rewrite(true) -> true;
+rewrite(1) -> true;
 rewrite(false) -> false;
+rewrite(0) -> false;
 rewrite(A={p,_P,_Vs}) -> A;
 rewrite(A={'not',{p,_P,_Vs}}) -> A;
 rewrite({'not', {'not', A}}) -> rewrite(A);
@@ -146,8 +151,10 @@ rewrite({'not', F}) -> rewrite(r('not',F));
 rewrite({'!', F})  -> rewrite(r('not',F));
 rewrite({'and', A, B}) -> r('and', A, B);
 rewrite({'&&', A, B}) ->  r('and', A, B);
+rewrite({'&', A, B}) ->  r('and', A, B);
 rewrite({'or', A, B}) ->  r('or', A, B);
 rewrite({'||', A, B}) ->  r('or', A, B);
+rewrite({'|', A, B}) ->  r('or', A, B);
 rewrite({'imp',A,B}) ->   r('or', {'not', A}, B);
 rewrite({'->',A,B}) ->    r('or', {'not', A}, B);
 rewrite({'<->',A,B}) ->   rewrite({'equ',A,B});
@@ -170,7 +177,7 @@ rewrite({'one',Fs})  ->
 fold(_Op,Init,[]) -> Init;
 fold(_Op,_Init,[A]) -> A;
 fold(Op,Init,[A|As]) -> {Op,A,fold(Op,Init,As)}.
-    
+
 r(Op,A,B) -> {Op,rewrite(A),rewrite(B)}.
 r(Op,A) -> {Op,rewrite(A)}.
 

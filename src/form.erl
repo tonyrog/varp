@@ -400,11 +400,14 @@ vars({'equ',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
 vars({'<->',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
 vars({'and',F1,F2}, Set) -> vars(F2, vars(F1,Set));
 vars({'&&',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
+vars({'&',F1,F2}, Set)  -> vars(F2, vars(F1,Set));
 vars({'or',F1,F2},  Set)  ->  vars(F2, vars(F1,Set));
 vars({'||',F1,F2},  Set)  ->  vars(F2, vars(F1,Set));
+vars({'|',F1,F2},  Set)  ->  vars(F2, vars(F1,Set));
 vars({'xor',F1,F2}, Set) ->  vars(F2, vars(F1,Set));
 vars({'!',F},Set) -> vars(F,Set);
 vars({'not',F},Set) -> vars(F,Set);
+vars({'~',F},Set) -> vars(F,Set);
 %% may be present in some partially expanded forms
 vars({all,Fs}, Set) -> vars_list(Fs, Set);
 vars({any,Fs}, Set) -> vars_list(Fs, Set);

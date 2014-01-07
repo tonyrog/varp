@@ -1,0 +1,8 @@
+varp satisfy -print=model n=3 group.varp
+1 models
+
+varp satisfy -print=model n=4 group.varp
+4 models
+
+varp satisfy -print=model n=5 group.varp
+6 models
