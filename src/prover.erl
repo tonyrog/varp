@@ -286,30 +286,45 @@ backtrack_bs(Bs) ->
     end.
 
 print(true,I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || Bound <- Bindings ], ",")]);
+	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
 print(literal,I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || Bound <- Bindings ], ",")]);
+	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
 print(model,I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || 
+			    Bound <- Bindings1,
+			    element(2,Bound) =/= false ], ",")]);
+print(umodel,I,Bindings) ->
     io:format("~w: ~s\n",
 	      [I,concat([ format_binding(Bound) || 
 			    Bound <- Bindings,
 			    element(2,Bound) =/= false ], ",")]);
+print(erlang,_I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
+    io:format("~w.\n", [Bindings1]);
 print(false,_I,_Bindings) ->
     ok.
 
-    
+filter_bindings(Bindings) ->
+    [ B || B={{p,V,_},_} <- Bindings, hd(atom_to_list(V)) =/= $_].
 
 format_model(Model) ->
     concat([ format_binding(Bound) || Bound <- Model ], ",").
 
-format_binding({V,true}) -> format_var(V);
-format_binding({V,false}) -> ["~",format_var(V)];
-format_binding({V,N}) -> [format_var(V),"=",integer_to_list(N)].
+format_binding({Var,Value}) ->
+    VarFmt = format_var(Var),
+    if Value =:= true -> VarFmt;
+       Value =:= false -> [$~|VarFmt];
+       is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
+    end.
 
-format_var(V) when is_atom(V) ->
-    [atom_to_list(V)];
+%% format_var(V) when is_atom(V) ->
+%%    [atom_to_list(V)];
 format_var({p,V,[]}) ->
     [atom_to_list(V)];
 format_var({p,V,As}) ->
@@ -477,6 +492,7 @@ saturate_(K,Bs) when is_integer(K), K >= 1 ->
     formula:info(Bs,"Saturate-~w: pair:~w\n", 
 		 [K,formula:getopt(pair,Bs)]),
     erase(last_print),
+    erase(last_bound),
     NB = formula:number_of_bound(Bs),
     case saturate_loop(K,Bs) of
 	false ->
@@ -494,19 +510,14 @@ saturate_loop(K, Bs) ->
 	[] -> Bs;
 	Vec ->
 	    NB = formula:number_of_bound(Bs),
-	    NU = formula:number_of_unbound(Bs),
-	    N  = varp_math:binom(NU, length(Vec)),
-	    %% io:format("Loop ~w vector estimate=~w\n", [K,N]),
-	    saturate_loop(Vec,1,N,K,NB,Bs)
+	    saturate_loop(Vec,1,K,NB,Bs)
     end.
 
-saturate_loop(Vec,I,N,K,NB,Bs) ->
-    %% io:format("step: ~w [~w]\n", [I,N]),
-    %% case saturate_perm_vec(Vec, Bs) of
+saturate_loop(Vec,I,K,NB,Bs) ->
     case saturate_vec(Vec, Bs) of
 	false -> false;
 	Bs1 ->
-	    saturate_info(I,N,Bs1),
+	    saturate_info(I,K,Bs1),
 	    case next_vector(Vec, Bs1) of %% check all elements?
 		[] ->
 		    NB1 = formula:number_of_bound(Bs1),
@@ -519,20 +530,23 @@ saturate_loop(Vec,I,N,K,NB,Bs) ->
 		Vec1 ->
 		    %% Ks = varp_math:factorial(K),
 		    Ks = 1,
-		    saturate_loop(Vec1,I+Ks,N,K,NB,Bs1)
+		    saturate_loop(Vec1,I+Ks,K,NB,Bs1)
 	    end
     end.
 
 %% progress info
-saturate_info(I,N,Bs) ->
-    P = trunc(1000*(I / N)),
-    case get(last_print) of
-	P -> ok;
-	_P0 ->
+saturate_info(I,K,Bs) ->
+    NV = formula:number_of_variables(Bs),
+    B = formula:number_of_bound(Bs),
+    NU = NV-B,
+    N = varp_math:binom(NU, K),
+    P = trunc(10000*(I / N)),
+    case {get(last_print),get(last_bound)} of
+	{P,B} -> ok;
+	_ ->
 	    put(last_print,P),
-	    B = formula:number_of_bound(Bs),
-	    NV = formula:number_of_variables(Bs),
-	    formula:info(Bs, "~.2f% [~w/~w]   \r", [P/10,B,NV])
+	    put(last_bound,B),
+	    formula:info(Bs, "~.3f% [~w/~w]   \r", [P/100,B,NV])
     end.
 
 %% Saturate for all permutations of vector

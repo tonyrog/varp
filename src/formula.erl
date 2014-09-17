@@ -80,9 +80,9 @@
 	{
 	  n = 2,            %% next free variable
 	  vs,               %% dict() model variables var <=> Vn
-	  vt :: array(),    %% variable binding Vn => Wm
-	  vc :: array(),    %% variable classes
-	  order :: array(), %% variable order I => V
+	  vt :: array:array(),    %% variable binding Vn => Wm
+	  vc :: array:array(),    %% variable classes
+	  order :: array:array(), %% variable order I => V
 	  depth :: integer(), %% backtrack/saturate depth
 	  bn :: integer(),  %% number of bound variables
 	  bl :: list(),     %% list of bound variables
@@ -451,6 +451,7 @@ setopt(print,true,Bs)   -> setopt_(#option.print,true,Bs);
 setopt(print,false,Bs)  -> setopt_(#option.print,false,Bs);
 setopt(print,model,Bs)  -> setopt_(#option.print,model,Bs);
 setopt(print,literal,Bs)  -> setopt_(#option.print,literal,Bs);
+setopt(print,erlang,Bs)  -> setopt_(#option.print,erlang,Bs);
 setopt(partial,true,Bs)   -> setopt_(#option.partial,true,Bs);
 setopt(partial,false,Bs)  -> setopt_(#option.partial,false,Bs);
 
@@ -2450,7 +2451,12 @@ model_bitset(X,N,I,V,Ms) ->
 model_bor({X,Bit}, Ms) ->
     case lists:keytake(X, 1, Ms) of
 	{value,{_,Bits},Ms1} ->
-	    [{X,Bit bor Bits} | Ms1];
+	    try Bit bor Bits of
+		Bits1 -> [{X,Bits1} | Ms1]
+	    catch
+		error:_ ->
+		    error({internal_error, {'bor',Bit,{X,Bits}}})
+	    end;
 	false ->
 	    [{X,Bit} | Ms]
     end.

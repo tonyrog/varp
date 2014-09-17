@@ -1,47 +1,59 @@
-(E11:sz == A11:((sz+1)/2)*A11:((sz+1)/2)) &&
-(E12:sz == A12:((sz+1)/2)*A12:((sz+1)/2)) &&
-(E13:sz == A13:((sz+1)/2)*A13:((sz+1)/2)) &&
+//
+// All elements must be squre numbers
+// run --carry=false
+// 
 
-(E21:sz == A21:((sz+1)/2)*A21:((sz+1)/2)) &&
-(E22:sz == A22:((sz+1)/2)*A22:((sz+1)/2)) &&
-(E23:sz == A23:((sz+1)/2)*A23:((sz+1)/2)) &&
 
-(E31:sz == A31:((sz+1)/2)*A31:((sz+1)/2)) &&
-(E32:sz == A32:((sz+1)/2)*A32:((sz+1)/2)) &&
-(E33:sz == A33:((sz+1)/2)*A33:((sz+1)/2)) &&
+(A:sz == _A11:((sz+1)/2)*_A11:((sz+1)/2)) &&
+(B:sz == _A12:((sz+1)/2)*_A12:((sz+1)/2)) &&
+(C:sz == _A13:((sz+1)/2)*_A13:((sz+1)/2)) &&
 
-(E11:sz != E12:sz) && (E11:sz != E13:sz) && 
-(E11:sz != E21:sz) && (E11:sz != E22:sz) && (E11:sz != E23:sz) &&
-(E11:sz != E31:sz) && (E11:sz != E32:sz) && (E11:sz != E33:sz) &&
+(D:sz == _A21:((sz+1)/2)*_A21:((sz+1)/2)) &&
+(E:sz == _A22:((sz+1)/2)*_A22:((sz+1)/2)) &&
+(F:sz == _A23:((sz+1)/2)*_A23:((sz+1)/2)) &&
 
-(E12:sz != E13:sz) &&
-(E12:sz != E21:sz) && (E12:sz != E22:sz) && (E12:sz != E23:sz) &&
-(E12:sz != E31:sz) && (E12:sz != E32:sz) && (E12:sz != E33:sz) &&
+(G:sz == _A31:((sz+1)/2)*_A31:((sz+1)/2)) &&
+(H:sz == _A32:((sz+1)/2)*_A32:((sz+1)/2)) &&
+(I:sz == _A33:((sz+1)/2)*_A33:((sz+1)/2)) &&
 
-(E13:sz != E21:sz) && (E13:sz != E22:sz) && (E13:sz != E23:sz) &&
-(E13:sz != E31:sz) && (E13:sz != E32:sz) && (E13:sz != E33:sz) &&
+//
+// All elements must be distinct
+//
+(A:sz != B:sz) && (A:sz != C:sz) && 
+(A:sz != D:sz) && (A:sz != E:sz) && (A:sz != F:sz) &&
+(A:sz != G:sz) && (A:sz != H:sz) && (A:sz != I:sz) &&
+(B:sz != C:sz) &&
+(B:sz != D:sz) && (B:sz != E:sz) && (B:sz != F:sz) &&
+(B:sz != G:sz) && (B:sz != H:sz) && (B:sz != I:sz) &&
+(C:sz != D:sz) && (C:sz != E:sz) && (C:sz != F:sz) &&
+(C:sz != G:sz) && (C:sz != H:sz) && (C:sz != I:sz) &&
+(D:sz != E:sz) && (D:sz != F:sz) &&
+(D:sz != G:sz) && (D:sz != H:sz) && (D:sz != I:sz) &&
+(E:sz != F:sz) &&
+(E:sz != G:sz) && (E:sz != H:sz) && (E:sz != I:sz) &&
+(G:sz != H:sz) && (G:sz != I:sz) &&
+(H:sz != I:sz) &&
 
-(E21:sz != E22:sz) && (E21:sz != E23:sz) &&
-(E21:sz != E31:sz) && (E21:sz != E32:sz) && (E21:sz != E33:sz) &&
+//
+// All elements must be different from zero
+//
+(A:sz != 0) && (B:sz != 0) && (C:sz != 0) &&
+(D:sz != 0) && (E:sz != 0) && (F:sz != 0) &&
+(G:sz != 0) && (H:sz != 0) && (I:sz != 0) &&
 
-(E22:sz != E23:sz) &&
-(E22:sz != E31:sz) && (E22:sz != E32:sz) && (E22:sz != E33:sz) &&
+// Row sums
+(S:sz == A:sz + B:sz + C:sz) &&
+(S:sz == D:sz + E:sz + F:sz) &&
+(S:sz == G:sz + H:sz + I:sz) &&
 
-(E31:sz != E32:sz) && (E31:sz != E33:sz) &&
+// Column sums
+(S:sz == A:sz + D:sz + G:sz) &&
+(S:sz == B:sz + E:sz + H:sz) &&
+(S:sz == C:sz + F:sz + I:sz) &&
 
-(E32:sz != E33:sz) &&
+// Diagonal sums
+(S:sz == A:sz + E:sz + I:sz) &&
+(S:sz == C:sz + E:sz + G:sz) &&
 
-(E11:sz != 0) && (E12:sz != 0) && (E13:sz != 0) &&
-(E21:sz != 0) && (E22:sz != 0) && (E23:sz != 0) &&
-(E31:sz != 0) && (E32:sz != 0) && (E33:sz != 0) &&
+true
 
-(Sum:sz == E11:sz + E12:sz + E13:sz) &&
-(Sum:sz == E21:sz + E22:sz + E23:sz) &&
-(Sum:sz == E31:sz + E32:sz + E33:sz) &&
-
-(Sum:sz == E11:sz + E21:sz + E31:sz) &&
-(Sum:sz == E12:sz + E22:sz + E32:sz) &&
-(Sum:sz == E13:sz + E23:sz + E33:sz) &&
-
-(Sum:sz == E11:sz + E22:sz + E33:sz) &&
-(Sum:sz == E13:sz + E22:sz + E31:sz)

@@ -49,7 +49,7 @@ options() ->
       #option { long="print",
 		short="p",
 		key=print,
-		spec=[{"true",true},{"literal",literal},
+		spec=[{"true",true},{"literal",literal},{"erlang",erlang},
 		      {"model",model},{"false",false}],
 		default=false,
 		description="Print models when found."

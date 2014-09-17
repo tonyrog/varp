@@ -85,12 +85,12 @@ run(version, _Formula, _Opts) ->
     varp_option:version().
 
 
-result(true,prove) ->       io:format("TRUE\n", []);
-result(false,prove) ->      io:format("FALSE\n", []);
-result(undefined,prove) ->  io:format("UNKNOWN\n", []);
+result(true,prove) ->       io:format("% TRUE\n", []);
+result(false,prove) ->      io:format("% FALSE\n", []);
+result(undefined,prove) ->  io:format("% UNKNOWN\n", []);
 result(undefined,_) ->      io:format("\n", []);
-result(N, _) when is_integer(N) -> io:format("~w\n", [N]);
-result({N,_Mdls}, _) -> io:format("~w\n", [N]).
+result(N, _) when is_integer(N) -> io:format("% ~w\n", [N]);
+result({N,_Mdls}, _) -> io:format("% ~w\n", [N]).
 
 
 %% load files and form a conjunction over all files
@@ -102,7 +102,7 @@ load_files([F|Fs],Formula0,Defs0,JoinOp) ->
 		    io:format("~s: error: ~p\n", [F,_Reason]),
 		    Error;
 		Cnf = {cnf,{_NVars,_NClauses,_CLs}} ->
-		    io:format("loaded: ~s\n", [F]),
+		    io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
 		    load_files(Fs,Formula1,Defs0,JoinOp)
 	    end;
@@ -110,7 +110,7 @@ load_files([F|Fs],Formula0,Defs0,JoinOp) ->
 	    {ok, Data} = file:read_file(F),
 	    case parse(F, Data) of
 		{ok,{Defs,Formula}} ->
-		    io:format("loaded: ~s\n", [F]),
+		    io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
 		    load_files(Fs,Formula1,Defs++Defs,JoinOp);
 		Error ->
@@ -196,8 +196,8 @@ parse(String) ->
 parse(File, Binary) when is_binary(Binary) ->
     parse(File, binary_to_list(Binary));
 parse(File, String) ->
-    case varp_scan:string(String) of
-	{ok,Ts,_Ln} ->
+    case tokens(String) of
+	{ok,Ts} ->
 	    case varp_parse:parse(Ts) of
 		{ok,Formula} ->
 		    {ok,Formula};
@@ -213,8 +213,32 @@ parse(File, String) ->
 string(Binary) when is_binary(Binary) ->
     string(binary_to_list(Binary));
 string(String) when is_list(String) ->
-    {ok,Ts,_Ln} = varp_scan:string(String),
+    {ok,Ts} = tokens(String),
     varp_parse:parse(Ts).
+
+tokens(String) ->
+    case varp_scan:string(remove_comments(String)) of
+	{ok,Ts,_Ln} -> {ok,Ts};
+	Error -> Error
+    end.
+
+%% remove C-style comments from data
+remove_comments([$/,$/|Cs]) -> remove_comments(remove_line(Cs));
+remove_comments([$/,$*|Cs]) -> remove_comments(remove_block(Cs));
+remove_comments([C|Cs]) -> [C|remove_comments(Cs)];
+remove_comments([]) -> [].
+
+%% remove until */ but keep all \n
+remove_block([$*,$/|Cs]) -> Cs;
+remove_block([$\n|Cs]) -> [$\n|remove_block(Cs)];
+remove_block([_|Cs]) -> remove_block(Cs);
+remove_block([]) -> [].
+
+%% remove until end-of-line (but keep it)
+remove_line(Cs=[$\n|_]) -> Cs;
+remove_line([_|Cs]) -> remove_line(Cs);
+remove_line([]) -> [].
+
 
 %% special
 file_expand_cnf(File, MetaBind) ->

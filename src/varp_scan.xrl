@@ -114,8 +114,9 @@ equ                 : {token,{equ,TokenLine}}.
 \.\.		: {token,{'..',TokenLine}}.
 \.		: {token,{'.',TokenLine}}.
 
-{L}({A}|{D}|_)*     : {token,{variable,TokenLine,TokenChars}}.
-{U}({A}|{D}|_)*     : {token,{symbol,TokenLine,TokenChars}}.
+{L}({A}|{D}|_)*  : {token,{variable,TokenLine,TokenChars}}.
+{U}({A}|{D}|_)*  : {token,{symbol,TokenLine,TokenChars}}.
+_({U}|{D})({A}|{D}|_)* : {token,{symbol,TokenLine,TokenChars}}.
 
 {WS}+		: skip_token .
 

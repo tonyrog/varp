@@ -1,5 +1,17 @@
-([A a=1..n,b=1..n][E! c=1..n] G(a,b,c)) &&
-([A a=1..n] (G(a,1,a) && G(1,a,a))) &&
-([A a=1..n][E b=1..n] (G(a,b,1) && G(b,a,1))) &&
-([A a=1..n,b=1..n,c=1..n][E t1=1..n,t2=1..n,t3=1..n]
+//
+// Group formulation 
+// 0 is used as the unit element
+//
+
+// a*b = c, a*b has exactly one result and that is an element in G
+([A a=0..n-1,b=0..n-1][E! c=0..n-1] G(a,b,c)) &&
+
+// product with id element yield the element it self
+([A a=0..n-1] (G(a,0,a) && G(0,a,a))) &&
+
+// for every element a the exist an inverse element b 
+([A a=0..n-1][E b=0..n-1] (G(a,b,0) && G(b,a,0))) &&
+
+// G is associative (a*b)*c = a*(b*c)
+([A a=0..n-1,b=0..n-1,c=0..n-1][E t1=0..n-1,t2=0..n-1,t3=0..n-1]
     (G(a,b,t1) && G(t1,c,t2) && G(a,t3,t2) && G(b,c,t3)))
