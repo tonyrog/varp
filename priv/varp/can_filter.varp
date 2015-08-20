@@ -1,0 +1,13 @@
+// 
+//  Formula to check CAN filter
+//  (F & M) == (I & M)
+//
+
+// !((F & M) == (I & M)) <-> ((F & M) ^ (I & M))
+
+
+!((F & M) == (I & M)) <-> ((F & M) == (~I | ~M))
+
+
+
+

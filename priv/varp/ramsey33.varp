@@ -1,0 +1,26 @@
+//
+// Ramsey formula ( the negation of it )
+//
+//  Find a graph G of size n such that there
+//  is no clique of size k and no independent set of size k
+//
+//  E(i,j) is true if there is an edge between vertex i and j
+//  A clique of size 3 is then expressed like 
+//  E(1,2) & E(1,3) & E(2,3)
+//
+
+// this is formulation of size clique k=3
+
+// There is no clique of size 3
+[ A a=0..n-1,b=0..n-1,c=0..n-1,a<b,b<c ] !( E(a,b) & E(a,c) & E(b,c) ) 
+
+AND
+
+// F are edges in the complement graph G'
+
+[ A a=0..n-1,b=0..n-1,a<b ] ( E(a,b) XOR F(a,b) )
+
+AND
+
+// There is no clique of size 3 in the complement graph G'
+[ A a=0..n-1,b=0..n-1,c=0..n-1,a<b,b<c ] !( F(a,b) & F(a,c) & F(b,c) )

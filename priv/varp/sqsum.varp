@@ -1,0 +1,30 @@
+//
+//  Square sum
+//
+
+(Sum:(sz+1) == A:sz + B:sz) &&
+(Sum:(sz+1) == C:sz + D:sz) &&
+(Sum:(sz+1) == E:sz + F:sz) &&
+
+(A:sz == A0:((sz+1)/2)*A0:((sz+1)/2)) &&
+(B:sz == B0:((sz+1)/2)*B0:((sz+1)/2)) &&
+(C:sz == C0:((sz+1)/2)*C0:((sz+1)/2)) &&
+(D:sz == D0:((sz+1)/2)*D0:((sz+1)/2)) &&
+(E:sz == E0:((sz+1)/2)*E0:((sz+1)/2)) &&
+(F:sz == F0:((sz+1)/2)*F0:((sz+1)/2)) &&
+
+(A:sz != B:sz) && (A:sz != C:sz) && (A:sz != D:sz) && (A:sz != E:sz) && (A:sz != F:sz) &&
+(B:sz != C:sz) && (B:sz != D:sz) && (B:sz != E:sz) && (B:sz != F:sz) &&
+(C:sz != D:sz) && (C:sz != E:sz) && (C:sz != F:sz) &&
+(D:sz != E:sz) && (D:sz != F:sz) &&
+(E:sz != F:sz) &&
+
+
+(A:sz != 0) && 
+(B:sz != 0) &&
+(C:sz != 0) &&
+(D:sz != 0) &&
+(E:sz != 0) &&
+(F:sz != 0)
+
+
