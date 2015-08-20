@@ -34,7 +34,7 @@ main(Args) ->
 		{ok,Data} ->
 		    case parse("*stdin*", Data) of
 			{ok,{Defs,Formula}} ->
-			    Formula1 = join_f(Formula0,Formula,'and'),
+			    Formula1 = join_f('and',Formula0,Formula),
 			    run(Mode,Formula1,[{defs,Defs0++Defs}|Opts]);
 			_Error ->
 			    halt(1)
@@ -65,13 +65,27 @@ run(prove, Formula, Opts) ->
 run(none, Formula, Opts) ->
     R = run_formula(Formula,Opts),
     result(R, none);
+run(snf, Formula, Opts) ->
+    %% generate dimacs snf from a formula
+    Bs = proplists:get_value(env,Opts,[]),
+    F = form:expand(Formula,Bs),
+    %% Cs=clauses and Ls=literals eliminated
+    {Cs,_Ls} = cnf:clauses(F),
+    Data = cnf:format(Cs),
+    case proplists:get_value(output,Opts,"") of
+	"" ->
+	    io:put_chars(Data);
+	FileName ->
+	    file:write_file(FileName, Data)
+    end,
+    ok;
 run(cnf, Formula, Opts) ->
     %% generate dimacs cnf from a formula
     Bs = proplists:get_value(env,Opts,[]),
     F = form:expand(Formula,Bs),
     %% Cs=clauses and Ls=literals eliminated
     {Cs,_Ls} = cnf:clauses(F),
-    Data = cnf:format(Cs),
+    Data = dimacs:format(Cs),
     case proplists:get_value(output,Opts,"") of
 	"" ->
 	    io:put_chars(Data);

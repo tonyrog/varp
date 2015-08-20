@@ -14,12 +14,16 @@ static void varc_unload(ErlNifEnv* env, void* priv_data);
 
 static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_new_variable(ErlNifEnv* env, int argc,
+static ERL_NIF_TERM varc_add_variable(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_new_clause(ErlNifEnv* env, int argc,
+static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_number_of_variables(ErlNifEnv* env, int argc,
 					     const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_number_of_clauses(ErlNifEnv* env, int argc,
+					   const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_value(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_class(ErlNifEnv* env, int argc,
@@ -89,12 +93,14 @@ typedef struct _heap_t
 } heap_t;
 
 typedef struct _varc_t {
-    unsigned int next;       // next free variable number
-    unsigned int size;       // allocated size of value/class map
+    unsigned int vnext;      // next free variable number
+    unsigned int vsize;      // allocated size of value/class map
+    unsigned int cnext;      // next clause number
+    unsigned int csize;      // allocated size of value/class map
     unsigned int expand;     // how much to expand value/class map
     int*   value_map;        // value_map[v] = value of variable v
     int*   class_map;        // class_map[v] = class chain of variable v
-    unsigned int usize;      // allocated size of undo vector
+    clause_t** clause_map;   // class_map[v] = class chain of variable v
     unsigned int umark;      // next entry should be marked
     undo_t*  undo_stack;     // undo stack
     clause_t* eval_queue;    // clauses to eval 
@@ -112,7 +118,7 @@ ErlNifFunc varc_funcs[] =
     { "new",                 0,  varc_new },
     { "new",                 1,  varc_new },
     { "new",                 2,  varc_new },
-    { "new_variable",        1,  varc_new_variable },
+    { "add_variable",        1,  varc_add_variable },
     { "number_of_variables", 1,  varc_number_of_variables },
     { "value",               2,  varc_value },
     { "class",               2,  varc_class },
@@ -123,10 +129,14 @@ ErlNifFunc varc_funcs[] =
     { "is_equivalent",       3,  varc_is_equivalent },
     { "mark",                1,  varc_mark },
     { "undo",                1,  varc_undo },
-    { "new_clause",          4,  varc_new_clause },   // x1 = OP x2
-    { "new_clause",          5,  varc_new_clause },   // x1 = OP x2 x3
-    { "new_clause",          6,  varc_new_clause },   // x1 = OP x2 x3 x4
-    { "new_clause",          7,  varc_new_clause }    // x1 = OP x2 x3 x4 x5
+    { "add_clause",          3,  varc_add_clause },   // x1 = OP x2 ... x32
+    { "add_clause",          4,  varc_add_clause },   // x1 = OP x2
+    { "add_clause",          5,  varc_add_clause },   // x1 = OP x2 x3
+    { "add_clause",          6,  varc_add_clause },   // x1 = OP x2 x3 x4
+    { "add_clause",          7,  varc_add_clause },   // x1 = OP x2 x3 x4 x5
+    { "add_clause",          8,  varc_add_clause },   // x1 = OP x2 x3 x4 x5 x6
+    { "get_clause",          2,  varc_get_clause },
+    { "number_of_clauses",   1,  varc_number_of_clauses },
 };
 
 // Atom macros
@@ -234,13 +244,13 @@ static ERL_NIF_TERM x_enif_make_boolean(ErlNifEnv* env, int value)
 
 static int is_variable(int x, varc_t* vp)
 {
-    return ((x > TRUE) && (x < vp->size));
+    return ((x > TRUE) && (x < vp->vnext));
 }
 
 static int is_literal(int x, varc_t* vp)
 {
-    return (((x > TRUE) && (x < vp->size)) ||
-	    ((x < FALSE) && (-x < vp->size)));
+    return (((x > TRUE) && (x < vp->vnext)) ||
+	    ((x < FALSE) && (-x < vp->vnext)));
 }
 
 static int is_constant(int x, varc_t* vp)
@@ -251,7 +261,7 @@ static int is_constant(int x, varc_t* vp)
 static int is_bound(int x, varc_t* vp)
 {
     if (x < 0) x = -x;
-    if ((x < 2) || (x >= vp->size)) return -1;
+    if ((x < 2) || (x >= vp->vnext)) return -1;
     return vp->value_map[x] != 0;
 }
 
@@ -306,6 +316,10 @@ static void cleanup(varc_t* vp)
 	free(vp->class_map);
 	vp->class_map = NULL;
     }
+    if (vp->clause_map) {
+	free(vp->clause_map);
+	vp->clause_map = NULL;
+    }
     hp = vp->undo_heap;
     while(hp != NULL) {
 	heap_t* hp_next = hp->next;
@@ -340,7 +354,8 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
 {
     varc_t* vp;
     unsigned int expand = DEFAULT_MAP_EXPAND;
-    unsigned int size   = DEFAULT_MAP_SIZE;
+    unsigned int vsize  = DEFAULT_MAP_SIZE;
+    unsigned int csize  = DEFAULT_MAP_SIZE;
     ERL_NIF_TERM t;
     int i;
     
@@ -350,11 +365,11 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     memset(vp, 0, sizeof(varc_t));
 
     if (argc >= 1) {
-	if (!enif_get_uint(env, argv[0], &size))
+	if (!enif_get_uint(env, argv[0], &vsize))
 	    return enif_make_badarg(env);
-	if (size == 0)
-	    size = DEFAULT_MAP_SIZE;
-	else if ((size < 2) || (size > MAX_MAP_SIZE))
+	if (vsize == 0)
+	    vsize = DEFAULT_MAP_SIZE;
+	else if ((vsize < 2) || (vsize > MAX_MAP_SIZE))
 	    return enif_make_badarg(env);
     }
     if (argc >= 2) {
@@ -365,12 +380,17 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
 	else if (expand >  MAX_MAP_EXPAND)
 	    return enif_make_badarg(env);
     }
-    vp->next = 2;
-    vp->size = size;
+    vp->vnext = 2;
+    vp->vsize = vsize;
     vp->expand = expand;
-    if (!(vp->value_map = malloc(size*sizeof(int))))
+    if (!(vp->value_map = malloc(vsize*sizeof(int))))
 	goto error;
-    if (!(vp->class_map = malloc(size*sizeof(int))))
+    if (!(vp->class_map = malloc(vsize*sizeof(int))))
+	goto error;
+
+    vp->cnext = 0;
+    vp->csize = csize;
+    if (!(vp->clause_map = malloc(csize*sizeof(clause_t**))))
 	goto error;
 
     if (!(vp->undo_heap = new_heap_block(NULL)))
@@ -381,7 +401,6 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     }
 
     vp->umark = MARK;
-    vp->usize = size;
     
     vp->value_map[0] = 0;
     vp->value_map[1] = 1;
@@ -399,7 +418,7 @@ error:
     return enif_make_badarg(env);
 }
 
-static ERL_NIF_TERM varc_new_variable(ErlNifEnv* env, int argc,
+static ERL_NIF_TERM varc_add_variable(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
 {
     varc_t* vp;
@@ -407,23 +426,23 @@ static ERL_NIF_TERM varc_new_variable(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (vp->next == vp->size) {
-	unsigned int old_size = vp->size;
-	unsigned int new_size = old_size + vp->expand;
+    if (vp->vnext == vp->vsize) {
+	unsigned int old_vsize = vp->vsize;
+	unsigned int new_vsize = old_vsize + vp->expand;
 	void* ptr;
 	// expand
-	if (!(ptr = realloc(vp->value_map, new_size*sizeof(int))))
+	if (!(ptr = realloc(vp->value_map, new_vsize*sizeof(int))))
 	    return enif_make_badarg(env);
 	vp->value_map = ptr;
-	if (!(ptr = realloc(vp->class_map, new_size*sizeof(int))))
+	if (!(ptr = realloc(vp->class_map, new_vsize*sizeof(int))))
 	    return enif_make_badarg(env);
 	vp->class_map = ptr;
-	vp->size = new_size;
+	vp->vsize = new_vsize;
     }
-    var = vp->next++;
+    var = vp->vnext++;
     vp->value_map[var] = 0;
     vp->class_map[var] = 0;
-    return enif_make_tuple2(env, enif_make_int(env, var), argv[0]);
+    return enif_make_int(env, var);
 }
 
 static ERL_NIF_TERM varc_number_of_variables(ErlNifEnv* env, int argc,
@@ -433,9 +452,18 @@ static ERL_NIF_TERM varc_number_of_variables(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
-    return enif_make_int(env, vp->next);
+    return enif_make_int(env, vp->vnext-2);
 }
 
+static ERL_NIF_TERM varc_number_of_clauses(ErlNifEnv* env, int argc,
+					   const ERL_NIF_TERM argv[])
+{
+    varc_t* vp;
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
+	return enif_make_badarg(env);
+    return enif_make_int(env, vp->cnext);
+}
 
 //
 // value(X, Vct) -> Value.
@@ -446,16 +474,16 @@ static ERL_NIF_TERM varc_value(ErlNifEnv* env, int argc,
 {
     int x;
     varc_t* vp;
-    
-    if (!enif_get_int(env, argv[0], &x))
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_resource(env, argv[1], varc_res, (void**) &vp))
+    if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
     if (is_constant(x,vp))
 	return enif_make_int(env, x);	
     if (!is_literal(x,vp))
 	return enif_make_badarg(env);
-    if (!(x = lookup(x, vp->value_map, vp->size)))
+    if (!(x = lookup(x, vp->value_map, vp->vsize)))
 	return enif_make_badarg(env);
     return enif_make_int(env, x);
 }
@@ -465,16 +493,16 @@ static ERL_NIF_TERM varc_class(ErlNifEnv* env, int argc,
 {
     int x;
     varc_t* vp;
-    
-    if (!enif_get_int(env, argv[0], &x))
-	return enif_make_badarg(env);
-    if (!enif_get_resource(env, argv[1], varc_res, (void**) &vp))
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
+	return enif_make_badarg(env);    
+    if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
     if (is_constant(x,vp))
 	return enif_make_int(env, x);	
     if (!is_literal(x,vp))
 	return enif_make_badarg(env);
-    if (!(x = lookup(x, vp->class_map, vp->size)))
+    if (!(x = lookup(x, vp->class_map, vp->vsize)))
 	return enif_make_badarg(env);
     return enif_make_int(env, x);
 }
@@ -486,9 +514,9 @@ static ERL_NIF_TERM varc_is_variable(ErlNifEnv* env, int argc,
     varc_t* vp;
     int x;
 
-    if (!enif_get_int(env, argv[0], &x))
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_resource(env, argv[1], varc_res, (void**) &vp))
+    if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
     return x_enif_make_boolean(env, is_literal(x, vp));
 }
@@ -500,9 +528,9 @@ static ERL_NIF_TERM varc_is_bound(ErlNifEnv* env, int argc,
     int x;
     int p;
 
-    if (!enif_get_int(env, argv[0], &x))
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_resource(env, argv[1], varc_res, (void**) &vp))
+    if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
     if ((p = is_bound(x, vp)) < 0)
 	return enif_make_badarg(env);
@@ -519,10 +547,10 @@ static ERL_NIF_TERM varc_class_next(ErlNifEnv* env, int argc,
     int x;
     varc_t* vp;
 
-    if (!enif_get_int(env, argv[0], &x))
-	return enif_make_badarg(env);	
-    if (!enif_get_resource(env, argv[1], varc_res, (void**) &vp))
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
+    if (!enif_get_int(env, argv[1], &x))
+	return enif_make_badarg(env);	
     if (!is_variable(x, vp))
 	return enif_make_badarg(env);
     return enif_make_int(env, vp->class_map[x]);
@@ -535,15 +563,15 @@ static ERL_NIF_TERM varc_is_equivalent(ErlNifEnv* env, int argc,
     int x, y;
     varc_t* vp;
 
-    if (!enif_get_int(env, argv[0], &x))
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &y))
+    if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
-    if (!enif_get_resource(env, argv[2], varc_res, (void**) &vp))
+    if (!enif_get_int(env, argv[2], &y))
 	return enif_make_badarg(env);
-    if (!(x = lookup(x, vp->class_map, vp->size)))
+    if (!(x = lookup(x, vp->class_map, vp->vsize)))
 	return enif_make_badarg(env);
-    if (!(y = lookup(y, vp->class_map, vp->size)))
+    if (!(y = lookup(y, vp->class_map, vp->vsize)))
 	return enif_make_badarg(env);
     return x_enif_make_boolean(env, (x == y));
 }
@@ -558,11 +586,11 @@ static ERL_NIF_TERM varc_equivalent(ErlNifEnv* env, int argc,
     int x, y, yc;
     varc_t* vp;
 
-    if (!enif_get_int(env, argv[0], &x))
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &y))
+    if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
-    if (!enif_get_resource(env, argv[2], varc_res, (void**) &vp))
+    if (!enif_get_int(env, argv[2], &y))
 	return enif_make_badarg(env);
     if (!is_literal(x, vp))
 	return enif_make_badarg(env);
@@ -572,7 +600,7 @@ static ERL_NIF_TERM varc_equivalent(ErlNifEnv* env, int argc,
     // we could allow bound x by let x mean class(x)
     if (is_bound(x, vp))
 	return enif_make_badarg(env);
-    if (!(yc = lookup(y, vp->class_map, vp->size)))
+    if (!(yc = lookup(y, vp->class_map, vp->vsize)))
 	return enif_make_badarg(env);
     push(VALUE, x, vp->value_map[x], vp);
     vp->value_map[x] = y;
@@ -633,11 +661,12 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
     return argv[0];
 }
 //
-// new_clause(vp, 'and', x1, ..., xn)
-// new_clause(vp, 'or',  x1, ..., xn)
-// new_clause(vp, 'xor', x1, ..., xn)
+// add_clause(vp, 'and', x1, ..., xn)
+// add_clause(vp, 'or',  x1, ..., xn)
+// add_clause(vp, 'xor', x1, ..., xn)
+// add_clause(vp, Op, [x1, ..., xn])
 //
-static ERL_NIF_TERM varc_new_clause(ErlNifEnv* env, int argc,
+static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
     uint8_t op;
@@ -645,6 +674,8 @@ static ERL_NIF_TERM varc_new_clause(ErlNifEnv* env, int argc,
     clause_t* ptr;
     varc_t* vp;
     int i;
+    size_t size;
+    unsigned int clause;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -658,21 +689,89 @@ static ERL_NIF_TERM varc_new_clause(ErlNifEnv* env, int argc,
     else
 	return enif_make_badarg(env);
 
-    if (argc > 34)
-	return enif_make_badarg(env);
-    for (i = 2; i < argc; i++) {
-	if (!enif_get_int(env, argv[i], &lit[i-2]))
+    if (argc == 3) {   // argv[2] is a list of literals
+	ERL_NIF_TERM list = argv[2];
+	ERL_NIF_TERM head, tail;
+
+	i = 0;
+	while((i < 32) && enif_get_list_cell(env, list, &head, &tail)) {
+	    if (!enif_get_int(env, head, &lit[i]))
+		return enif_make_badarg(env);
+	    i++;
+	    list = tail;
+	}
+	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
+	size = i;
     }
-    if ((ptr = clause_alloc(vp, op, argc-2)) == NULL)
+    else if (argc  <= 34) {
+	for (i = 2; i < argc; i++) {
+	    if (!enif_get_int(env, argv[i], &lit[i-2]))
+		return enif_make_badarg(env);
+	}
+	size = i-2;
+    }
+    else 
 	return enif_make_badarg(env);
-    memcpy(ptr->lit, lit, sizeof(int)*(argc-2));
+
+    if ((ptr = clause_alloc(vp, op, size)) == NULL)
+	return enif_make_badarg(env);
+
+    // check all literals
+    for (i = 0; i < size; i++) {
+	if (!is_literal(lit[i], vp) && !is_constant(lit[i], vp))
+	    return enif_make_badarg(env);
+	ptr->lit[i] = lit[i];
+    }
 
     ptr->next = vp->eval_queue;
     vp->eval_queue = ptr;
     ptr->flags |= CLAUSE_FLAG_INQUEUE;
 
-    return ATOM(ok);
+    if (vp->cnext == vp->csize) {
+	unsigned int old_csize = vp->csize;
+	unsigned int new_csize = old_csize + vp->expand;
+	void* p;
+	// expand
+	if (!(p = realloc(vp->clause_map, new_csize*sizeof(clause_t**))))
+	    return enif_make_badarg(env);
+	vp->clause_map = p;
+	vp->csize = new_csize;
+    }
+
+    clause = vp->cnext++;
+    vp->clause_map[clause] = ptr;
+    return enif_make_int(env, clause);
+}
+
+static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
+{
+    clause_t* ptr;
+    varc_t* vp;
+    unsigned int clause;
+    ERL_NIF_TERM lit[32];
+    ERL_NIF_TERM op;
+    int i;
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!enif_get_uint(env, argv[1], &clause))
+	return enif_make_badarg(env);
+    if (clause >= vp->cnext)
+	return enif_make_badarg(env);
+    ptr = vp->clause_map[clause];
+    
+    for (i = 0; i < ptr->size; i++)
+	lit[i] = enif_make_int(env, ptr->lit[i]);
+    switch(ptr->op) {
+    case CLAUSE_OP_AND: op = ATOM(and); break;
+    case CLAUSE_OP_OR: op = ATOM(or); break;
+    case CLAUSE_OP_XOR: op = ATOM(xor); break;
+    default: op = ATOM(undefined); break;
+    }
+    return enif_make_tuple2(env, op, 
+			    enif_make_list_from_array(env, lit, ptr->size));
 }
 
 

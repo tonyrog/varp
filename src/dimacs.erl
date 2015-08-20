@@ -38,7 +38,7 @@ load(File) ->
 %% <format>=cnf
 %% Each line contains literal in form of integers 
 %%   (signed are negated variables)
-%% Each clause constist of a list of integers and is terminate by number 0
+%% Each clause consist of a list of integers and is terminate by number 0
 %%
 %% Each integer I > 0 is mapped to {p,x,[I]}}
 %% ande I < 0 is mapped to {'not',{p,x,[I]}}
@@ -149,18 +149,14 @@ to_snf_(Fd,File,Ln,Ts0,CLs) ->
 save(File, Cs) ->
     file:write_file(File, format(Cs)).
 
-format(Cs) ->    
-    Cs1 = from_cnf(Cs),
+format(Cs) ->
+    {Cs1,NVars} = from_cnf(Cs),
     NClauses = length(Cs1),
-    Vs = lists:usort(lists:flatten(Cs1)),
-    NVars = if hd(Vs) =:= 1 -> length(Vs) -1;
-	       true -> length(Vs)
-	    end,
     [["c auto generated from <file>\n"],
      ["p cnf ", integer_to_list(NVars), " ", integer_to_list(NClauses), "\n"],
-     [[format_clause(CL)," 0","\n"] || CL <- Cs1],
-     ["%\n"],
-     ["0\n"]].
+     [[format_clause(CL)," 0","\n"] || CL <- Cs1]].
+%%     ["%\n"],
+%%     ["0\n"]].
 
 format_clause([L]) -> [integer_to_list(L)];
 format_clause([L|Ls]) -> [integer_to_list(L)," " | format_clause(Ls)].
@@ -169,9 +165,10 @@ format_clause([L|Ls]) -> [integer_to_list(L)," " | format_clause(Ls)].
 %% Translate clauses to dimacs form 
 %%
 from_cnf(Cs) ->
-    D0 = dict:from_list([{'$fresh',2}]),
-    {Cs1, _} = from_cnf_(Cs, [], D0),
-    Cs1.
+    D0 = dict:from_list([{'$fresh',1}]),
+    {Cs1, D1} = from_cnf_(Cs, [], D0),
+    NVars = dict:fetch('$fresh',D1),
+    {Cs1,NVars-1}.
 
 from_cnf_([CL|Cs], Acc, D) ->
     from_cnf_(CL, [], Cs, Acc, D);
@@ -180,8 +177,8 @@ from_cnf_([], Acc, D) ->
 
 from_cnf_([L|Ls], Acc1, Cs, Acc, D) ->
     case L of
-	true  -> from_cnf_(Ls, [1|Acc1], Cs, Acc, D);
-	false -> from_cnf_(Ls, [-1|Acc1], Cs, Acc, D);
+	true  -> from_cnf_(Cs, Acc, D);  %% clause is true remove it
+	false -> from_cnf_(Ls, Acc1, Cs, Acc, D);
 	{'not',V={p,_V,_Vs}} ->
 	    case dict:find(V, D) of
 		error -> 

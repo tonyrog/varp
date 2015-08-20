@@ -1234,24 +1234,34 @@ eval_domain({range,A,B}, Bs) ->
     if A1 =< B1 -> lists:seq(A1, B1);
        true -> lists:reverse(lists:seq(B1,A1))
     end;
-eval_domain({union,A,B}, Bs) ->
+eval_domain({f,union,[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:union(A1,B1);
-eval_domain({subtract,A,B}, Bs) ->
+eval_domain({f,subtract,[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:subtract(A1,B1);
-eval_domain({intersect,A,B}, Bs) ->
+eval_domain({f,intersect,[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:intersection(A1,B1);
-eval_domain({product,A,B}, Bs) ->
+eval_domain({f,product,[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
+eval_domain({f,subsets,[A]}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    subsets(A1);
+eval_domain({f,subsets,[K,A]}, Bs) ->
+    K1 = eval_meta(K,Bs),
+    A1 = eval_domain(A,Bs),
+    subsets(K1,A1);
 eval_domain(Expr, Bs) ->
-    [eval_meta(Expr,Bs)].
+    D = eval_meta(Expr,Bs),
+    if is_list(D) -> D;
+       true -> [D]
+    end.
 
 eval_meta(V, _Bs) when is_integer(V) -> V;
 eval_meta(true, _Bs)  -> true;
@@ -1261,7 +1271,8 @@ eval_meta(V, Bs) when is_atom(V) ->
 	none ->
 	    io:format("variable '~s' is not bound\n", [V]),
 	    error({unbound, V});
-	{_,W} -> W
+	{_,W} -> 
+	    W
     end;
 eval_meta(_A1={f,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
@@ -1330,6 +1341,24 @@ eval_meta({Op,A},Bs) ->
 
 eval_meta_list(As,Bs) ->
     map(fun(A) -> eval_meta(A,Bs) end, As).
+
+%% Generate a set/list of all subsets of a set
+subsets([A|As]) ->
+    Bs = subsets(As),
+    [[A]] ++ [[A|B] || B <- Bs] ++ Bs;
+subsets([]) ->
+    [].
+
+%% subsets of size K
+subsets(1, As) ->
+    [[A] || A <- As];
+subsets(K, As0=[A|As]) ->
+    L = length(As0),
+    if K =:= L -> [As0];
+       K < L ->
+	    Bs = subsets(K-1,As),
+	    subsets(K, As) ++ [[A|B] || B <- Bs]
+    end.
 
 uint64(I,Bs) when is_integer(I) ->
     const_vector(uint,I,64,Bs);

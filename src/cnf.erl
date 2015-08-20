@@ -10,6 +10,7 @@
 -export([clauses/1]).
 -export([succ_dimacs/2, succ/2]).
 -export([normalize_clause/1, normalize_clauses/1]).
+-export([format/1]).
 
 -compile(export_all).
 
@@ -21,13 +22,13 @@
 satisfy(F0) ->
     F = form:expand(F0),
     Vs = lists:sort(form:variables(F)),
-    {A, Ls} = clauses(F),
-    io:format("literals=~w\n",[Ls]),
+    {A, _Ls} = clauses(F),
+    %% io:format("literals=~w\n",[_Ls]),
     Af = {all, map(fun(Cp) -> {any,Cp} end, A)},
     case varp:satisfy({'and',{none,Vs}, Af}) of
 	false ->
-	    {A1,Ls1} = normalize_clauses(succ_clauses(A,Vs)),
-	    io:format("literals1=~w\n",[Ls1]),
+	    {A1,_Ls1} = normalize_clauses(succ_clauses(A,Vs)),
+	    %% io:format("literals1=~w\n",[_Ls1]),
 	    Af1 = {all, map(fun(Cp) -> {any,Cp} end, A1)},
 	    case varp:prove({'imp',Af,Af1}) of
 		true -> false;
@@ -47,13 +48,13 @@ test_succ(C,Vs) ->
 clauses(A) ->
     %% io:format("A=~p\n", [A]),
     A1 = rewrite(A),
-    io:format("A1=~p\n", [A1]),
+    %% io:format("A1=~p\n", [A1]),
     Cs1 = clause_form(A1),
-    io:format("Cs1=~p\n", [Cs1]),
+    %% io:format("Cs1=~p\n", [Cs1]),
     Cs2 = normalize_clauses(Cs1),
-    io:format("Cs2=~p\n", [Cs2]),
+    %% io:format("Cs2=~p\n", [Cs2]),
     Cs3 = subsume_clauses(Cs2),
-    io:format("Cs3=~p\n", [Cs3]),
+    %% io:format("Cs3=~p\n", [Cs3]),
     Cs3.
 
 %%
@@ -77,18 +78,20 @@ normalize_clauses_([],Acc) ->
 %%      A false B => A B
 %%
 normalize_clause(CL) ->
-    lists:usort(CL).
+    normalize_clause_(lists:usort(CL),[]).
 
 %% fixme: handle true,false and removed literals !
 normalize_clause_([false|As],CL) ->   normalize_clause_(As,CL);
 normalize_clause_([true|_],_CL)  ->   [];
-normalize_clause_([NA={'not',A}|As], CL) ->
-    case lists:member(A, As) of
-	false -> normalize_clause_(As, [NA|CL]);
+normalize_clause_([L={'not',_}|As], CL) -> normalize_clause_(As, [L|CL]);
+normalize_clause_([A|As], CL) ->
+    NA = {'not',A},
+    case lists:member(NA, As) orelse lists:member(NA,CL) of
+	false -> normalize_clause_(As, [A|CL]);
 	true -> []
     end;
-normalize_clause_(As, C) -> %% only potive literals should remain
-    reverse(C) ++ As.
+normalize_clause_([], CL) -> %% only potive literals should remain
+    CL.
 
 %%
 %% Remove sub clauses, return clauses and a lists of
@@ -192,8 +195,7 @@ pairs([A|As]) -> [{A,Ai} || Ai <- As] ++ pairs(As).
 
 format(CLs) ->
     NClauses = length(CLs),
-    Vs = lists:usort(lists:flatten(CLs)),
-    NVars = length(Vs),
+    NVars = length(lists:usort(lists:map(fun({'not',V}) -> V; (V) -> V end, lists:flatten(CLs)))),
     [["c auto generated from <file>\n"],
      ["p snf ", integer_to_list(NVars), " ", integer_to_list(NClauses), "\n"],
      [[format_clause(C)," .","\n"] || C <- CLs],
@@ -211,7 +213,7 @@ format_symbol(false) -> "false";
 format_symbol({p,V,[]}) -> atom_to_list(V);
 format_symbol({p,V,As}) ->
     [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
-    
+
 concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].

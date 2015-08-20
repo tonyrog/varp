@@ -81,7 +81,7 @@ options() ->
 		      {"occure",occure},
 		      {"depth_occure",depth_occure},
 		      {"occure_depth",occure_depth}],
-		default=identify,
+		default=identity,
 		description="Specifiy variable order."
 	      },
       #option { long="bcp",
@@ -347,7 +347,7 @@ vsn() ->
 
 usage() ->
     io:format("varp: usage: varp [<Mode>] [Options] [Bindings] [files]\n"),
-    io:format("  <Mode> = satisfy|falsify|prove|cnf|version|help\n"),
+    io:format("  <Mode> = satisfy|falsify|prove|cnf|snf|version|help\n"),
     io:format("Options\n"),
     lists:foreach(
       fun(#option{long=LongOpt,short=ShortOpt,spec=Spec,

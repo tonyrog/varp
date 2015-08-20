@@ -99,9 +99,6 @@ expr -> variable '=' expr  : { '=', name('$1'), '$3' }.
 exprs -> expr : ['$1'].
 exprs -> expr ',' exprs : ['$1' | '$3'].
 
-%% dexpr -> dexpr '|' dexpr : { union,   '$1', '$3' }.
-%% dexpr -> dexpr '*' dexpr : { product, '$1', '$3' }.
-    
 %%
 %% Formulas
 %%
