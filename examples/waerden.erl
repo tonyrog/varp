@@ -81,15 +81,31 @@ varname(F,I) ->
 run(R,K,N) ->
     run(R,K,N,1).
 run(R,K,N,S) ->
-    prover:run_formula(w(R,K,N),[{value,false},{saturate,S},
+    F = w(R,K,N),
+    prover:run_formula(F,[{value,false},{saturate,S},
+			  {log,info},{max,1}]).
+
+runn(R,K,N) ->
+    runn(R,K,N,1).
+runn(R,K,N,S) ->
+    F = {'->', w(R,K,N+1), w(R,K,N)},
+    prover:run_formula(F,[{value,false},{saturate,S},
 				 {log,info},{max,1}]).
 
 %% 4,3,76 => 17000 triples, test1 11931/17935
 run0(R,K,N) ->
     run0(R,K,N,1).
 run0(R,K,N,S) ->
-    prover:run_formula(w0(R,K,N),[{value,false},{saturate,S},
-				  {log,info},{max,1}]).
+    F = w0(R,K,N),
+    prover:run_formula(F,[{value,false},{saturate,S},
+			  {log,info},{max,1}]).
+
+runn0(R,K,N) ->
+    runn0(R,K,N,1).
+runn0(R,K,N,S) ->
+    F = {'->', w0(R,K,N+1), w0(R,K,N)},
+    prover:run_formula(F,[{value,false},{saturate,S},
+			  {log,info},{max,1}]).
 
 
 gap_pos_lt(K, N) when K > 1 ->

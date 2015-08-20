@@ -2,6 +2,7 @@
 // NIF library for managing variable classes
 //
 #include <stdio.h>
+#include <stdint.h>
 #include <memory.h>
 #include "erl_nif.h"
 
@@ -15,6 +16,8 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_new_variable(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_new_clause(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_number_of_variables(ErlNifEnv* env, int argc,
 					     const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_value(ErlNifEnv* env, int argc,
@@ -42,6 +45,10 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 #define MAX_MAP_SIZE       (1024*1024)   // max inital size
 #define MAX_MAP_EXPAND     (256*1024)    // max expand
 
+#define HEAP_BLOCK_SIZE      4096
+#define MAX_HEAP_ALLOC_SIZE  (HEAP_BLOCK_SIZE - sizeof(heap_t))
+#define HEAP_BYTE_ALIGN      sizeof(void*)
+
 #define FALSE -1
 #define TRUE  1
 
@@ -50,21 +57,52 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 #define CLASS 0
 
 typedef struct _undo_t {
+    struct _undo_t* next;  // undo list next
     int what;   // (CLASS | VALUE) | MARK
     int x;
     int y;
 } undo_t;
 
+#define CLAUSE_OP_OR   1
+#define CLAUSE_OP_AND  2
+#define CLAUSE_OP_XOR  3
+
+#define CLAUSE_FLAG_INQUEUE 0x0001
+
+// max clause length is 32
+typedef struct _clause_t
+{
+    struct _clause_t* next;      // next in queue or other lists
+    uint32_t mask;               // bit mask of assigned positions
+    uint16_t flags;              // INQUEUE ...
+    uint8_t  op;                 // OR|AND|XOR
+    uint8_t  size;               // number of literals 1..32
+    int      lit[0];
+} clause_t;
+
+typedef struct _heap_t
+{
+    struct _heap_t* next;       // next heap block
+    uint8_t* current;           // must be aligned
+    uint8_t* end;
+    uint8_t base[0];
+} heap_t;
+
 typedef struct _varc_t {
-    unsigned int next;   // next free variable number
-    unsigned int size;   // allocated size of value/class map
-    unsigned int expand; // how much to expand value/class map
-    int*   value_map;    // value_map[v] = value of variable v
-    int*   class_map;    // class_map[v] = class chain of variable v
-    unsigned int usize;  // allocated size of undo vector
-    unsigned int upos;   // "stack" position of undo
-    unsigned int umark;  // next entry should be marked
-    undo_t*  undo_map;   // undo vector
+    unsigned int next;       // next free variable number
+    unsigned int size;       // allocated size of value/class map
+    unsigned int expand;     // how much to expand value/class map
+    int*   value_map;        // value_map[v] = value of variable v
+    int*   class_map;        // class_map[v] = class chain of variable v
+    unsigned int usize;      // allocated size of undo vector
+    unsigned int umark;      // next entry should be marked
+    undo_t*  undo_stack;     // undo stack
+    clause_t* eval_queue;    // clauses to eval 
+
+    heap_t* undo_heap;       // memory heap to allocate/free undo elements from
+    undo_t* undo_free;          // free list of undo_t
+    heap_t* clause_heap[33]; // memory heaps to allocate/free clauses from
+    clause_t* clause_free[33];  // free list of clause_t
 } varc_t;
 
 ErlNifResourceType* varc_res;
@@ -85,6 +123,10 @@ ErlNifFunc varc_funcs[] =
     { "is_equivalent",       3,  varc_is_equivalent },
     { "mark",                1,  varc_mark },
     { "undo",                1,  varc_undo },
+    { "new_clause",          4,  varc_new_clause },   // x1 = OP x2
+    { "new_clause",          5,  varc_new_clause },   // x1 = OP x2 x3
+    { "new_clause",          6,  varc_new_clause },   // x1 = OP x2 x3 x4
+    { "new_clause",          7,  varc_new_clause }    // x1 = OP x2 x3 x4 x5
 };
 
 // Atom macros
@@ -105,6 +147,85 @@ DECL_ATOM(true);
 DECL_ATOM(false);
 DECL_ATOM(undefined);
 DECL_ATOM(error);
+DECL_ATOM(and);
+DECL_ATOM(or);
+DECL_ATOM(xor);
+
+
+static heap_t* new_heap_block(heap_t* next)
+{
+    void* block;
+    heap_t* hp;
+
+    if (posix_memalign(&block, HEAP_BYTE_ALIGN, HEAP_BLOCK_SIZE) < 0)
+	return NULL;
+    hp = (heap_t*) block;
+    hp->next    = next;
+    hp->current = hp->base;
+    hp->end     = hp->current + MAX_HEAP_ALLOC_SIZE;
+    return hp;
+}
+
+static void* heap_alloc(heap_t** pool, size_t size)
+{
+    heap_t* hp;
+    heap_t* hq;
+    void* ptr;
+
+    if (size > MAX_HEAP_ALLOC_SIZE)
+	return NULL;
+    hp = *pool;
+    if (hp->current + size >= hp->end) {
+	if ((hq = new_heap_block(hp)) == NULL)
+	    return NULL;
+	*pool = hq;
+	hp = hq;
+    }
+    size = (size + HEAP_BYTE_ALIGN - 1) & ~(HEAP_BYTE_ALIGN-1);
+    ptr = hp->current;
+    hp->current += size;
+    return ptr;
+}
+
+undo_t* undo_alloc(varc_t* vp)
+{
+    undo_t* ptr;
+    if ((ptr = vp->undo_free) == NULL)
+	return heap_alloc(&vp->undo_heap, sizeof(undo_t));
+    vp->undo_free = ptr->next;
+    return ptr;
+}
+
+void undo_free(undo_t* ptr, varc_t* vp)
+{
+    ptr->next = vp->undo_free;
+    vp->undo_free = ptr;
+}
+
+// allocate a simple clause (size <= 32)
+clause_t* clause_alloc(varc_t* vp, uint8_t op, size_t size)
+{
+    clause_t* ptr;
+    if ((size < 2) || (size > 32))
+	return NULL;
+    if ((ptr = vp->clause_free[size]) != NULL)
+	vp->clause_free[size] = ptr->next;
+    else if ((ptr = heap_alloc(&vp->clause_heap[size],
+			       sizeof(clause_t)+sizeof(int)*size)) == NULL)
+	return NULL;
+    ptr->next = NULL;
+    ptr->mask = 0;
+    ptr->op   = op;
+    ptr->size = size;
+    // memset(ptr->lit, 0, sizeof(int)*size); // debug only?
+    return ptr;
+}
+
+void clause_free(clause_t* ptr, varc_t* vp)
+{
+    ptr->next = vp->clause_free[ptr->size];
+    vp->clause_free[ptr->size] = ptr;
+}
 
 static ERL_NIF_TERM x_enif_make_boolean(ErlNifEnv* env, int value)
 {
@@ -163,20 +284,20 @@ static void push(int what, int x, int y, varc_t* vp)
 {
     undo_t* up;
 
-    if (vp->upos >= vp->size) {
-	fprintf(stderr, "varc_nif: trying to push above limit\r\n");
-	return;
-    }
-    up = &vp->undo_map[vp->upos];
+    up = undo_alloc(vp);
     up->what = what | vp->umark;
     up->x = x;
     up->y = y;
-    vp->upos++;
+    up->next = vp->undo_stack;
+    vp->undo_stack = up;
     vp->umark = 0;  // mark reset
 }
 
 static void cleanup(varc_t* vp)
 {
+    heap_t* hp;
+    int i;
+
     if (vp->value_map) {
 	free(vp->value_map);
 	vp->value_map = NULL;
@@ -185,9 +306,24 @@ static void cleanup(varc_t* vp)
 	free(vp->class_map);
 	vp->class_map = NULL;
     }
-    if (vp->undo_map) {
-	free(vp->undo_map);
-	vp->undo_map = NULL;
+    hp = vp->undo_heap;
+    while(hp != NULL) {
+	heap_t* hp_next = hp->next;
+	free(hp);
+	hp = hp_next;
+    }
+    vp->undo_heap = NULL;
+    vp->undo_free = NULL;
+
+    for(i = 0; i <= 32; i++) {
+	hp = vp->clause_heap[i];
+	while(hp != NULL) {
+	    heap_t* hp_next = hp->next;
+	    free(hp);
+	    hp = hp_next;
+	}
+	vp->clause_heap[i] = NULL;
+	vp->clause_free[i] = NULL;
     }
 }
 
@@ -206,6 +342,7 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     unsigned int expand = DEFAULT_MAP_EXPAND;
     unsigned int size   = DEFAULT_MAP_SIZE;
     ERL_NIF_TERM t;
+    int i;
     
     if (!(vp = enif_alloc_resource(varc_res, sizeof(varc_t))))
 	goto error;
@@ -234,10 +371,15 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     if (!(vp->value_map = malloc(size*sizeof(int))))
 	goto error;
     if (!(vp->class_map = malloc(size*sizeof(int))))
-	goto error;	
-    if (!(vp->undo_map  = malloc(size*sizeof(undo_t))))
 	goto error;
-    vp->upos  = 0;
+
+    if (!(vp->undo_heap = new_heap_block(NULL)))
+	goto error;
+    for (i = 1; i <= 32; i++) {
+	if (!(vp->clause_heap[i] = new_heap_block(NULL)))
+	    goto error;
+    }
+
     vp->umark = MARK;
     vp->usize = size;
     
@@ -276,9 +418,6 @@ static ERL_NIF_TERM varc_new_variable(ErlNifEnv* env, int argc,
 	if (!(ptr = realloc(vp->class_map, new_size*sizeof(int))))
 	    return enif_make_badarg(env);
 	vp->class_map = ptr;
-	if (!(ptr = realloc(vp->undo_map, new_size*sizeof(undo_t))))
-	    return enif_make_badarg(env);
-	vp->undo_map = ptr;
 	vp->size = new_size;
     }
     var = vp->next++;
@@ -468,27 +607,74 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
 {
     varc_t* vp;
-    int pos;
+    undo_t* up;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    pos = vp->upos;
-    while(pos > 0) {
-	int x, y;
 
-	pos--;
-	x = vp->undo_map[pos].x;
-	y = vp->undo_map[pos].y;
-	if (vp->undo_map[pos].what & VALUE)
+    up = vp->undo_stack;
+    while(up != NULL) {
+	int x, y, w;
+	undo_t* un;
+	x = up->x;
+	y = up->y;
+	w = up->what;
+	un = up->next;
+	undo_free(up, vp);
+	up = un;
+	if (w & VALUE)
 	    vp->value_map[x] = y;
 	else
 	    vp->class_map[x] = y;
-	if (vp->undo_map[pos].what & MARK)
+	if (w & MARK)
 	    break;
     }
-    vp->upos = pos;
+    vp->undo_stack = up;
     return argv[0];
 }
+//
+// new_clause(vp, 'and', x1, ..., xn)
+// new_clause(vp, 'or',  x1, ..., xn)
+// new_clause(vp, 'xor', x1, ..., xn)
+//
+static ERL_NIF_TERM varc_new_clause(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
+{
+    uint8_t op;
+    int lit[32];
+    clause_t* ptr;
+    varc_t* vp;
+    int i;
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
+	return enif_make_badarg(env);
+
+    if (argv[1] == ATOM(and))
+	op = CLAUSE_OP_AND;
+    else if (argv[1] == ATOM(or))
+	op = CLAUSE_OP_OR;
+    else if (argv[1] == ATOM(xor))
+	op = CLAUSE_OP_XOR;
+    else
+	return enif_make_badarg(env);
+
+    if (argc > 34)
+	return enif_make_badarg(env);
+    for (i = 2; i < argc; i++) {
+	if (!enif_get_int(env, argv[i], &lit[i-2]))
+	    return enif_make_badarg(env);
+    }
+    if ((ptr = clause_alloc(vp, op, argc-2)) == NULL)
+	return enif_make_badarg(env);
+    memcpy(ptr->lit, lit, sizeof(int)*(argc-2));
+
+    ptr->next = vp->eval_queue;
+    vp->eval_queue = ptr;
+    ptr->flags |= CLAUSE_FLAG_INQUEUE;
+
+    return ATOM(ok);
+}
+
 
 static int varc_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {
@@ -505,6 +691,9 @@ static int varc_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     LOAD_ATOM(false);
     LOAD_ATOM(undefined);
     LOAD_ATOM(error);
+    LOAD_ATOM(and);
+    LOAD_ATOM(or);
+    LOAD_ATOM(xor);
 
     *priv_data = 0;
     return 0;
