@@ -13,16 +13,18 @@
 -export([new/1]).
 -export([new/2]).
 -export([add_variable/1]).
--export([number_of_variables/1]).
--export([value/2]).
+-export([get_number_of_variables/1]).
+-export([get/2]).
+-export([put/3]).
 -export([class/2]).
+-export([occure/2]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([class_next/2]).
--export([equivalent/3]).
--export([is_equivalent/3]).
--export([mark/1]).
+-export([equal/3]).
+-export([mark/2]).
 -export([undo/1]).
+-export([eval/1]).
 -export([add_clause/3]).
 -export([add_clause/4]).
 -export([add_clause/5]).
@@ -30,7 +32,17 @@
 -export([add_clause/7]).
 -export([add_clause/8]).
 -export([get_clause/2]).
--export([number_of_clauses/1]).
+-export([get_clause_flags/2]).
+-export([del_clause/2]).
+-export([get_number_of_clauses/1]).
+-export([get_clauses/2]).
+-export([get_queue/1]).
+-export([clear_queue/1]).
+-export([get_bindings/2]).
+-export([order_first/1, order_next/2]).
+-export([order_sort/2, order_sort/3]).
+-export([order_all/1]).
+-export([sat/1, sat/2]).
 
 -ifdef(debug).
 -define(debug(F,A), io:format((F),(A))).
@@ -60,13 +72,22 @@ new(Size,Expand) when is_integer(Size), Size >= 0,
 add_variable(Varc) when ?is_varc(Varc) ->
     erlang:error(nif_not_loaded).
 
-number_of_variables(Varc) when ?is_varc(Varc) ->
+get_number_of_variables(Varc) when ?is_varc(Varc) ->
     erlang:error(nif_not_loaded).
 
-value(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+get(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
     erlang:error(nif_not_loaded).
+
+put(Varc, LitA, LitB) when ?is_varc(Varc), 
+			   is_integer(LitA),
+			   is_integer(LitB) ->
+    erlang:error(nif_not_loaded).
+
 
 class(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+    erlang:error(nif_not_loaded).
+
+occure(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
     erlang:error(nif_not_loaded).
 
 is_variable(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
@@ -78,23 +99,21 @@ is_bound(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
 class_next(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
     erlang:error(nif_not_loaded).
 
-equivalent(Varc, LitA, LitB) when ?is_varc(Varc), 
-				  is_integer(LitA),
-				  is_integer(LitB) ->
+equal(Varc, LitA, LitB) when ?is_varc(Varc), 
+			     is_integer(LitA),
+			     is_integer(LitB) ->
     erlang:error(nif_not_loaded).
 
-is_equivalent(Varc, LitA, LitB) when ?is_varc(Varc), 
-				     is_integer(LitA),
-				     is_integer(LitB) ->
-    erlang:error(nif_not_loaded).
-
-mark(Varc) when ?is_varc(Varc) ->
+mark(Varc,Level) when ?is_varc(Varc), is_integer(Level), Level >= 0 ->
     erlang:error(nif_not_loaded).
 
 undo(Varc) when ?is_varc(Varc) ->
     erlang:error(nif_not_loaded).
 
-number_of_clauses(Varc) when ?is_varc(Varc) ->
+eval(Varc) when ?is_varc(Varc) ->
+    erlang:error(nif_not_loaded).
+
+get_number_of_clauses(Varc) when ?is_varc(Varc) ->
     erlang:error(nif_not_loaded).
 
 add_clause(Varc,Op,Ls) when ?is_varc(Varc), ?is_op(Op), is_list(Ls) ->
@@ -141,5 +160,108 @@ add_clause(Varc,Op,X1,X2,X3,X4,X5,X6) when
     erlang:error(nif_not_loaded).
 
 get_clause(Varc,Index)
-    when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
+  when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
     erlang:error(nif_not_loaded).
+
+get_clause_flags(Varc,Index)
+  when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
+    erlang:error(nif_not_loaded).
+
+del_clause(Varc,Index)
+  when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
+    erlang:error(nif_not_loaded).
+
+get_clauses(Varc,Var)
+  when ?is_varc(Varc), is_integer(Var), Var >= 0 ->
+    erlang:error(nif_not_loaded).
+
+get_queue(Varc)
+  when ?is_varc(Varc) ->
+    erlang:error(nif_not_loaded).
+
+clear_queue(Varc)
+  when ?is_varc(Varc) ->
+    erlang:error(nif_not_loaded).
+
+get_bindings(Varc, Level)
+  when ?is_varc(Varc), is_integer(Level), Level >= 0 ->
+    erlang:error(nif_not_loaded).
+
+%% return {Ix,Var} | false
+order_first(Varc) 
+  when ?is_varc(Varc) ->
+    erlang:error(nif_not_loaded).
+
+order_next(Varc, Ix)
+  when ?is_varc(Varc), is_integer(Ix), Ix > 0 ->
+    erlang:error(nif_not_loaded).
+
+order_sort(Varc, Sort) 
+  when ?is_varc(Varc),
+       ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)) ->
+    erlang:error(nif_not_loaded).
+
+order_sort(Varc, Sort, Arg) 
+  when ?is_varc(Varc),
+       ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)),
+       is_integer(Arg) ->
+    erlang:error(nif_not_loaded).
+
+%% utility to get a list of unbound variables
+order_all(V) ->
+    case order_first(V) of
+	false -> [];
+	{I,Var} -> order_all_(V, I, [Var])
+    end.
+
+order_all_(V, I, Acc) ->
+    case order_next(V,I) of
+	false -> lists:reverse(Acc);
+	{I1,Var} -> order_all_(V, I1, [Var|Acc])
+    end.
+
+%% satify the rules, stop at first model or return false
+sat(V) ->
+    sat(V,0).
+
+sat(V,M) ->
+    put(conflicts, 0),
+    case eval(V) of
+	false -> 0;
+	true ->
+	    case order_first(V) of
+		false -> model(V), 1;
+		{I,Var} -> sat__(V,I,0,M,1,Var)
+	    end
+    end.
+
+sat_(V,I,N,M,D) ->
+    case eval(V) of
+	false ->
+	    put(conflicts, get(conflicts)+1),
+	    N;
+	true ->
+	    case order_next(V,I) of
+		false -> model(V), N+1;
+		{I1,Var} -> sat__(V,I1,N,M,D+1,Var)
+	    end
+    end.
+
+sat__(V,I,N,M,D,Var) ->
+    varc:mark(V, D),
+    varc:clear_queue(V),
+    varc:put(V, Var, false),
+    N1 = sat_(V,I,N,M,D),
+    varc:undo(V),
+    if M > 0, N1 >= M -> N1;
+       true ->
+	    varc:mark(V, D),
+	    varc:clear_queue(V),
+	    varc:put(V, Var, true),
+	    N2 = sat_(V,I,N1,M,D),
+	    varc:undo(V),
+	    N2
+    end.
+    
+model(V) ->
+    io:format("~w\n", [varc:get_bindings(V, 0)]).

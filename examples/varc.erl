@@ -376,7 +376,7 @@ is_equivalent(X, Y, Vct) ->
 
 %%--------------------------------------------------------------------
 %% @doc
-%%     Make X and Y equeivalent, belong to same equivalence class
+%%     Make X and Y equivalent, belong to same equivalence class
 %% @end
 %%--------------------------------------------------------------------
 

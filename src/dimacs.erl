@@ -82,7 +82,9 @@ to_cnf_(Fd,File,L,Acc,Cs) ->
 	eof ->
 	    {ok,reverse(Cs)};
 	{ok,[$%|_]} ->  %% ????
-	    {ok,reverse(Cs)};	    
+	    {ok,reverse(Cs)};
+	{ok,[$c|_Comment]} -> 
+	    to_cnf_(Fd,File,L+1,Acc,Cs);
 	{ok,Line} ->
 	    case add_literals(string:tokens(Line, " \n"),Acc) of
 		{false,Acc1} ->
@@ -121,6 +123,8 @@ to_snf_(Fd,File,Ln,Ts0,CLs) ->
 	    {ok,reverse(CLs)};
 	{ok,[$%|_]} ->  %% ????
 	    {ok,reverse(CLs)};
+	{ok,[$c|_Comment]} ->
+	    to_snf_(Fd,File,Ln+1,Ts0,CLs);
 	{ok,Line} ->
 	    case varp_scan:string(Line) of
 		{ok,Ts1,Ln1} ->
