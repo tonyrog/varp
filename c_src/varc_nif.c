@@ -374,6 +374,13 @@ static void undo_free(varc_t* vp, undo_t* ptr)
     varc_free(&vp->undo_allocator, (object_t*) ptr);
 }
 
+// return the first bit = 1 couting from least significant bit position
+static inline int bitpos(uint64_t x)
+{
+  return __builtin_ffsll(x);
+}
+
+
 static void arc4_init(arc4_stream_t *as)
 {
     int n;
@@ -908,7 +915,6 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, int value)
 // X = Y1 OR T ... OR Yn       => X/T
 // X = F OR Y ... OR F         => X/Y
 //
-// FIXME: use mask_F and mask_T to eval clause
 //
 
 static int eval_or_clause(varc_t* vp, clause_t* cp)
@@ -979,6 +985,43 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	break;
     }
     return 0;
+}
+
+//
+// eval an OR clause using bitmasks mask_F and mask_T
+//
+static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
+{
+  int i;
+
+  if (cp->mask_T & 1) {
+    uint64_t unbound = ~(cp->mask_T | cp->mask_F) & ((1 << cp->size)-1);
+    if ((unbound & (unbound - 1)) == 0) { // exactly on unbound pos
+      if ((i = bitpos(unbound))) {
+	if (put(vp, cp->lit[i-1], TRUE) < 0)
+	  return -1;
+      }
+    }
+  }
+  else if (cp->mask_F & 1) {
+    cp->flags |= CLAUSE_FLAG_DEAD;
+    for (i = 1; i < cp->size; i++) {
+      if (put(vp, cp->lit[i], FALSE) < 0)
+	return -1;
+    }
+  }
+  else {
+    if (cp->mask_T) { // there is at least on TRUE literal 
+      cp->flags |= CLAUSE_FLAG_DEAD;
+      if (put(vp, cp->lit[0], TRUE) < 0) return -1; // assert?
+    }
+    else if ((cp->mask_F >> 1) == ((1 << (cp->size-1))-1)) {
+      cp->flags |= CLAUSE_FLAG_DEAD;
+      if (put(vp, cp->lit[0], FALSE) < 0) return -1; // assert
+    }
+  }
+  return 0;
+
 }
 
 //
@@ -1211,12 +1254,22 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 
 static int eval_clause(varc_t* vp, clause_t* cp)
 {
+  if (cp->size <= 64) {
+    switch(cp->op) {
+    case CLAUSE_OP_OR: return eval_or_clause_mask(vp, cp);
+    case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
+    case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
+    default: return -1;
+    }
+  }
+  else {
     switch(cp->op) {
     case CLAUSE_OP_OR: return eval_or_clause(vp, cp);
     case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
     case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
     default: return -1;
     }
+  }
 }
 
 static void cleanup(varc_t* vp)
