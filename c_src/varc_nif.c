@@ -3,6 +3,7 @@
 //
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <memory.h>
 #include <sys/time.h>
@@ -14,6 +15,9 @@
 #define NIF_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
 
+extern void qsort_r(void *base, size_t nmemb, size_t size,
+		    int (*compar)(const void *, const void *, void *),
+		    void *arg);
 
 static int varc_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info);
 static int varc_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, 
@@ -85,8 +89,9 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 #define MAX_HEAP_ALLOC_SIZE  (HEAP_BLOCK_SIZE - sizeof(heap_t))
 #define HEAP_ALIGN           sizeof(void*)
 
-#define ALIGN(ptr,align) ((((intptr_t) (ptr)) + (align) -1) & ~((align)-1))
-#define PAD(ptr,align) (((align)-((intptr_t)(ptr)) & ((align)-1)) & ((align)-1))
+#define AMASK(ptr,align) (((intptr_t)(ptr)) & ((align)-1))
+#define ALIGN(ptr,align) ((((intptr_t) (ptr))+(align)-1) & ~((align)-1))
+#define PAD(ptr,align)   (((align)-AMASK(ptr,align)) & ((align)-1))
 
 #define	RANDOMDEV	"/dev/urandom"
 
@@ -443,7 +448,8 @@ static void arc4_stir(arc4_stream_t* as)
     gettimeofday(&rdat.tv, NULL);
     rdat.pid = getpid();
     if ((f = fopen(RANDOMDEV, "r")) != NULL) {
-	fread(rdat.rnd, 1, sizeof(rdat.rnd), f);
+	int r = fread(rdat.rnd, 1, sizeof(rdat.rnd), f);
+	(void) r;
 	fclose(f);
     }
     arc4_add_random(as, (void *) &rdat, sizeof(rdat));
@@ -922,6 +928,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
     int v,w;
     int i, j=0;
     int nf;
+    (void) w;
 
     w = v = get(vp, cp->lit[0]);
     switch(v) {
@@ -1015,7 +1022,7 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
       cp->flags |= CLAUSE_FLAG_DEAD;
       if (put(vp, cp->lit[0], TRUE) < 0) return -1; // assert?
     }
-    else if ((cp->mask_F >> 1) == ((1 << (cp->size-1))-1)) {
+    else if ((int)(cp->mask_F >> 1) == ((1 << (cp->size-1))-1)) {
       cp->flags |= CLAUSE_FLAG_DEAD;
       if (put(vp, cp->lit[0], FALSE) < 0) return -1; // assert
     }
@@ -1526,10 +1533,10 @@ static void order_occure(varc_t* vp, int arg)
 {
     order_reset(vp);
     if (arg < 0)
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), vp,
+	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), (void*)vp,
 		cmp_occure_inc);
     else
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), vp,
+	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), (void*)vp,
 		cmp_occure_dec);
 }
 
