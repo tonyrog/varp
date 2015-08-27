@@ -1,6 +1,11 @@
 //
 // NIF library for managing variable classes
 //
+
+#ifdef __linux__
+#define __USE_GNU__
+#endif
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -14,10 +19,6 @@
 #else
 #define NIF_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
-
-extern void qsort_r(void *base, size_t nmemb, size_t size,
-		    int (*compar)(const void *, const void *, void *),
-		    void *arg);
 
 static int varc_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info);
 static int varc_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data, 
@@ -1532,12 +1533,23 @@ static int cmp_occure_dec(void* arg, const void* a, const void* b)
 static void order_occure(varc_t* vp, int arg)
 {
     order_reset(vp);
+#ifdef __APPLE__
+    // qsort_r extra argument in different positions
     if (arg < 0)
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), (void*)vp,
+	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), vp,
 		cmp_occure_inc);
     else
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), (void*)vp,
+	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), vp,
 		cmp_occure_dec);
+
+#else
+    if (arg < 0)
+	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int),
+		cmp_occure_inc, vp);
+    else
+	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int),
+		cmp_occure_dec, vp);
+#endif
 }
 
 
