@@ -3,7 +3,7 @@
 //
 
 #ifdef __linux__
-#define __USE_GNU__
+#define _GNU_SOURCE
 #endif
 
 #include <stdio.h>
@@ -1518,13 +1518,25 @@ static void order_random(varc_t* vp, int arg)
     shuffle_array(vp, vp->order_map+2, vp->vnext-2);
 }
 
-static int cmp_occure_inc(void* arg, const void* a, const void* b)
+// this is INSANE!!!
+#if defined(_GNU_SOURCE)
+#define QSORT_R(base,nmemb,size,compar,arg) \
+    qsort_r((base),(nmemb),(size),(compar),(arg))
+#define QSORT_R_ARGS(a,b,arg) (a, b, arg)
+ 
+#elif defined(__APPLE__)
+#define QSORT_R(base,nmemb,size,compar,arg) \
+    qsort_r((base),(nmemb),(size),(arg),(compar))
+#define QSORT_R_ARGS(a,b,arg) (arg, a, b)
+#endif
+
+static int cmp_occure_inc QSORT_R_ARGS(const void* a,const void* b,void* arg)
 {
     varc_t* vp = (varc_t*) arg;
     return vp->var_map[*((int*)a)].occure - vp->var_map[*((int*)b)].occure;
 }
 
-static int cmp_occure_dec(void* arg, const void* a, const void* b)
+static int cmp_occure_dec QSORT_R_ARGS(const void* b, const void* a,void* arg)
 {
     varc_t* vp = (varc_t*) arg;
     return vp->var_map[*((int*)b)].occure - vp->var_map[*((int*)a)].occure;
@@ -1533,23 +1545,14 @@ static int cmp_occure_dec(void* arg, const void* a, const void* b)
 static void order_occure(varc_t* vp, int arg)
 {
     order_reset(vp);
-#ifdef __APPLE__
-    // qsort_r extra argument in different positions
-    if (arg < 0)
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), vp,
-		cmp_occure_inc);
-    else
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int), vp,
-		cmp_occure_dec);
 
-#else
+    // qsort_r extra argument in different positions between apple/gnu
     if (arg < 0)
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int),
+	QSORT_R(vp->order_map+2, vp->vnext-2, sizeof(int),
 		cmp_occure_inc, vp);
     else
-	qsort_r(vp->order_map+2, vp->vnext-2, sizeof(int),
+	QSORT_R(vp->order_map+2, vp->vnext-2, sizeof(int),
 		cmp_occure_dec, vp);
-#endif
 }
 
 
