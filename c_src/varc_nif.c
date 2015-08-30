@@ -14,6 +14,8 @@
 #include <sys/time.h>
 #include "erl_nif.h"
 
+#include "bitset.h"
+
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
 #define NIF_FUNC(name,arity,fptr) {(name),(arity),(fptr),(0)}
 #else
@@ -147,8 +149,8 @@ typedef struct _clause_var_t  // not used yet...
 {
     struct _clause_var_t* next;
     struct _clause_var_t* prev;
-    uint64_t mask_F;             // bit mask of assigned positions
-    uint64_t mask_T;             // bit mask of assigned positions
+    bitset_t mask_F;             // bit mask of assigned positions
+    bitset_t mask_T;             // bit mask of assigned positions
     uint16_t flags;              // INQUEUE ...
 } clause_var_t;
 
@@ -157,8 +159,8 @@ typedef struct _clause_t
     struct _clause_t* next;      // MUST BE FIRST
     int      size;               // number of literals
     int      cix;                // clause index
-    uint64_t mask_F;             // bit mask for 64 positions = FALSE
-    uint64_t mask_T;             // bit mask for 64 positions = TRUE
+    bitset_t mask_F;             // bit mask for 64 positions = FALSE
+    bitset_t mask_T;             // bit mask for 64 positions = TRUE
     uint16_t flags;              // INQUEUE ...
     uint16_t op;                 // OR|AND|XOR
     int      lit[0];
@@ -482,8 +484,8 @@ static clause_t* clause_alloc(varc_t* vp, uint16_t op, int size)
 
     cp->next = NULL;
     cp->size = size;
-    cp->mask_F = 0;
-    cp->mask_T = 0;
+    bitset_init(&cp->mask_F);
+    bitset_init(&cp->mask_T);
     cp->flags = 0;
     cp->op = op;
     return cp;
@@ -538,8 +540,9 @@ static void push(varc_t* vp, int what, int x, int y)
 // put clause on eval queue
 static int enqueue_clause(varc_t* vp, clause_t* cp)
 {
-    TRACE("enqueue_clause %d T=%llx F=%llx flags=%x\r\n", 
-	  cp->cix, cp->mask_T, cp->mask_F, cp->flags);
+    TRACE("enqueue_clause %d T=%s F=%s flags=%x\r\n", 
+	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F),
+	  cp->flags);
     if (cp->flags & (CLAUSE_FLAG_INQUEUE|CLAUSE_FLAG_DEAD))
 	return 0;
     cp->next = NULL;
@@ -561,8 +564,9 @@ static clause_t* dequeue_clause(varc_t* vp)
 	    vp->eval_queue_tl = NULL;
 	cp->next = NULL;
 	cp->flags &= ~CLAUSE_FLAG_INQUEUE;
-	TRACE("enqueue_clause %d T=%llx F=%llx flags=%x\r\n", 
-	      cp->cix, cp->mask_T, cp->mask_F, cp->flags);
+	TRACE("dequeue_clause %d T=%s F=%s flags=%x\r\n", 
+	      cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F),
+	      cp->flags);
     }
     return cp;
 }
@@ -601,9 +605,9 @@ static void enqueue_varref(varc_t* vp,varref_t* vrp,int x,int y)
 	    TRACE("enqueue_varref: %d=%d clause=%d pos=%d\r\n",
 		  x, y1, vrp->clause, pos);
 	    if (y1 == TRUE)
-		cp->mask_T |= (1 << pos);
+		bitset_iset(&cp->mask_T, pos);
 	    else if (y1 == FALSE)
-		cp->mask_F |= (1 << pos);
+		bitset_iset(&cp->mask_F, pos);
 	}
 	enqueue_clause(vp,cp);
 	vrp = vrp->next;
@@ -626,8 +630,8 @@ static void enqueue_var(varc_t* vp,int x,int y)
 static void undo_clause(varc_t* vp,clause_t* cp)
 {
     (void) vp;
-    TRACE("undo_clause %d T=%llx, F=%llx\r\n", cp->cix,
-	  cp->mask_T, cp->mask_F);
+    TRACE("undo_clause %d T=%s, F=%s\r\n", cp->cix,
+	  bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
     cp->flags &= ~CLAUSE_FLAG_DEAD;
 }
 
@@ -639,9 +643,9 @@ static void undo_varref(varc_t* vp,varref_t* vrp,int x,int y)
 	if (pos < 64) {  // FIXME: other positions!
 	    int y1 = (x == -cp->lit[pos]) ? -y : y;
 	    if (y1 == TRUE)
-		cp->mask_T &= ~(1 << pos);
+		bitset_iclear(&cp->mask_T, pos);
 	    else if (y1 == FALSE)
-		cp->mask_F &= ~(1 << pos);
+		bitset_iclear(&cp->mask_F, pos);
 	}
 	undo_clause(vp,cp);
 	vrp = vrp->next;
@@ -766,13 +770,13 @@ static int add_varref(varc_t* vp,int lit,clause_t* cp,unsigned pos)
     variable_t* vptr;
 
     if (lit == TRUE) {
-	if (pos < 64)  // FIXME!
-	    cp->mask_T |= (1 << pos);
+	if (pos < sizeof(bitset_t)*8)  // FIXME!
+	    bitset_iset(&cp->mask_T, pos);
 	return 0;
     }
     else if (lit == FALSE) {
-	if (pos < 64)  // FIXME!
-	    cp->mask_F |= (1 << pos);
+	if (pos < sizeof(bitset_t)*8)  // FIXME!
+	    bitset_iset(&cp->mask_F, pos);
 	return 0;
     }
     if ((vrp = varc_alloc(&vp->varref_allocator)) == NULL)  
@@ -927,7 +931,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
     w = v = get(vp, cp->lit[0]);
     switch(v) {
     case FALSE:
-	TRACE("or:%d: lit[0]=%d size=%zd\r\n",cp->cix,w,cp->size);
+	TRACE("or:%d: lit[0]=%d size=%d\r\n",cp->cix,w,cp->size);
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	for (i = 1; i < cp->size; i++) {
 	    PUTA(vp, cp->lit[i], FALSE);
@@ -945,7 +949,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	    else
 		j = i; // save unbound pos
 	}
-	TRACE("or:%d: lit[0]=%d size=%zd nf=%d\r\n",cp->cix,w,cp->size,nf);
+	TRACE("or:%d: lit[0]=%d size=%d nf=%d\r\n",cp->cix,w,cp->size,nf);
 	if (nf == cp->size-1) { // all are false
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    return -1;  // contradiction
@@ -960,7 +964,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	nf = 0;  // count number of FALSE literals
 	for (i = 1; i < cp->size; i++) {
 	    if ((v = get(vp, cp->lit[i])) == TRUE) {
-		TRACE("or:%d: lit[0]=%d size=%zd lit[%d]=true\r\n",
+		TRACE("or:%d: lit[0]=%d size=%d lit[%d]=true\r\n",
 		      cp->cix,w,cp->size,i);
 		cp->flags |= CLAUSE_FLAG_DEAD;
 		PUTA(vp, cp->lit[0], TRUE);
@@ -971,7 +975,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	    else
 		j = i;  // save unbound pos
 	}
-	TRACE("or:%d: lit[0]=%d size=%zd nf=%d\r\n",cp->cix,w,cp->size,nf);
+	TRACE("or:%d: lit[0]=%d size=%d nf=%d\r\n",cp->cix,w,cp->size,nf);
 	if (nf == cp->size-1) {  // all are false
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], FALSE);
@@ -1019,7 +1023,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	    else
 		j = i; // save unbound pos
 	}
-	TRACE("and:%d: lit[0]=%d size=%zd nt=%d\r\n",cp->cix,w,cp->size,nt);
+	TRACE("and:%d: lit[0]=%d size=%d nt=%d\r\n",cp->cix,w,cp->size,nt);
 	if (nt == cp->size-1) { // all are true
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    return -1;  // contradiction
@@ -1031,7 +1035,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	break;
 	
     case TRUE:
-	TRACE("and:%d: lit[0]=%d size=%zd\r\n",cp->cix,w,cp->size);
+	TRACE("and:%d: lit[0]=%d size=%d\r\n",cp->cix,w,cp->size);
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	for (i = 1; i < cp->size; i++) {
 	    PUTA(vp, cp->lit[i], TRUE);
@@ -1042,7 +1046,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	nt = 0;  // count number of FALSE literals
 	for (i = 1; i < cp->size; i++) {
 	    if ((v = get(vp, cp->lit[i])) == FALSE) {
-		TRACE("and:%d: lit[0]=%d size=%zd lit[%d]=false\r\n",
+		TRACE("and:%d: lit[0]=%d size=%d lit[%d]=false\r\n",
 		      cp->cix,w,cp->size,i);
 		cp->flags |= CLAUSE_FLAG_DEAD;
 		PUTA(vp, cp->lit[0], FALSE);
@@ -1053,7 +1057,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	    else
 		j = i;  // save unbound pos
 	}
-	TRACE("and:%d: lit[0]=%d size=%zd nt=%d\r\n",cp->cix,w,cp->size,nt);
+	TRACE("and:%d: lit[0]=%d size=%d nt=%d\r\n",cp->cix,w,cp->size,nt);
 	if (nt == cp->size-1) {  // all are true
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], TRUE);
@@ -1109,7 +1113,7 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
     }
     v = w = get(vp, cp->lit[0]);
 
-    TRACE("xor:%d: lit[0]=%d, size=%zd, nf=%d, nt=%d\r\n",cp->cix,
+    TRACE("xor:%d: lit[0]=%d, size=%d, nf=%d, nt=%d\r\n",cp->cix,
 	  w,cp->size,nf,nt);
 
     switch(v) {
@@ -1215,80 +1219,48 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
     return 0;
 }
 
-
 //
 // Return a bit mask representing the unbound literal positions
+// unbound = ~(mask_T | mask_F)
 //
-static inline uint64_t unbound_mask(clause_t* cp)
+static inline void unbound_literals(clause_t* cp, bitset_t* unbound)
 {
-    return ~(cp->mask_T | cp->mask_F) & ((1 << cp->size)-1);
+    bitset_t x, y;
+    bitset_union(&x, &cp->mask_T, &cp->mask_F);
+    bitset_complement(&x, &x);
+    bitset_fill(&y, cp->size);
+    bitset_intersect(unbound, &x, &y);
 }
-
-static inline int exactly_one_set(uint64_t v)
-{
-    return v && ((v & (v-1)) == 0);
-}
-
-// return the first bit = 1 couting from least significant bit position
-static inline int bitpos(uint64_t x)
-{
-  return __builtin_ffsll(x);
-}
-
-/**
-static inline int xm_ffs(__m128i x)
-{
-    int pos = _mm_movemask_epi8(_mm_cmpeq_epi8(x, _mm_setzero_si128()));
-    pos = ffs((uint16_t)~pos) - 1;
-    return pos < 0 ? -1
-	: (pos << 3) + ffs(((unsigned char const*)&x)[pos]) - 1;
-
-}
-**/
-
-static inline int parity(uint64_t v)
-{
-    v ^= v >> 32;
-    v ^= v >> 16;
-    v ^= v >> 8;
-    v ^= v >> 4;
-    v &= 0xf;
-    return (0x6996 >> v) & 1;
-}
-
 
 //
 // eval an OR clause using bitmasks mask_F and mask_T
+// clause is x0 = OR(x1,....,xn)
 //
 static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 {
     int i;
 
-    TRACE("eval_or_clause_mask %d T=%llx F=%llx\r\n", 
-	  cp->cix, cp->mask_T, cp->mask_F);
+    TRACE("eval_or_clause_mask %d T=%s F=%s\r\n", 
+	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
 
-    if (cp->mask_T & 1) {
-	if (!(cp->mask_T >> 1)) { // no more true literals
-	    uint64_t unbound = unbound_mask(cp);
-	    TRACE(" lit[0]=T, unbound=%llx\r\n", unbound);
-	    if (exactly_one_set(unbound)) {  // one unbound position 
-		if ((i = bitpos(unbound))) { // assert!?
+    if (bitset_is_set(&cp->mask_T,0)) {  // x0 == TRUE?
+	if (bitset_is_nclear(&cp->mask_T,1,cp->size-1)) { // x1...xn == FALSE
+	    bitset_t unbound;
+	    unbound_literals(cp, &unbound);
+	    TRACE(" lit[0]=T, unbound=%s\r\n", bitset_format(&unbound));
+	    if (bitset_count_one(&unbound)) {
+		if ((i = bitset_first(&unbound))) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
 		    PUTA(vp, cp->lit[i-1], TRUE);
 		}
 	    }
-	    else if (unbound == 0) {
-		uint64_t sz = (1 << (cp->size-1))-1;
-		// TRACE("mask_F=%llx size=%llx\r\n", (cp->mask_F>>1),sz);
-		if ((cp->mask_F >> 1) == sz) {
-		    // all FALSE
-		    // TRACE("contradiction%s\r\n", "");
+	    else if (bitset_is_empty(&unbound)) {
+		if (bitset_is_nset(&cp->mask_F,1,cp->size-1))
 		    return -1;
-		}
 	    }
 	}
     }
-    else if (cp->mask_F & 1) {
+    else if (bitset_is_set(&cp->mask_F,0)) { // x0 == FALSE?
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	TRACE(" lit[i]=F%s\r\n", "");
 	for (i = 1; i < cp->size; i++) {
@@ -1296,12 +1268,12 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 	}
     }
     else {
-	if (cp->mask_T) { // there is at least on TRUE literal
+	if (bitset_any(&cp->mask_T)) { // one of x0,x1..xn is TRUE
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    TRACE(" lit[0]=T, some true%s\r\n", "");
 	    PUTA(vp, cp->lit[0], TRUE);
 	}
-	else if ((cp->mask_F >> 1) == ((1 << (cp->size-1))-1)) { // all FALSE
+	else if (bitset_is_nset(&cp->mask_F,1,cp->size-1)) { // x1..xn == FALSE
 	    TRACE(" lit[0]=F, all false%s\r\n", "");
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], FALSE);
@@ -1316,46 +1288,48 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 
 //
 // eval an OR clause using bitmasks mask_F and mask_T
+// clause is x0 = AND(x1,....,xn)
 //
 static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 {
     int i;
 
-    TRACE("eval_and_clause_mask %d T=%llx F=%llx\r\n", 
-	  cp->cix, cp->mask_T, cp->mask_F);
+    TRACE("eval_and_clause_mask %d T=%s F=%s\r\n", 
+	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
 
-    if (cp->mask_T & 1) {
+    if (bitset_is_set(&cp->mask_T,0)) {  // x0 = TRUE
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	for (i = 1; i < cp->size; i++) {
 	    PUTA(vp, cp->lit[i], TRUE);
 	}
     }
-    else if (cp->mask_F & 1) {
-	if (!(cp->mask_F >> 1)) {  // no more false literals
-	    uint64_t unbound = unbound_mask(cp);
-	    if (exactly_one_set(unbound)) {    // one unbound position
-		if ((i = bitpos(unbound))) {  // assert!?
+    else if (bitset_is_set(&cp->mask_F,0)) {  // x0 = FALSE
+	if (bitset_is_nclear(&cp->mask_F,1,cp->size-1)) { // x1,...,xn != FALSE
+	    bitset_t unbound;
+	    unbound_literals(cp, &unbound);
+	    if (bitset_count_one(&unbound)) {
+		if ((i = bitset_first(&unbound))) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
 		    PUTA(vp, cp->lit[i-1], FALSE);
 		}
 	    }
-	    else if (unbound == 0) {
-		uint64_t sz = (1 << (cp->size-1))-1;
-		if ((cp->mask_T >> 1) == sz) {
-		    // all TRUE
+	    else if (bitset_is_empty(&unbound)) {
+		if (bitset_is_nset(&cp->mask_T,1,cp->size-1))
 		    return -1;
-		}
 	    }
 	}
     }
     else {
-	if (cp->mask_F) { // there is at least on FALSE literal
+	if (bitset_any(&cp->mask_F)) { // there is at least on FALSE literal
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], FALSE);
 	}
-	else if ((cp->mask_T >> 1) == ((1 << (cp->size-1))-1)) {
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTA(vp, cp->lit[0], TRUE);
+	else {
+	    if (bitset_is_nset(&cp->mask_T,1,cp->size-1)) { // all TRUE
+		TRACE(" lit[0]=T, all true%s\r\n", "");
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		PUTA(vp, cp->lit[0], TRUE);
+	    }
 	}
     }
     return 0;
@@ -1363,50 +1337,59 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 
 //
 // eval an XOR clause using bitmasks mask_F and mask_T
+// clause is x0 = XOR(x1,....,xn)
 //
 
 static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
 {
     int i;
 
-    TRACE("eval_xor_clause_mask %d T=%llx F=%llx\r\n", 
-	  cp->cix, cp->mask_T, cp->mask_F);
+    TRACE("eval_xor_clause_mask %d T=%s F=%s\r\n", 
+	  cp->cix,  bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
 
-    if (cp->mask_T & 1) { // T = x1 ^ x2 ^ x3 ...
-	uint64_t unbound = unbound_mask(cp);
-	TRACE(" lit[0]=T, unbound=%llx\r\n", unbound);
-	if (exactly_one_set(unbound)) {  // one unbound position 
-	    if ((i = bitpos(unbound))) {
+    if (bitset_is_set(&cp->mask_T,0)) { // x0 = TRUE
+	bitset_t unbound;
+	unbound_literals(cp, &unbound);
+	TRACE(" lit[0]=T, unbound=%s\r\n", bitset_format(&unbound));
+	if (bitset_count_one(&unbound)) { // one unbound position
+	    if ((i = bitset_first(&unbound))) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (parity(cp->mask_T>>1))
+		if (!bitset_parity(&cp->mask_T))  // x0 is counted
 		    PUTA(vp, cp->lit[i-1], FALSE);
 		else
 		    PUTA(vp, cp->lit[i-1], TRUE);
 	    }
 	}
-	else if ((unbound == 0) && !parity(cp->mask_T>>1))
-	    return -1;
+	else if (bitset_is_empty(&unbound)) {
+	    if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
+		return -1;
+	}
     }
-    else if (cp->mask_F & 1) { // F = x1 ^ x2 ^ x3 ...
-	uint64_t unbound = unbound_mask(cp);
-	TRACE(" lit[0]=F, unbound=%llx\r\n", unbound);
-	if (exactly_one_set(unbound)) {  // one unbound position 
-	    if ((i = bitpos(unbound))) {
+    else if (bitset_is_set(&cp->mask_F,0)) { // x0 = FALSE
+	bitset_t unbound;
+	unbound_literals(cp, &unbound);
+	TRACE(" lit[0]=F, unbound=%s\r\n", bitset_format(&unbound));
+	if (bitset_count_one(&unbound)) { // one unbound position
+	    if ((i = bitset_first(&unbound))) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (parity(cp->mask_T>>1))
+		if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
 		    PUTA(vp, cp->lit[i-1], TRUE);
 		else
 		    PUTA(vp, cp->lit[i-1], FALSE);
 	    }
 	}
-	else if ((unbound == 0) && parity(cp->mask_T>>1))
-	    return -1;
+	else if (bitset_is_empty(&unbound)) {
+	    if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
+		return -1;
+	}
     }
     else {
-	uint64_t unbound = (unbound_mask(cp) >> 1);
-	TRACE(" lit[0]=X, unbound=%llx\r\n", unbound);
-	if (unbound == 0) {  // all unbound
-	    if (parity(cp->mask_T))  // odd number of bits set
+	bitset_t unbound;
+	unbound_literals(cp, &unbound);
+	TRACE(" lit[0]=X, unbound=%s\r\n", bitset_format(&unbound));
+	bitset_iclear(&unbound, 0);
+	if (bitset_is_empty(&unbound)) {     // x1,...,xn ALL bound
+	    if (bitset_parity(&cp->mask_T))  // odd number of bits set
 		PUTA(vp, cp->lit[0], TRUE);
 	    else
 		PUTA(vp, cp->lit[0], FALSE);
