@@ -7,48 +7,113 @@
 
 -module(varc_test).
 
-
 -compile(export_all).
+
+all() ->
+    test1(),
+    test2(),
+    test3(),
+    %% test4(),
+    or_eval(),
+    or_clause(),
+    or_conflict(),
+    and_eval(),
+    and_clause(),
+    xor_eval(),
+    xor_clause(),
+    order().
+
+    
 
 test1() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
     
-    C1 = varc:add_clause(V, 'and', [X1, X2, X3]),
-    C2 = varc:add_clause(V, 'and', [X2, X3, X4]),
+    C0 = varc:add_clause(V, 'and', [X2, X3, X4]),
+    C1 = varc:add_clause(V, 'and', [X3, X4, X5]),
+
+    R0 = varc:get_clause(V, C0),
+    R0 = {'and', [X2, X3, X4]},
 
     R1 = varc:get_clause(V, C1),
-    R1 = {'and', [X1, X2, X3]},
-
-    R2 = varc:get_clause(V, C2),
-    R2 = {'and', [X2, X3, X4]}.
+    R1 = {'and', [X3, X4, X5]}.
 
 
 test2() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
     
-    C1 = varc:add_clause(V, 'and', X1, X2, X3),
-    C2 = varc:add_clause(V, 'and', X2, X3, X4),
+    C0 = varc:add_clause(V, 'and', X2, X3, X4),
+    C1 = varc:add_clause(V, 'and', X3, X4, X5),
+
+    R0 = varc:get_clause(V, C0),
+    R0 = {'and', [X2, X3, X4]},
 
     R1 = varc:get_clause(V, C1),
-    R1 = {'and', [X1, X2, X3]},
-
-    R2 = varc:get_clause(V, C2),
-    R2 = {'and', [X2, X3, X4]}.
+    R1 = {'and', [X3, X4, X5]}.
     
 %%
 %% Test clause / queue 
 %%    
 test3() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
+    X8 = varc:add_variable(V),
+
+    C0 = varc:add_clause(V, 'and', X2, X3, X4),
+    C1 = varc:add_clause(V, 'and', X3, X4, X5),
+    C2 = varc:add_clause(V, 'and', X4, X5, X6, X7),
+    C3 = varc:add_clause(V, 'and', X6, X7, X8),
+
+    {'and',[X2,X3,X4]} = varc:get_clause(V, C0),
+    {'and',[X3,X4,X5]} = varc:get_clause(V, C1),
+    {'and',[X4,X5,X6,X7]} = varc:get_clause(V, C2),
+    {'and',[X6,X7,X8]} = varc:get_clause(V, C3),
+
+    true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X2)),
+    true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_clauses(V, X4)),
+    true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X5)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X6)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X7)),
+    true = lists:sort([C3]) =:= lists:sort(varc:get_clauses(V, X8)),
+
+    true = lists:sort([C0,C1,C2,C3]) =:= lists:sort(varc:get_queue(V)),
+
+    varc:del_clause(V, C3),
+
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_queue(V)),
+
+    io:format("X6 clauses = ~p\n", [varc:get_clauses(V, X6)]),
+    io:format("X7 clauses = ~p\n", [varc:get_clauses(V, X7)]),
+    io:format("X8 clauses = ~p\n", [varc:get_clauses(V, X8)]),
+
+    true = lists:sort([]) =:= lists:sort(varc:get_clauses(V, X8)),
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_queue(V)),
+    true = varc:eval(V),
+    true = lists:sort([]) =:= lists:sort(varc:get_queue(V)),
+    true = varc:mark(V, 0),
+    true = varc:put(V, X3, true),
+    true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
+    true = varc:put(V, X4, false),
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_queue(V)),
+
+    {varc:get_bindings(V, 0), varc:get_number_of_clauses(V)}.
+
+%%  Test various bindings ( only in bcp = false !!! )
+test4() ->
+    V = varc:new([{bcp, false}]),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
@@ -56,57 +121,13 @@ test3() ->
     X6 = varc:add_variable(V),
     X7 = varc:add_variable(V),
 
-    C1 = varc:add_clause(V, 'and', X1, X2, X3),
-    C2 = varc:add_clause(V, 'and', X2, X3, X4),
-    C3 = varc:add_clause(V, 'and', X3, X4, X5, X6),
-    C4 = varc:add_clause(V, 'and', X5, X6, X7),
-
-    {'and',[X1,X2,X3]} = varc:get_clause(V, C1),
-    {'and',[X2,X3,X4]} = varc:get_clause(V, C2),
-    {'and',[X3,X4,X5,X6]} = varc:get_clause(V, C3),
-    {'and',[X5,X6,X7]} = varc:get_clause(V, C4),
-
-    true = lists:sort([C1]) =:= lists:sort(varc:get_clauses(V, X1)),
-    true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X2)),
-    true = lists:sort([C1,C2,C3]) =:= lists:sort(varc:get_clauses(V, X3)),
-    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X4)),
-    true = lists:sort([C3,C4]) =:= lists:sort(varc:get_clauses(V, X5)),
-    true = lists:sort([C3,C4]) =:= lists:sort(varc:get_clauses(V, X6)),
-    true = lists:sort([C4]) =:= lists:sort(varc:get_clauses(V, X7)),
-
-    true = lists:sort([C1,C2,C3,C4]) =:= lists:sort(varc:get_queue(V)),
-
-    varc:del_clause(V, C4),
-
-    true = lists:sort([]) =:= lists:sort(varc:get_clauses(V, X7)),
-    true = lists:sort([C1,C2,C3]) =:= lists:sort(varc:get_queue(V)),
-    true = varc:eval(V),
-    true = lists:sort([]) =:= lists:sort(varc:get_queue(V)),
     true = varc:mark(V, 0),
-    true = varc:put(V, X2, true),
-    true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X2)),
-    true = varc:put(V, X3, false),
-    true = lists:sort([C1,C2,C3]) =:= lists:sort(varc:get_queue(V)),
+    varc:put(V, X2, X3),
+    varc:put(V, X4, X5),
+    varc:put(V, X6, X7),
 
-    {varc:get_bindings(V, 0), varc:get_number_of_clauses(V)}.
-
-%%  Test various bindings
-test4() ->
-    V = varc:new(),
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
-    X6 = varc:add_variable(V),
-
-    true = varc:mark(V, 0),
-    varc:put(V, X1, X2),
-    varc:put(V, X3, X4),
-    varc:put(V, X5, X6),
-
-    varc:put(V, X2, X4),
-    varc:put(V, X4, X6),
+    varc:put(V, X3, X5),
+    varc:put(V, X5, X7),
 
     %% varc:put(V, X6, 1),
 
@@ -114,29 +135,25 @@ test4() ->
 
 
 %% Test eval
-test_or_eval() ->
+or_eval() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
 
-    X1 = varc:get(V, X1),
     X2 = varc:get(V, X2),
     X3 = varc:get(V, X3),
     X4 = varc:get(V, X4),
+    X5 = varc:get(V, X5),
 
-    C1 = varc:add_clause(V, 'or', X1, true, false, true, false),
-    C2 = varc:add_clause(V, 'or', X2, true, true, true, true),
-    C3 = varc:add_clause(V, 'or', X3, false, false, false, false),
-    C4 = varc:add_clause(V, 'or', X4, true, false, true, false, true),
-    io:format("clauses=~p\n", [[C1,C2,C3,C4]]),
+    C0 = varc:add_clause(V, 'or', X2, true, false, true, false),
+    C1 = varc:add_clause(V, 'or', X3, true, true, true, true),
+    C2 = varc:add_clause(V, 'or', X4, false, false, false, false),
+    C3 = varc:add_clause(V, 'or', X5, true, false, true, false, true),
+    io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     io:format("queue=~p\n", [varc:get_queue(V)]),
     true = varc:eval(V),
-
-    V1 = varc:get(V, X1),
-    io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= true,
 
     V2 = varc:get(V, X2),
     io:format("X2 = ~w\n", [V2]),
@@ -144,145 +161,169 @@ test_or_eval() ->
 
     V3 = varc:get(V, X3),
     io:format("X3 = ~w\n", [V3]),
-    true = V3 =:= false,
-
-    V4 = varc:get(V, X4),
-    io:format("X4 = ~w\n", [V4]),
-    true = V4 =:= true,
-
-    io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
-
-    true.
-
-test_or_clause() ->
-    V = varc:new(),
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-
-    C1 = varc:add_clause(V, 'or', true, false, X1, false, false),
-    C2 = varc:add_clause(V, 'or', false, false, X2, false, false),
-    C3 = varc:add_clause(V, 'or', X3, false, false, X4, false),
-    io:format("clauses=~p\n", [[C1,C2,C3]]),
-    io:format("queue=~p\n", [varc:get_queue(V)]),
-    true = varc:eval(V),
-
-    V1 = varc:get(V, X1),
-    io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= true,
-
-    V2 = varc:get(V, X2),
-    io:format("X2 = ~w\n", [V2]),
-    true = V2 =:= false,
-
-    V3 = varc:get(V, X3),
-    V4 = varc:get(V, X4),
-    io:format("X3 = ~w, X4 = ~w\n", [V3,V4]),
-    true = V3 =:= X4,
-
-    io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
-
-    true.
-    
-test_and_eval() ->
-    V = varc:new(),
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-
-    4 = varc:get_number_of_variables(V),
-    X1 = varc:get(V, X1),
-    X2 = varc:get(V, X2),
-    X3 = varc:get(V, X3),
-    X4 = varc:get(V, X4),
-
-    C1 = varc:add_clause(V, 'and', X1, true, false, true, false),
-    C2 = varc:add_clause(V, 'and', X2, true, true, true, true),
-    C3 = varc:add_clause(V, 'and', X3, false, false, false, false),
-    C4 = varc:add_clause(V, 'and', X4, true, false, true, false, true),
-    io:format("clauses=~p\n", [[C1,C2,C3,C4]]),
-    io:format("queue=~p\n", [varc:get_queue(V)]),
-    true = varc:eval(V),
-    
-    V1 = varc:get(V, X1),
-    io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= false,
-
-    V2 = varc:get(V, X2),
-    io:format("X2 = ~w\n", [V2]),
-    true = V2 =:= true,
-
-    V3 = varc:get(V, X3),
-    io:format("X3 = ~w\n", [V3]),
-    true = V3 =:= false,
+    true = V3 =:= true,
 
     V4 = varc:get(V, X4),
     io:format("X4 = ~w\n", [V4]),
     true = V4 =:= false,
 
+    V5 = varc:get(V, X5),
+    io:format("X5 = ~w\n", [V5]),
+    true = V5 =:= true,
+
     io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
 
     true.
 
-test_and_clause() ->
+or_clause() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
 
-    C1 = varc:add_clause(V, 'and', false, true, X1, true, true),
-    C2 = varc:add_clause(V, 'and', true, true, X2, true, true),
-    C3 = varc:add_clause(V, 'and', X3, true, true, X4, true),
-    io:format("clauses=~p\n", [[C1,C2,C3]]),
+    C0 = varc:add_clause(V, 'or', true, false, X2, false, false),
+    C1 = varc:add_clause(V, 'or', false, false, X3, false, false),
+    C2 = varc:add_clause(V, 'or', X4, false, false, X5, false),
+    io:format("clauses=~p\n", [[C0,C1,C2]]),
     io:format("queue=~p\n", [varc:get_queue(V)]),
     true = varc:eval(V),
-
-    V1 = varc:get(V, X1),
-    io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= false,
 
     V2 = varc:get(V, X2),
     io:format("X2 = ~w\n", [V2]),
     true = V2 =:= true,
 
     V3 = varc:get(V, X3),
+    io:format("X3 = ~w\n", [V3]),
+    true = V3 =:= false,
+
+    %% bcp = false
+    %% V4 = varc:get(V, X4),
+    %% V5 = varc:get(V, X5),
+    %% io:format("X3 = ~w, X4 = ~w\n", [V4,V5]),
+    %% true = V4 =:= X5,
+
+    io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
+
+    true.
+
+or_conflict() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+
+    C0 = varc:add_clause(V, 'or', true, false, false, X2, X3),
+    C1 = varc:add_clause(V, 'or', true, false, false, X2, -X3),
+    io:format("clauses=~p\n", [[C0,C1]]),
+    true = varc:eval(V),
+
+    true = varc:mark(V, 0),
+    true = varc:put(V, X2, true),
+    true = varc:eval(V),
+
+    varc:undo(V),
+    true = varc:put(V, X2, false),
+    false = varc:eval(V),    
+    ok.
+
+
+    
+and_eval() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+
+    4 = varc:get_number_of_variables(V),
+    X2 = varc:get(V, X2),
+    X3 = varc:get(V, X3),
+    X4 = varc:get(V, X4),
+    X5 = varc:get(V, X5),
+
+    C0 = varc:add_clause(V, 'and', X2, true, false, true, false),
+    C1 = varc:add_clause(V, 'and', X3, true, true, true, true),
+    C2 = varc:add_clause(V, 'and', X4, false, false, false, false),
+    C3 = varc:add_clause(V, 'and', X5, true, false, true, false, true),
+    io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
+    io:format("queue=~p\n", [varc:get_queue(V)]),
+    true = varc:eval(V),
+    
+    V2 = varc:get(V, X2),
+    io:format("X1 = ~w\n", [V2]),
+    true = V2 =:= false,
+
+    V3 = varc:get(V, X3),
+    io:format("X2 = ~w\n", [V3]),
+    true = V3 =:= true,
+
     V4 = varc:get(V, X4),
-    io:format("X3 = ~w, X4 = ~w\n", [V3,V4]),
-    true = V3 =:= X4,
+    io:format("X3 = ~w\n", [V4]),
+    true = V4 =:= false,
+
+    V5 = varc:get(V, X5),
+    io:format("X4 = ~w\n", [V5]),
+    true = V5 =:= false,
+
+    io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
+
+    true.
+
+and_clause() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+
+    C0 = varc:add_clause(V, 'and', false, true, X2, true, true),
+    C1 = varc:add_clause(V, 'and', true, true, X3, true, true),
+    C2 = varc:add_clause(V, 'and', X4, true, true, X5, true),
+    io:format("clauses=~p\n", [[C0,C1,C2]]),
+    io:format("queue=~p\n", [varc:get_queue(V)]),
+    true = varc:eval(V),
+
+    V2 = varc:get(V, X2),
+    io:format("X2 = ~w\n", [V2]),
+    true = V2 =:= false,
+
+    V3 = varc:get(V, X3),
+    io:format("X2 = ~w\n", [V3]),
+    true = V3 =:= true,
+
+    %% bcp = true
+    %% V4 = varc:get(V, X4),
+    %% V5 = varc:get(V, X5),
+    %% io:format("X4 = ~w, X5 = ~w\n", [V4,V5]),
+    %% true = V4 =:= X5,
 
     io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
 
     true.
 
 
-test_xor_eval() ->
+xor_eval() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
-    
-    C1 = varc:add_clause(V, 'xor', X1, true, false, true, false),
-    {'xor', [X1,true,false,true,false]} = varc:get_clause(V, C1),
-    [inqueue] = varc:get_clause_flags(V, C1),
+    X5 = varc:add_variable(V),
 
+    C0 = varc:add_clause(V, 'xor', X2, true, false, true, false),
+    {'xor', [X2,true,false,true,false]} = varc:get_clause(V, C0),
+    [inqueue] = varc:get_clause_flags(V, C0),
     true = varc:eval(V),
-    C2 = varc:add_clause(V, 'xor', X2, true, true, true, true),
+    C1 = varc:add_clause(V, 'xor', X3, true, true, true, true),
     true = varc:eval(V),
-    C3 = varc:add_clause(V, 'xor', X3, false, false, false, false),
+    C2 = varc:add_clause(V, 'xor', X4, false, false, false, false),
     true = varc:eval(V),
-    C4 = varc:add_clause(V, 'xor', X4, true, false, true, false, true),
+    C3 = varc:add_clause(V, 'xor', X5, true, false, true, false, true),
     true = varc:eval(V),
-    io:format("clauses=~p\n", [[C1,C2,C3,C4]]),
+    io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     io:format("queue=~p\n", [varc:get_queue(V)]),
     
-    V1 = varc:get(V, X1),
-    io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= false,
-
     V2 = varc:get(V, X2),
     io:format("X2 = ~w\n", [V2]),
     true = V2 =:= false,
@@ -292,69 +333,74 @@ test_xor_eval() ->
     true = V3 =:= false,
 
     V4 = varc:get(V, X4),
-    io:format("X4 = ~w\n", [V4]),
-    true = V4 =:= true,
+    io:format("X3 = ~w\n", [V4]),
+    true = V4 =:= false,
+
+    V5 = varc:get(V, X5),
+    io:format("X5 = ~w\n", [V5]),
+    true = V5=:= true,
 
     io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
 
     true.
 
 
-test_xor_clause() ->
+xor_clause() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
     X5 = varc:add_variable(V),
     X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
     
-    C1 = varc:add_clause(V, 'xor', true, true, X1, true, false),
-    C2 = varc:add_clause(V, 'xor', false, true, X2, true, true),
-    C3 = varc:add_clause(V, 'xor', X3, false, X4, false, false),
-    C4 = varc:add_clause(V, 'xor', X5, false, X6, true, false),
+    C0 = varc:add_clause(V, 'xor', true, true, X2, true, false),
+    C1 = varc:add_clause(V, 'xor', false, true, X3, true, true),
+    C2 = varc:add_clause(V, 'xor', X4, false, X5, false, false),
+    C3 = varc:add_clause(V, 'xor', X6, false, X7, true, false),
     true = varc:eval(V),
 
-    io:format("clauses=~p\n", [[C1,C2,C3,C4]]),
+    io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     io:format("queue=~p\n", [varc:get_queue(V)]),
     
-    V1 = varc:get(V, X1),
-    io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= true,
-
     V2 = varc:get(V, X2),
     io:format("X2 = ~w\n", [V2]),
     true = V2 =:= true,
 
     V3 = varc:get(V, X3),
-    V4 = varc:get(V, X4),
-    io:format("X3 = ~w, X4=~w\n", [V3,V4]),
-    true = V3 =:= V4,
+    io:format("X3 = ~w\n", [V3]),
+    true = V3 =:= true,
 
-    V5 = varc:get(V, X5),
-    V6 = varc:get(V, X6),
-    io:format("X5 = ~w, X6=~w\n", [V5,V6]),
-    true = V5 =:= -V6,
+%%  bcp = false
+%%    V4 = varc:get(V, X4),
+%%    V5 = varc:get(V, X5),
+%%    io:format("X4 = ~w, X5=~w\n", [V4,V5]),
+%%    true = V4 =:= V5,
+
+%%  bcp = false
+%%    V6 = varc:get(V, X6),
+%%    V7 = varc:get(V, X7),
+%%    io:format("X5 = ~w, X6=~w\n", [V6,V7]),
+%%    true = V6 =:= -V7,
 
     io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
 
     true.
 
-
-test_order() ->    
+order() ->    
     V = varc:new(),
-    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
     X5 = varc:add_variable(V),
     X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
 
     varc:order_sort(V, id),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    [X2, X3, X4, X5, X6, X7] = varc:order_all(V),
 
     varc:order_sort(V, id, -1),
-    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+    [X7, X6, X5, X4, X3, X2] = varc:order_all(V),
 
     varc:order_sort(V, random, 1001),
     Sort1 = varc:order_all(V),

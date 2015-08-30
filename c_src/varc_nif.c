@@ -175,12 +175,10 @@ typedef struct _varref_t
 // FIXME: split structure to allow parallell access?
 typedef struct _variable_t
 {
-    int value;             // current value
-    int klass;             // class index
-    int occure;            // occure counter
-    varref_t* first;
-    varref_t* first_pos[3];
-    varref_t* first_neg[3];
+    int value;         // current value
+    int klass;         // class index
+    int occure;        // occure counter
+    varref_t* ref;     // reference list
 } variable_t;
 
 typedef struct arc4_stream_t {
@@ -380,13 +378,6 @@ static void undo_free(varc_t* vp, undo_t* ptr)
     varc_free(&vp->undo_allocator, (object_t*) ptr);
 }
 
-// return the first bit = 1 couting from least significant bit position
-static inline int bitpos(uint64_t x)
-{
-  return __builtin_ffsll(x);
-}
-
-
 static void arc4_init(arc4_stream_t *as)
 {
     int n;
@@ -547,6 +538,8 @@ static void push(varc_t* vp, int what, int x, int y)
 // put clause on eval queue
 static int enqueue_clause(varc_t* vp, clause_t* cp)
 {
+    TRACE("enqueue_clause %d T=%llx F=%llx flags=%x\r\n", 
+	  cp->cix, cp->mask_T, cp->mask_F, cp->flags);
     if (cp->flags & (CLAUSE_FLAG_INQUEUE|CLAUSE_FLAG_DEAD))
 	return 0;
     cp->next = NULL;
@@ -568,21 +561,18 @@ static clause_t* dequeue_clause(varc_t* vp)
 	    vp->eval_queue_tl = NULL;
 	cp->next = NULL;
 	cp->flags &= ~CLAUSE_FLAG_INQUEUE;
+	TRACE("enqueue_clause %d T=%llx F=%llx flags=%x\r\n", 
+	      cp->cix, cp->mask_T, cp->mask_F, cp->flags);
     }
     return cp;
 }
 
-static void init_variable(variable_t* var, int value, int klass)
+static void init_variable(variable_t* vptr, int value, int klass)
 {
-    int i;
-
-    var->value = value;
-    var->klass = klass;
-    var->first = NULL;
-    for (i = 0; i < 3; i++)
-	var->first_pos[i] = NULL;
-    for (i = 0; i < 3; i++)
-	var->first_neg[i] = NULL;
+    vptr->value = value;
+    vptr->klass = klass;
+    vptr->occure = 0;
+    vptr->ref = NULL;
 }
 
 
@@ -607,11 +597,12 @@ static void enqueue_varref(varc_t* vp,varref_t* vrp,int x,int y)
 	clause_t* cp = vp->clause_map[vrp->clause];
 	unsigned pos = vrp->pos;
 	if (pos < 64) {  // FIXME: other positions (>=64)!
-	    if (x == -cp->lit[pos]) // FIXME: use several varref chains
-		y = -y;
-	    if (y == TRUE)
+	    int y1 = (x == -cp->lit[pos]) ? -y : y;
+	    TRACE("enqueue_varref: %d=%d clause=%d pos=%d\r\n",
+		  x, y1, vrp->clause, pos);
+	    if (y1 == TRUE)
 		cp->mask_T |= (1 << pos);
-	    else if (y == FALSE)
+	    else if (y1 == FALSE)
 		cp->mask_F |= (1 << pos);
 	}
 	enqueue_clause(vp,cp);
@@ -619,57 +610,53 @@ static void enqueue_varref(varc_t* vp,varref_t* vrp,int x,int y)
     }
 }
 
+// enqueue all clauses that contains literal x
 static void enqueue_var(varc_t* vp,int x,int y)
 {
+    TRACE("enqueue_var %d=%d\r\n", x, y);
     while(x != 0) {
-	if (x < 0) {
-	    y = -y;
-	    enqueue_varref(vp,vp->var_map[-x].first,-x,y);
-	    x = vp->var_map[-x].klass;
-	}
-	else {
-	    enqueue_varref(vp,vp->var_map[x].first,x,y);
-	    x = vp->var_map[x].klass;
-	}
+	variable_t* vptr;
+	if (x < 0) { x = -x; y = -y; }
+	vptr = &vp->var_map[x];
+	enqueue_varref(vp,vptr->ref,x,y);
+	x = vp->var_map[x].klass;
     }
 }
 
-static void wakeup_clause(varc_t* vp,clause_t* cp)
+static void undo_clause(varc_t* vp,clause_t* cp)
 {
     (void) vp;
+    TRACE("undo_clause %d T=%llx, F=%llx\r\n", cp->cix,
+	  cp->mask_T, cp->mask_F);
     cp->flags &= ~CLAUSE_FLAG_DEAD;
 }
 
-static void wakeup_varref(varc_t* vp,varref_t* vrp,int x,int y)
+static void undo_varref(varc_t* vp,varref_t* vrp,int x,int y)
 {
     while(vrp) {
 	clause_t* cp = vp->clause_map[vrp->clause];
 	unsigned pos = vrp->pos;
 	if (pos < 64) {  // FIXME: other positions!
-	    if (x == -cp->lit[pos]) // FIXME: use several varref chains
-		y = -y;
-	    if (y == TRUE)
+	    int y1 = (x == -cp->lit[pos]) ? -y : y;
+	    if (y1 == TRUE)
 		cp->mask_T &= ~(1 << pos);
-	    else if (y == FALSE)
+	    else if (y1 == FALSE)
 		cp->mask_F &= ~(1 << pos);
 	}
-	wakeup_clause(vp,cp);
+	undo_clause(vp,cp);
 	vrp = vrp->next;
     }
 }
 
-static void wakeup_var(varc_t* vp,int x,int y)
+static void undo_var(varc_t* vp,int x,int y)
 {
+    TRACE("undo_var %d=%d\r\n", x, y);
     while(x != 0) {
-	if (x < 0) {
-	    y = -y;
-	    wakeup_varref(vp,vp->var_map[-x].first,-x,y);
-	    x = vp->var_map[-x].klass;
-	}
-	else {
-	    wakeup_varref(vp, vp->var_map[x].first,x,y);
-	    x = vp->var_map[x].klass;
-	}
+	variable_t* vptr;
+	if (x < 0) { x = -x; y = -y; }
+	vptr = &vp->var_map[x];
+	undo_varref(vp,vptr->ref,x,y);
+	x = vp->var_map[x].klass;
     }
 }
 
@@ -725,6 +712,8 @@ static int put(varc_t* vp, int x, int y)
 {
     int xc, yc;
 
+    TRACE("%d = %d\r\n", x, y);
+
     xc = klass(vp, x);
     yc = klass(vp, y);
     x = get(vp, xc);
@@ -771,37 +760,29 @@ static int put(varc_t* vp, int x, int y)
     return 0;
 }
 
-
-
-static int add_varref(varc_t* vp,int op,int lit,unsigned clause,unsigned pos)
+static int add_varref(varc_t* vp,int lit,clause_t* cp,unsigned pos)
 {
     varref_t* vrp;
-    varref_t* vrp1;
-    int ix;
+    variable_t* vptr;
 
-    if ((lit == TRUE) || (lit == FALSE))
+    if (lit == TRUE) {
+	if (pos < 64)  // FIXME!
+	    cp->mask_T |= (1 << pos);
 	return 0;
-    // remove this soon
+    }
+    else if (lit == FALSE) {
+	if (pos < 64)  // FIXME!
+	    cp->mask_F |= (1 << pos);
+	return 0;
+    }
     if ((vrp = varc_alloc(&vp->varref_allocator)) == NULL)  
 	return -1;
-    if ((vrp1 = varc_alloc(&vp->varref_allocator)) == NULL)
-	return -1;
-    // Keep a positive and a negative literal list for each op & variable
-    if (lit < 0) {
-	ix = -lit;
-	vrp1->next = vp->var_map[ix].first_pos[op];
-	vp->var_map[ix].first_pos[op] = vrp1;
-    }
-    else {
-	ix = lit;
-	vrp1->next = vp->var_map[ix].first_neg[op];
-	vp->var_map[ix].first_neg[op] = vrp1;
-    }
-    vrp->next = vp->var_map[ix].first;
-    vp->var_map[ix].first = vrp;
-    vp->var_map[ix].occure++;
-    vrp->clause = clause;
+    vptr = (lit < 0) ? &vp->var_map[-lit] : &vp->var_map[lit];
+    vrp->next = vptr->ref;
+    vptr->ref = vrp;
+    vrp->clause = cp->cix;
     vrp->pos = pos;
+    vptr->occure++;
     return 0;
 }
 
@@ -849,7 +830,9 @@ static int remove_clause_from_queue(varc_t* vp, clause_t* cp)
 static int insert_clause(ErlNifEnv* env, varc_t* vp, clause_t* cp)
 {
     (void) env;
-    int cix;
+    int cix = vp->cnext++;
+
+    cp->cix = cix;
 
     enqueue_clause(vp, cp);
 
@@ -864,9 +847,7 @@ static int insert_clause(ErlNifEnv* env, varc_t* vp, clause_t* cp)
 	vp->csize = new_csize;
     }
     vp->cnum++;
-    cix = vp->cnext++;
     vp->clause_map[cix] = cp;
-    cp->cix = cix;
     return cix;
 }
 
@@ -913,6 +894,18 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, int value)
 }
 
 //
+// Utility to bind a literal to a value, assert that
+// the setting does not fail!
+//
+#define PUTA(vp,x,y) do {						\
+    if (put((vp),(x),(y)) < 0) {					\
+        fprintf(stderr, "put: assertion failed %d = %d when assign %d\r\n", \
+		x, get(vp, x), get(vp, y));				\
+	return -1;							\
+    }									\
+    } while(0)
+
+//
 // F = Y1 OR Y2 OR ...          => Y1/FALSE, Y2/FALSE ...
 //
 // T  = F OR F ... OR F       => CONTRADICTION
@@ -937,8 +930,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	TRACE("or:%d: lit[0]=%d size=%zd\r\n",cp->cix,w,cp->size);
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	for (i = 1; i < cp->size; i++) {
-	    if (put(vp, cp->lit[i], FALSE) < 0)
-		return -1;
+	    PUTA(vp, cp->lit[i], FALSE);
 	}
 	break;
 
@@ -960,7 +952,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	}
 	else if ((nf == cp->size-2) && j) {  // all but one are false
 	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if (put(vp, cp->lit[j], TRUE) < 0) return -1;
+	    PUTA(vp, cp->lit[j], TRUE);
 	}
 	break;
 	
@@ -971,7 +963,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 		TRACE("or:%d: lit[0]=%d size=%zd lit[%d]=true\r\n",
 		      cp->cix,w,cp->size,i);
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[0], TRUE) < 0) return -1; // assert?
+		PUTA(vp, cp->lit[0], TRUE);
 		return 0;
 	    }
 	    else if (v == FALSE)
@@ -982,12 +974,12 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	TRACE("or:%d: lit[0]=%d size=%zd nf=%d\r\n",cp->cix,w,cp->size,nf);
 	if (nf == cp->size-1) {  // all are false
 	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if (put(vp, cp->lit[0], FALSE) < 0) return -1; // assert?
+	    PUTA(vp, cp->lit[0], FALSE);
 	}
 	else if ((nf == cp->size-2) && j) {  // all but one are false
 	    if (!vp->bcp) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[0], cp->lit[j]) < 0) return -1;
+		PUTA(vp, cp->lit[0], cp->lit[j]);
 	    }
 	}
 	break;
@@ -995,42 +987,6 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
     return 0;
 }
 
-//
-// eval an OR clause using bitmasks mask_F and mask_T
-//
-static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
-{
-  int i;
-
-  if (cp->mask_T & 1) {
-    uint64_t unbound = ~(cp->mask_T | cp->mask_F) & ((1 << cp->size)-1);
-    if ((unbound & (unbound - 1)) == 0) { // exactly on unbound pos
-      if ((i = bitpos(unbound))) {
-	if (put(vp, cp->lit[i-1], TRUE) < 0)
-	  return -1;
-      }
-    }
-  }
-  else if (cp->mask_F & 1) {
-    cp->flags |= CLAUSE_FLAG_DEAD;
-    for (i = 1; i < cp->size; i++) {
-      if (put(vp, cp->lit[i], FALSE) < 0)
-	return -1;
-    }
-  }
-  else {
-    if (cp->mask_T) { // there is at least on TRUE literal 
-      cp->flags |= CLAUSE_FLAG_DEAD;
-      if (put(vp, cp->lit[0], TRUE) < 0) return -1; // assert?
-    }
-    else if ((int)(cp->mask_F >> 1) == ((1 << (cp->size-1))-1)) {
-      cp->flags |= CLAUSE_FLAG_DEAD;
-      if (put(vp, cp->lit[0], FALSE) < 0) return -1; // assert
-    }
-  }
-  return 0;
-
-}
 
 //
 // F  = T AND T ... AND T         => CONTRADICTION
@@ -1070,7 +1026,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	}
 	else if ((nt == cp->size-2) && j) {  // all but one are true
 	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if (put(vp, cp->lit[j], FALSE) < 0) return -1;
+	    PUTA(vp, cp->lit[j], FALSE);
 	}
 	break;
 	
@@ -1078,8 +1034,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	TRACE("and:%d: lit[0]=%d size=%zd\r\n",cp->cix,w,cp->size);
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	for (i = 1; i < cp->size; i++) {
-	    if (put(vp, cp->lit[i], TRUE) < 0)
-		return -1;
+	    PUTA(vp, cp->lit[i], TRUE);
 	}
 	break;
 
@@ -1090,7 +1045,7 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 		TRACE("and:%d: lit[0]=%d size=%zd lit[%d]=false\r\n",
 		      cp->cix,w,cp->size,i);
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[0], FALSE) < 0) return -1; // assert?
+		PUTA(vp, cp->lit[0], FALSE);
 		return 0;
 	    }
 	    else if (v == TRUE)
@@ -1101,12 +1056,12 @@ static int eval_and_clause(varc_t* vp, clause_t* cp)
 	TRACE("and:%d: lit[0]=%d size=%zd nt=%d\r\n",cp->cix,w,cp->size,nt);
 	if (nt == cp->size-1) {  // all are true
 	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if (put(vp, cp->lit[0], TRUE) < 0) return -1; // assert?
+	    PUTA(vp, cp->lit[0], TRUE);
 	}
 	else if ((nt == cp->size-2) && j) {  // all but one are true
 	    if (!vp->bcp) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[0], cp->lit[j]) < 0) return -1;
+		PUTA(vp, cp->lit[0], cp->lit[j]);
 	    }
 	}
 	break;
@@ -1168,11 +1123,11 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 	else if (((nt+nf) == cp->size-2) && j) {
 	    if (nt & 1) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[j], TRUE) < 0) return -1;
+		PUTA(vp, cp->lit[j], TRUE);
 	    }
 	    else {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[j], FALSE) < 0) return -1;
+		PUTA(vp, cp->lit[j], FALSE);
 	    }
 	    return 0;
 	}
@@ -1180,13 +1135,13 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 	    if (nt & 1) {
 		if (!vp->bcp) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    if (put(vp, cp->lit[j], -cp->lit[k]) < 0) return -1;
+		    PUTA(vp, cp->lit[j], -cp->lit[k]);
 		}
 	    }
 	    else {
 		if (!vp->bcp) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    if (put(vp, cp->lit[j], cp->lit[k]) < 0) return -1;
+		    PUTA(vp, cp->lit[j], cp->lit[k]);
 		}
 	    }
 	    return 0;
@@ -1203,11 +1158,11 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 	else if (((nt+nf) == cp->size-2) && j) {
 	    if (nt & 1) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[j], FALSE) < 0) return -1;
+		PUTA(vp, cp->lit[j], FALSE);
 	    }
 	    else {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[j], TRUE) < 0) return -1;
+		PUTA(vp, cp->lit[j], TRUE);
 	    }
 	    return 0;
 	}
@@ -1215,13 +1170,13 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 	    if (nt & 1) {
 		if (!vp->bcp) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    if (put(vp, cp->lit[j], cp->lit[k]) < 0) return -1;
+		    PUTA(vp, cp->lit[j], cp->lit[k]);
 		}
 	    }
 	    else {
 		if (!vp->bcp) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    if (put(vp, cp->lit[j], -cp->lit[k]) < 0) return -1;
+		    PUTA(vp, cp->lit[j], -cp->lit[k]);
 		}
 	    }
 	    return 0;
@@ -1232,11 +1187,11 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 	if ((nt+nf) == cp->size-1) { // all are bound
 	    if (nt & 1) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[0], TRUE) < 0) return -1;
+		PUTA(vp, cp->lit[0], TRUE);
 	    }
 	    else {
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (put(vp, cp->lit[0], FALSE) < 0) return -1;
+		PUTA(vp, cp->lit[0], FALSE);
 	    }
 	    return 0;
 	}
@@ -1244,13 +1199,13 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
 	    if (nt & 1) {
 		if (!vp->bcp) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    if (put(vp, cp->lit[0], -cp->lit[j]) < 0) return -1;
+		    PUTA(vp, cp->lit[0], -cp->lit[j]);
 		}
 	    }
 	    else {
 		if (!vp->bcp) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    if (put(vp, cp->lit[0], cp->lit[j]) < 0) return -1;
+		    PUTA(vp, cp->lit[0], cp->lit[j]);
 		}
 	    }
 	    return 0;
@@ -1260,24 +1215,225 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
     return 0;
 }
 
+
+//
+// Return a bit mask representing the unbound literal positions
+//
+static inline uint64_t unbound_mask(clause_t* cp)
+{
+    return ~(cp->mask_T | cp->mask_F) & ((1 << cp->size)-1);
+}
+
+static inline int exactly_one_set(uint64_t v)
+{
+    return v && ((v & (v-1)) == 0);
+}
+
+// return the first bit = 1 couting from least significant bit position
+static inline int bitpos(uint64_t x)
+{
+  return __builtin_ffsll(x);
+}
+
+/**
+static inline int xm_ffs(__m128i x)
+{
+    int pos = _mm_movemask_epi8(_mm_cmpeq_epi8(x, _mm_setzero_si128()));
+    pos = ffs((uint16_t)~pos) - 1;
+    return pos < 0 ? -1
+	: (pos << 3) + ffs(((unsigned char const*)&x)[pos]) - 1;
+
+}
+**/
+
+static inline int parity(uint64_t v)
+{
+    v ^= v >> 32;
+    v ^= v >> 16;
+    v ^= v >> 8;
+    v ^= v >> 4;
+    v &= 0xf;
+    return (0x6996 >> v) & 1;
+}
+
+
+//
+// eval an OR clause using bitmasks mask_F and mask_T
+//
+static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
+{
+    int i;
+
+    TRACE("eval_or_clause_mask %d T=%llx F=%llx\r\n", 
+	  cp->cix, cp->mask_T, cp->mask_F);
+
+    if (cp->mask_T & 1) {
+	if (!(cp->mask_T >> 1)) { // no more true literals
+	    uint64_t unbound = unbound_mask(cp);
+	    TRACE(" lit[0]=T, unbound=%llx\r\n", unbound);
+	    if (exactly_one_set(unbound)) {  // one unbound position 
+		if ((i = bitpos(unbound))) { // assert!?
+		    cp->flags |= CLAUSE_FLAG_DEAD;
+		    PUTA(vp, cp->lit[i-1], TRUE);
+		}
+	    }
+	    else if (unbound == 0) {
+		uint64_t sz = (1 << (cp->size-1))-1;
+		// TRACE("mask_F=%llx size=%llx\r\n", (cp->mask_F>>1),sz);
+		if ((cp->mask_F >> 1) == sz) {
+		    // all FALSE
+		    // TRACE("contradiction%s\r\n", "");
+		    return -1;
+		}
+	    }
+	}
+    }
+    else if (cp->mask_F & 1) {
+	cp->flags |= CLAUSE_FLAG_DEAD;
+	TRACE(" lit[i]=F%s\r\n", "");
+	for (i = 1; i < cp->size; i++) {
+	    PUTA(vp, cp->lit[i], FALSE);
+	}
+    }
+    else {
+	if (cp->mask_T) { // there is at least on TRUE literal
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    TRACE(" lit[0]=T, some true%s\r\n", "");
+	    PUTA(vp, cp->lit[0], TRUE);
+	}
+	else if ((cp->mask_F >> 1) == ((1 << (cp->size-1))-1)) { // all FALSE
+	    TRACE(" lit[0]=F, all false%s\r\n", "");
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    PUTA(vp, cp->lit[0], FALSE);
+	}
+	else {
+	    TRACE(" lit[0]= nope%s\r\n", "");
+	}
+    }
+    return 0;
+}
+
+
+//
+// eval an OR clause using bitmasks mask_F and mask_T
+//
+static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
+{
+    int i;
+
+    TRACE("eval_and_clause_mask %d T=%llx F=%llx\r\n", 
+	  cp->cix, cp->mask_T, cp->mask_F);
+
+    if (cp->mask_T & 1) {
+	cp->flags |= CLAUSE_FLAG_DEAD;
+	for (i = 1; i < cp->size; i++) {
+	    PUTA(vp, cp->lit[i], TRUE);
+	}
+    }
+    else if (cp->mask_F & 1) {
+	if (!(cp->mask_F >> 1)) {  // no more false literals
+	    uint64_t unbound = unbound_mask(cp);
+	    if (exactly_one_set(unbound)) {    // one unbound position
+		if ((i = bitpos(unbound))) {  // assert!?
+		    cp->flags |= CLAUSE_FLAG_DEAD;
+		    PUTA(vp, cp->lit[i-1], FALSE);
+		}
+	    }
+	    else if (unbound == 0) {
+		uint64_t sz = (1 << (cp->size-1))-1;
+		if ((cp->mask_T >> 1) == sz) {
+		    // all TRUE
+		    return -1;
+		}
+	    }
+	}
+    }
+    else {
+	if (cp->mask_F) { // there is at least on FALSE literal
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    PUTA(vp, cp->lit[0], FALSE);
+	}
+	else if ((cp->mask_T >> 1) == ((1 << (cp->size-1))-1)) {
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    PUTA(vp, cp->lit[0], TRUE);
+	}
+    }
+    return 0;
+}
+
+//
+// eval an XOR clause using bitmasks mask_F and mask_T
+//
+
+static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
+{
+    int i;
+
+    TRACE("eval_xor_clause_mask %d T=%llx F=%llx\r\n", 
+	  cp->cix, cp->mask_T, cp->mask_F);
+
+    if (cp->mask_T & 1) { // T = x1 ^ x2 ^ x3 ...
+	uint64_t unbound = unbound_mask(cp);
+	TRACE(" lit[0]=T, unbound=%llx\r\n", unbound);
+	if (exactly_one_set(unbound)) {  // one unbound position 
+	    if ((i = bitpos(unbound))) {
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		if (parity(cp->mask_T>>1))
+		    PUTA(vp, cp->lit[i-1], FALSE);
+		else
+		    PUTA(vp, cp->lit[i-1], TRUE);
+	    }
+	}
+	else if ((unbound == 0) && !parity(cp->mask_T>>1))
+	    return -1;
+    }
+    else if (cp->mask_F & 1) { // F = x1 ^ x2 ^ x3 ...
+	uint64_t unbound = unbound_mask(cp);
+	TRACE(" lit[0]=F, unbound=%llx\r\n", unbound);
+	if (exactly_one_set(unbound)) {  // one unbound position 
+	    if ((i = bitpos(unbound))) {
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		if (parity(cp->mask_T>>1))
+		    PUTA(vp, cp->lit[i-1], TRUE);
+		else
+		    PUTA(vp, cp->lit[i-1], FALSE);
+	    }
+	}
+	else if ((unbound == 0) && parity(cp->mask_T>>1))
+	    return -1;
+    }
+    else {
+	uint64_t unbound = (unbound_mask(cp) >> 1);
+	TRACE(" lit[0]=X, unbound=%llx\r\n", unbound);
+	if (unbound == 0) {  // all unbound
+	    if (parity(cp->mask_T))  // odd number of bits set
+		PUTA(vp, cp->lit[0], TRUE);
+	    else
+		PUTA(vp, cp->lit[0], FALSE);
+	}
+    }
+    return 0;
+}
+
+
 static int eval_clause(varc_t* vp, clause_t* cp)
 {
-  if (cp->size <= 64) {
-    switch(cp->op) {
-    case CLAUSE_OP_OR: return eval_or_clause_mask(vp, cp);
-    case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
-    case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
-    default: return -1;
+    if (vp->bcp && (cp->size <= 64)) {
+	switch(cp->op) {
+	case CLAUSE_OP_OR: return eval_or_clause_mask(vp, cp);
+	case CLAUSE_OP_AND: return eval_and_clause_mask(vp, cp);
+	case CLAUSE_OP_XOR: return eval_xor_clause_mask(vp, cp);
+	default: return -1;
+	}
     }
-  }
-  else {
-    switch(cp->op) {
-    case CLAUSE_OP_OR: return eval_or_clause(vp, cp);
-    case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
-    case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
-    default: return -1;
+    else {
+	switch(cp->op) {
+	case CLAUSE_OP_OR: return eval_or_clause(vp, cp);
+	case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
+	case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
+	default: return -1;
+	}
     }
-  }
 }
 
 static void cleanup(varc_t* vp)
@@ -1356,7 +1512,7 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     vp->csize = csize;
     vp->cnum = 0;
 
-    vp->bcp = 0;
+    vp->bcp = 1;  // Fixme: config
 
     if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
 	goto error;
@@ -1416,10 +1572,7 @@ static ERL_NIF_TERM varc_add_variable(ErlNifEnv* env, int argc,
     }
     var = vp->vnext++;
     vp->vnum++;
-    vp->var_map[var].value = UNDEF;
-    vp->var_map[var].klass = UNDEF;
-    vp->var_map[var].occure = 0;
-    vp->var_map[var].first = NULL;
+    init_variable(&vp->var_map[var], UNDEF, UNDEF);
     vp->order_map[var] = var;
     return enif_make_int(env, var);
 }
@@ -1781,11 +1934,13 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 	un = up->next;
 	undo_free(vp,up);
 	up = un;
-	wakeup_var(vp,x,y);
-	if (w & VALUE)
+	if (w & VALUE) {
+	    undo_var(vp,x,vp->var_map[x].value);
 	    vp->var_map[x].value = y;
-	else
+	}
+	else {
 	    vp->var_map[x].klass = y;
+	}
 	if (w & MARK)
 	    break;
     }
@@ -1804,7 +1959,6 @@ static ERL_NIF_TERM varc_eval(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     while((cp = dequeue_clause(vp)) != NULL) {
-	TRACE("dequeue = %d\r\n", cp->cix);
 	if (eval_clause(vp, cp) < 0) {
 	    clear_queue(vp);
 	    return ATOM(false);  // contradiction
@@ -1830,7 +1984,7 @@ static ERL_NIF_TERM add_clause_list(ErlNifEnv* env, varc_t* vp, int op,
 	if (!get_literal(env, vp, head, &x))  // should not fail!
 	    return enif_make_badarg(env);
 	ptr->lit[i] = x;
-	if (add_varref(vp, op, x, cix, i) < 0)
+	if (add_varref(vp, x, ptr, i) < 0)
 	    return enif_make_badarg(env);
 	i++;
 	list = tail;
@@ -1854,7 +2008,7 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
 	if (!get_literal(env, vp, array[i], &x))  // should not fail!
 	    return enif_make_badarg(env);
 	ptr->lit[i] = x;
-	if (add_varref(vp, op, x, cix, i) < 0)
+	if (add_varref(vp, x, ptr, i) < 0)
 	    return enif_make_badarg(env);
     }
     return enif_make_int(env, cix);
@@ -1938,17 +2092,14 @@ static ERL_NIF_TERM varc_del_clause(ErlNifEnv* env, int argc,
     for (i = 0; i < cp->size; i++) {
 	int lit = cp->lit[i];
 	if ((lit != TRUE) && (lit != FALSE)) {
-	    int ix;
 	    if (lit < 0) {
-		ix = -lit;
-		del_varref(vp, &vp->var_map[ix].first_neg[cp->op], cix, i);
+		vp->var_map[-lit].occure--;
+		del_varref(vp,&vp->var_map[-lit].ref,cix,i);
 	    }
 	    else {
-		ix = lit;
-		del_varref(vp, &vp->var_map[ix].first_pos[cp->op], cix, i);
+		vp->var_map[lit].occure--;
+		del_varref(vp,&vp->var_map[lit].ref,cix,i);
 	    }
-	    del_varref(vp, &vp->var_map[ix].first, cix, i);
-	    vp->var_map[ix].occure--;
 	}
     }
     remove_clause_from_queue(vp, cp);
@@ -1957,7 +2108,6 @@ static ERL_NIF_TERM varc_del_clause(ErlNifEnv* env, int argc,
     vp->cnum--;
     return ATOM(ok);
 }
-
 
 static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
@@ -2019,15 +2169,26 @@ static ERL_NIF_TERM varc_get_clause_flags(ErlNifEnv* env, int argc,
     return list;
 }
 
+static ERL_NIF_TERM build_varref_list(ErlNifEnv* env, varref_t* vrp,
+				      ERL_NIF_TERM list)
+{
+    while(vrp) {
+	ERL_NIF_TERM elem = enif_make_uint(env, vrp->clause);
+	list = enif_make_list_cell(env, elem, list);
+	vrp = vrp->next;
+    }
+    return list;
+}
+
 
 static ERL_NIF_TERM varc_get_clauses(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
     (void) argc;
     varc_t* vp;
-    varref_t* vrp;
-    int lit, ix, i;
+    int lit, ix;
     ERL_NIF_TERM list;
+    variable_t* vptr;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -2035,24 +2196,9 @@ static ERL_NIF_TERM varc_get_clauses(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     ix = (lit < 0) ? -lit : lit;
     list = enif_make_list(env, 0);
+    vptr = &vp->var_map[ix];
 
-    for (i = 0; i < 3; i++) {
-	vrp = vp->var_map[ix].first_pos[i];
-	while(vrp) {
-	    ERL_NIF_TERM elem = enif_make_uint(env, vrp->clause);
-	    list = enif_make_list_cell(env, elem, list);
-	    vrp = vrp->next;
-	}
-    }
-    for (i = 0; i < 3; i++) {
-	vrp = vp->var_map[ix].first_neg[i];
-	while(vrp) {
-	    ERL_NIF_TERM elem = enif_make_uint(env, vrp->clause);
-	    list = enif_make_list_cell(env, elem, list);
-	    vrp = vrp->next;
-	}
-    }
-    return list;
+    return build_varref_list(env, vptr->ref,list);
 }
 
 
