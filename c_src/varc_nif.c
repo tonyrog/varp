@@ -159,8 +159,8 @@ typedef struct _clause_t
     struct _clause_t* next;      // MUST BE FIRST
     int      size;               // number of literals
     int      cix;                // clause index
-    bitset_t mask_F;             // bit mask for 64 positions = FALSE
-    bitset_t mask_T;             // bit mask for 64 positions = TRUE
+    bitset_t mask_F;             // bit mask positions = FALSE
+    bitset_t mask_T;             // bit mask positions = TRUE
     uint16_t flags;              // INQUEUE ...
     uint16_t op;                 // OR|AND|XOR
     int      lit[0];
@@ -600,7 +600,7 @@ static void enqueue_varref(varc_t* vp,varref_t* vrp,int x,int y)
     while(vrp) {
 	clause_t* cp = vp->clause_map[vrp->clause];
 	unsigned pos = vrp->pos;
-	if (pos < 64) {  // FIXME: other positions (>=64)!
+	if (pos < sizeof(bitset_t)*8) {  // FIXME: other positions
 	    int y1 = (x == -cp->lit[pos]) ? -y : y;
 	    TRACE("enqueue_varref: %d=%d clause=%d pos=%d\r\n",
 		  x, y1, vrp->clause, pos);
@@ -640,7 +640,7 @@ static void undo_varref(varc_t* vp,varref_t* vrp,int x,int y)
     while(vrp) {
 	clause_t* cp = vp->clause_map[vrp->clause];
 	unsigned pos = vrp->pos;
-	if (pos < 64) {  // FIXME: other positions!
+	if (pos < sizeof(bitset_t)*8) {  // FIXME: other positions!
 	    int y1 = (x == -cp->lit[pos]) ? -y : y;
 	    if (y1 == TRUE)
 		bitset_iclear(&cp->mask_T, pos);
@@ -1244,7 +1244,7 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
 
     if (bitset_is_set(&cp->mask_T,0)) {  // x0 == TRUE?
-	if (bitset_is_nclear(&cp->mask_T,1,cp->size-1)) { // x1...xn == FALSE
+	if (bitset_is_nclear(&cp->mask_T,1,cp->size-1)) { // clause not dead
 	    bitset_t unbound;
 	    unbound_literals(cp, &unbound);
 	    TRACE(" lit[0]=T, unbound=%s\r\n", bitset_format(&unbound));
@@ -1304,7 +1304,7 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 	}
     }
     else if (bitset_is_set(&cp->mask_F,0)) {  // x0 = FALSE
-	if (bitset_is_nclear(&cp->mask_F,1,cp->size-1)) { // x1,...,xn != FALSE
+	if (bitset_is_nclear(&cp->mask_F,1,cp->size-1)) { // clause not dead
 	    bitset_t unbound;
 	    unbound_literals(cp, &unbound);
 	    if (bitset_count_one(&unbound)) {
@@ -1401,7 +1401,7 @@ static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
 
 static int eval_clause(varc_t* vp, clause_t* cp)
 {
-    if (vp->bcp && (cp->size <= 64)) {
+    if (vp->bcp && (cp->size < (int)sizeof(bitset_t)*8)) {
 	switch(cp->op) {
 	case CLAUSE_OP_OR: return eval_or_clause_mask(vp, cp);
 	case CLAUSE_OP_AND: return eval_and_clause_mask(vp, cp);
