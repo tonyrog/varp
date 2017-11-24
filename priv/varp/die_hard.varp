@@ -1,0 +1,51 @@
+// DIE HARD
+// L(i)  L(i) is jug volume of the little jug in step i (4 bits)
+// B(i)  B(i) is jug volume of the big jug in step i (4 bits)
+//
+// #FILL_SMALL(i) is a macro 
+// Fill_small(i) is a predicate, true iff small jug is fill in step i
+//
+//
+
+declare B(i):5/signed;
+declare L(i):5/signed;
+
+define INIT(i) := Init(i) and (B(i) == 0) and (L(i) == 0) ;
+
+define FILL_SMALL(i) := Fill_small(i) and (B(i) == B(i-1)) and (L(i) == 3) ;
+
+define FILL_BIG(i) := Fill_big(i) and (B(i) == 5) and (L(i) == L(i-1)) ;
+
+define EMPTY_SMALL(i) := Empty_small(i) and (L(i) == 0) and (B(i) == B(i-1)) ;
+
+define EMPTY_BIG(i) := Empty_big(i) and (L(i) == L(i-1)) and (B(i) == 0) ;
+
+define SMALL_TO_BIG(i) := Small_to_big(i) and
+		    (B(i) == min(B(i-1) + L(i-1), 5)) and
+		    (L(i) == L(i-1)-(B(i)-B(i-1))) ;
+
+define BIG_TO_SMALL(i) := Big_to_small(i) and
+		    (L(i) == min(B(i-1) + L(i-1), 3)) and
+		    (B(i) == B(i-1)-(L(i)-L(i-1))) ;
+
+define NEXT(i) := [EQ 1](Fill_small(i), Fill_big(i), Empty_small(i), Empty_big(i),
+	           Small_to_big(i), Big_to_small(i)) and
+	    (FILL_SMALL(i) or FILL_BIG(i) or
+	    EMPTY_SMALL(i) or EMPTY_BIG(i) or
+	    SMALL_TO_BIG(i) or BIG_TO_SMALL(i)) ;
+
+define GOAL(i) := B(i) == 4 ;
+
+INIT(0) and [A s=1..n] NEXT(s) and GOAL(n)
+
+
+// SOLUTIONS 6 steps
+// MODEL 1: B(0)=0,B(1)=5,B(2)=2,B(3)=2,B(4)=0,B(5)=5,B(6)=4,Big_to_small(2),Big_to_small(4),Big_to_small(6),Empty_small(3),Fill_big(1),Fill_big(5),Init(0),L(0)=0,L(1)=0,L(2)=3,L(3)=0,L(4)=2,L(5)=2,L(6)=3
+
+// SOLUTIONS 7 steps
+// 1: B(0)=0,B(1)=5,B(2)=5,B(3)=2,B(4)=2,B(5)=0,B(6)=5,B(7)=4,Big_to_small(3),Big_to_small(5),Big_to_small(7),Empty_small(4),Fill_big(1),Fill_big(2),Fill_big(6),Init(0),L(0)=0,L(1)=0,L(2)=0,L(3)=3,L(4)=0,L(5)=2,L(6)=2,L(7)=3
+// 2: B(0)=0,B(1)=5,B(2)=5,B(3)=2,B(4)=2,B(5)=0,B(6)=5,B(7)=4,Big_to_small(3),Big_to_small(5),Big_to_small(7),Empty_small(2),Empty_small(4),Fill_big(1),Fill_big(6),Init(0),L(0)=0,L(1)=0,L(2)=0,L(3)=3,L(4)=0,L(5)=2,L(6)=2,L(7)=3
+
+// SOLUTIONS 8 steps
+// 1: B(0)=0,B(1)=0,B(2)=5,B(3)=5,B(4)=2,B(5)=2,B(6)=0,B(7)=5,B(8)=4,Big_to_small(4),Big_to_small(6),Big_to_small(8),Empty_small(3),Empty_small(5),Fill_big(2),Fill_big(7),Fill_small(1),Init(0),L(0)=0,L(1)=3,L(2)=3,L(3)=0,L(4)=3,L(5)=0,L(6)=2,L(7)=2,L(8)=3
+// 2: B(0)=0,B(1)=0,B(2)=3,B(3)=5,B(4)=2,B(5)=2,B(6)=0,B(7)=5,B(8)=4,Big_to_small(4),Big_to_small(6),Big_to_small(8),Empty_small(5),Fill_big(3),Fill_big(7),Fill_small(1),Init(0),L(0)=0,L(1)=3,L(2)=0,L(3)=0,L(4)=3,L(5)=0,L(6)=2,L(7)=2,L(8)=3,Small_to_big(2)

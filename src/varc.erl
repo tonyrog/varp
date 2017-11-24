@@ -51,7 +51,10 @@
 -endif.
 
 -define(is_varc(Varc), is_binary(Varc)).
--define(is_op(Op), (((Op) =:= 'and') orelse ((Op) =:= 'or') orelse ((Op) =:= 'xor'))).
+-define(is_op(Op), (((Op) =:= 'and') 
+		    orelse ((Op) =:= 'or') 
+		    orelse ((Op) =:= 'xor')
+		    orelse ((Op) =:= 'reg'))).
 
 init() ->
     Nif = filename:join([code:priv_dir(varp), "varc_nif"]),

@@ -4,21 +4,25 @@
 //  Find a graph G of size n such that there
 //  is no clique of size k and no independent set of size m
 //
-//  E(i,j) is true if there is an edge between vertex i and j
+//  E([i,j]) is true if there is an edge between vertex i and j
 //  A clique of size 3 is then expressed like 
-//  E(1,2) & E(1,3) & E(2,3)
+//  E([1,2]) & E([1,3]) & E([2,3])
 //
 
 // There is no clique of size k
 [ A i=subsets(k, 1..n) ] ![A j=subsets(2,i)] E(j)
 
-AND
+and
 
 // F are edges in the complement graph G'
 
-[ A j=subsets(2,1..n) ] ( E(j) XOR F(j) )
+[ A j=subsets(2,1..n) ] ( E(j) xor F(j) )
 
-AND
+and
 
 // There is no clique of size m in the complement graph G'
 [ A i=subsets(m, 1..n) ] ![A j=subsets(2,i)] F(j)
+
+// and
+// There is a clique of size k-1
+// [ E i=subsets(k-1, 1..n) ] [A j=subsets(2,i)] E(j)

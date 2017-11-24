@@ -47,58 +47,58 @@ expand({'!=',A,B},Bs) ->    {'!=',expand(A,Bs),expand(B,Bs)};
 expand({subst,Rx,Py,F},Bs) ->  expand(F, [{Rx,Py}|Bs]);
 expand({subst,SList,F},Bs) ->  expand(F, SList++Bs);
 
-expand({all,Fs}, Bs) when is_list(Fs) ->
+expand({'ALL',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     all(Ys);
-expand({any,Fs}, Bs) when is_list(Fs) ->
+expand({'ANY',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     any(Ys);
-expand({one,Fs}, Bs) when is_list(Fs) ->
+expand({'ONE',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     one(Ys);
-expand({none,Fs}, Bs) when is_list(Fs) ->
+expand({'NONE',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     none(Ys);
 
-expand({{all,Xs}, F}, Bs) ->
+expand({{'ALL',Xs}, F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     all(Ys);
-expand({{any,Xs},F}, Bs) ->
+expand({{'ANY',Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     any(Ys);
-expand({{one,Xs},F}, Bs) ->
+expand({{'ONE',Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     one(Ys);
-expand({{none,Xs},F}, Bs) ->
+expand({{'NONE',Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     none(Ys);
 
-expand({{eqk,[X1|Xs]},F}, Bs) ->
+expand({{'EQ',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     if N =:= 1 -> one(Ys);
-       true -> {eqk,N,Ys}
+       true -> {'EQ',N,Ys}
     end;
-expand({{neqk,[X1|Xs]},F}, Bs) ->
+expand({{'NEQ',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
-    {neqk,N,Ys};
-expand({{gtk,[X1|Xs]},F}, Bs) ->
+    {'NEQ',N,Ys};
+expand({{'GT',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
-    {gtk,N,Ys};
-expand({{gtek,[X1|Xs]},F}, Bs) ->
+    {'GT',N,Ys};
+expand({{'GTE',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
-    {gtek,N,Ys};
-expand({{ltk,[X1|Xs]},F}, Bs) ->
+    {'GTE',N,Ys};
+expand({{'LT',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
-    {ltk,N,Ys};
-expand({{ltek,[X1|Xs]},F}, Bs) ->
+    {'LT',N,Ys};
+expand({{'LTE',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
-    {ltek,N,Ys};
+    {'LTE',N,Ys};
 
 expand(F, _Bs) ->
     F.
@@ -370,8 +370,7 @@ fmt_list([A]) -> [fmt(A)];
 fmt_list([A|As]) -> [fmt(A),"," | fmt_list(As)];
 fmt_list([]) -> [].
 
-
-fmtq(X) ->
+fmt_q(X) ->
     fmt_var(X, "\"").
 
 fmt_var(X) ->

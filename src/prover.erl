@@ -672,5 +672,3 @@ equal_mark_eval(V, Value, Bs) ->
     catch
 	throw:contradiction -> false
     end.
-    
-

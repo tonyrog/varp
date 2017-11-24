@@ -10,357 +10,217 @@
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([fresh_var/1]).
+-export([clause/2]).
 -export([variable/2, alias/3]).
--export([value/2, is_input/2]).
--export([fmt_var/2]).
+-export([value/2, class/2]).
+-export([fmt_var/2, fmt_v/2, fmt_q/2]).
+-export([find_var/2, get_var/2]).
+-export([uint64/2, uint32/2, uint16/2, uint8/2]).
+
 %% building with operations
 -export([operation/4, operation/3]).
 -export([all/2, any/2]).
 -export([eqk/4, gtk/4]).
 -export([set_bt_depth/2]).
 -export([get_bt_depth/1]).
+-export([equal/3]).
+-export([is_equivalent/3]).
+-export([getopt/2, setopt/3]).
+-export([number_of_variables/1]).
+-export([number_of_bound/1]).
+-export([number_of_unbound/1]).
+-export([order/2]).
+-export([model/1]).
+-export([first_init/1]).
+-export([first_unbound/1]).
+-export([next_unbound/2]).
+-export([latest_bound/1]).
+-export([info/3, debug/3]).
+-export([get_bindings/1]).
+-export([model_variables/2]).
+-export([show_fail/1]).
+-export([fmt_digraph/3]).
+-export([enq_all/1]).
+-export([eval/1]).
+-export([mark/1]).
+-export([vfold_op/4]).
 
--compile(export_all).
 -import(lists, [map/2, reverse/1, foldl/3]).
+
+-include("log.hrl").
+-include("varp_bic.hrl").
 
 -define(TRUE,   1).
 -define(FALSE, -1).
-
--define(LOG_NONE, -1).
--define(EMERGENCY, 0).
--define(ALERT,     1).
--define(CRITICAL,  2).
--define(ERROR,     3).
--define(WARNING,   4).
--define(NOTICE,    5).
--define(INFO,      6).
--define(DEBUG,     7).
 
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
 -define(pair(A,B),  [(A)|(B)]).
 
-%% -define(dbg(F,A), io:format((F),(A))).
--define(dbg(F,A), ok).
-
--record(ts,
-	{
-	  n = 1,   %% next free triple
-	  triple,  %% array 1..N of triple (TI -> T)
-	  xref,    %% array 1..M of [Ti]   (Var -> [Ti])
-	  queue,   %% triple queue
-	  qset     %% Ti -> boolean
-	}).
-
--type unsigned_t() :: non_neg_integer().
--type order_t() :: identity | reverse | depth | occure | 
-		   depth_occure | occure_depth.
-
--record(option,
-	{
-	  value = none ::  boolean() | none,   
-	  order = identify :: order_t(),
-	  print = false :: boolean()|model|literal,  %% print models
-	  partial = false :: boolean(),   %% print partial model (eval/saturate)
-	  log   = ?LOG_NONE :: ?LOG_NONE .. ?DEBUG,
-	  max   = 0 :: unsigned_t(),            %% max number of models to find
-	  method = collect :: count|collect,    %% model collect|count
-	  carry = ignore  :: true|false|ignore, %% ignore carry condition
-	  borrow = ignore :: true|false|ignore, %% ignore borrow condition
-	  divz   = false  :: true|false|ignore, %% do not accept divide by zero
-	  bcp    = false  :: boolean(),         %% do not use equvalence classes
-	  saturate = 0 :: unsigned_t(),         %% saturate formula
-	  backtrack = true :: boolean(),        %% find models with backtrack
-	  threshold = 0 :: unsigned_t(),  %% >i variables changed -> loop again
-	  pair = true :: boolean(),       %% saturate pair algoritm	
-	  assoc = left :: left|right|middle  %% fold op
-	}).
+-define(dbg(F,A), io:format((F),(A))).
+%% -define(dbg(F,A), ok).
 
 -record(bs,
 	{
-	  n = 2,            %% next free variable
-	  vs,               %% dict() model variables var <=> Vn
-	  vt :: array:array(),    %% variable binding Vn => Wm
-	  vc :: array:array(),    %% variable classes
-	  order :: array:array(), %% variable order I => V
 	  depth :: integer(), %% backtrack/saturate depth
-	  bn :: integer(),  %% number of bound variables
-	  bl :: list(),     %% list of bound variables
 	  option = #option {} :: [#option{}],  %% the options
-	  meta=[],          %% meta variable bindings during build
-	  defs=[],          %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
-	  subst=[],         %% var/function substitution(s)
-	  ts                %% ::ts triples during build
+	  vs, %%  dict() model variables var <=> Vn
+	  meta=[],            %% meta variable bindings during build
+	  defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
+	  decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]
+	  subst=[],           %% var/function substitution(s)
+	  mod :: atom(),      %% backend module
+	  arg :: term()       %% backend data
 	}).
 
 new() ->
     new([]).
 
 new(Opts) ->
-    Ts = 
-	#ts { triple = array:new(),
-	      xref   = array:new([{default, []}]),
-	      queue  = queue:new(),
-	      qset   = sets:new()
-	    },
-    Bs = #bs { vs = dict:from_list([{true,?TRUE},{?TRUE,true},
-				    {false,?FALSE},{?FALSE,false}]),
-	       vt = array:from_list([0,1], 0),
-	       vc = array:new([{default,0}]),
-	       depth = 0,
-	       bn = 0,
-	       bl = [],
-	       ts = Ts
-	     },
-    setopts(Opts, Bs).
-    
+    Opt = varp_option:setopts(Opts, #option{} ),
+    Mod = Opt#option.backend,
+    Arg = Mod:new(Opt),
+    #bs {
+       option = Opt,
+       vs = dict:from_list([{true,?TRUE},{?TRUE,true},
+			    {false,?FALSE},{?FALSE,false}]),
+       meta = Opt#option.meta,
+       defs = Opt#option.defs,
+       decls = Opt#option.decls,
+       mod = Mod,
+       arg = Arg
+      }.
+
+evcall(F,Bs) ->
+    apply(Bs#bs.mod,F,[Bs#bs.arg]).
+
+evcall(F,A1,Bs) ->
+    apply(Bs#bs.mod,F,[A1,Bs#bs.arg]).
+
+evcall(F,A1,A2,Bs) ->
+    apply(Bs#bs.mod,F,[A1,A2,Bs#bs.arg]).
+
+%% evcall(F,A1,A2,A3,Bs) ->
+%%    apply(Bs#bs.mod,F,[A1,A2,A3,Bs#bs.arg]).
+
+%% evcall(F,A1,A2,A3,A4,Bs) ->
+%%    apply(Bs#bs.mod,F,[A1,A2,A3,A4,Bs#bs.arg]).
 
 fresh_var(Bs) ->
-    N  = Bs#bs.n,
-    {N, Bs#bs { n = N+1 }}.
+    {Var,Arg1} = evcall(fresh_var,Bs),
+    {Var,Bs#bs { arg=Arg1}}.
 
-number_of_variables(Bs) ->
-    Bs#bs.n - 2.
-
-number_of_bound(Bs) ->
-    Bs#bs.bn.
-
-number_of_unbound(Bs) ->
-    number_of_variables(Bs) - Bs#bs.bn.
-
-order(What, Bs) ->
-    Vx0 = array:from_list([0,1|lists:seq(2,Bs#bs.n-1)]),
-    Vx1 = order_(What, Vx0, Bs),
-    %% Map = lists:zip(array:to_list(Vx0),array:to_list(Vx1)),
-    %% ?dbg("order map=~w\n", [Map]),
-    %% ?dbg("order rmap=~w\n", [[{Y,X}||{X,Y} <-lists:keysort(2, Map)]]),
-    Bs#bs { order=Vx1 }.
-
-order_([W|Ws], Vx0, Bs) ->
-    Vx1 = order__(W, Vx0, Bs),
-    order_(Ws, Vx1, Bs);
-order_([], Vx0, _Bs) ->
-    Vx0;
-order_(W, Vx0, Bs) when is_atom(W) ->
-    order__(W, Vx0, Bs);
-order_(W={uint,_V,_N,_I}, Vx0, Bs) ->
-    order__(W, Vx0, Bs);
-order_(W={int,_V,_N,_I}, Vx0, Bs) ->
-    order__(W, Vx0, Bs);
-order_(W={bit,_V,_N,_I}, Vx0, Bs) ->
-    order__(W, Vx0, Bs).
-
-order__(identity,Vx0,_Bs) ->
-    Vx0;
-order__(reverse,Vx0,_Bs) ->
-    [_,_|As] = array:to_list(Vx0),
-    array:from_list([0,1|reverse(As)]);
-order__(depth, _Vx0, Bs) ->
-    A = calculate_depth(Bs),
-    array:from_list([0,1|
-		     lists:sort(
-		       fun(X,Y) -> array:get(X,A) < array:get(Y,A) end,
-		       lists:seq(2,Bs#bs.n-1))]);
-order__(occure, _Vx0, Bs) ->
-    A = calculate_occure(Bs),
-    array:from_list([0,1|
-		     lists:sort(
-		       fun(X,Y) -> array:get(X,A) < array:get(Y,A) end,
-		       lists:seq(2,Bs#bs.n-1))]);
-order__(depth_occure, _Vx0, Bs) ->
-    A0 = calculate_depth(Bs),
-    A1 = calculate_occure(Bs),
-    array:from_list([0,1|
-		     lists:sort(
-		       fun(X,Y) ->
-			       X0 = array:get(X,A0),
-			       Y0 = array:get(Y,A0),
-			       if X0 =:= Y0 ->
-				       array:get(X,A1) < array:get(Y,A1);
-				  true ->
-				       X0 < Y0
-			       end
-		       end, lists:seq(2,Bs#bs.n-1))]);
-order__(occure_depth, _Vx0, Bs) ->
-    A0 = calculate_occure(Bs),
-    A1 = calculate_depth(Bs),
-    array:from_list([0,1|
-		     lists:sort(
-		       fun(X,Y) ->
-			       X0 = array:get(X,A0),
-			       Y0 = array:get(Y,A0),
-			       if X0 =:= Y0 ->
-				       array:get(X,A1) < array:get(Y,A1);
-				  true ->
-				       X0 < Y0
-			       end
-		       end, lists:seq(2,Bs#bs.n-1))]);
-order__(Var, Vx0, Bs) ->
-    %% vector component put first in search array
-    case dict:find(Var, Bs#bs.vs) of
-	error -> Vx0;
-	{ok,X} when is_integer(X), X > 1 ->
-	    ?dbg("order_first: ~w (~s) = ~w\n", 
-		 [Var, fmt_var(X,Bs), X]),
-	    order_first(X, Vx0)
-    end.
-
-%% put variable X first!
-order_first(X, Vx0) ->
-    [0,1|List] = array:to_list(Vx0),
-    array:from_list([0,1,X|(List -- [X])]).
-
-%%
-%% Calculate variable occurence
-%%
-calculate_occure(Bs) ->
-    Ts = Bs#bs.ts,
-    array:sparse_foldl(
-      fun(_,{_,X,Y,Z},A0) ->
-	      A1 = occure(X, A0),
-	      A2 = occure(Y, A1),
-	      occure(Z, A2)
-      end, array:new([{default,0}]), Ts#ts.triple).
-
-occure(X, A) when X < ?FALSE -> occure(-X, A);
-occure(X, A) when X > ?TRUE -> array:set(X, array:get(X,A)+1, A);
-occure(?TRUE, A) -> A;
-occure(?FALSE, A) -> A.
-    
-%%
-%% create a array with depth for each variable literals are 0     
-%% triple {X,A,B} variable X depth is calcluated like 
-%%  depth(X)=max(depth(A),depth(B))+1
-%%
-calculate_depth(Bs) ->
-    Ts = Bs#bs.ts,
-    calc_depth(array:to_list(Ts#ts.triple), [], array:new(),0,Bs).
-    
-calc_depth([T={_,X,Y,Z}|Ts],Ts1,D0,I,Bs) ->
-    {Yd,D1} = var_depth(Y,D0,Bs),
-    {Zd,D2} = var_depth(Z,D1,Bs),
-    if Yd =:= undefined; Zd =:= undefined ->
-	    case var_depth(X,D2,Bs) of
-		{undefined,D3} ->
-		    calc_depth(Ts, [T|Ts1], D3, I, Bs);
-		{_Xd,D3} ->
-		    calc_depth(Ts, Ts1, D3, I+1, Bs)
-	    end;
-       true ->
-	    Xd = max(Yd,Zd)+1,
-	    case var_depth(X,D2,Bs) of
-		{undefined,D3} ->
-		    D4 = set_var_depth(X,Xd,D3),
-		    calc_depth(Ts, Ts1, D4, I+1, Bs);
-		{Xd0,D3} ->
-		    D4 = set_var_depth(X,max(Xd,Xd0),D3),
-		    calc_depth(Ts, Ts1, D4, I+1, Bs)
-	    end
-    end;
-calc_depth([undefined|Ts],Ts1,D,I,Bs) ->
-    calc_depth(Ts,Ts1,D,I,Bs);
-calc_depth([],[],D,_I,_Bs) ->
-    D;
-calc_depth([],Ts,D,0,Bs) ->
-    %% no depth could be determined, probably recursive defintion
-    %% assign max depth to all?
-    MaxD = array:sparse_foldr(fun(_I,X,A) -> erlang:max(X,A) end, 0, D)+1,
-    assign_depth(Ts,MaxD,D,Bs);
-calc_depth([],Ts,D,_I,Bs) ->
-    %% take it for an other spin
-    calc_depth(Ts,[],D,0,Bs).
-
-assign_depth([{_,X,Y,Z}|Ts],MaxD,D0,Bs) ->
-    D1 = case var_depth(Y,D0,Bs) of
-	     undefined -> set_var_depth(Y,MaxD,D0);
-	     _Yd -> D0
-	 end,
-    D2 = case var_depth(Z,D1,Bs) of
-	     undefined -> set_var_depth(Z,MaxD,D1);
-	     _Zd -> D1
-	 end,
-    D3 = case var_depth(X,D2,Bs) of
-	     undefined -> set_var_depth(Z,MaxD,D2);
-	     _Xd -> D2
-	 end,
-    assign_depth(Ts,MaxD,D3,Bs);
-assign_depth([],_MaxD,D0,_Bs) ->
-    D0.
-
-    
-
-var_depth(X, D, Bs) ->
-    case get_var_depth(X, D) of
-	undefined ->
-	    case is_input(X, Bs) of
-		true ->
-		    {0,set_var_depth(X, 0, D)};
-		false ->
-		    {undefined, D}
-	    end;
-	Depth ->
-	    {Depth,D}
-    end.
-		
-set_var_depth(1,_Level,D) -> D;
-set_var_depth(-1,_Level,D) -> D;
-set_var_depth(X,Level,D) when X < -1 -> array:set(-X,Level,D);
-set_var_depth(X,Level,D) when X > 1 -> array:set(X,Level,D).
-
-get_var_depth(1,_D)  -> 0;
-get_var_depth(-1,_D) -> 0;
-get_var_depth(X,D) when X < -1 ->  array:get(-X, D);
-get_var_depth(X,D) when X > 1 -> array:get(X, D).
-
-first_init(_Bs) ->
-    1.
-
-first_unbound(Bs) ->
-    next_unbound(first_init(Bs), Bs).
-
-next_unbound(I, Bs) ->
-    next_unbound_(I+1, number_of_variables(Bs)+1, Bs).
-
-next_unbound_(I, Max, Bs) when I =< Max ->
-    if Bs#bs.order =:= undefined ->
-	    case is_unbound(I, Bs) of
-		true  -> {I,I};
-		false -> next_unbound_(I+1,Max,Bs)
-	    end;
-       true ->
-	    Xi = array:get(I, Bs#bs.order),
-	    ?dbg("order[~w] = ~w, vt[~w]=~w\n", 
-		 [I, Xi, Xi, array:get(Xi,Bs#bs.vt)]),
-	    case is_unbound(Xi, Bs) of
-		true  -> {I,Xi};
-		false -> next_unbound_(I+1,Max,Bs)
-	    end
-    end;
-next_unbound_(_X, _N, _Bs) ->
-    false.
-
-all_bound(Bs) ->
-    Bs#bs.bl.
-
-take_skip_mark_([mark|Xs]) -> take_skip_mark_(Xs);
-take_skip_mark_([X|Xs]) -> [X|take_skip_mark_(Xs)];
-take_skip_mark_([]) -> [].
-    
-latest_bound(Bs) ->
-    take_until_mark_(Bs#bs.bl).
-
-take_until_mark_([mark|_]) -> [];
-take_until_mark_([{_,{X,_,_}}|Xs]) -> [X|take_until_mark_(Xs)];
-take_until_mark_([]) -> [].
+clause(Clause,Bs) ->
+    Arg1 = evcall(clause,Clause,Bs),
+    Bs#bs {arg=Arg1}.
     
 make_variable(V, Bs) ->
     {N,Bs1} = fresh_var(Bs),
     {N, alias(V, N, Bs1)}.
 
+order(Order, Bs) ->
+    Arg1 = evcall(order,Order,Bs),
+    Bs#bs { arg=Arg1 }.
+
+enq_all(Bs) ->
+    Arg1 = evcall(enq_all,Bs),
+    Bs#bs { arg=Arg1 }.
+
+eval(Bs) ->
+    Arg1 = evcall(eval,Bs),
+    Bs#bs { arg=Arg1 }.
+
+mark(Bs) ->
+    Arg1 = evcall(mark,Bs),
+    Bs#bs { arg=Arg1 }.
+
+value(V, Bs) ->
+    evcall(value,V,Bs).
+
+class(V, Bs) ->
+    evcall(class,V,Bs).
+
+equal(X,Y,Bs) ->
+    X0 = literal(X,Bs),
+    Y0 = literal(Y,Bs),
+    Arg1 = evcall(equal,X0,Y0,Bs),
+    Bs#bs {arg=Arg1}.
+
+literal(X, _Bs) when is_integer(X) -> X;
+literal({'not',X}, Bs) -> -literal(X, Bs);
+literal({bool,X}, Bs) -> literal(X, Bs);
+literal(X, Bs) -> dict:fetch(X, Bs#bs.vs).
+
+getopt(Key, Bs) ->
+    varp_option:getopt(Key, Bs#bs.option).
+
+setopt(Key,Value,Bs) ->
+    Option = varp_option:setopt(Key,Value,Bs#bs.option),
+    %% Mybe set option in backend as well? probably
+    Bs#bs { option = Option }.
+
+number_of_variables(Bs) -> evcall(number_of_variables,Bs).
+    
+number_of_bound(Bs) -> evcall(number_of_bound,Bs).
+
+number_of_unbound(Bs) -> evcall(number_of_unbound,Bs).
+
+first_init(Bs) -> evcall(first_init,Bs).
+
+first_unbound(Bs) -> evcall(first_unbound,Bs).
+
+next_unbound(I,Bs) -> evcall(next_unbound,I,Bs).
+
+latest_bound(Bs) -> evcall(latest_bound,Bs).
+
+info(Bs,Fmt,As) -> ?info(Bs#bs.option, Fmt, As).
+
+debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
+
+get_bindings(Bs) -> evcall(get_bindings,Bs).
+
+%% compact version of fmt_var
+fmt_v(?TRUE,_)  -> "1";
+fmt_v(?FALSE,_) -> "0";
+fmt_v(X, Bs) ->
+    if X < 0 -> fmt_var_(-X, "~", "", Bs);
+       true ->  fmt_var_(X, "", "", Bs)
+    end.
+
+fmt_q(X, Bs) ->
+    fmt_var(X, "\"", Bs).
+
+fmt_var(X, Bs) ->
+    fmt_var(X, "", Bs).
+
+fmt_var(?TRUE, _Q, _Bs)  -> "true";
+fmt_var(?FALSE, _Q, _Bs) -> "false";
+fmt_var(X, Q, Bs) ->
+    if X < 0 ->
+	    fmt_var_(-X, "~", Q, Bs);
+       true ->
+	    fmt_var_(X, "", Q, Bs)
+    end.
+
+fmt_var_(X, P, Q, Bs) ->
+    case dict:find(X, Bs#bs.vs) of
+	error ->
+	    [Q,P,$$,integer_to_list(X),Q];
+	{ok,[{T,V,_N,I}|_Ns]} when ?is_vec_type(T),is_integer(I) ->
+	    [Q,P,io_lib:format("~p[~w]", [V,I]),Q];
+	{ok,[{A,I}|_Ns]} when is_atom(A),is_integer(I) ->
+	    [Q,P,io_lib:format("~p[~w]", [A,I]),Q];
+	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
+	    [Q,P,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
+	{ok,[N|_Ns]} ->
+	    [Q,P,io_lib:format("~p", [N]),Q]
+    end.
+
+
 variable(V, Bs) ->
     W = expand_meta(V, Bs),
     ?dbg("variable expand: ~w -> ~w\n", [V,W]),
-    case dict:find(W, Bs#bs.vs) of
+    case find_var(W, Bs) of
 	error ->
 	    case W of
 		{p,P,Rs} ->
@@ -370,7 +230,8 @@ variable(V, Bs) ->
 			    make_variable(W, Bs);
 			{_W1={p,_,Ps},Def} ->
 			    ?dbg("~w = ~p\n", [_W1,Def]),
-			    Bnd2 = lists:zip(Ps,Rs),
+			    Names = [Name || #cid{name=Name}<-Ps],
+			    Bnd2 = lists:zip(Names,Rs),
 			    Meta = Bnd2 ++ Bs#bs.meta,
 			    ?dbg("meta bind: ~p\n", [Meta]),
 			    {R,Bs1} = build_(Def, Bs#bs { meta=Meta}),
@@ -387,147 +248,10 @@ variable(V, Bs) ->
 	    {N,Bs}
     end.
 
-debug(Bs, Fmt, As) ->
-    log(Bs, ?DEBUG, Fmt, As).
-
-info(Bs, Fmt, As) ->
-    log(Bs, ?INFO, Fmt, As).
-
-log(Bs, Level0, Fmt, As) ->
-    Level = level(Level0),
-    LogLevel = getopt(log,Bs),
-    if LogLevel =/= ?LOG_NONE, Level =< LogLevel ->
-	    io:format(Fmt, As);
-       true ->
-	    ok
-    end.
-	    
-
-level(debug)   -> ?DEBUG;
-level(info)    -> ?INFO;
-level(notice)  -> ?NOTICE;
-level(warning) -> ?WARNING;
-level(error)   -> ?ERROR;
-level(critical) -> ?CRITICAL;
-level(alert)    -> ?ALERT;
-level(emergency) -> ?EMERGENCY;
-level(none) -> ?LOG_NONE;
-level(Level) when Level >= -1, Level =< 7 -> Level.
-
 set_bt_depth(D, Bs) when is_integer(D), D>=0 ->
     Bs#bs { depth=D }.
+
 get_bt_depth(Bs) -> Bs#bs.depth.
-    
-setopts([{Opt,Value}|Opts], Bs) ->
-    setopts(Opts, setopt(Opt,Value,Bs));
-setopts([debug|Opts], Bs) ->
-    setopts(Opts, setopt(log, debug, Bs));
-setopts([Opt|Opts], Bs) when is_atom(Opt) ->
-    setopts(Opts, setopt(Opt,true,Bs));
-setopts([], Bs) ->
-    Bs.
-
-setopt(value,true,Bs)  -> setopt_(#option.value,true,Bs);
-setopt(value,false,Bs) -> setopt_(#option.value,false,Bs);
-setopt(value,none,Bs)  -> setopt_(#option.value,none,Bs);
-
-setopt(env,Env,Bs) when is_list(Env) -> 
-    Meta = lists:foldl(
-	     fun({X,V},E0) ->
-		     E1 = proplists:delete(X,E0),
-		     [{X,V} | E1]
-	     end, Bs#bs.meta, Env),
-    Bs#bs { meta = Meta };
-
-setopt(defs,Ds,Bs) when is_list(Ds) -> 
-    Defs = lists:foldl(
-	      fun({Px,Def},E0) ->
-		      E1 = proplists:delete(Px,E0),
-		      [{Px,Def} | E1]
-	      end, Bs#bs.defs, Ds),
-    Bs#bs { defs = Defs };
-
-setopt(print,true,Bs)   -> setopt_(#option.print,true,Bs);
-setopt(print,false,Bs)  -> setopt_(#option.print,false,Bs);
-setopt(print,model,Bs)  -> setopt_(#option.print,model,Bs);
-setopt(print,literal,Bs)  -> setopt_(#option.print,literal,Bs);
-setopt(print,erlang,Bs)  -> setopt_(#option.print,erlang,Bs);
-setopt(partial,true,Bs)   -> setopt_(#option.partial,true,Bs);
-setopt(partial,false,Bs)  -> setopt_(#option.partial,false,Bs);
-
-setopt(method,collect,Bs) -> setopt_(#option.method,collect,Bs);
-setopt(method,count,Bs) -> setopt_(#option.method,count,Bs);
-
-setopt(max,N,Bs) when is_integer(N), N>=0 ->
-    setopt_(#option.max,N,Bs);
-%% fixme check all order options! (normalize?)
-setopt(order,Order,Bs) -> setopt_(#option.order,Order,Bs);
-
-setopt(bcp,Bool,Bs) when is_boolean(Bool) -> 
-    setopt_(#option.bcp, Bool, Bs);
-
-setopt(saturate,K,Bs) when is_integer(K),K>=0 ->
-    setopt_(#option.saturate,K,Bs);
-setopt(threshold,K,Bs) when is_integer(K),K>=0 ->
-    setopt_(#option.threshold,K,Bs);
-
-setopt(pair,true,Bs) ->    setopt_(#option.pair,true,Bs);
-setopt(pair,false,Bs) ->   setopt_(#option.pair,false,Bs);
-
-setopt(assoc,left,Bs) ->    setopt_(#option.assoc,left,Bs);
-setopt(assoc,right,Bs) ->   setopt_(#option.assoc,right,Bs);
-setopt(assoc,middle,Bs) ->   setopt_(#option.assoc,middle,Bs);
-
-setopt(carry,true,Bs)    ->    setopt_(#option.carry,true,Bs);
-setopt(carry,false,Bs)   ->   setopt_(#option.carry,false,Bs);
-setopt(carry,ignore,Bs)  ->  setopt_(#option.carry,ignore,Bs);
-
-setopt(borrow,true,Bs)   ->   setopt_(#option.borrow,true,Bs);
-setopt(borrow,false,Bs)  ->  setopt_(#option.borrow,false,Bs);
-setopt(borrow,ignore,Bs) -> setopt_(#option.borrow,ignore,Bs);
-
-setopt(divz,true,Bs) ->   setopt_(#option.divz,true,Bs);
-setopt(divz,false,Bs) ->  setopt_(#option.divz,false,Bs);
-setopt(divz,ignore,Bs) -> setopt_(#option.divz,ignore,Bs);
-
-setopt(log,debug,Bs) -> setopt_(#option.log,?DEBUG,Bs);
-setopt(log,info,Bs)  -> setopt_(#option.log,?INFO, Bs);
-setopt(log,notice,Bs) -> setopt_(#option.log,?NOTICE,Bs);
-setopt(log,warning,Bs) -> setopt_(#option.log,?WARNING,Bs);
-setopt(log,error,Bs) -> setopt_(#option.log,?ERROR,Bs);
-setopt(log,critical,Bs) -> setopt_(#option.log,?CRITICAL,Bs);
-setopt(log,alert,Bs) -> setopt_(#option.log,?ALERT,Bs);
-setopt(log,emergency,Bs) -> setopt_(#option.log,?EMERGENCY,Bs);
-setopt(log,none,Bs) -> setopt_(#option.log,?LOG_NONE,Bs);
-setopt(log,Level,Bs) when Level >= ?LOG_NONE, Level =< ?DEBUG -> 
-    setopt_(#option.log,Level,Bs);
-setopt(backtrack,true,Bs) -> setopt_(#option.backtrack,true,Bs);
-setopt(backtrack,false,Bs) -> setopt_(#option.backtrack,false,Bs);
-setopt(formula,_,Bs) -> Bs.  %% not used internally
-
-setopt_(KeyPos, Value, Bs) ->
-    Bs#bs { option = setelement(KeyPos, Bs#bs.option, Value) }.
-
-%%
-%% Get options
-%%
-getopt(value,  Bs)    -> (Bs#bs.option)#option.value;
-getopt(print,  Bs)    -> (Bs#bs.option)#option.print;
-getopt(partial, Bs)    -> (Bs#bs.option)#option.partial;
-getopt(log,    Bs)    -> (Bs#bs.option)#option.log;
-getopt(debug,  Bs)    -> (Bs#bs.option)#option.log =:= ?DEBUG;
-getopt(method, Bs)    -> (Bs#bs.option)#option.method;
-getopt(max, Bs)       -> (Bs#bs.option)#option.max;
-getopt(order, Bs)     -> (Bs#bs.option)#option.order;
-getopt(carry,  Bs)    -> (Bs#bs.option)#option.carry;
-getopt(borrow, Bs)    -> (Bs#bs.option)#option.borrow;
-getopt(divz, Bs)      -> (Bs#bs.option)#option.divz;
-getopt(eval_bcp, Bs)  -> (Bs#bs.option)#option.bcp;
-getopt(saturate, Bs)  -> (Bs#bs.option)#option.saturate;
-getopt(threshold, Bs) -> (Bs#bs.option)#option.threshold;
-getopt(pair, Bs)      -> (Bs#bs.option)#option.pair;
-getopt(assoc, Bs)     -> (Bs#bs.option)#option.assoc;
-getopt(backtrack,Bs)  -> (Bs#bs.option)#option.backtrack.
 
 %%
 %%  {r,f1,..fn} => {q,eval(f1),...,eval(fn)}
@@ -569,7 +293,7 @@ expand_meta(_Rx={p,P,Rs},Bs) ->
 	    expand_meta({p,Q,Qs}, Bs#bs { meta=Meta})
     end;
 expand_meta(V,_Bs) ->
-    %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),    
+    %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),
     V.
 
 find_def(P, [Def={{p,P,_Vs},_}|_]) -> Def;
@@ -580,9 +304,9 @@ find_subst(P, [E={_Qy,{p,P,_}}|_]) -> E;
 find_subst(P, [_|Bnd]) -> find_subst(P, Bnd);
 find_subst(_P ,[]) -> false.
 
-bind_meta([V|Vs], Bs, Acc, Bnd) when is_atom(V) ->
+bind_meta([V=#cid{name=N}|Vs], Bs, Acc, Bnd) ->
     W = eval_meta(V,Bs),
-    bind_meta(Vs, Bs, [W|Acc], [{V,W}|Bnd]);
+    bind_meta(Vs, Bs, [W|Acc], [{N,W}|Bnd]);
 bind_meta([V|Vs], Bs, Acc, Bnd) ->
     W = eval_meta(V,Bs),
     bind_meta(Vs, Bs, [W|Acc], Bnd);
@@ -598,348 +322,31 @@ pop_meta(Bs = #bs { meta = [_|Meta]}) ->
     Bs#bs { meta = Meta }.
 
 alias(V, N, Bs) ->
-    case dict:find(N, Bs#bs.vs) of
+    case find_var(N,Bs) of
 	error ->
-	    Vs1 = dict:store(V, N, Bs#bs.vs),
-	    Vs2 = dict:store(N, [V], Vs1),
-	    Bs#bs { vs=Vs2 };
+	    set_var(V, N, Bs);
 	{ok,Vs} ->
-	    Vs1 = dict:store(V, N, Bs#bs.vs),
-	    Vs2 = dict:store(N, [V|Vs], Vs1),
-	    Bs#bs { vs=Vs2 }
+	    add_var(V,N,Vs,Bs)
     end.
 
+find_var(V, Bs) ->
+    dict:find(V, Bs#bs.vs).
 
+get_var(V, Bs) ->
+    dict:fetch(V, Bs#bs.vs).
 
-%% true if Y is in X's bound chain
-in_chain(X, Y, Bs) when X < 0 ->
-    in_chain(-X, Y, Bs);
-in_chain(X, Y, Bs) ->
-    case array:get(X, Bs#bs.vt) of
-	?TRUE  -> false;
-	?FALSE -> false;
-	X -> false;
-	X1 when X1 =:= Y -> true;
-	X1 when X1 =:= -Y -> true;
-	X1 -> in_chain(X1,Y,Bs)
-    end.
+set_var(V, N, Bs) ->
+    Vs1 = dict:store(V, N, Bs#bs.vs),
+    Vs2 = dict:store(N, [V], Vs1),
+    Bs#bs { vs = Vs2 }.
 
-is_unbound(X, Bs) when X > 1 ->
-    array:get(X, Bs#bs.vt) =:= 0.
+add_var(V, N, Vs, Bs) ->
+    Vs1 = dict:store(V, N, Bs#bs.vs),
+    Vs2 = dict:store(N, [V|Vs], Vs1),
+    Bs#bs { vs = Vs2 }.
 
-is_bound(X, Bs) when X > 1 ->
-    array:get(X, Bs#bs.vt) =/= 0.
-    
-
-is_input(?TRUE, _Bs)  -> true;
-is_input(?FALSE, _Bs) -> true;
-is_input(X, Bs) when X < 0 -> is_input(-X, Bs);
-is_input(X, Bs) ->
-    case dict:find(X, Bs#bs.vs) of %% fixme: what about aliases?
-	{ok,V} when not is_integer(V) ->    
-	    true;
-	_ ->
-	    false
-    end.
-
-literal(X, _Bs) when is_integer(X) -> X;
-literal({'not',X}, Bs) -> -literal(X, Bs);
-literal({bool,X}, Bs) -> literal(X, Bs);
-literal(X, Bs) -> dict:fetch(X, Bs#bs.vs).
-
-%%
-%% eval(Ts, Bs) -> Bs'
-%%
-eval(Bs) ->
-    eval_(Bs#bs.ts,Bs).
-
-eval_(Ts, Bs) ->
-    case getopt(eval_bcp, Bs) of
-	true ->
-	    eval_bcp(Ts#ts.queue, Ts#ts.qset, Ts, Bs);
-	false ->
-	    eval_eqv(Ts#ts.queue, Ts#ts.qset, Ts, Bs)
-    end.
-
-%%
-%% Full eval with equivalence classes
-%%
-
-eval_eqv(Q, Qset, Ts, Bs) ->
-    case queue:out(Q) of
-	{empty, Q1} ->
-	    Ts1 = Ts#ts { queue=Q1, qset=sets:new() },
-	    Bs#bs { ts=Ts1};
-	{{value,Ti},Q1} ->
-	    T={Op,Xt,Yt,Zt} = array:get(Ti, Ts#ts.triple),
-	    X = value(Xt, Bs),
-	    Y = value(Yt, Bs),
-	    Z = value(Zt, Bs),
-	    ?dbg("EVAL: ~s\n", [fmt_triple(T,Bs)]),
-	    As = eval_op(Op,T,X,Y,Z),
-	    {XRef,Bs1} = equal_list_(As,[],Bs,Ts),
-	    eval_enq_eqv(Q1, sets:del_element(Ti, Qset), XRef, Ts, Bs1)
-    end.
-
-eval_enq_eqv(Q, Qset, [Ti|Tis], Ts, Bs) ->
-    case sets:is_element(Ti, Qset) of
-	false ->
-	    Q1 = queue:in(Ti, Q),
-	    Qset1 = sets:add_element(Ti, Qset),
-	    eval_enq_eqv(Q1, Qset1, Tis, Ts, Bs);
-	true ->
-	    eval_enq_eqv(Q, Qset, Tis, Ts, Bs)
-    end;
-eval_enq_eqv(Q, Qset, [], Ts, Bs) ->
-    eval_eqv(Q, Qset, Ts, Bs).
-
-%%
-%% @doc
-%% eval_op:
-%%    Generate binding consequence edge from tripple information.
-%%    The edge {{X,Xv},{Y,Yv}} means that when X/Xv -> Y/Yv
-%% @end
-%%
-eval_op(imp,T={_,Xt,_Yt,_Zt},?FALSE,Y,Z) -> [{T,{Xt,?FALSE},{Y,?TRUE}},
-					     {T,{Xt,?FALSE},{Z,?FALSE}}];
-eval_op(imp,T={_,_Xt,Yt,_Zt},X,?TRUE,Z)   -> [{T,{Yt,?TRUE},{X,Z}}];
-eval_op(imp,T={_,_Xt,Yt,_Zt},X,?FALSE,_Z) -> [{T,{Yt,?FALSE},{X,?TRUE}}];
-eval_op(imp,T={_,_Xt,_Yt,Zt},X,_Y,?TRUE)  -> [{T,{Zt,?TRUE},{X,?TRUE}}];
-eval_op(imp,T={_,_Xt,_Yt,Zt},X,Y,?FALSE)  -> [{T,{Zt,?FALSE},{X,-Y}}];
-eval_op(imp,T={_,_Xt,_Yt,Zt},X,Y,Y)       -> [{T,{Zt,Y},{X,?TRUE}}];
-eval_op(imp,T={_,_Xt,_Yt,Zt},X,Y,Z) when Y =:= -Z -> [{T,{Zt,-Y},{X,Z}}];
-eval_op(imp,_T,_X,_Y,_Z) -> [];
-eval_op(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,Z)  -> [{T,{Xt,?TRUE},{Y,Z}}];
-eval_op(equ,T={_,Xt,_Yt,_Zt},?FALSE,Y,Z) -> [{T,{Xt,?FALSE},{Y,-Z}}];
-eval_op(equ,T={_,_Xt,Yt,_Zt},X,?TRUE,Z)  -> [{T,{Yt,?TRUE},{X,Z}}];
-eval_op(equ,T={_,_Xt,Yt,_Zt},X,?FALSE,Z) -> [{T,{Yt,?FALSE},{X,-Z}}];
-eval_op(equ,T={_,_Xt,_Yt,Zt},X,Y,?TRUE)  -> [{T,{Zt,?TRUE},{X,Y}}];
-eval_op(equ,T={_,_Xt,_Yt,Zt},X,Y,?FALSE) -> [{T,{Zt,?FALSE},{X,-Y}}];
-eval_op(equ,T={_,_Xt,_Yt,Zt},X,Y,Y)      -> [{T,{Zt,Y},{X,?TRUE}}];
-eval_op(equ,T={_,_Xt,_Yt,Zt},X,Y,Z) when Y =:= -Z -> [{T,{Zt,-Y},{X,?FALSE}}];
-eval_op(equ,_T,_X,_Y,_Z) -> [].
-
-
-%%
-%% BCP version
-%%
-
-eval_bcp(Q, Qset, Ts, Bs) ->
-    case queue:out(Q) of
-	{empty, Q1} ->
-	    Ts1 = Ts#ts { queue=Q1, qset=sets:new() },
-	    Bs#bs { ts=Ts1};
-	{{value,Ti},Q1} ->
-	    T={Op,Xt,Yt,Zt} = array:get(Ti, Ts#ts.triple),
-	    X = value(Xt, Bs),
-	    Y = value(Yt, Bs),
-	    Z = value(Zt, Bs),
-	    ?dbg("EVAL: ~s\n", [fmt_triple(T,Bs)]),
-	    As = eval_bcp(Op,T,X,Y,Z),
-	    {XRef,Bs1} = equal_list_(As,[],Bs,Ts),
-	    eval_enq_bcp(Q1, sets:del_element(Ti, Qset), XRef, Ts, Bs1)
-    end.
-
-eval_enq_bcp(Q, Qset, [Ti|Tis], Ts, Bs) ->
-    case sets:is_element(Ti, Qset) of
-	false ->
-	    Q1 = queue:in(Ti, Q),
-	    Qset1 = sets:add_element(Ti, Qset),
-	    eval_enq_bcp(Q1, Qset1, Tis, Ts, Bs);
-	true ->
-	    eval_enq_bcp(Q, Qset, Tis, Ts, Bs)
-    end;
-eval_enq_bcp(Q, Qset, [], Ts, Bs) ->
-    eval_bcp(Q, Qset, Ts, Bs).
-
-%% @doc
-%% eval_bcp:
-%%    Generate binding consequence edge from tripple information.
-%%    The edge {{X,Xv},{Y,Yv}} means that when X/Xv -> Y/Yv
-%%    No equivalence classes are generated!
-%% @end
-
-eval_bcp(imp,T={_,Xt,_Yt,_Zt},?FALSE,Y,Z) -> [{T,{Xt,?FALSE},{Y,?TRUE}},
-					      {T,{Xt,?FALSE},{Z,?FALSE}}];
-eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?TRUE,?FALSE) -> [{T,{Yt,?TRUE},{X,?FALSE}}];
-eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?TRUE,?TRUE)  -> [{T,{Yt,?TRUE},{X,?TRUE}}];
-eval_bcp(imp,T={_,_Xt,Yt,_Zt},X,?FALSE,_Z) -> [{T,{Yt,?FALSE},{X,?TRUE}}];
-eval_bcp(imp,T={_,_Xt,_Yt,Zt},X,_Y,?TRUE)  -> [{T,{Zt,?TRUE},{X,?TRUE}}];
-eval_bcp(imp,T={_,_Xt,_Yt,Zt},X,Y,Y)       -> [{T,{Zt,Y},{X,?TRUE}}];
-eval_bcp(imp,_T,_X,_Y,_Z) -> [];
-
-%% eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,Z)  -> [{T,{Xt,?TRUE},{Y,Z}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,?TRUE) -> [{T,{Xt,?TRUE},{Y,?TRUE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,Y,?FALSE) -> [{T,{Xt,?TRUE},{Y,?FALSE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,?TRUE,Z) -> [{T,{Xt,?TRUE},{Z,?TRUE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?TRUE,?FALSE,Z) -> [{T,{Xt,?TRUE},{Z,?FALSE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,Y,?TRUE) -> [{T,{Xt,?FALSE},{Y,?FALSE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,Y,?FALSE) -> [{T,{Xt,?FALSE},{Y,?TRUE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,?TRUE,Z) -> [{T,{Xt,?FALSE},{Z,?FALSE}}];
-eval_bcp(equ,T={_,Xt,_Yt,_Zt},?FALSE,?FALSE,Z) -> [{T,{Xt,?FALSE},{Z,?TRUE}}];
-
-eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?TRUE,?FALSE) -> [{T,{Yt,?TRUE},{X,?FALSE}}];
-eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?TRUE,?TRUE)  -> [{T,{Yt,?TRUE},{X,?TRUE}}];
-eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?FALSE,?TRUE) -> [{T,{Yt,?FALSE},{X,?TRUE}}];
-eval_bcp(equ,T={_,_Xt,Yt,_Zt},X,?FALSE,?FALSE) -> [{T,{Yt,?TRUE},{X,?TRUE}}];
-eval_bcp(equ,_T,_X,_Y,_Z) -> [].
-
-
-%% a bit more high level handle {bool,X} already bound values etc.
-equal(X,Y,Bs) ->
-    ?dbg("equal: ~w = ~w\n", [X, Y]),
-    X0 = literal(X,Bs),
-    X1 = value(X0,Bs),
-    Y0 = literal(Y,Bs),
-    Y1 = value(Y0,Bs),
-    Ts = Bs#bs.ts,
-    {XRef,Bs1} = equal__(X1,Y1,decision,Bs,Ts),
-    enq(Ts#ts.queue, Ts#ts.qset, XRef, Ts, Bs1).
-
-enq(Q, Qset, [Ti|Tis], Ts, Bs) ->
-    case sets:is_element(Ti, Qset) of
-	false ->
-	    Q1 = queue:in(Ti, Q),
-	    Qset1 = sets:add_element(Ti, Qset),
-	    enq(Q1, Qset1, Tis, Ts, Bs);
-	true ->
-	    enq(Q, Qset, Tis, Ts, Bs)
-    end;
-enq(Q, Qset, [], Ts, Bs) ->
-    Ts1 = Ts#ts { queue=Q, qset=Qset },
-    Bs#bs {ts=Ts1}.
-
-enq_all(Bs) ->
-    Ts = Bs#bs.ts,
-    enq_all(Ts#ts.queue, Ts#ts.qset, 1, Ts#ts.n, Ts, Bs).
-
-enq_all(Q, Qset, Ti, N, Ts, Bs) when Ti =< N ->
-    case array:get(Ti, Ts#ts.triple) of
-	undefined ->
-	    enq_all(Q, Qset, Ti+1, N, Ts, Bs);
-	_T ->
-	    case sets:is_element(Ti, Qset) of
-		false ->
-		    Q1 = queue:in(Ti, Q),
-		    Qset1 = sets:add_element(Ti, Qset),
-		    enq_all(Q1, Qset1, Ti+1, N, Ts, Bs);
-		true ->
-		    enq_all(Q, Qset, Ti+1, N, Ts, Bs)
-	    end
-    end;
-enq_all(Q, Qset, _Ti, _N, Ts, Bs) ->
-    Ts1 = Ts#ts { queue=Q, qset=Qset },
-    Bs#bs {ts=Ts1}.
-
-    
-
-%% eval a binding list
-equal_list_([{_T,P,{X,Y}}|List],XRef,Bs,Ts) ->
-    %% ?dbg("~w : ~w => ~w\n", [_T,P,{X,Y}]),
-    X1 = value(X,Bs),
-    {XRef1,Bs1} = equal__(X1,Y,P,Bs,Ts),
-    equal_list_(List,XRef++XRef1,Bs1,Ts);
-equal_list_([],XRef,Bs,_Ts) ->
-    {XRef,Bs}.
-
-%% equal__ with info about trigger Xp=Yp
-%% return:
-%%    {[],Bs}     when noop
-%%    {[Ti], Bs}  when binding set
-%%    throw(contractdition)
-%%
-
-equal__(X,Y,_P,_Bs,_Ts) 
-  when X =:= -Y -> 
-    %% fixme add _P
-    %% show_fail(_Bs),
-    throw(contradiction);
-equal__(X,X,_P,Bs,_Ts) -> 
-    {[],Bs};
-equal__(?TRUE,Y,P,Bs,Ts) ->
-    if Y < 0 -> eq__(-Y,?FALSE,P,Bs,Ts);
-       true ->  eq__(Y,?TRUE,P,Bs,Ts)
-    end;
-equal__(?FALSE,Y,P,Bs,Ts) ->
-    if Y < 0 -> eq__(-Y,?TRUE,P,Bs,Ts);
-       true ->  eq__(Y,?FALSE,P,Bs,Ts)
-    end;
-equal__(X,Y,P,Bs,Ts) when X < 1 -> eq__(-X,-Y,P,Bs,Ts);
-equal__(X,Y,P,Bs,Ts) when X > 1 -> eq__(X,Y,P,Bs,Ts).
-
-%%
-%% X=Y  when P=(Xp,Dp,Yp) 
-%%  X must be unbound 
-%%  Y should not have X in it's values chain
-%%
-eq__(X,Y,P,Bs,Ts) ->
-    D    = Bs#bs.depth,
-    Bl = add_edge(P,{X,D,Y},Bs#bs.bl,Bs),
-    case Bl of
-	[{{_Xp,_Dp,_Yp},_}|_] ->
-	    ?dbg("  _eq: ~s/~s(~w) [when ~s/~s(~w)]\n", 
-		 [fmt_var(X,Bs),fmt_var(Y,Bs), D,
-		  fmt_var(_Xp,Bs),fmt_var(_Yp,Bs),_Dp]);
-	[{decision,_}|_] ->
-	    ?dbg("  _eq: ~s/~s(~w)\n", 
-		 [fmt_var(X,Bs),fmt_var(Y,Bs), D]);
-	[{true,_}|_] ->
-	    ?dbg("  _eq: ~s/~s(~w)\n", 
-		 [fmt_var(X,Bs),fmt_var(Y,Bs), D])
-    end,
-    Vt   = array:set(X, Y, Bs#bs.vt),
-    Bn   = Bs#bs.bn+1,
-    XRef = get_xref(X,Bs,Ts),
-    Bs1 = case class(Y,Bs) of
-	      ?TRUE  -> 
-		  Bs#bs { vt = Vt, bn=Bn, bl=Bl };
-	      ?FALSE -> 
-		  Bs#bs { vt = Vt, bn=Bn, bl=Bl };
-	      Yc when Yc < 0 ->
-		  Vc = array:set(-Yc, -X, Bs#bs.vc),
-		  Bs#bs { vt = Vt, vc = Vc, bn=Bn, bl=Bl };
-	      Yc ->
-		  Vc = array:set(Yc, X, Bs#bs.vc),
-		  Bs#bs { vt = Vt, vc = Vc, bn=Bn, bl=Bl }
-	  end,
-    {XRef,Bs1}.
-
-add_edge(decision,Q,Bl,_Bs) ->
-    [{decision,Q}|Bl];
-add_edge(P,Q,Bl,Bs) ->
-    %% ?dbg("~w => ~w :BL=~w\n", [P,Q,Bl]),
-    case find_edge_start(P,Bl,Bs) of
-	true    -> [{true,Q}|Bl]; %% FIXME
-	{P1,ok} -> [{P1,Q} | Bl];
-	{P1,P2} ->
-	    %% ?dbg("ADD EDGE 2\n"),
-	    add_edge(P2,Q,[{P1,Q}|Bl],Bs)
-    end.
-
-%% find & normalize vertex
-find_edge_start({X,Y},Bl,Bs) when X < 0 -> find_edge_start({-X,-Y},Bl,Bs);
-find_edge_start({X,X},_Bl,_Bs) -> true;
-find_edge_start(P,Bl,Bs) -> find_edge_start_(P,Bl,Bs).
-
-find_edge_start_({X,Y},[{_,{X,D,Y}}|_],_Bs) -> {{X,D,Y},ok};
-find_edge_start_({X,Y},[{_,{X,D,Y1}}|_],Bs) ->
-    case value(Y1, Bs) of
-	Y -> {{X,D,Y},{Y1,Y}}
-    end;
-find_edge_start_(P,[_|Bl],Bs) -> find_edge_start_(P,Bl,Bs).
-
-%%
-%% Mark binding list
-%%
-mark(Bs) ->
-    Bl = [mark | Bs#bs.bl],
-    Bs#bs { bl = Bl }.
-
-%% get all triples from all classes for variable X
-get_xref(X,Bs,Ts) when X > 0 ->
-    array:get(X, Ts#ts.xref) ++ get_xref(class_next(X,Bs),Bs,Ts);
-get_xref(X,Bs,Ts) when X < 0 -> get_xref(-X,Bs,Ts);
-get_xref(0, _Ts, _Bs) -> [].
+fold_var(Fun, Acc, Bs) ->
+    dict:fold(Fun, Acc, Bs#bs.vs).
 
 %%
 %% Generate the variable rules from a formula
@@ -948,13 +355,22 @@ build(F) ->
     build(F,[]).
 
 build(F,Opts) ->
-    ?dbg("Formula: ~w\n", [F]),
+    ?dbg("Formula: ~p\n", [F]),
     Bs = new(Opts),
-    try build_(F, Bs) of
+    Bs1 = build_code(proplists:get_value(defs,Opts,[]),Bs),
+    try build_(F, Bs1) of
      	Value -> Value
     catch
      	throw:contradiction -> 
-	    {{bool,?FALSE},Bs}
+	    {{bool,?FALSE},Bs1}
+    end.
+
+build_code([], Bs) ->
+    Bs;
+build_code(Defs, Bs) ->
+    case proplists:get_value(code, Defs) of
+	undefined -> Bs;
+	Code -> varp_code:generate(Code, Bs)
     end.
 
 build_(undefined, Bs) ->
@@ -963,11 +379,19 @@ build_(true, Bs) ->
     {{bool,?TRUE}, Bs};
 build_(false, Bs) ->
     {{bool,?FALSE}, Bs};
-build_(V={p,_P,_Ps}, Bs) ->
-    {X,Bs1} = variable(V, Bs),
-    {{bool,X},Bs1};    
+build_(V={p,P,Ps}, Bs) ->
+    %% match delcs to see if this predicate is declared with
+    %% sign and bit size look for {p,P,['_','_',...]}
+    Px = {p,P,['_' || _ <- Ps]},
+    case proplists:lookup(Px, Bs#bs.decls) of
+	none ->
+	    {X,Bs1} = variable(V, Bs),
+	    {{bool,X},Bs1};
+	{_,Sign,Size} ->
+	    var_vector(Sign,V,Size,Bs)
+    end;
 build_({uint,N,V}, Bs) ->
-    if  is_atom(V) ->
+    if is_atom(V) ->
 	    case proplists:lookup(V,Bs#bs.meta) of
 		none ->
 		    io:format("variable '~s' is not bound\n", [V]),
@@ -975,7 +399,7 @@ build_({uint,N,V}, Bs) ->
 		{_,W} ->
 		    const_vector(uint,W,N,Bs)
 	    end;
-	is_integer(V) -> const_vector(uint,V,N,Bs);
+       is_integer(V) -> const_vector(uint,V,N,Bs);
        true          -> var_vector(uint,V,N,Bs)
     end;
 build_({int,N,V}, Bs) ->
@@ -1100,53 +524,53 @@ build_({'max',[A,B]}, Bs) ->
     {A1,Bs1} = build_(A, Bs),
     {B1,Bs2} = build_(B, Bs1),
     operation('max', A1, B1, Bs2);
-build_({'all',Fs}, Bs) ->
+build_({'ALL',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     all(Xs, Bs1);
-build_({'any',Fs}, Bs) ->
+build_({'ANY',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     any(Xs, Bs1);
-build_({'none',Fs}, Bs) ->
+build_({'NONE',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     none(Xs, Bs1);
-build_({'one',Fs}, Bs) ->
+build_({'ONE',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     one(Xs, Bs1);
 
 %% Quatifer version
-build_({{'all',Qs}, F}, Bs) ->
+build_({{'ALL',Qs}, F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     all(Ys,Bs1);
-build_({{'any',Qs},F}, Bs) ->
+build_({{'ANY',Qs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     any(Ys,Bs1);
-build_({{'none',Qs},F}, Bs) ->
+build_({{'NONE',Qs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     none(Ys,Bs1);
-build_({{'one',Qs},F}, Bs) ->
+build_({{'ONE',Qs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     eqk(1, length(Ys), Ys, Bs1);
 
-build_({{eqk,[X1|Qs]},F}, Bs) ->
+build_({{'EQ',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
 	    eqk(K, length(Ys), Ys, Bs1)
     end;
-build_({{neqk,[X1|Qs]},F}, Bs) ->
+build_({{'NEQ',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
 	    {X,Bs2} = eqk(K, length(Ys), Ys, Bs1),
 	    {negate(X),Bs2}
     end;
-build_({{gtk,[X1|Qs]},F}, Bs) ->
+build_({{'GT',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
 	    gtk(K, length(Ys), Ys, Bs1)
     end;
-build_({{gtek,[X1|Qs]},F}, Bs) ->
+build_({{'GTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 0 ->
@@ -1154,7 +578,7 @@ build_({{gtek,[X1|Qs]},F}, Bs) ->
        is_integer(K),K >= 0 ->
 	    gtk(K-1, length(Ys), Ys, Bs1)
     end;
-build_({{ltk,[X1|Qs]},F}, Bs) ->
+build_({{'LT',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 1 ->
@@ -1163,7 +587,7 @@ build_({{ltk,[X1|Qs]},F}, Bs) ->
 	    N = length(Ys),
 	    gtk(N-K, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
-build_({{ltek,[X1|Qs]},F}, Bs) ->
+build_({{'LTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 0 ->
@@ -1173,7 +597,7 @@ build_({{ltek,[X1|Qs]},F}, Bs) ->
 	    gtk(N-K-1, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end.
 
-
+-ifdef(__UNUSED__).
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
     Bs1 = push_meta(X, Xi, Bs),
     case build_(F,Bs1) of
@@ -1189,13 +613,14 @@ build_meta(F,X,[Xi|Xs],Acc,Bs) ->
     end;
 build_meta(_F,_X,[],Acc,Bs) ->
     {Acc,Bs}.
+-endif.
 
-build_quant(Fs, Qs, Bs) when is_list(Fs) ->
+build_quant(Fs, Qs, Bs) when is_list(Fs), is_list(Qs) ->
     build_quant_list(Fs, Qs, Bs);
-build_quant(F, Qs, Bs) ->
+build_quant(F, Qs, Bs) when is_list(Qs) ->
     build_quant_(F, Qs, Bs).
 
-build_quant_(F,[{'=',V,D}|Qs], Bs) ->
+build_quant_(F,[#cassign{op='=',lhs=V,rhs=D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_quant_domain(F, V, Ds, Qs, Bs);
 build_quant_(F, [Expr|Qs], Bs) ->
@@ -1211,8 +636,8 @@ build_quant_(F, [], Bs) ->
 	{X,Bs1} -> {[X],Bs1}
     end.
 
-build_quant_domain(F, V, [Y|Ys], Xs, Bs) ->
-    Bs1 = push_meta(V, Y, Bs),
+build_quant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
+    Bs1 = push_meta(Vn, Y, Bs),
     {Zs1,Bs2} = build_quant_(F, Xs, Bs1),
     Bs3 = pop_meta(Bs2),
     {Zs2,Bs4} = build_quant_domain(F, V, Ys, Xs, Bs3),
@@ -1228,32 +653,32 @@ build_quant_list([], _Xs, Bs) ->
     {[],Bs}.
 
 %% expand domain expressions
-eval_domain({range,A,B}, Bs) ->
+eval_domain(#crange{from=A,to=B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if A1 =< B1 -> lists:seq(A1, B1);
        true -> lists:reverse(lists:seq(B1,A1))
     end;
-eval_domain({f,union,[A,B]}, Bs) ->
+eval_domain(#ccall{func=#cid{name="union"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:union(A1,B1);
-eval_domain({f,subtract,[A,B]}, Bs) ->
+eval_domain(#ccall{func=#cid{name="subtract"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:subtract(A1,B1);
-eval_domain({f,intersect,[A,B]}, Bs) ->
+eval_domain(#ccall{func=#cid{name="intersect"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:intersection(A1,B1);
-eval_domain({f,product,[A,B]}, Bs) ->
+eval_domain(#ccall{func=#cid{name="product"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
-eval_domain({f,subsets,[A]}, Bs) ->
+eval_domain(#ccall{func=#cid{name="subsets"},args=[A]}, Bs) ->
     A1 = eval_domain(A,Bs),
     subsets(A1);
-eval_domain({f,subsets,[K,A]}, Bs) ->
+eval_domain(#ccall{func=#cid{name="subsets"},args=[K,A]}, Bs) ->
     K1 = eval_meta(K,Bs),
     A1 = eval_domain(A,Bs),
     subsets(K1,A1);
@@ -1264,45 +689,48 @@ eval_domain(Expr, Bs) ->
     end.
 
 eval_meta(V, _Bs) when is_integer(V) -> V;
-eval_meta(true, _Bs)  -> true;
-eval_meta(false, _Bs) -> false;
-eval_meta(V, Bs) when is_atom(V) ->
-    case proplists:lookup(V,Bs#bs.meta) of
+eval_meta(#cconst{base=B,value=V}, _Bs) -> list_to_integer(V,B);
+eval_meta(#cid {name="true"}, _Bs)  -> true;
+eval_meta(#cid {name="false"}, _Bs) -> false;
+eval_meta(#cid {name=Vn}, Bs) ->
+    case proplists:lookup(Vn,Bs#bs.meta) of
 	none ->
-	    io:format("variable '~s' is not bound\n", [V]),
-	    error({unbound, V});
+	    io:format("variable '~s' is not bound\n", [Vn]),
+	    error({unbound, Vn});
 	{_,W} -> 
 	    W
     end;
-eval_meta(_A1={f,F,As},Bs) ->
+eval_meta(#ccall{func=F,args=As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
-	{factorial,[N]} -> varp_math:factorial(N);
-	{binom,[A,B]} -> varp_math:binom(A,B);
-	{sqrt,[A]}    -> math:sqrt(A);
-	{nroot,[A,N]} -> varp_math:nroot(A,N);
-	{ln,[A]}      -> math:log(A);
-	{log,[A,N]}   -> math:log(A)/math:log(N);
-	{log2,[A]}    -> math:log(A)/math:log(2);
-	{log10,[A]}   -> math:log10(A);
-	{pi,[]}       -> math:pi();
-	{e,[]}        -> math:exp(1);
-	{pow,[A,B]}   -> 
+	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
+	{#cid{name="binom"},[A,B]} -> varp_math:binom(A,B);
+	{#cid{name="sqrt"},[A]}    -> math:sqrt(A);
+	{#cid{name="nroot"},[A,N]} -> varp_math:nroot(A,N);
+	{#cid{name="ln"},[A]}      -> math:log(A);
+	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
+	{#cid{name="log2"},[A]}    -> math:log(A)/math:log(2);
+	{#cid{name="log10"},[A]}   -> math:log10(A);
+	{#cid{name="pi"},[]}       -> math:pi();
+	{#cid{name="e"},[]}        -> math:exp(1);
+	{#cid{name="pow"},[A,B]}   -> 
 	    if is_integer(A), is_integer(B) ->
 		    varp_math:pow(A,B);
 	       true ->
 		    math:pow(A,B)
 	    end;
-	{sin,[A]}     -> math:sin(A);
-	{cos,[A]}     -> math:cos(A);
-	{trunc,[A]}   -> trunc(A);
-	{round,[A]}   -> round(A);
-	{abs,[A]}     -> abs(A);
-	{max,[A,B]}   -> max(A,B);
-	{min,[A,B]}   -> min(A,B);
-	{F,As1} -> {f,F,As1}
+	{#cid{name="sin"},[A]}     -> math:sin(A);
+	{#cid{name="cos"},[A]}     -> math:cos(A);
+	{#cid{name="trunc"},[A]}   -> trunc(A);
+	{#cid{name="round"},[A]}   -> round(A);
+	{#cid{name="abs"},[A]}     -> abs(A);
+	{#cid{name="max"},[A,B]}   -> max(A,B);
+	{#cid{name="min"},[A,B]}   -> min(A,B);
+	{#cid{name="sum"},As}      ->
+	    lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
+	{#cid{name=F},As1} -> {f,F,As1}
     end;
 
-eval_meta({Op,A,B},Bs) ->
+eval_meta(#cbinary{op=Op,arg1=A,arg2=B},Bs) ->
     case {Op,eval_meta(A,Bs),eval_meta(B,Bs)} of
 	{'<',A1,B1} -> A1 < B1;
 	{'<=', A1, B1} -> A1 =< B1;
@@ -1310,9 +738,6 @@ eval_meta({Op,A,B},Bs) ->
 	{'>=', A1, B1} -> A1 >= B1;
 	{'==', A1, B1} -> A1 == B1;
 	{'!=', A1, B1} -> A1 =/= B1;
-	{'and',A1,B1} -> A1 and B1;
-	{'or',A1,B1} -> A1 or B1;
-	{'xor',A1,B1} -> (A1 =/= B1);
 	{'&&',A1,B1} -> A1 and B1;
 	{'||',A1,B1} -> A1 or B1;
 	{'&',A1,B1} -> A1 band B1;
@@ -1326,16 +751,12 @@ eval_meta({Op,A,B},Bs) ->
 	{'/',A1,B1} -> A1 div B1;
 	{'%',A1,B1} -> A1 rem B1
     end;
-%% replace this with {f,sum,As} !
-eval_meta({sum,As},Bs) ->
-    lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
 
-eval_meta({Op,A},Bs) ->
+eval_meta(#cunary{op=Op,arg=A},Bs) ->
     case {Op,eval_meta(A,Bs)} of
 	{'-',A1} -> -A1;
 	{'+',A1} -> +A1;
 	{'~',A1} ->  bnot A1;
-	{'not',A1} -> not A1;
 	{'!',A1} -> not A1
     end.
 
@@ -1379,6 +800,7 @@ uint8(I,Bs) when is_integer(I) ->
     const_vector(uint,I,8,Bs);
 uint8(V,Bs) ->
     var_vector(uint,V,8,Bs).
+
 
 %% generate a constant vector
 const_vector(Type,Value,Size,Bs) when is_integer(Value) ->
@@ -1426,46 +848,23 @@ vfold_op(Op,D,[Y|As],Bs) ->
 vfold_op(_Op,D,[],Bs) ->
     {D,Bs}.
 
-%% Fold operator Op over a list of bool variables
-fold_op(Op,A0,As,Bs) ->
-    case getopt(assoc,Bs) of
-	left ->  foldl_op(Op,A0,As,Bs);
-	right -> foldr_op(Op,A0,As,Bs);
-	middle -> foldm_op(Op,A0,As,Bs)
-    end.
-    
-%% maybe select between left,right,middle
+all([], Bs) ->
+    {?TRUE, Bs};
+all([A], Bs) ->
+    {A, Bs};
+all(As, Bs) ->
+    As1 = [A || {bool,A} <- As],
+    {X,Bs1} = fresh_var(Bs),
+    {{bool,X}, clause({'and',[X|As1]}, Bs1)}.
 
-foldl_op(_Op,_A0,[A],Bs) ->
-    {A,Bs};
-foldl_op(Op,A0,[Y|As],Bs) ->
-    {Z,Bs1} = foldl_op(Op,A0,As,Bs),
-    operation(Op,Y,Z,Bs1);
-foldl_op(_Op,A0,[],Bs) ->
-    {A0,Bs}.
-
-foldr_op(_Op,_A0,[A],Bs) ->
-    {A,Bs};
-foldr_op(Op,A0,[Y,Z|As],Bs) ->
-    {Z1,Bs1} = operation(Op,Y,Z,Bs),
-    foldr_op(Op,A0,[Z1|As],Bs1);
-foldr_op(_Op,A0,[],Bs) ->
-    {A0,Bs}.
-
-%% fold in middle (balanced tree)
-foldm_op(_Op,_A0,[A],Bs) -> {A,Bs};
-foldm_op(_Op,A0,[],Bs) -> {A0,Bs};
-foldm_op(Op,A0,As,Bs) ->
-    {As1,As2} = lists:split(length(As) div 2, As),
-    {Z1,Bs1} = foldm_op(Op,A0,As1,Bs),
-    {Z2,Bs2} = foldm_op(Op,A0,As2,Bs1),
-    operation(Op,Z1,Z2,Bs2).
-
-all(As, Bs) -> 
-    fold_op('and',{bool,?TRUE},As,Bs).
-
+any([], Bs) ->
+    {?FALSE, Bs};
+any([A], Bs) ->
+    {A, Bs};
 any(As, Bs) ->
-    fold_op('or',{bool,?FALSE},As,Bs).
+    As1 = [A || {bool,A} <- As],
+    {X,Bs1} = fresh_var(Bs),
+    {{bool,X}, clause({'or',[X|As1]}, Bs1)}.
 
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
@@ -1474,6 +873,7 @@ none(As,Bs) ->
 one(Xs, Bs) ->
     eqk(1,length(Xs),Xs,Bs).
 
+-ifdef(__UNDEFINE__).
 %% Not used - size = 5n
 %% special version of eqk(1,length(Xs),Xs,Bs)
 one_(Xs, Bs) ->
@@ -1490,7 +890,7 @@ one__([A|As],Bs) ->
     {One1,Bs5} = operation('or',A1,A3,Bs4),
     {O1,Bs6} = operation('or',A,Or,Bs5),
     {{One1,O1},Bs6}.
-
+-endif.
 
 %% Generate a formula where exact K out of N formulas are true.
 eqk(0,_N, Xs, Bs) ->
@@ -1538,15 +938,19 @@ vextend(bit,Xs,_N,K) ->
 vextend(bool,Xs,1,K) ->
     vset_size(Xs,K,?FALSE).
 
+-ifdef(__UNUSED__).
 vtype({uint,_,_}) -> uint;
 vtype({int,_,_})  -> int;
 vtype({bit,_,_})  -> bit;
 vtype({bool,_})   -> bool.
+-endif.
 
+-ifdef(__UNUSED__).
 vsize({uint,N,_}) -> N;
 vsize({int,N,_})  -> N;
 vsize({bit,N,_})  -> N;
 vsize({bool,_})   -> 1.
+-endif.
 
 varg(V={uint,_,_}) -> V;
 varg(V={int,_,_}) -> V;
@@ -1665,7 +1069,7 @@ operation('and',{bool,_Y},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},triple(imp,-X,Y,-Z,Bs1)};
+    {{bool,X},clause({'and',X,Y,Z},Bs1)};
 
 operation('and',A,B,Bs) ->
     operation('&',A,B,Bs);
@@ -1695,7 +1099,7 @@ operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},triple(imp,X,-Y,Z,Bs1)};
+    {{bool,X},clause({'or',X,Y,Z},Bs1)};
 
 operation('or',A,B,Bs) ->
     operation('|',A,B,Bs);
@@ -1724,7 +1128,7 @@ operation('imp',{bool,?TRUE},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},triple(imp,X,Y,Z,Bs1)};
+    {{bool,X},clause({'or',X,-Y,Z}, Bs1)};
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation('~',A,Bs),
     operation('|',An,B,Bs1);
@@ -1739,7 +1143,7 @@ operation('equ',{bool,?FALSE},{bool,?FALSE},Bs) ->
     {{bool,?TRUE},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},triple(equ,X,Y,Z,Bs1)};
+    {{bool,X},clause({'xor',X,-Y,Z},Bs1)};
 
 operation('equ',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1758,7 +1162,7 @@ operation('equ',A,B,Bs) ->
 
 operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},triple(equ,X,-Y,Z,Bs1)};
+    {{bool,X},clause({'xor',X,Y,Z},Bs1)};
 operation('xor',A,B,Bs) ->
     operation('^',A,B,Bs);
 operation('^',A,B,Bs) ->
@@ -1783,7 +1187,7 @@ operation('+',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {Carry,Cx,Bs1} = vadd(Ax1,Bx1,Bs),
-    Bs2 = set_carry_(Carry,getopt(carry,Bs1),Bs1),
+    Bs2 = set_carry_(Carry,(Bs1#bs.option)#option.carry,Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
@@ -1847,8 +1251,6 @@ operation('<->', A, B, Bs) ->
 
 operation('->', A, B, Bs) ->
     operation('imp', A, B, Bs);
-
-
 
 %%
 %% Alias operation
@@ -1919,7 +1321,7 @@ operation('-',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {BorrowNot,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
-    Bs2 = set_carry_(negate(BorrowNot),getopt(borrow,Bs1),Bs1),
+    Bs2 = set_carry_(negate(BorrowNot),(Bs1#bs.option)#option.borrow,Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
@@ -1946,7 +1348,7 @@ operation('/',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {Qs,_Rs,DivZero,Bs1} = vdivrem(Ys1,Zs1,Bs),
-    Bs2 = set_carry_(DivZero,getopt(divz,Bs1),Bs1),
+    Bs2 = set_carry_(DivZero,(Bs1#bs.option)#option.divz,Bs1),
     {{uint,K,Qs},Bs2};
 
 %% DivZero  coould be used to generate a Exception output
@@ -1955,7 +1357,7 @@ operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {_Qs,Rs,DivZero,Bs1} = vdivrem(Ys1,Zs1,Bs), %% fixme vrem! 
-    Bs2 = set_carry_(DivZero,getopt(divz,Bs1),Bs1),
+    Bs2 = set_carry_(DivZero,(Bs1#bs.option)#option.divz,Bs1),
     {{uint,K,Rs},Bs2};
 
 operation('min',Y={bool,_Y},Z={bool,_Z},Bs) ->
@@ -1989,9 +1391,9 @@ operation('max',A,B,Bs) ->
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
 set_carry_({bool,Carry}, false, Bs) ->    %% never overflow
-    triple(equ,?TRUE,Carry,?FALSE,Bs);
+    clause({equ,?TRUE,Carry,?FALSE},Bs);
 set_carry_({bool,Carry}, true, Bs) ->     %% only overflow
-    triple(equ,?TRUE,Carry,?TRUE,Bs);
+    clause({equ,?TRUE,Carry,?TRUE},Bs);
 set_carry_({bool,_Carry}, ignore, Bs) ->  %% allow carry overflow
     Bs.
 
@@ -2130,6 +1532,8 @@ vdivrem(X, Y, R, N, I, Bs) ->
 %%	    R -= Y;
 %%   }
 %%
+-ifdef(__UNUSED__).
+
 vrem(X, Y, Bs) ->
     N = length(Y),
     Zs = vextend(uint,[],0,N),  %% R = 0
@@ -2153,6 +1557,7 @@ vrem(X, Y, R, N, I, Bs) ->
     %% if (R < Y) R=R; R = R - Y
     {R3,Bs5} = vite({bool,Lt}, R1, R2, Bs4),
     vrem(tl(X), Y, R3, N, I-1, Bs5).
+-endif.
 
 %%
 %% Subtraction 
@@ -2227,6 +1632,7 @@ vite_(_I,[],[],Xs,Bs) ->
     {reverse(Xs),Bs}.
 
 %% conditional vector Ys or variable value Z
+-ifdef(__UNUSED__).
 vitex(I,Ys,Z,Bs) when is_list(Ys), is_integer(Z) ->
     vitex_(I,Ys,Z,[],Bs).
     
@@ -2235,7 +1641,7 @@ vitex_(I,[Y|Ys],Z,Xs,Bs) ->
     vitex_(I,Ys,Z,[X|Xs],Bs1);
 vitex_(_I,[],_Z,Xs,Bs) ->
     {reverse(Xs),Bs}.
-    
+-endif.
 %% 
 %% shift_left 2 [X0,X1,X2,X3,X4,X5,X6,X7]  ==
 %%              [FALSE,FALSE,X0,X1,X2,X3,X4,X5]
@@ -2339,77 +1745,23 @@ minmax2(X1,X2,Bs) ->
 cnf_to_formula(Cs) ->
     {all, [{any, C} || C <- Cs]}.
 
-triple(Op,X,Y,Z,Bs) ->
-    debug(Bs, "Triple: ~w:~w ~w ~w\n", [X,Y,Op,Z]),
-    Ts = Bs#bs.ts,
-    Ti  = Ts#ts.n,
-    Tp = array:set(Ti, {Op,X,Y,Z}, Ts#ts.triple),
-    X0 = Ts#ts.xref,
-    X1 = append_xref(X, Ti, X0),
-    X2 = append_xref(Y, Ti, X1),
-    X3 = append_xref(Z, Ti, X2),
-    N  = Ti+1,
-    Ts1 = Ts#ts { n = N, triple=Tp, xref=X3 },
-    if Ti rem 1000 =:= 999 ->
-	    info(Bs, "triples: ~w\n", [N]);
-       true -> ok
-    end,
-    Bs#bs { ts=Ts1 }.
-
-append_xref(?TRUE, _Ti, Xref) -> Xref;
-append_xref(?FALSE, _Ti, Xref) -> Xref;
-append_xref(V, Ti, Xr) when V < 0 -> append_xref(-V, Ti, Xr);
-append_xref(V, Ti, Xr) -> array:set(V, [Ti|array:get(V, Xr)], Xr).
-
-class_next(X, Bs) ->
-    array:get(X, Bs#bs.vc).
-
-value(?FALSE, _Bs) -> ?FALSE;
-value(?TRUE, _Bs)  -> ?TRUE;
-value(X, Bs) when X > 0 ->
-    case array:get(X, Bs#bs.vt) of
-	0 -> X;
-	X1 -> value(X1, Bs)
-    end;
-value(X, Bs) when X < 0 ->
-    -value(-X, Bs).
-%%  case array:get(-X, Bs#bs.vt) of
-%%	0 -> -X;
-%%	X1 -> -value(X1, Bs)
-%%  end.
-
-%% get class variable (with out sign!)
-class(?FALSE, _Bs) -> ?FALSE;
-class(?TRUE, _Bs)  -> ?TRUE;
-class(X, Bs) when X > 0 ->
-    case array:get(X, Bs#bs.vc) of
-	0 -> X;
-	X1 -> class(X1,Bs)
-    end;
-class(X, Bs) when X < 0 ->
-    case array:get(-X, Bs#bs.vc) of
-	0 -> X;
-	X1 -> class(-X1,Bs)
-    end.
-
 is_equivalent(X, Y, Bs) ->
     class(X,Bs) =:= class(Y,Bs).
 
 %% Return a list of input variables
 
 model_variables(Bs,[]) ->
-    lists:sort(
-      dict:fold(
-	fun('$free',_,Acc) -> Acc;
-	   (true,_,Acc) -> Acc;
-	   (false,_,Acc) -> Acc;
-	   (_X,Y,Acc) when is_integer(Y) ->
-		[Y | Acc];
-	   (_,_, Acc) -> Acc
-	end, [], Bs#bs.vs));
+    List = fold_var(
+	     fun('$free',_,Acc) -> Acc;
+		(true,_,Acc) -> Acc;
+		(false,_,Acc) -> Acc;
+		(_X,Y,Acc) when is_integer(Y) ->
+		     [Y | Acc];
+		(_,_, Acc) -> Acc
+	     end, [], Bs),
+    lists:sort(List);
 model_variables(Bs,Ws) ->
-    lists:map(fun(W) -> dict:fetch(W,Bs#bs.vs) end, Ws).
-
+    lists:map(fun(W) -> get_var(W,Bs) end, Ws).
 
 %%
 %% collect the model
@@ -2420,13 +1772,13 @@ model(Bs) ->
     lists:keysort(1, collect_model(Bs)).
 
 collect_model(Bs) ->
-    dict:fold(
+    fold_var(
       fun (?TRUE,_,Ms) -> Ms;
 	  (?FALSE,_,Ms) -> Ms;
 	  (Y,Xs, Ms) when is_integer(Y) ->
 	      model_vars(Xs,Y,Bs,Ms);
 	  (_, _, Ms) -> Ms
-      end, [], Bs#bs.vs).
+      end, [], Bs).
 
 %% collect all alias variables    
 model_vars([{bit,X,N,I}|Xs],Y,Bs,Ms) ->
@@ -2492,7 +1844,7 @@ model_bor({X,Bit}, Ms) ->
 
 show_fail(Bs) ->
     io:format("FAIL:\n", []),
-    Graph = lists:reverse(Bs#bs.bl),
+    Graph = lists:reverse(get_bindings(Bs)),
     fmt_fail(Graph, Bs),
     case get(fmt_digraph) of
 	done -> ok;
@@ -2581,80 +1933,3 @@ fmt_fail([mark|Bl], Bs) ->
     fmt_fail(Bl, Bs);
 fmt_fail([], _Bs) ->
     io:format("\n", []).
-
-%% compact version of fmt_var
-fmt_v(?TRUE,_)  -> "1";
-fmt_v(?FALSE,_) -> "0";
-fmt_v(X, Bs) ->
-    if X < 0 -> fmt_var_(-X, Bs, "~", "");
-       true ->  fmt_var_(X, Bs, "", "")
-    end.
-
-
-fmtq(X, Bs) ->
-    fmt_var(X, Bs, "\"").
-
-fmt_var(X, Bs) ->
-    fmt_var(X, Bs, "").
-
-		  
-fmt_var(?TRUE, _Bs, _Q)  -> "true";
-fmt_var(?FALSE, _Bs, _Q) -> "false";
-fmt_var(X, Bs, Q) ->
-    if X < 0 ->
-	    fmt_var_(-X, Bs, "~", Q);
-       true ->
-	    fmt_var_(X, Bs, "", Q)
-    end.
-
-fmt_var_(X, Bs, P, Q) ->
-    case dict:find(X, Bs#bs.vs) of
-	error ->
-	    [Q,P,$$,integer_to_list(X),Q];
-	{ok,[{T,V,_N,I}|_Ns]} when ?is_vec_type(T),is_integer(I) ->
-	    [Q,P,io_lib:format("~p[~w]", [V,I]),Q];
-	{ok,[{A,I}|_Ns]} when is_atom(A),is_integer(I) ->
-	    [Q,P,io_lib:format("~p[~w]", [A,I]),Q];
-	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
-	    [Q,P,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
-	{ok,[N|_Ns]} ->
-	    [Q,P,io_lib:format("~p", [N]),Q]
-    end.
-
-
-
-fmt_var_list([X],Bs) ->
-    fmt_var(X,Bs);
-fmt_var_list([X|Xs],Bs) ->
-    [fmt_var(X,Bs),",",fmt_var_list(Xs,Bs)];
-fmt_var_list([],_Bs) ->
-    "".
-
-fmt_var_value_list([?pair(X,V)],Bs) ->
-    [fmt_var(X,Bs),"=",fmt_value(V)];
-fmt_var_value_list([?pair(X,V)|Xs],Bs) ->
-    [fmt_var(X,Bs),"=",fmt_value(V),"," | fmt_var_value_list(Xs,Bs)];
-fmt_var_value_list([],_Bs) ->
-    "".
-
-fmt_value(?TRUE) -> "true";
-fmt_value(?FALSE) ->  "false";
-fmt_value(X) when X < 0 -> "~$"++integer_to_list(-X);
-fmt_value(X) when X > 0 -> "$"++integer_to_list(X).
-
-fmt_triples([], _Bs) ->
-    [];
-fmt_triples([T], Bs) ->
-    [fmt_triple(T,Bs)];
-fmt_triples([T|Ts], Bs) ->
-    [fmt_triple(T,Bs),"," | fmt_triples(Ts,Bs)].
-
-fmt_triple({Op,X,Y,Z}, Bs) ->
-    [fmt_var(X,Bs),":",fmt_var(Y,Bs),fmtop(Op),fmt_var(Z,Bs)].
-
-fmtop(imp) -> "->";
-fmtop(equ) -> "<->";
-fmtop('xor') -> " ^ ";
-fmtop('and') -> " & ";
-fmtop('or') -> " | ";
-fmtop('not') -> "~".

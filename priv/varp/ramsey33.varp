@@ -14,13 +14,13 @@
 // There is no clique of size 3
 [ A a=0..n-1,b=0..n-1,c=0..n-1,a<b,b<c ] !( E(a,b) & E(a,c) & E(b,c) ) 
 
-AND
+and
 
 // F are edges in the complement graph G'
 
 [ A a=0..n-1,b=0..n-1,a<b ] ( E(a,b) XOR F(a,b) )
 
-AND
+and
 
 // There is no clique of size 3 in the complement graph G'
 [ A a=0..n-1,b=0..n-1,c=0..n-1,a<b,b<c ] !( F(a,b) & F(a,c) & F(b,c) )

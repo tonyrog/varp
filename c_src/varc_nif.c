@@ -141,6 +141,12 @@ typedef struct _undo_t {
 #define CLAUSE_OP_OR   0
 #define CLAUSE_OP_AND  1
 #define CLAUSE_OP_XOR  2
+#define CLAUSE_OP_REG  3
+/*
+#define CLAUSE_OP_GTK  4
+#define CLAUSE_OP_GTEK 5
+#define CLAUSE_OP_EQK  6
+*/
 
 #define CLAUSE_FLAG_INQUEUE 0x0001
 #define CLAUSE_FLAG_DEAD    0x0002
@@ -288,6 +294,7 @@ DECL_ATOM(error);
 DECL_ATOM(and);
 DECL_ATOM(or);
 DECL_ATOM(xor);
+DECL_ATOM(reg);
 DECL_ATOM(inqueue);
 DECL_ATOM(dead);
 DECL_ATOM(flags);
@@ -499,21 +506,21 @@ static void clause_free(varc_t* vp, clause_t* cp)
 	varc_free(&vp->clause_allocator[cp->size], (object_t*) cp);
 }
 
-static int is_variable(varc_t* vp, int x)
+static inline int is_variable(int x)
 {
-    return ((x > TRUE) && (x < (int)vp->vnext));
+    return (x > TRUE);
 }
 
-static int is_literal(varc_t* vp, int x)
+#ifdef NOT_USED
+static inline int is_constant(int x)
 {
-    return (((x > TRUE) && (x < (int)vp->vnext)) ||
-	    ((x < FALSE) && (-x < (int)vp->vnext)));
-}
-
-static int is_constant(varc_t* vp, int x)
-{
-    (void) vp;
     return ((x == TRUE) || (x == FALSE));
+}
+#endif
+
+static inline int is_literal(int x)
+{
+    return !((x == TRUE) || (x == FALSE));
 }
 
 static int is_bound( varc_t* vp, int x)
@@ -727,13 +734,13 @@ static int put(varc_t* vp, int x, int y)
     if (x == y)
 	return 0;  // already equal
     // at this point x and y can not both be literal
-    if (is_literal(vp,x)) {  // x is a literal (y may also be a literal)
+    if (is_literal(x)) {  // x is a literal (y may also be a literal)
 	if (x < 0) {
 	    x = -x; xc = -xc;
 	    y = -y; yc = -yc;
 	}
     }
-    else if (is_literal(vp,y)) { // swap x and y
+    else if (is_literal(y)) { // swap x and y
 	if (y < 0) {
 	    int tc = -yc, t = -y;
 	    y = -x; yc = -xc;
@@ -910,316 +917,6 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, int value)
     } while(0)
 
 //
-// F = Y1 OR Y2 OR ...          => Y1/FALSE, Y2/FALSE ...
-//
-// T  = F OR F ... OR F       => CONTRADICTION
-// T  = F OR Y OR F ... OR F   => Y / TRUE
-//
-// X = F OR F ... OR F         => X/F
-// X = Y1 OR T ... OR Yn       => X/T
-// X = F OR Y ... OR F         => X/Y
-//
-//
-
-static int eval_or_clause(varc_t* vp, clause_t* cp)
-{
-    int v,w;
-    int i, j=0;
-    int nf;
-    (void) w;
-
-    w = v = get(vp, cp->lit[0]);
-    switch(v) {
-    case FALSE:
-	TRACE("or:%d: lit[0]=%d size=%d\r\n",cp->cix,w,cp->size);
-	cp->flags |= CLAUSE_FLAG_DEAD;
-	for (i = 1; i < cp->size; i++) {
-	    PUTA(vp, cp->lit[i], FALSE);
-	}
-	break;
-
-    case TRUE:
-	// if all literals except ONE lit[j] are FALSE, set lit[i] = TRUE
-	nf = 0;  // count number of FALSE literals
-	for (i = 1; i < cp->size; i++) {
-	    if ((v = get(vp, cp->lit[i])) == TRUE)
-		;
-	    else if (v == FALSE)
-		nf++;
-	    else
-		j = i; // save unbound pos
-	}
-	TRACE("or:%d: lit[0]=%d size=%d nf=%d\r\n",cp->cix,w,cp->size,nf);
-	if (nf == cp->size-1) { // all are false
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    return -1;  // contradiction
-	}
-	else if ((nf == cp->size-2) && j) {  // all but one are false
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTA(vp, cp->lit[j], TRUE);
-	}
-	break;
-	
-    default:
-	nf = 0;  // count number of FALSE literals
-	for (i = 1; i < cp->size; i++) {
-	    if ((v = get(vp, cp->lit[i])) == TRUE) {
-		TRACE("or:%d: lit[0]=%d size=%d lit[%d]=true\r\n",
-		      cp->cix,w,cp->size,i);
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], TRUE);
-		return 0;
-	    }
-	    else if (v == FALSE)
-		nf++;
-	    else
-		j = i;  // save unbound pos
-	}
-	TRACE("or:%d: lit[0]=%d size=%d nf=%d\r\n",cp->cix,w,cp->size,nf);
-	if (nf == cp->size-1) {  // all are false
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTA(vp, cp->lit[0], FALSE);
-	}
-	else if ((nf == cp->size-2) && j) {  // all but one are false
-	    if (!vp->bcp) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], cp->lit[j]);
-	    }
-	}
-	break;
-    }
-    return 0;
-}
-
-
-//
-// F  = T AND T ... AND T         => CONTRADICTION
-// F  = T AND Y ... AND T         => Y/F
-//
-// T = Y1 AND Y2 AND ...          => Y1/TRUE, Y2/TRUE ...
-//
-// X = T AND T ... AND T         => X/T
-// X = Y1 AND F ... AND Yn       => X/F
-// X = T AND Y ... AND T         => X/Y
-//
-// FIXME: use mask_F and mask_T to eval clause
-//
-
-static int eval_and_clause(varc_t* vp, clause_t* cp)
-{
-    int v,w;
-    int i, j=0;
-    int nt;
-
-    v = w = get(vp, cp->lit[0]);
-    switch(v) {
-    case FALSE:
-	nt = 0;  // count number of FALSE literals
-	for (i = 1; i < cp->size; i++) {
-	    if ((v = get(vp, cp->lit[i])) == FALSE)
-		;
-	    else if (v == TRUE)
-		nt++;
-	    else
-		j = i; // save unbound pos
-	}
-	TRACE("and:%d: lit[0]=%d size=%d nt=%d\r\n",cp->cix,w,cp->size,nt);
-	if (nt == cp->size-1) { // all are true
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    return -1;  // contradiction
-	}
-	else if ((nt == cp->size-2) && j) {  // all but one are true
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTA(vp, cp->lit[j], FALSE);
-	}
-	break;
-	
-    case TRUE:
-	TRACE("and:%d: lit[0]=%d size=%d\r\n",cp->cix,w,cp->size);
-	cp->flags |= CLAUSE_FLAG_DEAD;
-	for (i = 1; i < cp->size; i++) {
-	    PUTA(vp, cp->lit[i], TRUE);
-	}
-	break;
-
-    default:
-	nt = 0;  // count number of FALSE literals
-	for (i = 1; i < cp->size; i++) {
-	    if ((v = get(vp, cp->lit[i])) == FALSE) {
-		TRACE("and:%d: lit[0]=%d size=%d lit[%d]=false\r\n",
-		      cp->cix,w,cp->size,i);
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], FALSE);
-		return 0;
-	    }
-	    else if (v == TRUE)
-		nt++;
-	    else
-		j = i;  // save unbound pos
-	}
-	TRACE("and:%d: lit[0]=%d size=%d nt=%d\r\n",cp->cix,w,cp->size,nt);
-	if (nt == cp->size-1) {  // all are true
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTA(vp, cp->lit[0], TRUE);
-	}
-	else if ((nt == cp->size-2) && j) {  // all but one are true
-	    if (!vp->bcp) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], cp->lit[j]);
-	    }
-	}
-	break;
-    }
-    return 0;
-}
-
-//
-// F = F XOR T XOR F        => CONTRADICTION
-// F = T XOR F XOR T        => 
-// F = T XOR X XOR F        => X/T
-// F = F XOR X XOR F        => X/F
-// F = F XOR X1 XOR X2      => X1/X2
-// F = T XOR X1 XOR X2      => X1/-X2
-//
-// T = T XOR F XOR T        => CONTRADICTION
-// T = F XOR T XOR F        => 
-// T = F XOR X XOR T        => X/F
-// T = T XOR X XOR T        => X/T
-// T = T XOR X1 XOR X2      => X1/X2
-// T = F XOR X1 XOR X2      => X1/-X2
-//
-// X = T XOR F XOR T        => X/F
-// X = F XOR T XOR F        => X/T
-// X = F XOR Y XOR T        => X/-Y
-// X = T XOR Y XOR T        => X/Y
-//
-// FIXME: use mask_F and mask_T to eval clause
-//
-static int eval_xor_clause(varc_t* vp, clause_t* cp)
-{
-    int v, w;
-    int i, j=0, k=0;
-    int nf=0, nt=0;
-
-    for (i = 1; i < cp->size; i++) {
-	if ((v = get(vp, cp->lit[i])) == FALSE)
-	    nf++;
-	else if (v == TRUE)
-	    nt++;
-	else if (j)
-	    k = i; // save unbound pos 2
-	else 
-	    j = i; // save unbound pos 1
-    }
-    v = w = get(vp, cp->lit[0]);
-
-    TRACE("xor:%d: lit[0]=%d, size=%d, nf=%d, nt=%d\r\n",cp->cix,
-	  w,cp->size,nf,nt);
-
-    switch(v) {
-    case FALSE:
-	if ((nt+nf) == cp->size-1) { // all are bound
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if (nt & 1)
-		return -1;
-	    return 0;
-	}
-	else if (((nt+nf) == cp->size-2) && j) {
-	    if (nt & 1) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[j], TRUE);
-	    }
-	    else {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[j], FALSE);
-	    }
-	    return 0;
-	}
-	else if (((nt+nf) == cp->size-3) && j && k) {
-	    if (nt & 1) {
-		if (!vp->bcp) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[j], -cp->lit[k]);
-		}
-	    }
-	    else {
-		if (!vp->bcp) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[j], cp->lit[k]);
-		}
-	    }
-	    return 0;
-	}
-	break;
-	
-    case TRUE:
-	if ((nt+nf) == cp->size-1) { // all are bound
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if ((nt & 1))
-		return -1; // contradiction
-	    return 0;
-	}
-	else if (((nt+nf) == cp->size-2) && j) {
-	    if (nt & 1) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[j], FALSE);
-	    }
-	    else {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[j], TRUE);
-	    }
-	    return 0;
-	}
-	else if (((nt+nf) == cp->size-3) && j && k) {
-	    if (nt & 1) {
-		if (!vp->bcp) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[j], cp->lit[k]);
-		}
-	    }
-	    else {
-		if (!vp->bcp) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[j], -cp->lit[k]);
-		}
-	    }
-	    return 0;
-	}
-	break;
-
-    default:
-	if ((nt+nf) == cp->size-1) { // all are bound
-	    if (nt & 1) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], TRUE);
-	    }
-	    else {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], FALSE);
-	    }
-	    return 0;
-	}
-	else if (((nt+nf) == cp->size-2) && j) {
-	    if (nt & 1) {
-		if (!vp->bcp) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[0], -cp->lit[j]);
-		}
-	    }
-	    else {
-		if (!vp->bcp) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[0], cp->lit[j]);
-		}
-	    }
-	    return 0;
-	}
-	break;
-    }
-    return 0;
-}
-
-//
 // Return a bit mask representing the unbound literal positions
 // unbound = ~(mask_T | mask_F)
 //
@@ -1234,7 +931,7 @@ static inline void unbound_literals(clause_t* cp, bitset_t* unbound)
 
 //
 // eval an OR clause using bitmasks mask_F and mask_T
-// clause is x0 = OR(x1,....,xn)
+// clause is x0 = OR(x1,....,xn-1)
 //
 static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 {
@@ -1285,10 +982,9 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
     return 0;
 }
 
-
 //
 // eval an OR clause using bitmasks mask_F and mask_T
-// clause is x0 = AND(x1,....,xn)
+// clause is x0 = AND(x1,....,xn-1)
 //
 static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 {
@@ -1337,7 +1033,7 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 
 //
 // eval an XOR clause using bitmasks mask_F and mask_T
-// clause is x0 = XOR(x1,....,xn)
+// clause is x0 = XOR(x1,....,xn-1)
 //
 
 static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
@@ -1398,24 +1094,32 @@ static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
     return 0;
 }
 
+//
+// eval an REG clause using bitmasks mask_F and mask_T
+// clause is REG(x0,....,xn-1)
+// This is a way to group literal into registers that can be
+// viewed by looking at mask_T
+//
+static int eval_reg_clause_mask(varc_t* vp, clause_t* cp)
+{
+    bitset_t unbound;
+    (void) vp;
+    
+    unbound_literals(cp, &unbound);
+    if (bitset_is_empty(&unbound)) {
+	printf("REG %d = %llx\r\n", cp->cix, cp->mask_T);
+    }
+    return 0;
+}
 
 static int eval_clause(varc_t* vp, clause_t* cp)
 {
-    if (vp->bcp && (cp->size < (int)sizeof(bitset_t)*8)) {
-	switch(cp->op) {
-	case CLAUSE_OP_OR: return eval_or_clause_mask(vp, cp);
-	case CLAUSE_OP_AND: return eval_and_clause_mask(vp, cp);
-	case CLAUSE_OP_XOR: return eval_xor_clause_mask(vp, cp);
-	default: return -1;
-	}
-    }
-    else {
-	switch(cp->op) {
-	case CLAUSE_OP_OR: return eval_or_clause(vp, cp);
-	case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
-	case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
-	default: return -1;
-	}
+    switch(cp->op) {
+    case CLAUSE_OP_OR: return eval_or_clause_mask(vp, cp);
+    case CLAUSE_OP_AND: return eval_and_clause_mask(vp, cp);
+    case CLAUSE_OP_XOR: return eval_xor_clause_mask(vp, cp);
+    case CLAUSE_OP_REG: return eval_reg_clause_mask(vp, cp);
+    default: return -1;
     }
 }
 
@@ -1801,7 +1505,7 @@ static ERL_NIF_TERM varc_is_variable(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &x))
 	return enif_make_badarg(env);
-    return make_boolean(env, is_literal(vp,x));
+    return make_boolean(env, is_literal(x));
 }
 
 static ERL_NIF_TERM varc_is_bound(ErlNifEnv* env, int argc,
@@ -1836,7 +1540,7 @@ static ERL_NIF_TERM varc_class_next(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &x))
 	return enif_make_badarg(env);	
-    if (!is_variable(vp,x))
+    if (!is_variable(x))
 	return enif_make_badarg(env);
     return enif_make_int(env, vp->var_map[x].klass);
 }
@@ -2022,6 +1726,8 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	op = CLAUSE_OP_OR;
     else if (argv[1] == ATOM(xor))
 	op = CLAUSE_OP_XOR;
+    else if (argv[1] == ATOM(reg))
+	op = CLAUSE_OP_REG;
     else
 	return enif_make_badarg(env);
 
@@ -2035,8 +1741,6 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	    int x;
 	    if (!get_literal(env, vp, head, &x))
 		return enif_make_badarg(env);
-	    if (!is_literal(vp,x) && !is_constant(vp,x))
-		return enif_make_badarg(env);
 	    n++;
 	    list = tail;
 	}
@@ -2048,8 +1752,6 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	for (i = 2; i < argc; i++) {
 	    int x;
 	    if (!get_literal(env, vp, argv[i], &x))
-		return enif_make_badarg(env);
-	    if (!is_literal(vp,x) && !is_constant(vp,x))
 		return enif_make_badarg(env);
 	}
 	return add_clause_array(env, vp, op, argv+2, argc-2);
@@ -2124,6 +1826,7 @@ static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
     case CLAUSE_OP_AND: op = ATOM(and); break;
     case CLAUSE_OP_OR: op = ATOM(or); break;
     case CLAUSE_OP_XOR: op = ATOM(xor); break;
+    case CLAUSE_OP_REG: op = ATOM(reg); break;
     default: op = ATOM(undefined); break;
     }
     return enif_make_tuple2(env, op, list);
@@ -2262,6 +1965,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(and);
     LOAD_ATOM(or);
     LOAD_ATOM(xor);
+    LOAD_ATOM(reg);
     LOAD_ATOM(inqueue);
     LOAD_ATOM(dead);
     LOAD_ATOM(flags);

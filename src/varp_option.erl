@@ -7,7 +7,16 @@
 
 -module(varp_option).
 
--compile(export_all).
+-export([options/0]).
+-export([process_args/4]).
+
+-export([match_long_opt/3]).
+-export([match_short_opt/3]).
+
+-export([setopts/2, setopt/3, getopt/2]).
+
+-include("option.hrl").
+-include("log.hrl").
 
 %%
 %% Option format:
@@ -22,7 +31,7 @@
 -type option_type() :: unsigned | string | undefined | [{string(),atom()}].
 -type option_spec() :: option_type() | {multiple,option_type()}.
 
--record(option,
+-record(optinfo,
 	{
 	  long  :: string(),
 	  short :: string(),
@@ -37,7 +46,7 @@ options() ->
 	   {"warning",warning},{"error",error},{"critical",critical},
 	   {"alert",alert},{"emergency",emergency},{"none",none}],
     Bool = [{"true", true}, {"false", false}],
-    [ #option{ long ="value",
+    [ #optinfo{ long ="value",
 	       short="v",
 	       key=value,
 	       spec=[{"true",true},
@@ -46,7 +55,7 @@ options() ->
 	       default=none,
 	       description="Main formula variable value."
 	     },
-      #option { long="print",
+      #optinfo { long="print",
 		short="p",
 		key=print,
 		spec=[{"true",true},{"literal",literal},{"erlang",erlang},
@@ -54,26 +63,26 @@ options() ->
 		default=false,
 		description="Print models when found."
 	      },
-      #option { long="partial",
+      #optinfo { long="partial",
 		key=partial,
 		spec=Bool,
 		default=false,
 		description="Print partial models when possible."
 	      },
-      #option { long="method",
+      #optinfo { long="method",
 		key=method,
 		spec=[{"collect", collect}, {"count", count}],
 		default=collect,
 		description="Count or collect models."
 	      },
-      #option { long="max",
+      #optinfo { long="max",
 		short="n",
 		key=max,
 		spec=unsigned,
 		default=0,
 		description="Max number of models to count or collect, 0=all."
 	      },
-      #option { long="order",
+      #optinfo { long="order",
 		key=order,
 		spec=[{"identity",identity},
 		      {"reverse", reverse},
@@ -84,33 +93,33 @@ options() ->
 		default=identity,
 		description="Specifiy variable order."
 	      },
-      #option { long="bcp",
+      #optinfo { long="bcp",
 		key=bcp,
 		spec=Bool,
 		default=false,
 		description="Do not use equivalence classes."
 	      },
-      #option { long="saturate",
+      #optinfo { long="saturate",
 		short="s",
 		key=saturate,
 		spec=unsigned, 
 		default=0,
 		description="Saturation vector width."
 	      },
-      #option { long="backtrack",
+      #optinfo { long="backtrack",
 		short="b",
 		key=backtrack,
 		spec=Bool,
 		default=true,
 		description="Use backtracking."
 	      },
-      #option { long="pair",
+      #optinfo { long="pair",
 		key=pair,
 		spec=Bool,
 		default=true,
 		description="Add extra variable in saturation."
 	      },
-      #option { long="assoc",
+      #optinfo { long="assoc",
 		key=assoc,
 		spec=[{"left",left},
 		      {"right",right},
@@ -118,58 +127,58 @@ options() ->
 		default=left,
 		description="Specify the order how all and any are built."
 	      },
-      #option { long="threshold",
+      #optinfo { long="threshold",
 		key=threshold,
 		spec=unsigned,
 		default=0,
 		description="Take more rounds in saturation"
 	      },
-      #option { long="carry",
+      #optinfo { long="carry",
 		key=carry,
 		spec=[{"true",true},{"false",false},{"ignore",ignore}],
 		default=ignore,
 		description="How to handle carry in addition."
 	      },
-      #option { long="borrow",
+      #optinfo { long="borrow",
 		key=borrow,
 		spec=[{"true",true},{"false",false},{"ignore",ignore}],
 		default=ignore,
 		description="How to handle borrow in subtraction."
 	      },
-      #option { long="divz",
+      #optinfo { long="divz",
 		key=divz,
 		spec=[{"true",true},{"false",false},{"ignore",ignore}],
 		default=false,
 		description="How to handle divide by zero."
 	      },
-      #option { long="log",
+      #optinfo { long="log",
 		key=log, 
 		spec=Log,
 		default=none,
 		description="Output log level."
 	      },
-      #option { long="output",
+      #optinfo { long="output",
 		short="o",
 		key=output,
 		spec=string, 
 		default="",
 		description="Output file name."
 	      },
-      #option { long="formula",
+      #optinfo { long="formula",
 		short="f",
 		key=formula,
 		spec={multiple,string},
 		default=[],
 		description="Command line formula."
 	      },
-      #option { long="version",
+      #optinfo { long="version",
 		short="v", 
 		key=version,
 		spec=string,
 		default=vsn(),
 		description="Report current version."
 	      },
-      #option { long="help",
+      #optinfo { long="help",
 		short="h", 
 		key=help,
 		spec=void,
@@ -184,11 +193,11 @@ process_args(["--"++LongOpt|As],Mode,Opts,Bound) ->
     case match_long_opt(LongOpt,As,options()) of
 	false ->
 	    usage(LongOpt);
-	{#option { key=help},_Val,_As1} ->
+	{#optinfo { key=help},_Val,_As1} ->
 	    usage();
-	{#option { key=version},_Val,_As1} ->
+	{#optinfo { key=version},_Val,_As1} ->
 	    version();
-	{#option { key=Key,spec=ValSpec},Val,As1} ->
+	{#optinfo { key=Key,spec=ValSpec},Val,As1} ->
 	    case match_value(ValSpec,Val) of
 		false ->
 		    usage(Key,Val);
@@ -202,11 +211,11 @@ process_args(["-"++LongOpt|As],Mode,Opts,Bound) ->
 	    case match_short_opt(LongOpt,As,options()) of
 		false ->
 		    usage();
-		{#option { key=help },_Val,_As1} ->
+		{#optinfo { key=help },_Val,_As1} ->
 		    usage();
-		{#option { key=version },_Val,_As1} ->
+		{#optinfo { key=version },_Val,_As1} ->
 		    version();
-		{#option { key=Key, spec=ValSpec},Val,As1} ->
+		{#optinfo { key=Key, spec=ValSpec},Val,As1} ->
 		    case match_value(ValSpec,Val) of
 			false ->
 			    usage(Key,Val);
@@ -214,11 +223,11 @@ process_args(["-"++LongOpt|As],Mode,Opts,Bound) ->
 			    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
 		    end
 	    end;
-	{#option { key=help},_Val,_As1} ->
+	{#optinfo { key=help},_Val,_As1} ->
 	    usage();
-	{#option { key=version},_Val,_As1} ->
+	{#optinfo { key=version},_Val,_As1} ->
 	    version();
-	{#option { key=Key,spec=ValSpec},Val,As1} ->
+	{#optinfo { key=Key,spec=ValSpec},Val,As1} ->
 	    case match_value(ValSpec,Val) of
 		false ->
 		    usage(Key,Val);
@@ -227,10 +236,10 @@ process_args(["-"++LongOpt|As],Mode,Opts,Bound) ->
 	    end
     end;
 process_args([Var,"=",Value|As],Mode,Opts,Bound) ->
-    V = list_to_atom(Var),
+    %% V = list_to_atom(Var),
     case string:to_integer(Value) of
-	{N,""} -> process_args(As,Mode,Opts,[{V,N}|Bound]);
-	_ -> process_args(As,Mode,Opts,[{V,Value}|Bound])
+	{N,""} -> process_args(As,Mode,Opts,[{Var,N}|Bound]);
+	_ -> process_args(As,Mode,Opts,[{Var,Value}|Bound])
     end;
 process_args([A|As],Mode,Opts,Bound) ->
     case string:chr(A,$=) of
@@ -246,10 +255,10 @@ process_args([A|As],Mode,Opts,Bound) ->
 			end;
 		   true -> {Value0,As}
 		end,
-	    V = list_to_atom(Var),
+	    %% V = list_to_atom(Var),
 	    case string:to_integer(Value) of
-		{N,""} -> process_args(As1,Mode,Opts,[{V,N}|Bound]);
-		_ -> process_args(As1,Mode,Opts,[{V,Value}|Bound])
+		{N,""} -> process_args(As1,Mode,Opts,[{Var,N}|Bound]);
+		_ -> process_args(As1,Mode,Opts,[{Var,Value}|Bound])
 	    end
     end;
 process_args([], Mode, Opts, Bound) ->
@@ -282,10 +291,10 @@ match_value([], _) ->
     false.
 
 match_long_opt(LongOpt,As,[Opt|Opts]) ->
-    case match_string(Opt#option.long, LongOpt) of
+    case match_string(Opt#optinfo.long, LongOpt) of
 	false ->
 	    match_long_opt(LongOpt,As,Opts);
-	"" when Opt#option.spec == void -> %% no value!
+	"" when Opt#optinfo.spec == void -> %% no value!
 	    {Opt,"",As};
 	"" ->
 	    case As of
@@ -308,12 +317,12 @@ match_long_opt(_LongOpt,_As,[]) ->
     false.
 
 match_short_opt(ShortOpt,As,[Opt|Opts]) ->
-    case match_string(Opt#option.short, ShortOpt) of
+    case match_string(Opt#optinfo.short, ShortOpt) of
 	false ->
 	    match_short_opt(ShortOpt,As,Opts);
-	"" when Opt#option.spec == void -> %% no value!
+	"" when Opt#optinfo.spec == void -> %% no value!
 	    {Opt,"",As};
-	More when Opt#option.spec == void -> %% multi option
+	More when Opt#optinfo.spec == void -> %% multi option
 	    {Opt,"",[[$-|More]|As]};
 	"" ->
 	    case As of
@@ -334,7 +343,6 @@ match_string(_, _) ->
     false.
 
 version() ->
-
     io:format("version ~s\n", [vsn()]),
     halt(0).
 
@@ -344,13 +352,12 @@ vsn() ->
 	undefined -> "undefined"
     end.
 
-
 usage() ->
     io:format("varp: usage: varp [<Mode>] [Options] [Bindings] [files]\n"),
     io:format("  <Mode> = satisfy|falsify|prove|cnf|snf|version|help\n"),
     io:format("Options\n"),
     lists:foreach(
-      fun(#option{long=LongOpt,short=ShortOpt,spec=Spec,
+      fun(#optinfo{long=LongOpt,short=ShortOpt,spec=Spec,
 		  default=Def,description=Desc }) ->
 	      Names = [["--",LongOpt],"|",["-",LongOpt],
 		       if ShortOpt =:= undefined -> "";
@@ -372,24 +379,24 @@ usage(Opt) when is_list(Opt) ->
     io:format("varp: unknown option ~s\n", [Opt]),
     halt(1);    
 usage(Key) when is_atom(Key) ->
-    case lists:keyfind(Key, #option.key, options()) of
+    case lists:keyfind(Key, #optinfo.key, options()) of
 	false -> 
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
 	Opt ->
 	    io:format("varp: bad argument to option '~s', allowed values are ~s\n", 
-		      [Opt#option.long,format_spec(Opt#option.spec)]),
+		      [Opt#optinfo.long,format_spec(Opt#optinfo.spec)]),
 	    halt(1)
     end.
 
 usage(Key,Value) when is_atom(Key) ->
-    case lists:keyfind(Key, #option.key, options()) of
+    case lists:keyfind(Key, #optinfo.key, options()) of
 	false ->
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
 	Opt ->
 	    io:format("varp: bad argument ~s to option '~s', allowed values are ~s\n", 
-		      [Value,Opt#option.long,format_spec(Opt#option.spec)]),
+		      [Value,Opt#optinfo.long,format_spec(Opt#optinfo.spec)]),
 	    halt(1)
     end.
 
@@ -404,4 +411,136 @@ format_spec(Vs) when is_list(Vs) ->
 format_value(N) when is_integer(N) -> integer_to_list(N);
 format_value(A) when is_atom(A) -> atom_to_list(A);
 format_value(L) when is_list(L) -> L.
+
+
+%%
+%% Set options
+%%
+setopts([{Opt,Value}|Opts], OptRec) ->
+    setopts(Opts, setopt(Opt,Value,OptRec));
+setopts([debug|Opts], OptRec) ->
+    setopts(Opts, setopt(log, debug, OptRec));
+setopts([Opt|Opts], OptRec) when is_atom(Opt) ->
+    setopts(Opts, setopt(Opt,true,OptRec));
+setopts([], OptRec) ->
+    OptRec.
+
+setopt(value,true,OptRec)  -> setopt_(#option.value,true,OptRec);
+setopt(value,false,OptRec) -> setopt_(#option.value,false,OptRec);
+setopt(value,none,OptRec)  -> setopt_(#option.value,none,OptRec);
+
+setopt(env,Env,OptRec) when is_list(Env) -> 
+    Meta = lists:foldl(
+	     fun({X,V},E0) ->
+		     E1 = proplists:delete(X,E0),
+		     [{X,V} | E1]
+	     end, OptRec#option.meta, Env),
+    OptRec#option { meta = Meta };
+
+setopt(defs,Ds,OptRec) when is_list(Ds) ->
+    Defs = lists:foldl(
+	      fun({Px,Def},E0) ->
+		      E1 = proplists:delete(Px,E0),
+		      [{Px,Def} | E1]
+	      end, OptRec#option.defs, Ds),
+    OptRec#option { defs = Defs };
+
+setopt(decls,Ds,OptRec) when is_list(Ds) ->
+    Decls = lists:foldl(
+	      fun({Sign,Size,{p,Name,Args}},E0) ->
+		      Args1 = ['_' || _ <- Args], %% anonymous list
+		      Px = {p,Name,Args1},
+		      E1 = proplists:delete(Px,E0),
+		      [{Px,Sign,Size} | E1]
+	      end, OptRec#option.decls, Ds),
+    OptRec#option { decls = Decls };
+
+setopt(code,Code,OptRec) ->
+    OptRec#option { code = OptRec#option.code ++ Code };
+
+setopt(print,true,OptRec)   -> setopt_(#option.print,true,OptRec);
+setopt(print,false,OptRec)  -> setopt_(#option.print,false,OptRec);
+setopt(print,model,OptRec)  -> setopt_(#option.print,model,OptRec);
+setopt(print,literal,OptRec)  -> setopt_(#option.print,literal,OptRec);
+setopt(print,erlang,OptRec)  -> setopt_(#option.print,erlang,OptRec);
+setopt(partial,true,OptRec)   -> setopt_(#option.partial,true,OptRec);
+setopt(partial,false,OptRec)  -> setopt_(#option.partial,false,OptRec);
+
+setopt(method,collect,OptRec) -> setopt_(#option.method,collect,OptRec);
+setopt(method,count,OptRec) -> setopt_(#option.method,count,OptRec);
+
+setopt(max,N,OptRec) when is_integer(N), N>=0 ->
+    setopt_(#option.max,N,OptRec);
+%% fixme check all order options! (normalize?)
+setopt(order,Order,OptRec) -> setopt_(#option.order,Order,OptRec);
+
+setopt(bcp,Bool,OptRec) when is_boolean(Bool) -> 
+    setopt_(#option.bcp, Bool, OptRec);
+
+setopt(saturate,K,OptRec) when is_integer(K),K>=0 ->
+    setopt_(#option.saturate,K,OptRec);
+setopt(threshold,K,OptRec) when is_integer(K),K>=0 ->
+    setopt_(#option.threshold,K,OptRec);
+
+setopt(pair,true,OptRec) ->    setopt_(#option.pair,true,OptRec);
+setopt(pair,false,OptRec) ->   setopt_(#option.pair,false,OptRec);
+
+setopt(assoc,left,OptRec) ->    setopt_(#option.assoc,left,OptRec);
+setopt(assoc,right,OptRec) ->   setopt_(#option.assoc,right,OptRec);
+setopt(assoc,middle,OptRec) ->   setopt_(#option.assoc,middle,OptRec);
+
+setopt(carry,true,OptRec)    ->    setopt_(#option.carry,true,OptRec);
+setopt(carry,false,OptRec)   ->   setopt_(#option.carry,false,OptRec);
+setopt(carry,ignore,OptRec)  ->  setopt_(#option.carry,ignore,OptRec);
+
+setopt(borrow,true,OptRec)   ->   setopt_(#option.borrow,true,OptRec);
+setopt(borrow,false,OptRec)  ->  setopt_(#option.borrow,false,OptRec);
+setopt(borrow,ignore,OptRec) -> setopt_(#option.borrow,ignore,OptRec);
+
+setopt(divz,true,OptRec) ->   setopt_(#option.divz,true,OptRec);
+setopt(divz,false,OptRec) ->  setopt_(#option.divz,false,OptRec);
+setopt(divz,ignore,OptRec) -> setopt_(#option.divz,ignore,OptRec);
+
+setopt(log,debug,OptRec) -> setopt_(#option.log,?DEBUG,OptRec);
+setopt(log,info,OptRec)  -> setopt_(#option.log,?INFO, OptRec);
+setopt(log,notice,OptRec) -> setopt_(#option.log,?NOTICE,OptRec);
+setopt(log,warning,OptRec) -> setopt_(#option.log,?WARNING,OptRec);
+setopt(log,error,OptRec) -> setopt_(#option.log,?ERROR,OptRec);
+setopt(log,critical,OptRec) -> setopt_(#option.log,?CRITICAL,OptRec);
+setopt(log,alert,OptRec) -> setopt_(#option.log,?ALERT,OptRec);
+setopt(log,emergency,OptRec) -> setopt_(#option.log,?EMERGENCY,OptRec);
+setopt(log,none,OptRec) -> setopt_(#option.log,?LOG_NONE,OptRec);
+setopt(log,Level,OptRec) when Level >= ?LOG_NONE, Level =< ?DEBUG -> 
+    setopt_(#option.log,Level,OptRec);
+setopt(backtrack,true,OptRec) -> setopt_(#option.backtrack,true,OptRec);
+setopt(backtrack,false,OptRec) -> setopt_(#option.backtrack,false,OptRec);
+setopt(formula,_,OptRec) -> OptRec.  %% not used internally
+
+setopt_(KeyPos, Value, OptRec) ->
+    setelement(KeyPos, OptRec, Value).
+
+%%
+%% Get options
+%%
+getopt(value,  OptRec)    -> OptRec#option.value;
+getopt(print,  OptRec)    -> OptRec#option.print;
+getopt(partial, OptRec)    -> OptRec#option.partial;
+getopt(log,    OptRec)    -> OptRec#option.log;
+getopt(debug,  OptRec)    -> OptRec#option.log =:= ?DEBUG;
+getopt(method, OptRec)    -> OptRec#option.method;
+getopt(max, OptRec)       -> OptRec#option.max;
+getopt(order, OptRec)     -> OptRec#option.order;
+getopt(carry,  OptRec)    -> OptRec#option.carry;
+getopt(borrow, OptRec)    -> OptRec#option.borrow;
+getopt(divz, OptRec)      -> OptRec#option.divz;
+getopt(eval_bcp, OptRec)  -> OptRec#option.bcp;
+getopt(saturate, OptRec)  -> OptRec#option.saturate;
+getopt(threshold, OptRec) -> OptRec#option.threshold;
+getopt(pair, OptRec)      -> OptRec#option.pair;
+getopt(assoc, OptRec)     -> OptRec#option.assoc;
+getopt(backtrack,OptRec)  -> OptRec#option.backtrack;
+getopt(meta,OptRec) -> OptRec#option.meta;
+getopt(defs,OptRec) -> OptRec#option.defs;
+getopt(decls,OptRec) -> OptRec#option.decls;
+getopt(code,OptRec) -> OptRec#option.code.
 
