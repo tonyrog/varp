@@ -458,7 +458,8 @@ cnf_var(V, Var, Map) ->
 %% n pigeons in n-1 holes
 %%
 pigeon(N) ->
-    {ok,{_Defs,F}} = varp:file(filename:join([code:priv_dir(varp), "varp", "pigeon.varp"])),
+    {ok,{_Defs,_Decls,_Code,F}} = 
+	varp:file(filename:join([code:priv_dir(varp), "varp", "pigeon.varp"])),
     F1 = form:expand(F, [{n,N}]),
     {Cs,_} = cnf:clauses(F1),
     V = varc:new(),

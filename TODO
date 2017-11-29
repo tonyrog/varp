@@ -21,3 +21,53 @@ Bind pairwise
    settings and variable order etc.
 
    Now multitask over the instances.
+
+3. Introduce CODE block, reason about sequential code
+
+code {
+   int x = 1;
+   int y = 2;
+   if (x < y)
+      x++;
+   else
+      y++;
+}
+
+C-types:
+	char   = signed char
+	short  = signed short
+	int    = signed int
+	long   = signed long
+	unsigned char
+	unsigned short
+	unsigned int
+	unsigned long
+	unsigned = unsigned int
+	signed = signed int?
+stdint
+	int8_t, int16_t, int32_t, int64_t
+	uint8_t, uint16_t, uint32_t, uint64_t
+
+code generation
+     L0 : int x = 1  => X[0]:32 = 1
+     L1 : int y = 2  => Y[0]:32 = 2
+     L2 : if (x < y) => C1 == (X[0]:32 < Y[0]:32);
+     L3:      x++;    => X[1]:32 = X[0]:32 + 1
+          else
+     L4:      y++     => Y[1]:32 = Y[0]:32 + 1
+
+     X[2]:32 = ITE(C1, X[1]:32, X[0]:32)
+     Y[2]:32 = ITE(C1, Y[0]:32, Y[1]:32)
+     L0 = true
+     L1 = true
+     L2 = true
+     L3 = C1;
+     L4 = ~C1
+
+
+Models are presented with some of:
+- output state
+- all instances
+- all instances and flow positions (maybe line numbers)
+
+input variables must be accessible

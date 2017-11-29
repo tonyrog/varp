@@ -1016,7 +1016,7 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 	}
     }
     else {
-	if (bitset_any(&cp->mask_F)) { // there is at least on FALSE literal
+	if (bitset_any(&cp->mask_F)) { // there is at least one FALSE literal
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], FALSE);
 	}

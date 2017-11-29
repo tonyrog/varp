@@ -56,6 +56,9 @@
 		    orelse ((Op) =:= 'xor')
 		    orelse ((Op) =:= 'reg'))).
 
+-define(nif_stub(),
+	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
+
 init() ->
     Nif = filename:join([code:priv_dir(varp), "varc_nif"]),
     ?debug("Loading: ~s\n", [Nif]),
@@ -63,77 +66,77 @@ init() ->
 
 
 new() ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 new(Size) when is_integer(Size), Size >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 new(Size,Expand) when is_integer(Size), Size >= 0,
 		      is_integer(Expand), Expand >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_variable(Varc) when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_number_of_variables(Varc) when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 put(Varc, LitA, LitB) when ?is_varc(Varc), 
 			   is_integer(LitA),
 			   is_integer(LitB) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 
 class(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 occure(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 is_variable(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 is_bound(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 class_next(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 equal(Varc, LitA, LitB) when ?is_varc(Varc), 
 			     is_integer(LitA),
 			     is_integer(LitB) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 mark(Varc,Level) when ?is_varc(Varc), is_integer(Level), Level >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 undo(Varc) when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 eval(Varc) when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_number_of_clauses(Varc) when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_clause(Varc,Op,Ls) when ?is_varc(Varc), ?is_op(Op), is_list(Ls) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_clause(Varc,Op,X1,X2)
   when ?is_varc(Varc), ?is_op(Op),
        is_integer(X1),
        is_integer(X2) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_clause(Varc,Op,X1,X2,X3) 
   when ?is_varc(Varc), ?is_op(Op),
        is_integer(X1),
        is_integer(X2),
        is_integer(X3) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_clause(Varc,Op,X1,X2,X3,X4) when 
       ?is_varc(Varc), ?is_op(Op),
@@ -141,7 +144,7 @@ add_clause(Varc,Op,X1,X2,X3,X4) when
       is_integer(X2),
       is_integer(X3),
       is_integer(X4) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_clause(Varc,Op,X1,X2,X3,X4,X5) when 
       ?is_varc(Varc), ?is_op(Op),
@@ -150,7 +153,7 @@ add_clause(Varc,Op,X1,X2,X3,X4,X5) when
       is_integer(X3),
       is_integer(X4),
       is_integer(X5) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 add_clause(Varc,Op,X1,X2,X3,X4,X5,X6) when 
       ?is_varc(Varc), ?is_op(Op),
@@ -160,55 +163,55 @@ add_clause(Varc,Op,X1,X2,X3,X4,X5,X6) when
       is_integer(X4),
       is_integer(X5),
       is_integer(X6) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_clause(Varc,Index)
   when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_clause_flags(Varc,Index)
   when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 del_clause(Varc,Index)
   when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_clauses(Varc,Var)
   when ?is_varc(Varc), is_integer(Var), Var >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_queue(Varc)
   when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 clear_queue(Varc)
   when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 get_bindings(Varc, Level)
   when ?is_varc(Varc), is_integer(Level), Level >= 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 %% return {Ix,Var} | false
 order_first(Varc) 
   when ?is_varc(Varc) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 order_next(Varc, Ix)
   when ?is_varc(Varc), is_integer(Ix), Ix > 0 ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 order_sort(Varc, Sort) 
   when ?is_varc(Varc),
        ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 order_sort(Varc, Sort, Arg) 
   when ?is_varc(Varc),
        ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)),
        is_integer(Arg) ->
-    erlang:error(nif_not_loaded).
+    ?nif_stub().
 
 %% utility to get a list of unbound variables
 order_all(V) ->
@@ -251,18 +254,18 @@ sat_(V,I,N,M,D) ->
     end.
 
 sat__(V,I,N,M,D,Var) ->
-    varc:mark(V, D),
-    varc:clear_queue(V),
-    varc:put(V, Var, false),
+    mark(V, D),
+    clear_queue(V),
+    put(V, Var, false),
     N1 = sat_(V,I,N,M,D),
-    varc:undo(V),
+    undo(V),
     if M > 0, N1 >= M -> N1;
        true ->
-	    varc:mark(V, D),
-	    varc:clear_queue(V),
-	    varc:put(V, Var, true),
+	    mark(V, D),
+	    clear_queue(V),
+	    put(V, Var, true),
 	    N2 = sat_(V,I,N1,M,D),
-	    varc:undo(V),
+	    undo(V),
 	    N2
     end.
     

@@ -11,6 +11,8 @@
 -compile(export_all).
 -import(lists, [map/2, foldl/3]).
 
+-include("varp_bic.hrl").
+
 expand(F) ->
     expand(F, []).
 
@@ -158,23 +160,23 @@ expand_meta(V,_Bs) ->
     V.
 
 
-eval_domain({range,A,B}, Bs) ->
+eval_domain(#crange{from=A,to=B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     lists:seq(A1, B1);
-eval_domain({union,A,B}, Bs) ->
+eval_domain(#ccall{func=#cid{name="union"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:union(A1,B1);
-eval_domain({subtract,A,B}, Bs) ->
+eval_domain(#ccall{func=#cid{name="subtract"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:subtract(A1,B1);
-eval_domain({intersect,A,B}, Bs) ->
+eval_domain(#ccall{func=#cid{name="intersect"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:intersection(A1,B1);
-eval_domain({product,A,B}, Bs) ->
+eval_domain(#ccall{func=#cid{name="product"},args=[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
@@ -276,78 +278,90 @@ eval({'not',A},Bs) -> not eval(A,Bs).
 
 %% eval function expressions and suchthat expressions
 eval_meta(V, _Bs) when is_integer(V) ->  V;
-eval_meta(true, _Bs) ->  true;
-eval_meta(false, _Bs) -> false;
-eval_meta(V, Bs) when is_atom(V) ->
-    case lists:keyfind(V,1,Bs) of
-	false -> 
-	    io:format("variable '~s' is not bound\n", [V]),
-	    error({unbound, V});
+eval_meta(#cconst{base=B,value=V}, _Bs) -> list_to_integer(V,B);
+eval_meta(#cid {name="true"}, _Bs)  -> true;
+eval_meta(#cid {name="false"}, _Bs) -> false;
+%%eval_meta(true, _Bs) ->  true;
+%%eval_meta(false, _Bs) -> false;
+%%eval_meta(V, Bs) when is_atom(V) ->
+eval_meta(#cid {name=Vn}, Bs) ->
+    case proplists:lookup(Vn,Bs) of
+	none -> 
+	    io:format("variable '~s' is not bound\n", [Vn]),
+	    error({unbound, Vn});
 	{_,W} -> W
     end;
-eval_meta({f,F,As},Bs) ->
+eval_meta(#ccall{func=F,args=As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
-	{factorial,[N]} -> varp_math:factorial(N);
-	{binom,[A,B]} -> varp_math:binom(A,B);
-	{sqrt,[A]}    -> math:sqrt(A);
-	{nroot,[A,N]} -> varp_math:nroot(A,N);
-	{ln,[A]}      -> math:log(A);
-	{log,[A,N]}   -> math:log(A)/math:log(N);
-	{log2,[A]}    -> math:log(A)/math:log(2);
-	{log10,[A]}   -> math:log10(A);
-	{pi,[]}       -> math:pi();
-	{e,[]}        -> math:exp(1);
-	{pow,[A,B]}   -> 
+	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
+	{#cid{name="binom"},[A,B]} -> varp_math:binom(A,B);
+	{#cid{name="sqrt"},[A]}    -> math:sqrt(A);
+	{#cid{name="nroot"},[A,N]} -> varp_math:nroot(A,N);
+	{#cid{name="ln"},[A]}      -> math:log(A);
+	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
+	{#cid{name="log2"},[A]}    -> math:log(A)/math:log(2);
+	{#cid{name="log10"},[A]}   -> math:log10(A);
+	{#cid{name="pi"},[]}       -> math:pi();
+	{#cid{name="e"},[]}        -> math:exp(1);
+	{#cid{name="pow"},[A,B]}   -> 
 	    if is_integer(A), is_integer(B) ->
 		    varp_math:pow(A,B);
 	       true ->
 		    math:pow(A,B)
 	    end;
-	{sin,[A]}     -> math:sin(A);
-	{cos,[A]}     -> math:cos(A);
-	{trunc,[A]}   -> trunc(A);
-	{round,[A]}   -> round(A);
-	{abs,[A]}     -> abs(A);
-	{max,[A,B]}   -> max(A,B);
-	{min,[A,B]}   -> min(A,B);
-	{F,As1} -> {f,F,As1}
+	{#cid{name="sin"},[A]}     -> math:sin(A);
+	{#cid{name="cos"},[A]}     -> math:cos(A);
+	{#cid{name="trunc"},[A]}   -> trunc(A);
+	{#cid{name="round"},[A]}   -> round(A);
+	{#cid{name="abs"},[A]}     -> abs(A);
+	{#cid{name="max"},[A,B]}   -> max(A,B);
+	{#cid{name="min"},[A,B]}   -> min(A,B);
+	{#cid{name="sum"},As}      ->
+	    lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
+	{#cid{name=F},As1} -> {f,F,As1}
     end;
-eval_meta({Op,A,B},Bs) ->
+eval_meta(#cbinary{op=Op,arg1=A,arg2=B},Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if is_number(A1), is_number(B1) ->
-	    case {Op,A1,B1} of
-		{'<',A1,B1} -> A1 < B1;
-		{'<=', A1, B1} -> A1 =< B1;
-		{'>',A1,B1} -> A1 > B1;
-		{'>=', A1, B1} -> A1 >= B1;
-		{'==', A1, B1} -> A1 == B1;
-		{'!=', A1, B1} -> A1 =/= B1;
-		{'and',A1,B1} -> A1 and B1;
-		{'or',A1,B1} -> A1 or B1;
-		{'&',A1,B1} -> A1 band B1;
-		{'|',A1,B1} -> A1 bor B1;
-		{'^',A1,B1} -> A1 bxor B1;
-		{'<<',A1,B1} -> A1 bsl B1;
-		{'>>',A1,B1} -> A1 bsr B1;
-		{'+',A1,B1} -> A1+B1;
-		{'-',A1,B1} -> A1-B1;
-		{'*',A1,B1} -> A1*B1;
-		{'/',A1,B1} -> A1 div B1;
-		{'%',A1,B1} -> A1 rem B1
+	    case Op of
+		'<' -> A1 < B1;
+		'<=' -> A1 =< B1;
+		'>' -> A1 > B1;
+		'>=' -> A1 >= B1;
+		'==' -> A1 == B1;
+		'!=' -> A1 =/= B1;
+		'&&' -> A1 and B1;
+		'||' -> A1 or B1;
+		'&' -> A1 band B1;
+		'|' -> A1 bor B1;
+		'^' -> A1 bxor B1;
+		'<<' -> A1 bsl B1;
+		'>>' -> A1 bsr B1;
+		'+' -> A1+B1;
+		'-' -> A1-B1;
+		'*' -> A1*B1;
+		'/' -> A1 div B1;
+		'%' -> A1 rem B1
 	    end;
        true ->
 	    {Op,A1,B1}
     end;
-eval_meta({sum,As},Bs) ->
+
+eval_meta({sum,As},Bs) -> %% used???
     lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
-eval_meta({Op,A},Bs) ->
-    case {Op,eval_meta(A,Bs)} of
-	{'-',A1} -> -A1;
-	{'+',A1} -> +A1;
-	{'~',A1} ->  bnot A1;
-	{'not',A1} -> not A1;
-	{'!',A1} -> not A1
+
+eval_meta(#cunary{op=Op,arg=A},Bs) ->
+    A1 = eval_meta(A,Bs),
+    if is_number(A1) ->
+	    case Op of
+		'-' -> -A1;
+		'+' -> +A1;
+		'~' ->  bnot A1;
+		'!' -> not A1
+	    end;
+       true ->
+	    {Op,A1}
     end.
 
 eval_meta_list(As,Bs) ->
