@@ -5,7 +5,7 @@
 %%% @end
 %%% Created : 20 Aug 2010 by Tony Rogvall <tony@rogvall.se>
 
--module(cnf).
+-module(varp_cnf).
 -export([rewrite/1]).
 -export([clauses/1]).
 -export([succ_dimacs/2, succ/2]).
@@ -20,8 +20,8 @@
 %%
 %%
 satisfy(F0) ->
-    F = form:expand(F0),
-    Vs = lists:sort(form:variables(F)),
+    F = varp_expand:formula(F0),
+    Vs = lists:sort(varp_expand:variables(F)),
     {A, _Ls} = clauses(F),
     %% io:format("literals=~w\n",[_Ls]),
     Af = {all, map(fun(Cp) -> {any,Cp} end, A)},

@@ -5,7 +5,7 @@
 %%% @end
 %%% Created : 20 Aug 2010 by Tony Rogvall <tony@rogvall.se>
 
--module(dimacs).
+-module(varp_dimacs).
 
 -export([load/1, save/2]).
 -export([format/1]).

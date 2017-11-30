@@ -5,7 +5,7 @@
 %%% @end
 %%% Created : 21 Jul 2010 by Tony Rogvall <tony@rogvall.se>
 
--module(prover).
+-module(varp_prover).
 
 -export([run_formula/1,run_formula/2]).
 -export([prove_formula/1,prove_formula/2]).
@@ -26,15 +26,15 @@
 -define(is_non_negative(N), (is_integer((N)) andalso ((N) >= 0))).
 
 apply_opts(F, Bs) ->
-    try case formula:getopt(value, Bs) of
+    try case varp_formula:getopt(value, Bs) of
 	    none -> Bs;
-	    true -> formula:equal(F, true, Bs);
-	    false -> formula:equal(F, false, Bs)
+	    true -> varp_formula:equal(F, true, Bs);
+	    false -> varp_formula:equal(F, false, Bs)
 	end of
 	Bs1 ->
-	    case formula:getopt(order, Bs) of
+	    case varp_formula:getopt(order, Bs) of
 		none -> Bs1;
-		Order -> formula:order(Order, Bs1)
+		Order -> varp_formula:order(Order, Bs1)
 	    end
     catch
 	throw:contradiction ->
@@ -44,7 +44,7 @@ apply_opts(F, Bs) ->
 run_formula(F) ->
     run_formula(F, []).
 run_formula(F,Opts) ->
-    run(formula:build(F,Opts)).
+    run(varp_formula:build(F,Opts)).
 
 run({F,Bs}) ->
     run(F, Bs).
@@ -55,7 +55,7 @@ run({bool,X}, Bs) ->
     method(X,Bs);
 run({_Sign,_N,Xs}, Bs) ->
     %% or just a dummy variable?
-    {X,Bs1} = formula:vfold_op('or',{bool,?FALSE},Xs,Bs),
+    {X,Bs1} = varp_formula:vfold_op('or',{bool,?FALSE},Xs,Bs),
     method(X,Bs1).
 
     
@@ -72,13 +72,13 @@ prove_formula(F,Opts) ->
 falsify_formula(F) ->
     falsify_formula(F,[{method,collect},{print,true},{order,depth}]).
 falsify_formula(F,Opts) ->
-    falsify(formula:build(F,Opts)).
+    falsify(varp_formula:build(F,Opts)).
 
 falsify({F,Bs}) ->
     falsify(F, Bs).
 
 falsify({bool,X}, Bs) ->
-    Bs1 = formula:setopt(value,false,Bs),
+    Bs1 = varp_formula:setopt(value,false,Bs),
     method(X,Bs1).
 
 %%
@@ -88,13 +88,13 @@ satisfy_formula(F) ->
     satisfy_formula(F, [{method,collect},{print,true},{order,depth}]).
 
 satisfy_formula(F,Opts) ->
-    satisfy(formula:build(F,Opts)).
+    satisfy(varp_formula:build(F,Opts)).
 
 satisfy({F,Bs}) ->
     satisfy(F, Bs).
 
 satisfy({bool,X}, Bs) ->
-    Bs1 = formula:setopt(value,true,Bs),
+    Bs1 = varp_formula:setopt(value,true,Bs),
     method(X,Bs1).
 
 %%
@@ -105,7 +105,7 @@ eval_formula(F) ->
     eval_formula(F, []).
 
 eval_formula(F,Opts) ->
-    eval_bs(formula:build(F,Opts)).
+    eval_bs(varp_formula:build(F,Opts)).
 
 eval_bs({F,Bs}) ->
     case apply_opts(F, Bs) of
@@ -123,7 +123,7 @@ saturate_formula(K,F) when is_integer(K), K>=0 ->
     saturate_formula(K,F,[]).
 
 saturate_formula(K,F,Opts) ->
-    {Fv,Bs} = formula:build(F,Opts),
+    {Fv,Bs} = varp_formula:build(F,Opts),
     case apply_opts(Fv, Bs) of
 	false -> false;
 	Bs1 -> saturate(K,Bs1)
@@ -134,7 +134,7 @@ backtrack_formula(F) ->
     backtrack_formula(F,[]).
 
 backtrack_formula(F,Opts) ->
-    backtrack(formula:build(F,Opts)).
+    backtrack(varp_formula:build(F,Opts)).
 
 backtrack({F,Bs}) ->
     backtrack(F,Bs).
@@ -150,7 +150,7 @@ method(X,Bs) ->
 		Bs2 ->
 		    case one_model(Bs2) of
 			false ->
-			    case formula:getopt(saturate, Bs2) of
+			    case varp_formula:getopt(saturate, Bs2) of
 				0 ->
 				    backtrack_bs(Bs2);
 				K ->
@@ -171,13 +171,13 @@ method(X,Bs) ->
 
 %% check if there is already a "unique" model
 one_model(Bs) ->
-    NV = formula:number_of_variables(Bs),
-    NB = formula:number_of_bound(Bs),
+    NV = varp_formula:number_of_variables(Bs),
+    NB = varp_formula:number_of_bound(Bs),
     if NV =:= NB ->
-	    Print = formula:getopt(print, Bs),
-	    Mdl = formula:model(Bs),
+	    Print = varp_formula:getopt(print, Bs),
+	    Mdl = varp_formula:model(Bs),
 	    print(Print,1,Mdl),
-	    case formula:getopt(method, Bs) of
+	    case varp_formula:getopt(method, Bs) of
 		collect -> {1,[Mdl]};
 		count -> 1
 	    end;
@@ -186,15 +186,15 @@ one_model(Bs) ->
     end.
 
 no_models(Bs) ->
-    case formula:getopt(partial, Bs) of
+    case varp_formula:getopt(partial, Bs) of
 	true ->
 	    %% print partial model, the variables bound
-	    Mdl = formula:model(Bs),
+	    Mdl = varp_formula:model(Bs),
 	    io:format("partial: ~s\n",[format_model(Mdl)]);
 	false ->
 	    ok
     end,
-    case formula:getopt(method, Bs) of
+    case varp_formula:getopt(method, Bs) of
 	collect -> {0,[]};
 	count -> 0
     end.
@@ -203,7 +203,7 @@ no_models(Bs) ->
 eval_list([],Bs) ->
     eval(Bs);
 eval_list([{F,V}|Ps],Bs) ->
-    try formula:equal(F, V, Bs) of
+    try varp_formula:equal(F, V, Bs) of
 	Bs1 -> eval_list(Ps,Bs1)
     catch
 	throw:contradiction -> false
@@ -211,16 +211,16 @@ eval_list([{F,V}|Ps],Bs) ->
 
 %% eval all triples (push all triples on queue)
 eval(Bs) ->
-    formula:info(Bs,"Eval:\n", []),
-    case eval_(formula:enq_all(Bs)) of
+    varp_formula:info(Bs,"Eval:\n", []),
+    case eval_(varp_formula:enq_all(Bs)) of
 	false ->
-	    formula:info(Bs,"    | contradiction\n", []),
+	    varp_formula:info(Bs,"    | contradiction\n", []),
 	    false;
 	Bs1 ->
-	    formula:info(Bs,"    | bound: ~w [~w]\n",
-			 [formula:number_of_bound(Bs1) -
-			      formula:number_of_bound(Bs),
-			  formula:number_of_unbound(Bs1)]),
+	    varp_formula:info(Bs,"    | bound: ~w [~w]\n",
+			 [varp_formula:number_of_bound(Bs1) -
+			      varp_formula:number_of_bound(Bs),
+			  varp_formula:number_of_unbound(Bs1)]),
 	    Bs1
     end.
 	    
@@ -228,14 +228,14 @@ eval(Bs) ->
 eval_list_([],Bs) ->
     eval_(Bs);
 eval_list_([{F,V}|Ps],Bs) ->
-    try formula:equal(F, V, Bs) of
+    try varp_formula:equal(F, V, Bs) of
 	Bs1 -> eval_list_(Ps,Bs1)
     catch
 	throw:contradiction -> false
     end.
 
 eval_(Bs) ->
-    try formula:eval(Bs) of
+    try varp_formula:eval(Bs) of
 	Result -> Result
     catch
 	throw:contradiction -> false
@@ -243,25 +243,25 @@ eval_(Bs) ->
 
 
 backtrack(F,Bs) ->
-    formula:info(Bs,"BACKTRACK method=~w\n", [formula:getopt(method, Bs)]),
+    varp_formula:info(Bs,"BACKTRACK method=~w\n", [varp_formula:getopt(method, Bs)]),
     case apply_opts(F, Bs) of
 	false -> no_models(Bs);
 	Bs1 -> backtrack_bs(eval(Bs1))
     end.
 
 backtrack_bs(Bs) ->
-    case formula:getopt(backtrack, Bs) of
+    case varp_formula:getopt(backtrack, Bs) of
 	false -> 
 	    no_models(Bs),
 	    undefined;
 	true ->
-	    N     = formula:getopt(max, Bs),
-	    Print = formula:getopt(print, Bs),
-	    case formula:getopt(method, Bs) of
+	    N     = varp_formula:getopt(max, Bs),
+	    Print = varp_formula:getopt(print, Bs),
+	    case varp_formula:getopt(method, Bs) of
 		collect ->
 		    bt(Bs, fun({Count0,Acc},Bs1) ->
 				   Count = Count0+1,
-				   Mdl = formula:model(Bs1),
+				   Mdl = varp_formula:model(Bs1),
 				   print(Print,Count,Mdl),
 				   Continue = (N =:= 0) orelse (Count < N),
 				   {Continue,{Count,[Mdl|Acc]}}
@@ -271,7 +271,7 @@ backtrack_bs(Bs) ->
 				   Count = Count0+1,
 				   if Print =:= false -> ok;
 				      true ->
-					   Mdl = formula:model(Bs1),
+					   Mdl = varp_formula:model(Bs1),
 					   print(Print,Count,Mdl)
 				   end,
 				   if Count rem 1000 =:= 0 ->
@@ -369,9 +369,9 @@ bt_loop(Stack,Func,Acc) ->
 %% Stack: [ {I,Xi,[true,false],D,Bs} ]
 %%
 bt_init(Bs) ->
-    I0 = formula:first_init(Bs),
-    ?dbg("I0=~w N=~w\n", [I0,formula:number_of_variables(Bs)]),
-    Next = formula:next_unbound(I0,Bs),
+    I0 = varp_formula:first_init(Bs),
+    ?dbg("I0=~w N=~w\n", [I0,varp_formula:number_of_variables(Bs)]),
+    Next = varp_formula:next_unbound(I0,Bs),
     ?dbg("Next=~p\n",[Next]),
     case Next  of
 	false  -> {model,Bs,[]};
@@ -381,10 +381,10 @@ bt_init(Bs) ->
 bt_next([{_I,_Xi,[],_D,_Bs}|Stack]) ->
     bt_next(Stack);
 bt_next([{I,Xi,[V|Vs],D,Bs0} | Stack]) ->
-    Bs = formula:set_bt_depth(D, Bs0),
+    Bs = varp_formula:set_bt_depth(D, Bs0),
     if D < 9 ->
-	    formula:debug(Bs, "~*.. s: ~s\n",
-			  [D*2, "", formula:fmt_var(Xi,Bs)]);
+	    varp_formula:debug(Bs, "~*.. s: ~s\n",
+			  [D*2, "", varp_formula:fmt_var(Xi,Bs)]);
        true ->
 	    ok
     end,
@@ -393,7 +393,7 @@ bt_next([{I,Xi,[V|Vs],D,Bs0} | Stack]) ->
 	false -> %% hook this?
 	    bt_next([{I,Xi,Vs,D,Bs}|Stack]);
 	Bs1 ->
-	    case formula:next_unbound(I,Bs1) of
+	    case varp_formula:next_unbound(I,Bs1) of
 		false -> 
 		    {model,Bs1,[{I,Xi,Vs,D,Bs}|Stack]};
 		{J,Xj} ->
@@ -423,7 +423,7 @@ bt_next([]) ->
 init_vector(0, _Bs) ->
     [];
 init_vector(K, Bs) ->
-    case formula:first_unbound(Bs) of
+    case varp_formula:first_unbound(Bs) of
 	false -> [];
 	{I1,X1} -> init_vector_(K-1,I1,[{I1,X1}],Bs)
     end.
@@ -431,7 +431,7 @@ init_vector(K, Bs) ->
 init_vector_(0,_I,Vec,_Bs) -> 
     Vec;
 init_vector_(K,I0,Vec,Bs) ->
-    case formula:next_unbound(I0,Bs) of
+    case varp_formula:next_unbound(I0,Bs) of
 	false -> Vec;
 	{I1,X1} -> init_vector_(K-1,I1,[{I1,X1}|Vec],Bs)
     end.
@@ -450,7 +450,7 @@ next_vector_([{I,_Xi}|Vec], Bs, D) ->
 	    case next_vector_(Vec, Bs, D+1) of
 		[] -> [];
 		Vec1=[{J,_Xj}|_] ->
-		    case formula:next_unbound(J,Bs) of
+		    case varp_formula:next_unbound(J,Bs) of
 			false -> [];
 			{K,Xk} ->
 			    [{K,Xk}|Vec1]
@@ -462,9 +462,9 @@ next_vector_([], _Bs, _) ->
     [].
 
 nth_unbound(0,I,Bs) ->
-    formula:next_unbound(I,Bs);
+    varp_formula:next_unbound(I,Bs);
 nth_unbound(N,I,Bs) ->
-    case formula:next_unbound(I,Bs) of
+    case varp_formula:next_unbound(I,Bs) of
 	false -> false;
 	{I1,_X1} -> nth_unbound(N-1,I1,Bs)
     end.
@@ -474,7 +474,7 @@ nth_unbound(N,I,Bs) ->
 expand_vector([], _Bs) -> [];
 expand_vector(Vec, Bs) ->
     J = lists:max([I || {I,_} <- Vec]),
-    case formula:next_unbound(J,Bs) of
+    case varp_formula:next_unbound(J,Bs) of
 	false -> Vec;
 	{K,Xk} -> Vec++[{K,Xk}]
     end.
@@ -489,19 +489,19 @@ saturate(K,Bs) when is_integer(K), K >= 1 ->
     end.
 
 saturate_(K,Bs) when is_integer(K), K >= 1 ->
-    formula:info(Bs,"Saturate-~w: pair:~w\n", 
-		 [K,formula:getopt(pair,Bs)]),
+    varp_formula:info(Bs,"Saturate-~w: pair:~w\n", 
+		 [K,varp_formula:getopt(pair,Bs)]),
     erase(last_print),
     erase(last_bound),
-    NB = formula:number_of_bound(Bs),
+    NB = varp_formula:number_of_bound(Bs),
     case saturate_loop(K,Bs) of
 	false ->
-	    formula:info(Bs,"    | contradiction\n", []),
+	    varp_formula:info(Bs,"    | contradiction\n", []),
 	    false;
 	Bs1 ->
-	    formula:info(Bs, "    | bound: ~w [~w]\n",
-			 [formula:number_of_bound(Bs1) - NB,
-			  formula:number_of_unbound(Bs1)]),
+	    varp_formula:info(Bs, "    | bound: ~w [~w]\n",
+			 [varp_formula:number_of_bound(Bs1) - NB,
+			  varp_formula:number_of_unbound(Bs1)]),
 	    Bs1
     end.
 
@@ -509,7 +509,7 @@ saturate_loop(K, Bs) ->
     case init_vector(K, Bs) of
 	[] -> Bs;
 	Vec ->
-	    NB = formula:number_of_bound(Bs),
+	    NB = varp_formula:number_of_bound(Bs),
 	    saturate_loop(Vec,1,K,NB,Bs)
     end.
 
@@ -520,8 +520,8 @@ saturate_loop(Vec,I,K,NB,Bs) ->
 	    saturate_info(I,K,Bs1),
 	    case next_vector(Vec, Bs1) of %% check all elements?
 		[] ->
-		    NB1 = formula:number_of_bound(Bs1),
-		    D = formula:getopt(threshold, Bs1),
+		    NB1 = varp_formula:number_of_bound(Bs1),
+		    D = varp_formula:getopt(threshold, Bs1),
 		    if NB1 - NB > D ->
 			    saturate_loop(K, Bs1);
 		       true ->
@@ -536,8 +536,8 @@ saturate_loop(Vec,I,K,NB,Bs) ->
 
 %% progress info
 saturate_info(I,K,Bs) ->
-    NV = formula:number_of_variables(Bs),
-    B = formula:number_of_bound(Bs),
+    NV = varp_formula:number_of_variables(Bs),
+    B = varp_formula:number_of_bound(Bs),
     NU = NV-B,
     N = varp_math:binom(NU, K),
     P = trunc(10000*(I / N)),
@@ -546,7 +546,7 @@ saturate_info(I,K,Bs) ->
 	_ ->
 	    put(last_print,P),
 	    put(last_bound,B),
-	    formula:info(Bs, "~.3f% [~w/~w]   \r", [P/100,B,NV])
+	    varp_formula:info(Bs, "~.3f% [~w/~w]   \r", [P/100,B,NV])
     end.
 
 %% Saturate for all permutations of vector
@@ -569,14 +569,14 @@ perms(L) -> [[H|T] || H <- L, T <- perms(L--[H])].
 %% update vector with extra var if wanted and
 %% check vector
 saturate_vec(Vec, Bs) ->
-    case formula:getopt(pair,Bs) of
+    case varp_formula:getopt(pair,Bs) of
 	false ->
 	    %% io:format("saturate_vec: ~w\n", [Vec]),
-	    formula:debug(Bs, "vector: ~p\n", [Vec]),
+	    varp_formula:debug(Bs, "vector: ~p\n", [Vec]),
 	    saturate_vec_(Vec, Bs);
 	true ->
 	    Vec1 = expand_vector(Vec,Bs),
-	    formula:debug(Bs, "vector: ~p\n", [Vec1]),
+	    varp_formula:debug(Bs, "vector: ~p\n", [Vec1]),
 	    %% io:format("saturate_vec: ~w\n", [Vec1]),
 	    saturate_vec_(Vec1, Bs)
     end.
@@ -600,7 +600,7 @@ saturate_vec_([{_,X}|V], Bs) ->
 			    case saturate_vec_(V,BsF0) of
 				false -> BsT;
 				BsF ->
-				    Bound = formula:latest_bound(BsT),
+				    Bound = varp_formula:latest_bound(BsT),
 				    Ps = intersect(X,Bound,BsT,BsF),
 				    eval_list_(Ps,Bs)
 			    end
@@ -619,8 +619,8 @@ saturate_vec_([], Bs) ->
 %% @end
 %%
 intersect(X, [Y|Bound], BsT, BsF) ->
-    VT  = formula:value(Y,BsT),
-    VF  = formula:value(Y,BsF),
+    VT  = varp_formula:value(Y,BsT),
+    VF  = varp_formula:value(Y,BsF),
     if VT =:= VF ->
 	    [{Y,VT}|intersect(X,Bound,BsT,BsF)];
        VT =:= ?TRUE,VF =:= ?FALSE ->
@@ -628,9 +628,9 @@ intersect(X, [Y|Bound], BsT, BsF) ->
        VT =:= ?FALSE,VF =:= ?TRUE ->
 	    [{X,-Y}|intersect(X,Bound,BsT,BsF)];
        true ->
-	    VT1 = formula:value(VT, BsF),
+	    VT1 = varp_formula:value(VT, BsF),
 	    if VF =:= VT1 ->
-		    VF1 = formula:value(VF, BsT),
+		    VF1 = varp_formula:value(VF, BsT),
 		    if VT =:= VF1 ->
 			    %% all matching bindings in class?
 			    [{Y,VT}|intersect(X,Bound,BsT,BsF)];
@@ -646,10 +646,10 @@ intersect(_X,[],_BsT,_BsF) ->
 
 equal_eval(V, Value, Bs) ->
     ?dbg("eval_equal: ~s = ~s\n", 
-	 [formula:fmt_var(V,Bs),formula:fmt_var(Value,Bs)]),
-    try formula:equal(V, Value, Bs) of
+	 [varp_formula:fmt_var(V,Bs),varp_formula:fmt_var(Value,Bs)]),
+    try varp_formula:equal(V, Value, Bs) of
 	Bs1 ->
-	    try formula:eval(Bs1) of
+	    try varp_formula:eval(Bs1) of
 		Result -> Result
 	    catch
 		throw:contradiction -> false
@@ -660,11 +660,11 @@ equal_eval(V, Value, Bs) ->
 
 equal_mark_eval(V, Value, Bs) ->
     ?dbg("eval_equal: ~s = ~s\n", 
-	 [formula:fmt_var(V,Bs),formula:fmt_var(Value,Bs)]),
-    try formula:equal(V, Value, Bs) of
+	 [varp_formula:fmt_var(V,Bs),varp_formula:fmt_var(Value,Bs)]),
+    try varp_formula:equal(V, Value, Bs) of
 	Bs1 ->
-	    Bs2 = formula:mark(Bs1),
-	    try formula:eval(Bs2) of
+	    Bs2 = varp_formula:mark(Bs1),
+	    try varp_formula:eval(Bs2) of
 		Result -> Result
 	    catch
 		throw:contradiction -> false

@@ -5,7 +5,7 @@
 %%% @end
 %%% Created :  2 Sep 2012 by Tony Rogvall <tony@rogvall.se>
 
--module(formula).
+-module(varp_formula).
 
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -57,8 +57,8 @@
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
 -define(pair(A,B),  [(A)|(B)]).
 
--define(dbg(F,A), io:format((F),(A))).
-%% -define(dbg(F,A), ok).
+%% -define(dbg(F,A), io:format((F),(A))).
+-define(dbg(F,A), ok).
 
 -record(bs,
 	{
@@ -219,7 +219,7 @@ fmt_var_(X, P, Q, Bs) ->
 
 variable(V, Bs) ->
     W = expand_meta(V, Bs),
-    ?dbg("variable expand: ~w -> ~w\n", [V,W]),
+    ?dbg("variable expand: ~p -> ~w\n", [V,W]),
     case find_var(W, Bs) of
 	error ->
 	    case W of
@@ -229,7 +229,7 @@ variable(V, Bs) ->
 			false ->
 			    make_variable(W, Bs);
 			{_W1={p,_,Ps},Def} ->
-			    ?dbg("~w = ~p\n", [_W1,Def]),
+			    ?dbg("~p = ~p\n", [_W1,Def]),
 			    Names = [Name || #cid{name=Name}<-Ps],
 			    Bnd2 = lists:zip(Names,Rs),
 			    Meta = Bnd2 ++ Bs#bs.meta,
@@ -238,7 +238,9 @@ variable(V, Bs) ->
 			    Meta1 = lists:nthtail(length(Bnd2),Bs1#bs.meta),
 			    case R of
 				{bool,N} ->
-				    {N,Bs1#bs { meta=Meta1}}
+				    {N,Bs1#bs { meta=Meta1}};
+				Vector ->
+				    {Vector,Bs1#bs { meta=Meta1}}
 			    end
 		    end;
 		_ ->
@@ -392,10 +394,11 @@ build_(V={p,P,Ps}, Bs) ->
     end;
 build_({uint,N,V}, Bs) ->
     if is_atom(V) ->
-	    case proplists:lookup(V,Bs#bs.meta) of
+	    Vn = atom_to_list(V),
+	    case proplists:lookup(Vn,Bs#bs.meta) of
 		none ->
-		    io:format("variable '~s' is not bound\n", [V]),
-		    error({unbound, V});
+		    io:format("variable '~s' is not bound\n", [Vn]),
+		    error({unbound, Vn});
 		{_,W} ->
 		    const_vector(uint,W,N,Bs)
 	    end;
@@ -404,10 +407,11 @@ build_({uint,N,V}, Bs) ->
     end;
 build_({int,N,V}, Bs) ->
     if is_atom(V) ->
-	    case proplists:lookup(V,Bs#bs.meta) of
+	    Vn = atom_to_list(V),
+	    case proplists:lookup(Vn,Bs#bs.meta) of
 		none ->
-		    io:format("variable '~s' is not bound\n", [V]),
-		    error({unbound, V});
+		    io:format("variable '~s' is not bound\n", [Vn]),
+		    error({unbound, Vn});
 		{_,W} ->
 		    const_vector(int,W,N,Bs)
 	    end;
@@ -416,10 +420,11 @@ build_({int,N,V}, Bs) ->
     end;
 build_({bit,N,V}, Bs) ->
     if  is_atom(V) -> 
-	    case proplists:lookup(V,Bs#bs.meta) of
+	    Vn = atom_to_list(V),
+	    case proplists:lookup(Vn,Bs#bs.meta) of
 		none ->
-		    io:format("variable '~s' is not bound\n", [V]),
-		    error({unbound, V});
+		    io:format("variable '~s' is not bound\n", [Vn]),
+		    error({unbound, Vn});
 		{_,W} ->
 		    const_vector(bit,W,N,Bs)
 	    end;
@@ -700,6 +705,15 @@ eval_meta(#cid {name=Vn}, Bs) ->
 	{_,W} -> 
 	    W
     end;
+eval_meta(V, Bs) when is_atom(V) -> %% old format still around
+    Vn = atom_to_list(V),
+    case proplists:lookup(Vn,Bs#bs.meta) of
+	none ->
+	    io:format("variable '~s' is not bound\n", [Vn]),
+	    error({unbound, Vn});
+	{_,W} -> 
+	    W
+    end;    
 eval_meta(#ccall{func=F,args=As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
 	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);

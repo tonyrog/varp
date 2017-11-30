@@ -9,6 +9,8 @@
 
 -compile(export_all).
 
+-export([all/0]).
+
 all() ->
     test1(),
     test2(),
@@ -211,8 +213,8 @@ or_conflict() ->
     V = varc:new(),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
+    _X4 = varc:add_variable(V),
+    _X5 = varc:add_variable(V),
 
     C0 = varc:add_clause(V, 'or', true, false, false, X2, X3),
     C1 = varc:add_clause(V, 'or', true, false, false, X2, -X3),
@@ -460,8 +462,8 @@ cnf_var(V, Var, Map) ->
 pigeon(N) ->
     {ok,{_Defs,_Decls,_Code,F}} = 
 	varp:file(filename:join([code:priv_dir(varp), "varp", "pigeon.varp"])),
-    F1 = form:expand(F, [{n,N}]),
-    {Cs,_} = cnf:clauses(F1),
+    F1 = varp_expand:formula(F, [{"n",N}]),
+    {Cs,_} = varp_cnf:clauses(F1),
     V = varc:new(),
     pigeon_clauses(V, Cs, #{}),
     varc:order_sort(V, random, 1000),

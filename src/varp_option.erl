@@ -15,7 +15,7 @@
 
 -export([setopts/2, setopt/3, getopt/2]).
 
--include("option.hrl").
+-include("varp_option.hrl").
 -include("log.hrl").
 
 %%

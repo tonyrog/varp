@@ -714,7 +714,7 @@ get_xref(X,Vare,Ts) when X > 0 ->
 get_xref(X,Vare,Ts) when X < 0 -> get_xref(-X,Vare,Ts);
 get_xref(0, _Ts, _Vare) -> [].
 
-
+-ifdef(dbg).
 fmt_triple({Op,X,Y,Z}, Vare) ->
     [fmt_var(X,Vare),":",fmt_var(Y,Vare),fmtop(Op),fmt_var(Z,Vare)].
 
@@ -729,3 +729,4 @@ fmtop('xor') -> " ^ ";
 fmtop('and') -> " & ";
 fmtop('or') -> " | ";
 fmtop('not') -> "~".
+-endif.

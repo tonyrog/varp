@@ -5,107 +5,118 @@
 %%% @end
 %%% Created : 14 Sep 2012 by Tony Rogvall <tony@rogvall.se>
 
--module(form).
+-module(varp_expand).
 
--export([expand/1, expand/2]).
--compile(export_all).
--import(lists, [map/2, foldl/3]).
+-export([formula/1, formula/2]).
+-export([variables/1]).
+-export([subst/3, peval/1, eval/2]).
+-export([print/1]).
+
+-export([ysat_skolem/1, test/1, ysat_gunnar/1]).
+-export([count_ysat_models/1]).
+-export([test_gunnar/1, test_print/1]).
+-export([count_counter_models/2, count_models/2]).
+
 
 -include("varp_bic.hrl").
 
-expand(F) ->
-    expand(F, []).
+%% expand formula F expanding all use of meta variables, instanciate predicates
+formula(F) ->
+    formula(F, []).
 
-expand(true,_Bs) ->
+formula(F,Bs) ->
+    form_(F, Bs).
+
+form_(true,_Bs) ->
     true;
-expand(false,_Bs) ->
+form_(false,_Bs) ->
     false;
-expand(V, Bs) when is_atom(V) -> 
+form_(V, Bs) when is_atom(V) -> 
     expand_meta({p,V,[]}, Bs);
-expand({expr,E},Bs) ->
+form_({expr,E},Bs) ->
     eval_meta(E,Bs);
-expand(_P0={p,P,Vs},Bs) ->
+form_(_P0={p,P,Vs},Bs) ->
     P1 = {p,P,eval_meta_list(Vs,Bs)},
     %% io:format("expand: ~p => ~p\n", [_P0, P1]),
     expand_meta(P1, Bs);
 
-expand({'&',A,B},Bs) ->     {'&',expand(A,Bs),expand(B,Bs)};
-expand({'&&',A,B},Bs) ->    {'&&',expand(A,Bs),expand(B,Bs)};
-expand({'and',A,B},Bs) ->   {'and',expand(A,Bs),expand(B,Bs)};
-expand({'|',A,B},Bs) ->     {'|',expand(A,Bs),expand(B,Bs)};
-expand({'||',A,B},Bs) ->    {'||',expand(A,Bs),expand(B,Bs)};
-expand({'or',A,B},Bs) ->    {'or',expand(A,Bs),expand(B,Bs)};
-expand({'->',A,B},Bs) ->    {'->',expand(A,Bs),expand(B,Bs)};
-expand({'imp',A,B},Bs) ->   {'imp',expand(A,Bs),expand(B,Bs)};
-expand({'!',A},Bs) ->       {'!',expand(A,Bs)};
-expand({'not',A},Bs) ->     {'not',expand(A,Bs)};
-expand({'~',A},Bs) ->       {'~',expand(A,Bs)};
-expand({'equ',A,B},Bs) ->   {'equ',expand(A,Bs),expand(B,Bs)};
-expand({'=',A,B},Bs) ->     {'=',expand(A,Bs),expand(B,Bs)};
-expand({'^',A,B},Bs) ->     {'^',expand(A,Bs),expand(B,Bs)};
-expand({'xor',A,B},Bs) ->   {'xor',expand(A,Bs),expand(B,Bs)};
-expand({'<->',A,B},Bs) ->   {'<->',expand(A,Bs),expand(B,Bs)};
-expand({'!=',A,B},Bs) ->    {'!=',expand(A,Bs),expand(B,Bs)};
-expand({subst,Rx,Py,F},Bs) ->  expand(F, [{Rx,Py}|Bs]);
-expand({subst,SList,F},Bs) ->  expand(F, SList++Bs);
+form_({'&',A,B},Bs) ->     {'&',form_(A,Bs),form_(B,Bs)};
+form_({'&&',A,B},Bs) ->    {'&&',form_(A,Bs),form_(B,Bs)};
+form_({'and',A,B},Bs) ->   {'and',form_(A,Bs),form_(B,Bs)};
+form_({'|',A,B},Bs) ->     {'|',form_(A,Bs),form_(B,Bs)};
+form_({'||',A,B},Bs) ->    {'||',form_(A,Bs),form_(B,Bs)};
+form_({'or',A,B},Bs) ->    {'or',form_(A,Bs),form_(B,Bs)};
+form_({'->',A,B},Bs) ->    {'->',form_(A,Bs),form_(B,Bs)};
+form_({'imp',A,B},Bs) ->   {'imp',form_(A,Bs),form_(B,Bs)};
+form_({'!',A},Bs) ->       {'!',form_(A,Bs)};
+form_({'not',A},Bs) ->     {'not',form_(A,Bs)};
+form_({'~',A},Bs) ->       {'~',form_(A,Bs)};
+form_({'equ',A,B},Bs) ->   {'equ',form_(A,Bs),form_(B,Bs)};
+form_({'=',A,B},Bs) ->     {'=',form_(A,Bs),form_(B,Bs)};
+form_({'^',A,B},Bs) ->     {'^',form_(A,Bs),form_(B,Bs)};
+form_({'xor',A,B},Bs) ->   {'xor',form_(A,Bs),form_(B,Bs)};
+form_({'<->',A,B},Bs) ->   {'<->',form_(A,Bs),form_(B,Bs)};
+form_({'!=',A,B},Bs) ->    {'!=',form_(A,Bs),form_(B,Bs)};
+form_({subst,Rx,Py,F},Bs) ->  form_(F, [{Rx,Py}|Bs]);
+form_({subst,SList,F},Bs) ->  form_(F, SList++Bs);
 
-expand({'ALL',Fs}, Bs) when is_list(Fs) ->
+form_({'ALL',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     all(Ys);
-expand({'ANY',Fs}, Bs) when is_list(Fs) ->
+form_({'ANY',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     any(Ys);
-expand({'ONE',Fs}, Bs) when is_list(Fs) ->
+form_({'ONE',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     one(Ys);
-expand({'NONE',Fs}, Bs) when is_list(Fs) ->
+form_({'NONE',Fs}, Bs) when is_list(Fs) ->
     Ys = expand_args(Fs, Bs),
     none(Ys);
 
-expand({{'ALL',Xs}, F}, Bs) ->
+form_({{'ALL',Xs}, F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     all(Ys);
-expand({{'ANY',Xs},F}, Bs) ->
+form_({{'ANY',Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     any(Ys);
-expand({{'ONE',Xs},F}, Bs) ->
+form_({{'ONE',Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     one(Ys);
-expand({{'NONE',Xs},F}, Bs) ->
+form_({{'NONE',Xs},F}, Bs) ->
     Ys = expand_quant(F,Xs,Bs),
     none(Ys);
 
-expand({{'EQ',[X1|Xs]},F}, Bs) ->
+form_({{'EQ',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     if N =:= 1 -> one(Ys);
        true -> {'EQ',N,Ys}
     end;
-expand({{'NEQ',[X1|Xs]},F}, Bs) ->
+form_({{'NEQ',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {'NEQ',N,Ys};
-expand({{'GT',[X1|Xs]},F}, Bs) ->
+form_({{'GT',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {'GT',N,Ys};
-expand({{'GTE',[X1|Xs]},F}, Bs) ->
+form_({{'GTE',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {'GTE',N,Ys};
-expand({{'LT',[X1|Xs]},F}, Bs) ->
+form_({{'LT',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {'LT',N,Ys};
-expand({{'LTE',[X1|Xs]},F}, Bs) ->
+form_({{'LTE',[X1|Xs]},F}, Bs) ->
     N = eval_meta(X1,Bs),
     Ys = expand_quant(F,Xs,Bs),
     {'LTE',N,Ys};
 
-expand(F, _Bs) ->
+form_(F, _Bs) ->
     F.
 
-expand_quant(F,[{'=',V,D}|Xs], Bs) ->
+expand_quant(F,[#cassign{op='=',lhs=#cid{name=V},rhs=D}|Xs], Bs) ->
     Ds = eval_domain(D, Bs),
     expand_quant_domain(F, V, Ds, Xs, Bs);
 expand_quant(F, [Expr|Xs], Bs) ->
@@ -114,7 +125,7 @@ expand_quant(F, [Expr|Xs], Bs) ->
 	true -> expand_quant(F, Xs, Bs)
     end;
 expand_quant(F, [], Bs) ->
-    [expand(F,Bs)].
+    [form_(F,Bs)].
 
 	    
 expand_quant_domain(F, V, [Y|Ys], Xs, Bs) ->
@@ -127,12 +138,12 @@ expand_quant_domain(_F, _V, [], _Xs, _Bs) ->
 expand_args(Fs,Bs) when is_list(Fs) ->
     expand_args_(Fs,Bs);
 expand_args(F,Bs) ->
-    case expand(F,Bs) of
+    case form_(F,Bs) of
 	Fs when is_list(Fs) -> expand_args(Fs,Bs)
     end.
 
 expand_args_([F|Fs],Bs) ->
-    case expand(F,Bs) of
+    case form_(F,Bs) of
 	undefined -> expand_args_(Fs,Bs);
 	F1 -> [F1 | expand_args_(Fs,Bs)]
     end;
@@ -158,7 +169,6 @@ expand_meta(_Rx={p,P,Rs},Bs) when is_atom(P) ->
 expand_meta(V,_Bs) ->
     %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),    
     V.
-
 
 eval_domain(#crange{from=A,to=B}, Bs) ->
     A1 = eval_meta(A,Bs),
@@ -365,7 +375,7 @@ eval_meta(#cunary{op=Op,arg=A},Bs) ->
     end.
 
 eval_meta_list(As,Bs) ->
-    map(fun(A) -> eval_meta(A,Bs) end, As).
+    lists:map(fun(A) -> eval_meta(A,Bs) end, As).
     
 print(F) ->
     io:put_chars([fmt(F),"\n"]).
@@ -384,8 +394,10 @@ fmt_list([A]) -> [fmt(A)];
 fmt_list([A|As]) -> [fmt(A),"," | fmt_list(As)];
 fmt_list([]) -> [].
 
+-ifdef(not_used).
 fmt_q(X) ->
     fmt_var(X, "\"").
+-endif.
 
 fmt_var(X) ->
     fmt_var(X, "").
@@ -438,7 +450,7 @@ vars_list([],Set) -> Set.
 
 
 ysat_skolem(N) ->
-    R0 = expand(formulas:ysat(N)),
+    R0 = formula(formulas:ysat(N)),
     %% generate expanded skolem formula for r(i)/1
     R1 = lists:foldl(
 	   fun(I,Fi) ->
@@ -453,17 +465,18 @@ test(N) ->
 
 
 ysat_gunnar(N) ->
-    F = expand(formulas:ysat(N)),
+    F = formula(formulas:ysat(N)),
     RI  = [{r,I} || I <- lists:seq(1,N)],
     R1 =
-	any(map(
-	      fun(I) ->
-		      Row = [X =:= 1 || <<X:1>> <= <<I:N>>],
-		      lists:foldl(
-			fun({Ri,Vi}, Fi) ->
-				subst(Fi, Ri, Vi)
-			end, F, lists:zip(RI, Row))
-	      end, lists:seq(0, (1 bsl N)-1))),
+	any(
+	  lists:map(
+	    fun(I) ->
+		    Row = [X =:= 1 || <<X:1>> <= <<I:N>>],
+		    lists:foldl(
+		      fun({Ri,Vi}, Fi) ->
+			      subst(Fi, Ri, Vi)
+		      end, F, lists:zip(RI, Row))
+	    end, lists:seq(0, (1 bsl N)-1))),
     peval(R1).
 
     
@@ -482,7 +495,7 @@ eval_ysat(F, N) ->
     QIJ = [{q,I,J} || I <- lists:seq(1,N), 
 		      J <- lists:seq(1,N)],
     PIJQIJ = PIJ ++ QIJ,
-    map(
+    lists:map(
       fun(I) ->
 	      Row = [X =:= 1 || <<X:1>> <= <<I:K>>],
 	      Assign = lists:zip(PIJQIJ, Row),
@@ -491,7 +504,7 @@ eval_ysat(F, N) ->
       end, lists:seq(0, (1 bsl K)-1)).
 
 test_print(N) ->
-    G=lists:filter(fun({R,_}) -> not R end, form:test_gunnar(N)),
+    G=lists:filter(fun({R,_}) -> not R end, test_gunnar(N)),
     lists:foreach(
       fun({_, M}) -> 
 	      io:format("~s\n", 
@@ -520,7 +533,7 @@ count_ysat_models(N) ->
     QIJ = [{q,I,J} || I <- lists:seq(1,N), 
 		      J <- lists:seq(1,N)],
     PIJQIJ = PIJ ++ QIJ,
-    foldl(
+    lists:foldl(
       fun(I,Count) ->
 	      Row = [X =:= 1 || <<X:1>> <= <<I:K>>],
 	      Assign = lists:zip(PIJQIJ, Row),

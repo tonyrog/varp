@@ -6,7 +6,13 @@
 %%% Created : 10 Dec 2013 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_math).
--compile(export_all).
+
+-export([factorial/1]).
+-export([binom/2]).
+-export([pow/2]).
+-export([ilog2/1]).
+-export([integer_size/1]).
+-export([unsigned_size/1]).
 
 factorial(0) -> 1;
 factorial(N) when N > 0 -> 

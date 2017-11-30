@@ -28,16 +28,16 @@ models(R, Vs, Model) ->
     end.
     
 %%
-%% Construct a bbd from Formula F (see form:expand for forms)
+%% Construct a bbd from Formula F (see varp_expand:formula for forms)
 %%
 %% Return {Root,Free,Nodes}
 %% Nodes = [{Vi,Var,E0,E1}]
 %%
 construct(F) ->
-    construct_(form:expand(F)).
+    construct_(varp_expand:formula(F)).
 
 construct_(F) ->
-    case form:variables(F) of
+    case varp_expand:variables(F) of
 	[] ->
 	    peval(F, undefined, undefined);
 	Vs ->

@@ -1,7 +1,7 @@
 -ifndef(__LOG_HRL__).
 -define(__LOG_HRL__, true).
 
--include("option.hrl").
+-include("varp_option.hrl").
 
 -define(LOG_NONE, -1).
 -define(EMERGENCY, 0).

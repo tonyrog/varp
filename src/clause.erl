@@ -27,15 +27,15 @@ load_varp(File,Bs) ->
     case varp:file(File) of
 	{ok,Formula} ->
 	    F = form:expand(Formula,Bs),
-	    {Cs,_Ls} = cnf:clauses(F),
-	    Cs1 = dimacs:from_cnf(Cs),
+	    {Cs,_Ls} = varp_cnf:clauses(F),
+	    Cs1 = varp_dimacs:from_cnf(Cs),
 	    {ok,[new(CL) || CL <- Cs1]};
 	Error ->
 	    Error
     end.
 
 load_cnf(File) ->
-    case dimacs:load(File) of
+    case varp_dimacs:load(File) of
 	{cnf,{_NVars,_NClauses,CLs}} ->
 	    %% revert to normal dimacs format...
 	    {ok, from_xi(CLs)};

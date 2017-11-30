@@ -76,10 +76,10 @@ run(none, Formula, Opts) ->
 run(snf, Formula, Opts) ->
     %% generate dimacs snf from a formula
     Bs = proplists:get_value(env,Opts,[]),
-    F = form:expand(Formula,Bs),
+    F = varp_expand:formula(Formula,Bs),
     %% Cs=clauses and Ls=literals eliminated
-    {Cs,_Ls} = cnf:clauses(F),
-    Data = cnf:format(Cs),
+    {Cs,_Ls} = varp_cnf:clauses(F),
+    Data = varp_cnf:format(Cs),
     case proplists:get_value(output,Opts,"") of
 	"" ->
 	    io:put_chars(Data);
@@ -90,10 +90,10 @@ run(snf, Formula, Opts) ->
 run(cnf, Formula, Opts) ->
     %% generate dimacs cnf from a formula
     Bs = proplists:get_value(env,Opts,[]),
-    F = form:expand(Formula,Bs),
+    F = varp_expand:formula(Formula,Bs),
     %% Cs=clauses and Ls=literals eliminated
-    {Cs,_Ls} = cnf:clauses(F),
-    Data = dimacs:format(Cs),
+    {Cs,_Ls} = varp_cnf:clauses(F),
+    Data = varp_dimacs:format(Cs),
     case proplists:get_value(output,Opts,"") of
 	"" ->
 	    io:put_chars(Data);
@@ -105,7 +105,6 @@ run(help, _Formula, _Opts) ->
     varp_option:usage();
 run(version, _Formula, _Opts) ->
     varp_option:version().
-
 
 result(true,prove) ->       io:format("% TRUE\n", []);
 result(false,prove) ->      io:format("% FALSE\n", []);
@@ -119,7 +118,7 @@ result({N,_Mdls}, _) -> io:format("% ~w\n", [N]).
 load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp) ->
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf" ->
-	    case dimacs:load(F) of
+	    case varp_dimacs:load(F) of
 		Error={error,_Reason} ->
 		    io:format("~s: error: ~p\n", [F,_Reason]),
 		    Error;
@@ -201,12 +200,12 @@ collect_in(Acc) ->
 run_formula(Formula) ->
     run_formula(Formula,[]).
 run_formula(Formula,Opts) ->
-    prover:run_formula(Formula, Opts).
+    varp_prover:run_formula(Formula, Opts).
 
 prove_formula(Formula) ->
     prove_formula(Formula,[]).
 prove_formula(Formula,Opts) ->
-    prover:prove_formula(Formula, [{max,2}|Opts]).
+    varp_prover:prove_formula(Formula, [{max,2}|Opts]).
 
 file(File) ->
     case file:read_file(File) of
@@ -298,8 +297,8 @@ remove_line([]) -> [].
 file_expand_cnf(File, MetaBind) ->
     case file(File) of
 	{ok,F} ->
-	    F1 = form:expand(F,MetaBind),
-	    {CLs,_Ls} = cnf:clauses(F1),
+	    F1 = varp_expand:formula(F,MetaBind),
+	    {CLs,_Ls} = varp_cnf:clauses(F1),
 	    CLs;
 	Error ->
 	    Error

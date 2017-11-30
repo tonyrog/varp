@@ -483,7 +483,7 @@ cfile -> external_definition : '$1'.
 cfile -> cfile external_definition : '$1'++'$2'.
 
 external_definition -> function_definition : ['$1'].
-external_definition -> declaration : '$1'.
+external_definition -> declaration_list statement_list : '$1'++'$2'.
 
 function_definition -> declarator function_body : 
 		   {OldDecl,Body} = '$2',
@@ -554,7 +554,7 @@ pdecls -> pdecls ',' pdecl : '$1'++['$3'].
 %%
 lexpr_prim -> integer               : constant(value('$1')).
 lexpr_prim -> pexpr                 : '$1'.
-lexpr_prim -> identifier            : {'expr',name('$1')}.
+lexpr_prim -> identifier            : name('$1').
 lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
 
 lexpr0 -> lexpr_prim                : '$1'.
@@ -739,13 +739,10 @@ value({octnum,_,Num})       -> list_to_integer(Num,8);
 value({hexnum,_,"0x"++Num}) -> list_to_integer(Num,16);
 value({binnum,_,"0b"++Num}) -> list_to_integer(Num,2).
 
-comma_list(Expr) ->
-    comma_list(Expr,[]).
-
-comma_list(#cbinary{op=',',arg1=A,arg2=As}, Acc) ->
-    comma_list(As, [A|Acc]);
-comma_list(A, Acc) ->
-    lists:reverse([A|Acc]).
+comma_list(#cbinary{op=',',arg1=A1,arg2=A2}) ->
+    comma_list(A1) ++ comma_list(A2);
+comma_list(A) ->
+    [A].
 
 machine_type(Type) ->
     machine_type(int,Type).
