@@ -496,7 +496,7 @@ build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
 build_({cnf,{[],[]}},Bs) ->
     build_(false, Bs);
 build_({cnf,{Cs,Ls}},Bs) when is_list(Cs), is_list(Ls) ->
-    build_({'and',{all,Ls},cnf_to_formula(Cs)},Bs);
+    build_({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
 build_({cnf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
     build_(cnf_to_formula(Cs),Bs);
 build_({cnf,Cs},Bs) ->
@@ -1757,7 +1757,7 @@ minmax2(X1,X2,Bs) ->
     {Min,Max,Bs2}.
 
 cnf_to_formula(Cs) ->
-    {all, [{any, C} || C <- Cs]}.
+    {'ALL', [{'ANY', C} || C <- Cs]}.
 
 is_equivalent(X, Y, Bs) ->
     class(X,Bs) =:= class(Y,Bs).

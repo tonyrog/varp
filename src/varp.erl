@@ -117,7 +117,7 @@ result({N,_Mdls}, _) -> io:format("% ~w\n", [N]).
 %% load files and form a conjunction over all files
 load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp) ->
     Ext = filename:extension(F),
-    if Ext =:= ".cnf"; Ext =:= ".snf" ->
+    if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
 	    case varp_dimacs:load(F) of
 		Error={error,_Reason} ->
 		    io:format("~s: error: ~p\n", [F,_Reason]),

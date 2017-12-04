@@ -341,14 +341,3 @@ index(V, Vs) ->
 
 index(V, I, [V|_]) -> I;
 index(V, I, [_|Vs]) -> index(V,I+1,Vs).
-
-
-    
-
-
-
-
-
-
-
-

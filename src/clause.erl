@@ -26,7 +26,7 @@ load_varp(File) ->
 load_varp(File,Bs) ->
     case varp:file(File) of
 	{ok,Formula} ->
-	    F = form:expand(Formula,Bs),
+	    F = varp_expandd:formula(Formula,Bs),
 	    {Cs,_Ls} = varp_cnf:clauses(F),
 	    Cs1 = varp_dimacs:from_cnf(Cs),
 	    {ok,[new(CL) || CL <- Cs1]};

@@ -12,8 +12,8 @@
 -export([new/0]).
 -export([new/1]).
 -export([new/2]).
+-export([info/2]).
 -export([add_variable/1]).
--export([get_number_of_variables/1]).
 -export([get/2]).
 -export([put/3]).
 -export([class/2]).
@@ -34,7 +34,6 @@
 -export([get_clause/2]).
 -export([get_clause_flags/2]).
 -export([del_clause/2]).
--export([get_number_of_clauses/1]).
 -export([get_clauses/2]).
 -export([get_queue/1]).
 -export([clear_queue/1]).
@@ -42,7 +41,14 @@
 -export([order_first/1, order_next/2]).
 -export([order_sort/2, order_sort/3]).
 -export([order_all/1]).
+
 -export([sat/1, sat/2]).
+-export([saturate/2]).
+
+-export([get_max_clause_length/1]).
+-export([get_number_of_variables/1]).
+-export([get_number_of_clauses/1]).
+
 
 -ifdef(debug).
 -define(debug(F,A), io:format((F),(A))).
@@ -50,7 +56,6 @@
 -define(debug(F,A), ok).
 -endif.
 
--define(is_varc(Varc), is_binary(Varc)).
 -define(is_op(Op), (((Op) =:= 'and') 
 		    orelse ((Op) =:= 'or') 
 		    orelse ((Op) =:= 'xor')
@@ -75,79 +80,74 @@ new(Size,Expand) when is_integer(Size), Size >= 0,
 		      is_integer(Expand), Expand >= 0 ->
     ?nif_stub().
 
-add_variable(Varc) when ?is_varc(Varc) ->
+info(_Vp, Item) when is_atom(Item) ->
     ?nif_stub().
 
-get_number_of_variables(Varc) when ?is_varc(Varc) ->
+add_variable(_Vp) ->
     ?nif_stub().
 
-get(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+get(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-put(Varc, LitA, LitB) when ?is_varc(Varc), 
-			   is_integer(LitA),
-			   is_integer(LitB) ->
+put(_Vp, LitA, LitB) when is_integer(LitA),
+			  is_integer(LitB) ->
     ?nif_stub().
 
 
-class(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+class(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-occure(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+occure(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-is_variable(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+is_variable(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-is_bound(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+is_bound(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-class_next(Varc, Lit) when ?is_varc(Varc), is_integer(Lit) ->
+class_next(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-equal(Varc, LitA, LitB) when ?is_varc(Varc), 
-			     is_integer(LitA),
-			     is_integer(LitB) ->
+equal(_Vp, LitA, LitB) when is_integer(LitA),
+			    is_integer(LitB) ->
     ?nif_stub().
 
-mark(Varc,Level) when ?is_varc(Varc), is_integer(Level), Level >= 0 ->
+mark(_Vp,Level) when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
-undo(Varc) when ?is_varc(Varc) ->
+undo(_Vp) ->
     ?nif_stub().
 
-eval(Varc) when ?is_varc(Varc) ->
+eval(_Vp) ->
     ?nif_stub().
 
-get_number_of_clauses(Varc) when ?is_varc(Varc) ->
+add_clause(_Vp,Op,Ls) when ?is_op(Op), is_list(Ls) ->
     ?nif_stub().
 
-add_clause(Varc,Op,Ls) when ?is_varc(Varc), ?is_op(Op), is_list(Ls) ->
-    ?nif_stub().
-
-add_clause(Varc,Op,X1,X2)
-  when ?is_varc(Varc), ?is_op(Op),
+add_clause(_Vp,Op,X1,X2)
+  when ?is_op(Op),
        is_integer(X1),
        is_integer(X2) ->
     ?nif_stub().
 
-add_clause(Varc,Op,X1,X2,X3) 
-  when ?is_varc(Varc), ?is_op(Op),
+add_clause(_Vp,Op,X1,X2,X3) 
+  when ?is_op(Op),
        is_integer(X1),
        is_integer(X2),
        is_integer(X3) ->
     ?nif_stub().
 
-add_clause(Varc,Op,X1,X2,X3,X4) when 
-      ?is_varc(Varc), ?is_op(Op),
+add_clause(_Vp,Op,X1,X2,X3,X4) when 
+      ?is_op(Op),
       is_integer(X1),
       is_integer(X2),
       is_integer(X3),
       is_integer(X4) ->
     ?nif_stub().
 
-add_clause(Varc,Op,X1,X2,X3,X4,X5) when 
-      ?is_varc(Varc), ?is_op(Op),
+add_clause(_Vp,Op,X1,X2,X3,X4,X5) when 
+      ?is_op(Op),
       is_integer(X1),
       is_integer(X2),
       is_integer(X3),
@@ -155,8 +155,8 @@ add_clause(Varc,Op,X1,X2,X3,X4,X5) when
       is_integer(X5) ->
     ?nif_stub().
 
-add_clause(Varc,Op,X1,X2,X3,X4,X5,X6) when 
-      ?is_varc(Varc), ?is_op(Op),
+add_clause(_Vp,Op,X1,X2,X3,X4,X5,X6) when 
+      ?is_op(Op),
       is_integer(X1),
       is_integer(X2),
       is_integer(X3),
@@ -165,51 +165,46 @@ add_clause(Varc,Op,X1,X2,X3,X4,X5,X6) when
       is_integer(X6) ->
     ?nif_stub().
 
-get_clause(Varc,Index)
-  when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
+get_clause(_Vp,Index)
+  when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-get_clause_flags(Varc,Index)
-  when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
+get_clause_flags(_Vp,Index)
+  when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-del_clause(Varc,Index)
-  when ?is_varc(Varc), is_integer(Index), Index >= 0 ->
+del_clause(_Vp,Index)
+  when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-get_clauses(Varc,Var)
-  when ?is_varc(Varc), is_integer(Var), Var >= 0 ->
+get_clauses(_Vp,Var)
+  when is_integer(Var), Var >= 0 ->
     ?nif_stub().
 
-get_queue(Varc)
-  when ?is_varc(Varc) ->
+get_queue(_Vp) ->
     ?nif_stub().
 
-clear_queue(Varc)
-  when ?is_varc(Varc) ->
+clear_queue(_Vp) ->
     ?nif_stub().
 
-get_bindings(Varc, Level)
-  when ?is_varc(Varc), is_integer(Level), Level >= 0 ->
+get_bindings(_Vp, Level)
+  when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
 %% return {Ix,Var} | false
-order_first(Varc) 
-  when ?is_varc(Varc) ->
+order_first(_Vp) ->
     ?nif_stub().
 
-order_next(Varc, Ix)
-  when ?is_varc(Varc), is_integer(Ix), Ix > 0 ->
+order_next(_Vp, Ix)
+  when is_integer(Ix), Ix > 0 ->
     ?nif_stub().
 
-order_sort(Varc, Sort) 
-  when ?is_varc(Varc),
-       ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)) ->
+order_sort(_Vp, Sort) 
+  when ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)) ->
     ?nif_stub().
 
-order_sort(Varc, Sort, Arg) 
-  when ?is_varc(Varc),
-       ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)),
+order_sort(_Vp, Sort, Arg) 
+  when ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)),
        is_integer(Arg) ->
     ?nif_stub().
 
@@ -225,6 +220,16 @@ order_all_(V, I, Acc) ->
 	false -> lists:reverse(Acc);
 	{I1,Var} -> order_all_(V, I1, [Var|Acc])
     end.
+
+get_number_of_variables(Vp) ->
+    info(Vp, number_of_variables).
+
+get_number_of_clauses(Vp) ->
+    info(Vp, number_of_clauses).
+
+get_max_clause_length(Vp) ->
+    info(Vp, max_clause_length).
+
 
 %% satify the rules, stop at first model or return false
 sat(V) ->
@@ -268,6 +273,109 @@ sat__(V,I,N,M,D,Var) ->
 	    undo(V),
 	    N2
     end.
-    
+
 model(V) ->
     io:format("~w\n", [varc:get_bindings(V, 0)]).
+
+
+%% saturate clause set
+saturate(Vp,0) ->
+    eval(Vp);
+saturate(Vp,1) -> %% K=1 only now
+    case eval(Vp) of
+	false -> false;
+	true  ->
+	    case order_first(Vp) of
+		false -> false;
+		{I,Var} -> 
+		    saturate_(Vp,I,1,Var)
+	    end
+    end.
+
+saturate_(Vp,I,D,Var) ->
+    case saturate_1(Vp,D,Var) of
+	false -> false;
+	true ->
+	    case order_next(Vp,I) of
+		false -> true;
+		{I1,Var1} ->
+		    saturate_(Vp,I1,D,Var1)
+	    end
+    end.
+
+%% do one variable
+%% false is contradiction true is ok
+saturate_1(Vp,D,Var) ->
+    io:format("saturate1_: var=~w\n", [Var]),
+    mark(Vp, D),
+    clear_queue(Vp),
+    case put(Vp,Var,false) and eval(Vp) of
+	false ->
+	    undo(Vp),
+	    put(Vp, Var, true) and eval(Vp);
+	true ->	    
+	    Bs0 = get_bindings(Vp, D), %% Var=false is present!
+	    undo(Vp),
+	    mark(Vp, D),
+	    clear_queue(Vp), %% needed?
+	    case put(Vp,Var,true) and eval(Vp) of
+		false ->
+		    undo(Vp),
+		    put(Vp,Var,false) and eval(Vp);
+		true ->
+		    %% intersect bindings Bs0 with current bindings
+		    Bs = intersect(Vp, Var, Bs0),
+		    io:format("intersect Bs=~w\n", [Bs]),
+		    undo(Vp),
+		    clear_queue(Vp), %% needed?
+		    _ = [ put(Vp,B,V) || {B,V} <- Bs],
+		    eval(Vp)
+	    end
+    end.
+
+%% Vp is under the assumption that Var = TRUE
+%% The bindings Bs0 are from the evaluation when Var = FALSE
+%% evaluate the bindings and build the intersection
+intersect(Vp, Var, [{Var,false}|Bs0]) -> %% we may have this bindings, ignore
+    intersect(Vp,Var,Bs0);
+intersect(Vp, Var, [{X,true}|Bs0]) ->
+    %% !Var -> X
+    case get(Vp, X) of
+	true ->  %% Var -> X, !Var -> X   =>  X
+	    [{X,true} | intersect(Vp,Var,Bs0)];
+	false -> %% Var -> !X, !Var -> X  =>  Var=!X
+	    [{Var,-X} | intersect(Vp,Var,Bs0)];
+	_ ->
+	    intersect(Vp,Var,Bs0)
+    end;
+intersect(Vp, Var, [{X,false}|Bs0]) ->
+    %% !Var -> !X
+    case get(Vp, X) of
+	true ->  %% Var -> X, !Var -> !X   =>  Var=X
+	    [{Var,X} | intersect(Vp,Var,Bs0)];
+	false -> %% Var -> !X, !Var -> !X  =>  !X
+	    [{X,false} | intersect(Vp,Var,Bs0)];
+	_ ->
+	    intersect(Vp,Var,Bs0)
+    end;
+intersect(Vp, Var, [{X,Y}|Bs0]) ->
+    %% !Var => X=Y
+    case {get(Vp, X),get(Vp,Y)} of
+	{Z,Z} -> %% !Var -> X=Y, Var => X=Y => X=Y
+	    [{X,Y} | intersect(Vp,Var,Bs0)];
+	_ ->
+	    intersect(Vp,Var,Bs0)
+    end;
+intersect(_Vp,_Var,[]) ->
+    [].
+
+
+	    
+	    
+	    
+
+    
+
+	    
+    
+    

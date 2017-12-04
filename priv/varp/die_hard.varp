@@ -2,13 +2,13 @@
 // L(i)  L(i) is jug volume of the little jug in step i (4 bits)
 // B(i)  B(i) is jug volume of the big jug in step i (4 bits)
 //
-// #FILL_SMALL(i) is a macro 
+// define FILL_SMALL(i) is a macro 
 // Fill_small(i) is a predicate, true iff small jug is fill in step i
 //
 //
 
-declare B(i):5/signed;
-declare L(i):5/signed;
+declare B(i):4;
+declare L(i):4;
 
 define INIT(i) := Init(i) and (B(i) == 0) and (L(i) == 0) ;
 

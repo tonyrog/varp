@@ -412,10 +412,49 @@ order() ->
 
     ok.
 
+%% test saturate
+saturate() ->
+    V = varc:new(),
+    X1 = varc:add_variable(V),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
+    X8 = varc:add_variable(V),
+
+    C0 = varc:add_clause(V, 'and', false, X1, X2),
+    C1 = varc:add_clause(V, 'or',  true,  X1, X2),
+    %% X1 /= X2
+    C2 = varc:add_clause(V, 'and', X3, true, X4),
+    C3 = varc:add_clause(V, 'or',  X3, false, X4),
+    %% X3 == X4
+    C4 = varc:add_clause(V, 'xor', true, X5, X6),
+    %% X5 =/= X6
+    C5 = varc:add_clause(V, 'xor', false, X7, X8),
+    %% X7 == X8
+    true = varc:eval(V),
+    true = varc:saturate(V, 1),
+
+    L1 = varc:get(V, X1),
+    L1 = -varc:get(V, X2),
+    
+    L2 = varc:get(V, X3),
+    L2 = varc:get(V, X4),
+
+    L3 = varc:get(V, X5),
+    L3 = -varc:get(V, X6),
+
+    L4 = varc:get(V, X7),
+    L4 = varc:get(V, X8),
+    ok.
+    
+
 %% Test CNF file
 
 cnf(F) ->
-    case dimacs:load(F) of
+    case varp_dimacs:load(F) of
 	Error={error,_Reason} ->
 	    io:format("~s: error: ~p\n", [F,_Reason]),
 	    Error;

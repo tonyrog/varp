@@ -31,7 +31,7 @@ static inline int parity(uint64_t v)
     return (0x6996 >> v) & 1;
 }
 
-// a variant of above of bitset_ffs usinf popcount
+// a variant of above of bitset_ffs using popcount
 // x = 2^r*y 
 static inline int bitset_xffs(bitset_t* src)
 {
@@ -149,7 +149,7 @@ static inline int bitset_parity(bitset_t* src)
     return PARITY(*src);
 }
 
-// check if bitset_count(src == 1
+// check if bitset_count(src) == 1
 static inline int bitset_count_one(bitset_t* src)
 {
     return *src && ((*src & (*src-1)) == 0);
@@ -162,29 +162,41 @@ static inline int bitset_first(bitset_t* src)
     return FIRST(*src);
 }
 
-// format a bitset, support upto 4 bitset formats used at any time
-// this allow to printf upto 4 bitset, using sequaltial if not real
-// problem, but threading is not supported
+// format a bitset
+
+static inline char* bitset_format_r(bitset_t* src, char* ptr, size_t maxsize)
+{
+    bitset_t t = *src;
+    char* ptr0 = ptr;
+    int i = 1;
+    
+    if (!t) {
+	if (i < (int)maxsize)
+	    *ptr++ = '0';
+    }
+    else {
+	while(t && (i <= (int)sizeof(bitset_t)*8) && (i < (int)maxsize)) {
+	    *ptr++ = (t&1) ? '1' : '0';
+	    t >>= 1;
+	    i++;
+	}
+    }
+    *ptr = '\0';
+    return ptr0;
+}
+
+// format a bitset
+// upto 4 bitsets can be formatted in one call to for example
+//  printf("%s %s %s %s ...", bitset_format(a),bitset_format(b),
+//     bitset_format(c),bitset_format(d))
+// threading is not supported
+
 
 static inline char* bitset_format(bitset_t* src)
 {
     static char buf[4][sizeof(bitset_t)*8+1];
-    bitset_t t = *src;
-    int i = 0;
     static int select = 0;
-    char* cbuf = buf[select & 0x3];
-    select++;
-
-    if (!t)
-	cbuf[i++] = '0';
-    else {
-	while(t && (i < (int)sizeof(bitset_t)*8)){
-	    cbuf[i++] = (*src & t) ? '1' : '0';
-	    t >>= 1;
-	}
-    }
-    cbuf[i] = '\0';
-    return cbuf;
+    return bitset_format_r(src, buf[select++ & 0x3], sizeof(buf[0]));
 }
 
 #endif

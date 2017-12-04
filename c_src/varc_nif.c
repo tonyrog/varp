@@ -49,10 +49,9 @@ static ERL_NIF_TERM varc_get_bindings(ErlNifEnv* env, int argc,
 
 static ERL_NIF_TERM varc_del_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_get_number_of_variables(ErlNifEnv* env, int argc,
-					     const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_get_number_of_clauses(ErlNifEnv* env, int argc,
-					   const ERL_NIF_TERM argv[]);
+
+static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_get(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_put(ErlNifEnv* env, int argc,
@@ -98,8 +97,8 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 
 #define	RANDOMDEV	"/dev/urandom"
 
-// #define TRACE(f,va...) fprintf(stderr, (f), va)
-#define TRACE(f,va...)
+#define TRACE(f,va...) fprintf(stderr, (f), va)
+// #define TRACE(f,va...)
 
 typedef struct _heap_t
 {
@@ -240,8 +239,8 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "new",                 0,  varc_new ),
     NIF_FUNC( "new",                 1,  varc_new ),
     NIF_FUNC( "new",                 2,  varc_new ),
+    NIF_FUNC( "info",                2,  varc_info ),
     NIF_FUNC( "add_variable",        1,  varc_add_variable ),
-    NIF_FUNC( "get_number_of_variables", 1,  varc_get_number_of_variables ),
     NIF_FUNC( "get",                 2,  varc_get ),
     NIF_FUNC( "put",                 3,  varc_put ),
     NIF_FUNC( "class",               2,  varc_class ),
@@ -262,7 +261,6 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "get_clause",          2,  varc_get_clause ),
     NIF_FUNC( "get_clause_flags",    2,  varc_get_clause_flags ),
     NIF_FUNC( "del_clause",          2,  varc_del_clause ),
-    NIF_FUNC( "get_number_of_clauses",   1,  varc_get_number_of_clauses ),
     NIF_FUNC( "get_clauses",         2,  varc_get_clauses ),
     NIF_FUNC( "get_queue",           1,  varc_get_queue ),
     NIF_FUNC( "clear_queue",         1,  varc_clear_queue ),
@@ -302,6 +300,10 @@ DECL_ATOM(mask);
 DECL_ATOM(id);
 DECL_ATOM(random);
 DECL_ATOM(occure);
+// info
+DECL_ATOM(max_clause_length);
+DECL_ATOM(number_of_clauses);
+DECL_ATOM(number_of_variables);
 
 static heap_t* new_heap_block(heap_t* next)
 {
@@ -1419,29 +1421,6 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
     return ATOM(ok);
 }
 
-
-static ERL_NIF_TERM varc_get_number_of_variables(ErlNifEnv* env, int argc,
-						 const ERL_NIF_TERM argv[])
-{
-    (void) argc;
-    varc_t* vp;
-
-    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
-	return enif_make_badarg(env);
-    return enif_make_int(env, vp->vnum);
-}
-
-static ERL_NIF_TERM varc_get_number_of_clauses(ErlNifEnv* env, int argc,
-					       const ERL_NIF_TERM argv[])
-{
-    (void) argc;
-    varc_t* vp;
-
-    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
-	return enif_make_badarg(env);
-    return enif_make_int(env, vp->cnum);
-}
-
 //
 // get(Vct,X) -> Value.
 // value of a literal X
@@ -1704,6 +1683,28 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
     return enif_make_int(env, cix);
 }
 
+// get information
+static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[])
+{
+    (void) argc;
+    varc_t* vp;
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if (argv[1] == ATOM(max_clause_length)) {
+	return enif_make_int(env, sizeof(bitset_t)*8);
+    }
+    else if (argv[1] == ATOM(number_of_variables)) {
+	return enif_make_int(env, vp->vnum);
+    }
+    else if (argv[1] == ATOM(number_of_clauses)) {
+	return enif_make_int(env, vp->cnum);
+    }
+    return enif_make_badarg(env);
+}
+
 //
 // add_clause(vp, 'and', x1, ..., xn)
 // add_clause(vp, 'or',  x1, ..., xn)
@@ -1746,6 +1747,8 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	}
 	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
+	if (n > sizeof(bitset_t)*8)
+	    return enif_make_badarg(env);
 	return add_clause_list(env, vp, op, argv[2], n);
     }
     else {
@@ -1754,6 +1757,8 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	    if (!get_literal(env, vp, argv[i], &x))
 		return enif_make_badarg(env);
 	}
+	if (argc-2 > (int)sizeof(bitset_t)*8)
+	    return enif_make_badarg(env);
 	return add_clause_array(env, vp, op, argv+2, argc-2);
     }
 }
@@ -1973,6 +1978,10 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(id);
     LOAD_ATOM(random);
     LOAD_ATOM(occure);
+    // info
+    LOAD_ATOM(max_clause_length);
+    LOAD_ATOM(number_of_clauses);
+    LOAD_ATOM(number_of_variables);    
 }
 
 
