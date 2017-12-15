@@ -23,7 +23,7 @@
 -export([class_next/2]).
 -export([equal/3]).
 -export([mark/2]).
--export([undo/1]).
+-export([undo/1,undo/2]).
 -export([eval/1]).
 -export([add_clause/3]).
 -export([add_clause/4]).
@@ -36,9 +36,13 @@
 -export([del_clause/2]).
 -export([get_clauses/2]).
 -export([get_queue/1]).
+-export([get_queue_first/1]).
+-export([get_queue_next/2]).
 -export([clear_queue/1]).
+-export([enqueue_all/1]).
 -export([get_bindings/2]).
--export([order_first/1, order_next/2]).
+-export([order_init/1]).
+-export([order_first/1, order_next/2, order_next/3]).
 -export([order_sort/2, order_sort/3]).
 -export([order_all/1]).
 
@@ -48,13 +52,27 @@
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
+-export([get_number_of_bound_variables/1]).
+-export([get_number_of_unbound_variables/1]).
+-export([get_clause_eval_counter/1]).
+-export([get_eval_counter/1]).
 
+-export([init_vector/2]).
+-export([next_vector/2]).
+-export([expand_vector/2]).
 
 -ifdef(debug).
 -define(debug(F,A), io:format((F),(A))).
 -else.
 -define(debug(F,A), ok).
 -endif.
+
+-type varc() :: reference().
+-type clause_type() :: 'and'|'or'|'xor'|'reg'.
+-type literal() :: integer().
+-type sort_key()  :: identity|reverse|random|occure|depth|
+		     occure_depth|depth_occure.
+-type sort_value() :: integer().
 
 -define(is_op(Op), (((Op) =:= 'and') 
 		    orelse ((Op) =:= 'or') 
@@ -116,53 +134,37 @@ equal(_Vp, LitA, LitB) when is_integer(LitA),
 mark(_Vp,Level) when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
-undo(_Vp) ->
+undo(Vp) ->
+    undo(Vp,-1).
+
+-spec undo(Vp::varc(), Mark::integer()) -> ok.
+
+undo(_Vp,_Mark) ->
     ?nif_stub().
 
 eval(_Vp) ->
     ?nif_stub().
 
+-spec add_clause(Vp::varc(),Op::clause_type(),Ls::[literal()]) -> ok.
+
 add_clause(_Vp,Op,Ls) when ?is_op(Op), is_list(Ls) ->
     ?nif_stub().
 
-add_clause(_Vp,Op,X1,X2)
-  when ?is_op(Op),
-       is_integer(X1),
-       is_integer(X2) ->
+-spec add_clause(Vp::varc(),Op::clause_type(),
+		 X1::literal(),X2::literal()) -> ok.
+add_clause(_Vp,_Op,_X1,_X2) ->
     ?nif_stub().
 
-add_clause(_Vp,Op,X1,X2,X3) 
-  when ?is_op(Op),
-       is_integer(X1),
-       is_integer(X2),
-       is_integer(X3) ->
+add_clause(_Vp,_Op,_X1,_X2,_X3) ->
     ?nif_stub().
 
-add_clause(_Vp,Op,X1,X2,X3,X4) when 
-      ?is_op(Op),
-      is_integer(X1),
-      is_integer(X2),
-      is_integer(X3),
-      is_integer(X4) ->
+add_clause(_Vp,_Op,_X1,_X2,_X3,_X4) ->
     ?nif_stub().
 
-add_clause(_Vp,Op,X1,X2,X3,X4,X5) when 
-      ?is_op(Op),
-      is_integer(X1),
-      is_integer(X2),
-      is_integer(X3),
-      is_integer(X4),
-      is_integer(X5) ->
+add_clause(_Vp,_Op,_X1,_X2,_X3,_X4,_X5) ->
     ?nif_stub().
 
-add_clause(_Vp,Op,X1,X2,X3,X4,X5,X6) when 
-      ?is_op(Op),
-      is_integer(X1),
-      is_integer(X2),
-      is_integer(X3),
-      is_integer(X4),
-      is_integer(X5),
-      is_integer(X6) ->
+add_clause(_Vp,_Op,_X1,_X2,_X3,_X4,_X5,_X6) ->
     ?nif_stub().
 
 get_clause(_Vp,Index)
@@ -181,32 +183,61 @@ get_clauses(_Vp,Var)
   when is_integer(Var), Var >= 0 ->
     ?nif_stub().
 
-get_queue(_Vp) ->
+get_queue_first(_Vp) ->
+    ?nif_stub().
+
+get_queue_next(_Vp, _Cix) ->
     ?nif_stub().
 
 clear_queue(_Vp) ->
+    ?nif_stub().
+
+enqueue_all(_Vp) ->
     ?nif_stub().
 
 get_bindings(_Vp, Level)
   when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
+%% initial index to use if using order_next, instead of order_first
+order_init(_Vp) -> 
+    1.
+
 %% return {Ix,Var} | false
 order_first(_Vp) ->
     ?nif_stub().
 
-order_next(_Vp, Ix)
-  when is_integer(Ix), Ix > 0 ->
+order_next(Vp, Ix) ->
+    order_next(Vp, Ix, 0).
+
+order_next(_Vp, Ix, Skip)
+  when is_integer(Ix), Ix > 0,
+       is_integer(Skip), Skip >= 0 ->
     ?nif_stub().
 
-order_sort(_Vp, Sort) 
-  when ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)) ->
+-spec order_sort(Vp::varc(), Sort::sort_key()) -> ok.
+			
+order_sort(_Vp, _Sort) ->
     ?nif_stub().
 
-order_sort(_Vp, Sort, Arg) 
-  when ((Sort =:= id) orelse (Sort =:= random) orelse (Sort =:= occure)),
-       is_integer(Arg) ->
+-spec order_sort(Vp::varc(), Sort::sort_key(),Arg::sort_value()) -> ok.
+
+order_sort(_Vp, _Sort, _Arg) ->
     ?nif_stub().
+
+%% Get all clauses in queue
+get_queue(Vp) ->
+    case get_queue_first(Vp) of
+	false -> [];
+	I ->
+	    get_queue_(Vp,I,[I])
+    end.
+
+get_queue_(Vp,I,Acc) ->
+    case get_queue_next(Vp,I) of
+	false -> lists:reverse(Acc);
+	J -> get_queue_(Vp,J,[J|Acc])
+    end.
 
 %% utility to get a list of unbound variables
 order_all(V) ->
@@ -224,12 +255,23 @@ order_all_(V, I, Acc) ->
 get_number_of_variables(Vp) ->
     info(Vp, number_of_variables).
 
+get_number_of_bound_variables(Vp) ->
+    info(Vp, number_of_bound_variables).
+
+get_number_of_unbound_variables(Vp) ->
+    info(Vp, number_of_unbound_variables).
+
 get_number_of_clauses(Vp) ->
     info(Vp, number_of_clauses).
 
 get_max_clause_length(Vp) ->
     info(Vp, max_clause_length).
 
+get_clause_eval_counter(Vp) ->
+    info(Vp, clause_eval_counter).
+
+get_eval_counter(Vp) ->
+    info(Vp, eval_counter).
 
 %% satify the rules, stop at first model or return false
 sat(V) ->
@@ -277,18 +319,74 @@ sat__(V,I,N,M,D,Var) ->
 model(V) ->
     io:format("~w\n", [varc:get_bindings(V, 0)]).
 
+%%
+%% Create a variable "vector" of K unbound variables
+%%
+init_vector(_Vp, 0) ->
+    [];
+init_vector(Vp, K) ->
+    case order_first(Vp) of
+	false -> [];
+	{I1,X1} -> init_vector_(Vp,K-1,I1,[{I1,X1}])
+    end.
+
+init_vector_(_Vp,0,_I,Vec) -> 
+    Vec;
+init_vector_(Vp,K,I0,Vec) ->
+    case order_next(Vp,I0) of
+	false -> Vec;
+	{I1,X1} -> init_vector_(Vp,K-1,I1,[{I1,X1}|Vec])
+    end.
+
+%%
+%% Select next vector return [] when no more vectors
+%%
+next_vector(Vp, Vec) ->
+    next_vector_(Vp, Vec, 0).
+    
+next_vector_(Vp, [{I,_Xi}|Vec], Skip) ->
+    case order_next(Vp,I,Skip) of
+	false ->
+	    case next_vector_(Vp, Vec, Skip+1) of
+		[] -> [];
+		Vec1=[{J,_Xj}|_] ->
+		    case order_next(Vp,J) of
+			false -> [];
+			{K,Xk} ->
+			    [{K,Xk}|Vec1]
+		    end
+	    end;
+	{J,Xj} -> [{J,Xj}|Vec]
+    end;
+next_vector_([], _Bs, _) ->
+    [].
+
+%% add one extra unbound variable to "vector"
+expand_vector(_Vp, []) -> [];
+expand_vector(Vp, Vec) ->
+    J = lists:max([I || {I,_} <- Vec]),
+    case order_next(Vp,J) of
+	false -> Vec;
+	{K,Xk} -> Vec++[{K,Xk}]
+    end.
+
 
 %% saturate clause set
 saturate(Vp,0) ->
     eval(Vp);
 saturate(Vp,1) -> %% K=1 only now
+    B0 = get_number_of_bound_variables(Vp),
     case eval(Vp) of
 	false -> false;
 	true  ->
 	    case order_first(Vp) of
 		false -> false;
 		{I,Var} -> 
-		    saturate_(Vp,I,1,Var)
+		    R = saturate_(Vp,I,1,Var),
+		    B1 = get_number_of_bound_variables(Vp),		    
+		    io:format("saturate-1 bound ~w variables\n",
+			      [B1-B0]),
+		    R
 	    end
     end.
 
@@ -306,7 +404,7 @@ saturate_(Vp,I,D,Var) ->
 %% do one variable
 %% false is contradiction true is ok
 saturate_1(Vp,D,Var) ->
-    io:format("saturate1_: var=~w\n", [Var]),
+    %% io:format("saturate1_: var=~w\n", [Var]),
     mark(Vp, D),
     clear_queue(Vp),
     case put(Vp,Var,false) and eval(Vp) of
@@ -325,7 +423,7 @@ saturate_1(Vp,D,Var) ->
 		true ->
 		    %% intersect bindings Bs0 with current bindings
 		    Bs = intersect(Vp, Var, Bs0),
-		    io:format("intersect Bs=~w\n", [Bs]),
+		    %% io:format("intersect Bs=~w\n", [Bs]),
 		    undo(Vp),
 		    clear_queue(Vp), %% needed?
 		    _ = [ put(Vp,B,V) || {B,V} <- Bs],

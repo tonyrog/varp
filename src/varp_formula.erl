@@ -10,7 +10,7 @@
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([fresh_var/1]).
--export([clause/2]).
+-export([clause/3]).
 -export([variable/2, alias/3]).
 -export([value/2, class/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
@@ -29,6 +29,8 @@
 -export([number_of_variables/1]).
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
+-export([clause_eval_counter/1]).
+-export([eval_counter/1]).
 -export([order/2]).
 -export([model/1]).
 -export([first_init/1]).
@@ -36,13 +38,15 @@
 -export([next_unbound/2]).
 -export([latest_bound/1]).
 -export([info/3, debug/3]).
--export([get_bindings/1]).
+-export([get_bindings/2]).
 -export([model_variables/2]).
 -export([show_fail/1]).
 -export([fmt_digraph/3]).
--export([enq_all/1]).
+-export([clear_queue/1]).
+-export([enqueue_all/1]).
 -export([eval/1]).
--export([mark/1]).
+-export([mark/1, mark/2]).
+-export([undo/1, undo/2]).
 -export([vfold_op/4]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
@@ -64,13 +68,12 @@
 	{
 	  depth :: integer(), %% backtrack/saturate depth
 	  option = #option {} :: [#option{}],  %% the options
-	  vs, %%  dict() model variables var <=> Vn
+	  vs,                 %%  dict() model variables var <=> Vn
+	  vp,                 %% varc instance
 	  meta=[],            %% meta variable bindings during build
 	  defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
 	  decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]
-	  subst=[],           %% var/function substitution(s)
-	  mod :: atom(),      %% backend module
-	  arg :: term()       %% backend data
+	  subst=[]            %% var/function substitution(s)
 	}).
 
 new() ->
@@ -78,8 +81,7 @@ new() ->
 
 new(Opts) ->
     Opt = varp_option:setopts(Opts, #option{} ),
-    Mod = Opt#option.backend,
-    Arg = Mod:new(Opt),
+    Vp  = varc:new(), %% [{initial_size,Size},{grow,Expand},{bcp,boolean()}]
     #bs {
        option = Opt,
        vs = dict:from_list([{true,?TRUE},{?TRUE,true},
@@ -87,97 +89,111 @@ new(Opts) ->
        meta = Opt#option.meta,
        defs = Opt#option.defs,
        decls = Opt#option.decls,
-       mod = Mod,
-       arg = Arg
+       vp    = Vp
       }.
 
-evcall(F,Bs) ->
-    apply(Bs#bs.mod,F,[Bs#bs.arg]).
-
-evcall(F,A1,Bs) ->
-    apply(Bs#bs.mod,F,[A1,Bs#bs.arg]).
-
-evcall(F,A1,A2,Bs) ->
-    apply(Bs#bs.mod,F,[A1,A2,Bs#bs.arg]).
-
-%% evcall(F,A1,A2,A3,Bs) ->
-%%    apply(Bs#bs.mod,F,[A1,A2,A3,Bs#bs.arg]).
-
-%% evcall(F,A1,A2,A3,A4,Bs) ->
-%%    apply(Bs#bs.mod,F,[A1,A2,A3,A4,Bs#bs.arg]).
-
 fresh_var(Bs) ->
-    {Var,Arg1} = evcall(fresh_var,Bs),
-    {Var,Bs#bs { arg=Arg1}}.
+    Var = varc:add_variable(Bs#bs.vp),
+    {Var,Bs}.
 
-clause(Clause,Bs) ->
-    Arg1 = evcall(clause,Clause,Bs),
-    Bs#bs {arg=Arg1}.
+%% fixme: optional split clause if clause length is too long
+clause(Bs,Op,Ls) ->
+    _Ref = varc:add_clause(Bs#bs.vp,Op,Ls),
+    Bs.
     
-make_variable(V, Bs) ->
+make_variable(Bs,V) ->
     {N,Bs1} = fresh_var(Bs),
-    {N, alias(V, N, Bs1)}.
+    {N, alias(Bs1,V,N)}.
 
-order(Order, Bs) ->
-    Arg1 = evcall(order,Order,Bs),
-    Bs#bs { arg=Arg1 }.
+order(Bs,Order) ->
+    _Result = varc:order_sort(Bs#bs.vp, Order),
+    Bs.
 
-enq_all(Bs) ->
-    Arg1 = evcall(enq_all,Bs),
-    Bs#bs { arg=Arg1 }.
+clear_queue(Bs) ->
+    varc:clear_queue(Bs#bs.vp),
+    Bs.
+
+enqueue_all(Bs) ->
+    varc:enqueue_all(Bs#bs.vp),
+    Bs.
 
 eval(Bs) ->
-    Arg1 = evcall(eval,Bs),
-    Bs#bs { arg=Arg1 }.
+    varc:eval(Bs#bs.vp).
+
+undo(Bs) ->
+    varc:undo(Bs#bs.vp, -1).
+
+undo(Bs,Mark) ->
+    varc:undo(Bs#bs.vp,Mark).
 
 mark(Bs) ->
-    Arg1 = evcall(mark,Bs),
-    Bs#bs { arg=Arg1 }.
+    varc:mark(Bs#bs.vp, 0).
 
-value(V, Bs) ->
-    evcall(value,V,Bs).
+mark(Bs,Level) ->
+    varc:mark(Bs#bs.vp, Level).
 
-class(V, Bs) ->
-    evcall(class,V,Bs).
+value(Bs,V) ->
+    varc:get(Bs#bs.vp, V).
 
-equal(X,Y,Bs) ->
+class(Bs,V) ->
+    case varc:class(Bs#bs.vp, V) of
+	?TRUE -> ?TRUE;
+	?FALSE -> ?FALSE;
+	X -> abs(X)
+    end.
+
+equal(Bs,X,Y) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
-    Arg1 = evcall(equal,X0,Y0,Bs),
-    Bs#bs {arg=Arg1}.
+    varc:put(Bs#bs.vp, X0, Y0).
 
 literal(X, _Bs) when is_integer(X) -> X;
 literal({'not',X}, Bs) -> -literal(X, Bs);
 literal({bool,X}, Bs) -> literal(X, Bs);
 literal(X, Bs) -> dict:fetch(X, Bs#bs.vs).
 
-getopt(Key, Bs) ->
+getopt(Bs,Key) ->
     varp_option:getopt(Key, Bs#bs.option).
 
-setopt(Key,Value,Bs) ->
+setopt(Bs,Key,Value) ->
     Option = varp_option:setopt(Key,Value,Bs#bs.option),
     %% Mybe set option in backend as well? probably
     Bs#bs { option = Option }.
 
-number_of_variables(Bs) -> evcall(number_of_variables,Bs).
+number_of_variables(Bs) ->
+    varc:get_number_of_variables(Bs#bs.vp).
     
-number_of_bound(Bs) -> evcall(number_of_bound,Bs).
+number_of_bound(Bs) ->
+    varc:get_number_of_bound_variables(Bs#bs.vp).
 
-number_of_unbound(Bs) -> evcall(number_of_unbound,Bs).
+number_of_unbound(Bs) ->
+    varc:get_number_of_unbound_variables(Bs#bs.vp).
 
-first_init(Bs) -> evcall(first_init,Bs).
+clause_eval_counter(Bs) ->
+    varc:get_clause_eval_counter(Bs#bs.vp).
 
-first_unbound(Bs) -> evcall(first_unbound,Bs).
+eval_counter(Bs) ->
+    varc:get_eval_counter(Bs#bs.vp).
 
-next_unbound(I,Bs) -> evcall(next_unbound,I,Bs).
+first_init(Bs) -> 
+    varc:order_init(Bs#bs.vp).
 
-latest_bound(Bs) -> evcall(latest_bound,Bs).
+first_unbound(Bs) -> 
+    I0 = first_init(Bs),
+    varc:order_next(Bs#bs.vp, I0).
+
+next_unbound(Bs,I) ->
+    varc:order_next(Bs#bs.vp, I).
+
+latest_bound(Bs) ->
+    varc:get_bindings(Bs#bs.vp, -1).
 
 info(Bs,Fmt,As) -> ?info(Bs#bs.option, Fmt, As).
 
 debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
 
-get_bindings(Bs) -> evcall(get_bindings,Bs).
+get_bindings(Bs,Mark) when is_integer(Mark) -> 
+    varc:get_bindings(Bs#bs.vp, Mark).
 
 %% compact version of fmt_var
 fmt_v(?TRUE,_)  -> "1";
@@ -213,11 +229,13 @@ fmt_var_(X, P, Q, Bs) ->
 	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
 	    [Q,P,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
 	{ok,[N|_Ns]} ->
-	    [Q,P,io_lib:format("~p", [N]),Q]
+	    [Q,P,io_lib:format("~p", [N]),Q];
+	{ok,?TRUE} -> "true";
+	{ok,?FALSE} -> "false"
     end.
 
 
-variable(V, Bs) ->
+variable(Bs, V) ->
     W = expand_meta(V, Bs),
     ?dbg("variable expand: ~p -> ~w\n", [V,W]),
     case find_var(W, Bs) of
@@ -227,7 +245,7 @@ variable(V, Bs) ->
 		    %% check for a definition of P(x1,..xn)
 		    case find_def(P, Bs#bs.defs) of
 			false ->
-			    make_variable(W, Bs);
+			    make_variable(Bs,W);
 			{_W1={p,_,Ps},Def} ->
 			    ?dbg("~p = ~p\n", [_W1,Def]),
 			    Names = [Name || #cid{name=Name}<-Ps],
@@ -244,13 +262,13 @@ variable(V, Bs) ->
 			    end
 		    end;
 		_ ->
-		    make_variable(W, Bs)
+		    make_variable(Bs,W)
 	    end;
 	{ok,N} ->
 	    {N,Bs}
     end.
 
-set_bt_depth(D, Bs) when is_integer(D), D>=0 ->
+set_bt_depth(Bs,D) when is_integer(D), D>=0 ->
     Bs#bs { depth=D }.
 
 get_bt_depth(Bs) -> Bs#bs.depth.
@@ -323,7 +341,7 @@ push_meta(V,I,Bs) ->
 pop_meta(Bs = #bs { meta = [_|Meta]}) ->
     Bs#bs { meta = Meta }.
 
-alias(V, N, Bs) ->
+alias(Bs,V,N) ->
     case find_var(N,Bs) of
 	error ->
 	    set_var(V, N, Bs);
@@ -387,7 +405,7 @@ build_(V={p,P,Ps}, Bs) ->
     Px = {p,P,['_' || _ <- Ps]},
     case proplists:lookup(Px, Bs#bs.decls) of
 	none ->
-	    {X,Bs1} = variable(V, Bs),
+	    {X,Bs1} = variable(Bs,V),
 	    {{bool,X},Bs1};
 	{_,Sign,Size} ->
 	    var_vector(Sign,V,Size,Bs)
@@ -724,6 +742,8 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
 	{#cid{name="log2"},[A]}    -> math:log(A)/math:log(2);
 	{#cid{name="log10"},[A]}   -> math:log10(A);
+	{#cid{name="isize"},[A]}   -> varp_math:integer_size(A);
+	{#cid{name="usize"},[A]}   -> varp_math:unsigned_size(A);
 	{#cid{name="pi"},[]}       -> math:pi();
 	{#cid{name="e"},[]}        -> math:exp(1);
 	{#cid{name="pow"},[A,B]}   -> 
@@ -831,14 +851,14 @@ const_vector_(I,Type,N,Cs,Value,Bs) ->
     end.
 
 %% Install alias vector
-alias_vector(T,V,Size,Xs,Bs) ->
+alias_vector(Bs,T,V,Size,Xs) ->
     N = eval_meta(Size,Bs),
-    alias_vector_(0,T,N,Xs,V,Bs).
+    alias_vector_(Bs,0,T,N,Xs,V).
 
-alias_vector_(I,T,N,[X|Xs],V,Bs) ->
-    Bs1 = alias({T,V,N,I}, X, Bs),
-    alias_vector_(I+1,T,N,Xs,V,Bs1);
-alias_vector_(_I,_T,_N,[],_V,Bs) ->
+alias_vector_(Bs,I,T,N,[X|Xs],V) ->
+    Bs1 = alias(Bs,{T,V,N,I},X),
+    alias_vector_(Bs1,I+1,T,N,Xs,V);
+alias_vector_(Bs,_I,_T,_N,[],_V) ->
     Bs.
     
 %% generate a variable vector
@@ -850,16 +870,16 @@ var_vector(Type,V,Size,Bs) ->
 var_vector_(-1,Type,N,Xs,_V,Bs) -> 
     {{Type,N,Xs},Bs};
 var_vector_(I,Type,N,Xs,V,Bs) ->
-    {Xi,Bs1} = variable({Type,V,N,I},Bs),
+    {Xi,Bs1} = variable(Bs,{Type,V,N,I}),
     var_vector_(I-1,Type,N,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector
-vfold_op(_Op,_D,[A],Bs) ->
+vfold_op(Bs,_Op,_D,[A]) ->
     {{bool,A},Bs};
-vfold_op(Op,D,[Y|As],Bs) ->
-    {Z,Bs1} = vfold_op(Op,D,As,Bs),
+vfold_op(Bs,Op,D,[Y|As]) ->
+    {Z,Bs1} = vfold_op(Bs,Op,D,As),
     operation(Op,{bool,Y},Z,Bs1);
-vfold_op(_Op,D,[],Bs) ->
+vfold_op(Bs,_Op,D,[]) ->
     {D,Bs}.
 
 all([], Bs) ->
@@ -869,7 +889,7 @@ all([A], Bs) ->
 all(As, Bs) ->
     As1 = [A || {bool,A} <- As],
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X}, clause({'and',[X|As1]}, Bs1)}.
+    {{bool,X}, clause(Bs1,'and',[X|As1])}.
 
 any([], Bs) ->
     {?FALSE, Bs};
@@ -878,7 +898,7 @@ any([A], Bs) ->
 any(As, Bs) ->
     As1 = [A || {bool,A} <- As],
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X}, clause({'or',[X|As1]}, Bs1)}.
+    {{bool,X}, clause(Bs1,'or',[X|As1])}.
 
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
@@ -1083,7 +1103,7 @@ operation('and',{bool,_Y},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause({'and',X,Y,Z},Bs1)};
+    {{bool,X},clause(Bs1,'and',[X,Y,Z])};
 
 operation('and',A,B,Bs) ->
     operation('&',A,B,Bs);
@@ -1113,7 +1133,7 @@ operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause({'or',X,Y,Z},Bs1)};
+    {{bool,X},clause(Bs1,'or',[X,Y,Z])};
 
 operation('or',A,B,Bs) ->
     operation('|',A,B,Bs);
@@ -1142,7 +1162,7 @@ operation('imp',{bool,?TRUE},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause({'or',X,-Y,Z}, Bs1)};
+    {{bool,X},clause(Bs1,'or',[X,-Y,Z])};
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation('~',A,Bs),
     operation('|',An,B,Bs1);
@@ -1157,7 +1177,7 @@ operation('equ',{bool,?FALSE},{bool,?FALSE},Bs) ->
     {{bool,?TRUE},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause({'xor',X,-Y,Z},Bs1)};
+    {{bool,X},clause(Bs1,'xor',[X,-Y,Z])};
 
 operation('equ',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1176,7 +1196,7 @@ operation('equ',A,B,Bs) ->
 
 operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause({'xor',X,Y,Z},Bs1)};
+    {{bool,X},clause(Bs1,'xor',[X,Y,Z])};
 operation('xor',A,B,Bs) ->
     operation('^',A,B,Bs);
 operation('^',A,B,Bs) ->
@@ -1270,9 +1290,9 @@ operation('->', A, B, Bs) ->
 %% Alias operation
 %%
 operation('=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
-    {X, alias_vector(T,V,Size,Xs,Bs)};
+    {X, alias_vector(Bs,T,V,Size,Xs)};
 operation('=',V,X={bool,Xb},Bs) when is_atom(V) ->
-    {X, alias(V, Xb, Bs)};
+    {X, alias(Bs,V,Xb)};
 
 operation('<<',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1405,9 +1425,9 @@ operation('max',A,B,Bs) ->
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
 set_carry_({bool,Carry}, false, Bs) ->    %% never overflow
-    clause({equ,?TRUE,Carry,?FALSE},Bs);
+    clause(Bs,'xor',[?FALSE,Carry,?FALSE]);
 set_carry_({bool,Carry}, true, Bs) ->     %% only overflow
-    clause({equ,?TRUE,Carry,?TRUE},Bs);
+    clause(Bs,'xor',[?FALSE,Carry,?TRUE]);
 set_carry_({bool,_Carry}, ignore, Bs) ->  %% allow carry overflow
     Bs.
 
@@ -1681,7 +1701,7 @@ vshift_right(K,N,Xs) when K >= 0 ->
 %% Compare equal
 veq(Ys, Zs, Bs) ->
     {Xs,Bs1} = vmap_op('equ',Ys,Zs,Bs),
-    vfold_op('and',{bool,?TRUE},Xs,Bs1).
+    vfold_op(Bs1,'and',{bool,?TRUE},Xs).
     
 %% Compare less
 vless([Y],[Z],Bs) ->
@@ -1796,35 +1816,35 @@ collect_model(Bs) ->
 
 %% collect all alias variables    
 model_vars([{bit,X,N,I}|Xs],Y,Bs,Ms) ->
-    case value(Y, Bs) of
-	?TRUE ->
+    case value(Bs,Y) of
+	true ->
 	    model_vars(Xs,Y,Bs,model_bitset(X,N,I,1,Ms));
-	?FALSE ->
+	false ->
 	    model_vars(Xs,Y,Bs,model_bitset(X,N,I,0,Ms))
     end;
 model_vars([{uint,X,_N,I}|Xs],Y,Bs,Ms) ->
-    case value(Y, Bs) of
-	?TRUE ->
+    case value(Bs,Y) of
+	true ->
 	    model_vars(Xs,Y,Bs,model_bor({X,(1 bsl I)}, Ms));
-	?FALSE ->
+	false ->
 	    model_vars(Xs,Y,Bs,model_bor({X,0}, Ms))
     end;
 model_vars([{int,X,N,I}|Xs],Y,Bs,Ms) ->
-    case value(Y, Bs) of
-	?TRUE ->
+    case value(Bs,Y) of
+	true ->
 	    if I =:= N-1 ->
 		    model_vars(Xs,Y,Bs,model_bor({X,(-1 bsl I)}, Ms));
 	       true ->
 		    model_vars(Xs,Y,Bs,model_bor({X,(1 bsl I)}, Ms))
 	    end;
-	?FALSE ->
+	false ->
 	    model_vars(Xs,Y,Bs,model_bor({X,0}, Ms))
     end;
 model_vars([X|Xs],Y,Bs,Ms) when is_integer(Y) ->
-    case value(Y, Bs) of
-	?TRUE -> 
+    case value(Bs,Y) of
+	true -> 
 	    model_vars(Xs,Y,Bs,[{X,true} | Ms]);
-	?FALSE ->
+	false ->
 	    model_vars(Xs,Y,Bs,[{X,false} | Ms]);
 	_Z -> %% unbound...
 	    %%model_vars(Xs,Y,Bs,[{X,Z} | Ms])
@@ -1858,7 +1878,7 @@ model_bor({X,Bit}, Ms) ->
 
 show_fail(Bs) ->
     io:format("FAIL:\n", []),
-    Graph = lists:reverse(get_bindings(Bs)),
+    Graph = lists:reverse(get_bindings(Bs,0)),
     fmt_fail(Graph, Bs),
     case get(fmt_digraph) of
 	done -> ok;

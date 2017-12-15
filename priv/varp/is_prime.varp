@@ -1,4 +1,6 @@
-
-((A:size * B:size) == p:size) &&
-(A:size > B:size) &&
-(B:size > 1)
+// Check if p (paramter) is prime
+// need currently need to set size
+// this could be like having size = 
+//
+[A n=isize(p)]
+(((A:n * B:n) == p:n) &&(A:n > B:n) && (B:n > 1))

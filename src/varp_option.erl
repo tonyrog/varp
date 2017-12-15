@@ -14,6 +14,7 @@
 -export([match_short_opt/3]).
 
 -export([setopts/2, setopt/3, getopt/2]).
+-export([usage/0]).
 
 -include("varp_option.hrl").
 -include("log.hrl").

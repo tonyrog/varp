@@ -424,15 +424,15 @@ saturate() ->
     X7 = varc:add_variable(V),
     X8 = varc:add_variable(V),
 
-    C0 = varc:add_clause(V, 'and', false, X1, X2),
-    C1 = varc:add_clause(V, 'or',  true,  X1, X2),
+    _C0 = varc:add_clause(V, 'and', false, X1, X2),
+    _C1 = varc:add_clause(V, 'or',  true,  X1, X2),
     %% X1 /= X2
-    C2 = varc:add_clause(V, 'and', X3, true, X4),
-    C3 = varc:add_clause(V, 'or',  X3, false, X4),
+    _C2 = varc:add_clause(V, 'and', X3, true, X4),
+    _C3 = varc:add_clause(V, 'or',  X3, false, X4),
     %% X3 == X4
-    C4 = varc:add_clause(V, 'xor', true, X5, X6),
+    _C4 = varc:add_clause(V, 'xor', true, X5, X6),
     %% X5 =/= X6
-    C5 = varc:add_clause(V, 'xor', false, X7, X8),
+    _C5 = varc:add_clause(V, 'xor', false, X7, X8),
     %% X7 == X8
     true = varc:eval(V),
     true = varc:saturate(V, 1),
@@ -453,21 +453,43 @@ saturate() ->
 
 %% Test CNF file
 
-cnf(F) ->
-    case varp_dimacs:load(F) of
-	Error={error,_Reason} ->
-	    io:format("~s: error: ~p\n", [F,_Reason]),
-	    Error;
-	_Cnf = {cnf,{_NVars,_NClauses,CLs}} ->
-	    V = varc:new(),
-	    _Map = cnf_clauses(V, CLs, #{}),
+cnf(File) ->
+    case cnf_load(File) of
+	{ok,V} ->
 	    varc:order_sort(V, random, 0),
 	    M = varc:sat(V,1),
 	    io:format("conflicts = ~w\n", [get(conflicts)]),
 	    M
     end.
 
-	    
+cnf_s(File) ->
+    case cnf_load(File) of
+	{ok,V} ->
+	    varc:order_sort(V, random, 0),
+	    varc:saturate(V,1)
+    end.
+
+factor_load() ->
+    {ok,Vp} = cnf_load(filename:join([code:priv_dir(varp),"dimacs",
+				      "factoring_109_1753.dimacs"])),
+    {'or',[true|As]} = varc:get_clause(Vp,0),
+    {'or',[true|Bs]} = varc:get_clause(Vp,1),
+    varc:add_clause(Vp, reg, lists:reverse(As)), %% maybe reverse
+    varc:add_clause(Vp, reg, lists:reverse(Bs)), %% maybe reverse
+    Vp.
+    
+
+cnf_load(File) ->
+    case varp_dimacs:load(File) of
+	Error={error,_Reason} ->
+	    io:format("~s: error: ~p\n", [File,_Reason]),
+	    Error;
+	_Cnf = {cnf,{_NVars,_NClauses,CLs}} ->
+	    V = varc:new(),
+	    _Map = cnf_clauses(V, CLs, #{}),
+	    {ok,V}
+    end.
+
 cnf_clauses(V, [C|Cs], Map) ->
     Map1 = cnf_clause(V, C, Map, []),
     cnf_clauses(V, Cs, Map1);
@@ -499,16 +521,20 @@ cnf_var(V, Var, Map) ->
 %% n pigeons in n-1 holes
 %%
 pigeon(N) ->
+    V = pigeon_load(N),
+    varc:order_sort(V, random, 1000), %% seed=1000 !!!!
+    M = varc:sat(V),
+    io:format("conflicts = ~w\n", [get(conflicts)]),
+    M.
+
+pigeon_load(N) ->
     {ok,{_Defs,_Decls,_Code,F}} = 
 	varp:file(filename:join([code:priv_dir(varp), "varp", "pigeon.varp"])),
     F1 = varp_expand:formula(F, [{"n",N}]),
     {Cs,_} = varp_cnf:clauses(F1),
     V = varc:new(),
     pigeon_clauses(V, Cs, #{}),
-    varc:order_sort(V, random, 1000),
-    M = varc:sat(V),
-    io:format("conflicts = ~w\n", [get(conflicts)]),
-    M.
+    V.
 
 pigeon_clauses(V, [C|Cs], Map) ->
     Map1 = pigeon_clause(V, C, Map, []),
@@ -534,5 +560,3 @@ pigeon_var(V, Var, Map) ->
 	    Map1 = maps:put(Var, Vi, Map),
 	    {Vi, Map1}
     end.
-
-
