@@ -2,7 +2,7 @@
 %%
 %%
 Terminals
-	symbol variable hexnum binnum octnum decnum
+	symbol identifier hexnum binnum octnum decnum flonum chrnum
         true false
 	'A' 'E'
         '&' '|' '^' '!' '~'
@@ -14,7 +14,7 @@ Terminals
 Nonterminals
         bor_op band_op bxor_op bnot_op
 	rel_op add_op mul_op prefix_op 
-        integer expr exprs psymbol pexpr
+        constant expr exprs psymbol pexpr
         literal snf.
 
 Rootsymbol snf.
@@ -60,32 +60,44 @@ rel_op -> '>=' : '$1'.
 rel_op -> '==' : '$1'.
 rel_op -> '!=' : '$1'.
 
-integer -> binnum : '$1'.
-integer -> octnum : '$1'.
-integer -> decnum : '$1'.
-integer -> hexnum : '$1'.
-
+constant -> hexnum : hex('$1').
+constant -> octnum : oct('$1').
+constant -> decnum : dec('$1').
+constant -> binnum : bin('$1').
+constant -> flonum : flo('$1').
+constant -> chrnum : chr('$1').
 
 %%
 %% Arithmetic expression function expression
 %%
-expr -> variable          : name('$1').
-expr -> integer           : value('$1').
-expr -> bnot_op expr      : {op('$1'), '$2' }.
+expr -> identifier        : id('$1').
+expr -> symbol            : id('$1').
+expr -> constant          : '$1'.
+expr -> bnot_op expr      : 
+	    #cunary {line=line('$1'),op=op('$1'),arg='$2'}.
 expr -> prefix_op expr : 
 	    case op('$1') of
 	       '-' when is_integer('$2') -> -('$2');
-	       Op -> {Op,'$2'}
+	 	_ ->
+		    #cunary {line=line('$1'),op=op('$1'),arg='$2'}
 	    end.
 expr -> '(' expr ')' : '$2'.
-expr -> variable '(' exprs ')' : { f, name('$1'), '$3'}.
-expr -> expr add_op expr   : { op('$2'), '$1', '$3' }.
-expr -> expr mul_op expr   : { op('$2'), '$1', '$3' }.
-expr -> expr rel_op expr   : { op('$2'), '$1', '$3' }.
-expr -> expr band_op expr  : {op('$2'), '$1', '$3' }.
-expr -> expr bor_op  expr  : {op('$2'), '$1', '$3' }.
-expr -> expr bxor_op expr  : {op('$2'), '$1', '$3' }.
-expr -> variable '=' expr  : { '=', name('$1'), '$3' }.
+expr -> identifier '(' exprs ')' : 
+	    #ccall{ line=line('$2'), func='$1', args='$3'}.
+expr -> expr add_op expr   :
+	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+expr -> expr mul_op expr   :
+	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+expr -> expr rel_op expr   :
+	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+expr -> expr band_op expr  :
+	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+expr -> expr bor_op  expr  :
+	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+expr -> expr bxor_op expr  :
+	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+expr -> identifier '=' expr  :
+	    #cassign{ line=line('$2'), op=op('$2'), lhs='$1',rhs='$3'}.
 
 %% list of expr
 exprs -> expr : ['$1'].
@@ -102,12 +114,33 @@ psymbol -> symbol : name('$1').
 
 Erlang code.
 
+-include("varp_bic.hrl").
+
 op({Op,_Ln}) -> Op.
 
-name({symbol,_,Name})       -> list_to_atom(Name);
-name({variable,_,Name})     -> list_to_atom(Name).
+line([H|_]) -> line(H);
+line({_,Ln}) -> Ln.
 
-value({decnum,_,Num})       -> list_to_integer(Num,10);
-value({octnum,_,Num})       -> list_to_integer(Num,8);
-value({hexnum,_,"0x"++Num}) -> list_to_integer(Num,16);
-value({binnum,_,"0b"++Num}) -> list_to_integer(Num,2).
+name({symbol,_,Name})       -> list_to_atom(Name);
+name({identifier,_,Name})   -> list_to_atom(Name).
+
+id({identifier,Line,Name}) -> #cid { line=Line, name=Name};
+id({symbol,Line,Name})     -> #cid { line=Line, name=Name}.
+
+bin({binnum,Line,Val}) ->
+    #cconst { line=Line, base=2, value=Val}.
+    
+oct({octnum,Line,Val}) ->
+    #cconst { line=Line, base=8, value=Val}.
+
+hex({hexnum,Line,Val}) ->
+    #cconst { line=Line, base=16, value=Val}.
+
+dec({decnum,Line,Val}) ->
+    #cconst { line=Line, base=10, value=Val}.
+
+chr({chrnum,Line,Val}) ->
+    #cconst { line=Line, base=char, value=Val}.
+
+flo({flonum,Line,Val}) ->
+    #cconst { line=Line, base=float, value=Val}.

@@ -7,7 +7,7 @@ Terminals
 	symbol true false define declare code type
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
-        '<->' '>>>' '<<<' ':=' '$' '..'
+        '<->' '>>>' '<<<' '$' '..'
         hexnum octnum binnum decnum flonum chrnum
 	identifier string sizeof
 	'->' '++' '--' '<<' '>>' '<' '>' '>=' '<=' '==' '!='
@@ -71,9 +71,9 @@ file  -> lexpr : {[], '$1'}.
 definitions -> definition : ['$1'].
 definitions -> definitions definition : '$1'++['$2'].
 
-definition -> 'define' pexpr ':=' lexpr ';' : {'$2','$4'}.
-definition -> 'declare' pdecls ';'          : {declare,'$2'}.
-definition -> 'code' '{' cfile '}'          : {code, '$3'}.
+definition -> 'define' pexpr lexpr ';' : {'$2','$3'}.
+definition -> 'declare' pdecls ';'     : {declare,'$2'}.
+definition -> 'code' '{' cfile '}'     : {code, '$3'}.
 
 primary_expr -> cidentifier : '$1'.
 primary_expr -> constant : '$1'.
@@ -202,7 +202,7 @@ assignment_operator -> '|=' : '$1'.
 
 expr -> assignment_expr : '$1'.
 expr -> expr ',' assignment_expr : 
-     	#cbinary { line=line('$1'), op=',',arg1='$1',arg2='$3'}.
+     	#cbinary { line=line('$2'), op=',',arg1='$1',arg2='$3'}.
 
 constant_expr -> conditional_expr : '$1'.
 
@@ -560,10 +560,10 @@ lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
 lexpr0 -> lexpr_prim                : '$1'.
 lexpr0 -> true                      : true.
 lexpr0 -> false                     : false.
-lexpr0 -> '-' lexpr                 : {'-', '$2'}.
-lexpr0 -> 'not' lexpr               : { op('$1'), '$2' }.
-lexpr0 -> '!' lexpr                 : { op('$1'), '$2' }.
-lexpr0 -> '~' lexpr                 : { op('$1'), '$2' }.
+lexpr0 -> '-' lexpr0                : {'-', '$2'}.
+lexpr0 -> 'not' lexpr0              : { op('$1'), '$2' }.
+lexpr0 -> '!' lexpr0                : { op('$1'), '$2' }.
+lexpr0 -> '~' lexpr0                : { op('$1'), '$2' }.
 lexpr0 -> '(' lexpr ')'             : '$2'.
 lexpr0 -> '{' lexprs '}'            : {vec,'$2'}.
 lexpr0 -> identifier '(' lexprs ')' : { name('$1'), '$3'}.
@@ -721,12 +721,10 @@ decl(D) ->
 		D
 	end.
 
-op({Type,_Line})     -> Type.
+op({Op,_Ln})     -> Op.
 
 line([H|_]) -> line(H);
-line(T) when is_atom(element(1,T)),
-	     is_integer(element(2,T)) ->
-    element(2,T).
+line({_,Ln}) -> Ln.
 
 constant(N) when N >= 0   -> {uint,varp_math:integer_size(N),N};
 constant(N) when N < 0   -> {int,varp_math:integer_size(N),N}.

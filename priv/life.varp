@@ -4,55 +4,55 @@
 // Usage: varp satisfy --max=2 --print=model n=5 life.varp 
 
 // define live(i,j) at time = t
-#L(t,i,j) := ([EQ 3] { S(t,i-1,j-1),S(t,i,j-1),S(t,i+1,j-1),
-                       S(t,i-1,j),             S(t,i+1,j),
-                       S(t,i-1,j+1),S(t,i,j+1),S(t,i+1,j+1)}) or
-	      (S(t,i,j) and
-	       ([EQ 2] { S(t,i-1,j-1),S(t,i,j-1),S(t,i+1,j-1),
-                         S(t,i-1,j),             S(t,i+1,j),
-                         S(t,i-1,j+1),S(t,i,j+1),S(t,i+1,j+1)})) ;
+define L(t,i,j) ([EQ 3] { S(t,i-1,j-1),S(t,i,j-1),S(t,i+1,j-1),
+                          S(t,i-1,j),             S(t,i+1,j),
+       			  S(t,i-1,j+1),S(t,i,j+1),S(t,i+1,j+1)}) or
+	        (S(t,i,j) and
+	        ([EQ 2] { S(t,i-1,j-1),S(t,i,j-1),S(t,i+1,j-1),
+                          S(t,i-1,j),             S(t,i+1,j),
+                          S(t,i-1,j+1),S(t,i,j+1),S(t,i+1,j+1)})) ;
 
 // define a rectangular lines with zeros
-#ZHLINE(t,x1,x2,y) := [ NONE x=x1..x2 ] S(t,x,y) ;
-#ZVLINE(t,x,y1,y2) := [ NONE y=y1..y2 ] S(t,x,y) ;
+define ZHLINE(t,x1,x2,y) [ NONE x=x1..x2 ] S(t,x,y) ;
+define ZVLINE(t,x,y1,y2) [ NONE y=y1..y2 ] S(t,x,y) ;
 
-#ZBORDER(t,x1,x2,y1,y2) :=
+define ZBORDER(t,x1,x2,y1,y2)
 	   ZHLINE(t,x1,x2,y1) &
 	   ZHLINE(t,x1,x2,y2) &
 	   ZVLINE(t,x1,y1+1,y2-1) &
 	   ZVLINE(t,x2,y1+1,y2-1) ;
 
-#RECT(t,x,y,w,h) := [ ALL u=x..(x+w-1),v=y..(y+h-1) ] S(t,v,u) ;
+define RECT(t,x,y,w,h) [ ALL u=x..(x+w-1),v=y..(y+h-1) ] S(t,v,u) ;
 
-#ZRECT(t,x,y,w,h) := [ NONE u=x..(x+w-1),v=y..(y+h-1) ] S(t,v,u) ;
+define ZRECT(t,x,y,w,h) [ NONE u=x..(x+w-1),v=y..(y+h-1) ] S(t,v,u) ;
 
 // Glider travling down-left
-#GDL(t,i,j) := ~S(t,i,  j) & ~S(t,i,  j+1) &  S(t,i,j+2) &
-	        S(t,i+1,j) &  S(t,i+1,j+1) & ~S(t,i+1,j+2) &
-	       ~S(t,i+2,j) &  S(t,i+2,j+1) &  S(t,i+2,j+2) ;
+define GDL(t,i,j) ~S(t,i,  j) & ~S(t,i,  j+1) &  S(t,i,j+2) &
+                   S(t,i+1,j) &  S(t,i+1,j+1) & ~S(t,i+1,j+2) &
+	          ~S(t,i+2,j) &  S(t,i+2,j+1) &  S(t,i+2,j+2) ;
 
 // Glider travling down-right
-#GDR(t,i,j) :=  S(t,i,  j) & ~S(t,i,  j+1) & ~S(t,i,j+2) &
-	       ~S(t,i+1,j) &  S(t,i+1,j+1) &  S(t,i+1,j+2) &
-	        S(t,i+2,j) &  S(t,i+2,j+1) & ~S(t,i+2,j+2) ;
+define GDR(t,i,j)  S(t,i,  j) & ~S(t,i,  j+1) & ~S(t,i,j+2) &
+	          ~S(t,i+1,j) &  S(t,i+1,j+1) &  S(t,i+1,j+2) &
+	           S(t,i+2,j) &  S(t,i+2,j+1) & ~S(t,i+2,j+2) ;
 
 // Glider travling up-left
-#GUL(t,i,j) := ~S(t,i,  j) &  S(t,i,  j+1) &  S(t,i,  j+2) &
-	        S(t,i+1,j) &  S(t,i+1,j+1) & ~S(t,i+1,j+2) &
-	       ~S(t,i+2,j) & ~S(t,i+2,j+1) &  S(t,i+2,j+2) ;
+define GUL(t,i,j) ~S(t,i,  j) &  S(t,i,  j+1) &  S(t,i,  j+2) &
+	           S(t,i+1,j) &  S(t,i+1,j+1) & ~S(t,i+1,j+2) &
+	          ~S(t,i+2,j) & ~S(t,i+2,j+1) &  S(t,i+2,j+2) ;
 
 // Glider travling up-left
-#GUR(t,i,j) :=  S(t,i,  j) &  S(t,i,  j+1) & ~S(t,i,  j+2) &
-	       ~S(t,i+1,j) &  S(t,i+1,j+1) &  S(t,i+1,j+2) &
-	        S(t,i+2,j) & ~S(t,i+2,j+1) & ~S(t,i+2,j+2) ;
+define GUR(t,i,j)  S(t,i,  j) &  S(t,i,  j+1) & ~S(t,i,  j+2) &
+	          ~S(t,i+1,j) &  S(t,i+1,j+1) &  S(t,i+1,j+2) &
+	           S(t,i+2,j) & ~S(t,i+2,j+1) & ~S(t,i+2,j+2) ;
 
 // A live cell sourrunded by dead cells
-#DOT(t,i,j) :=  ~S(t,i,  j) & ~S(t,i,j+1)   & ~S(t,i,  j+2) &
-	        ~S(t,i+1,j) &  S(t,i+1,j+1) & ~S(t,i+1,j+2) &
-	        ~S(t,i+2,j) & ~S(t,i+2,j+1) & ~S(t,i+2,j+2) ;
+define DOT(t,i,j) ~S(t,i,  j) & ~S(t,i,j+1)   & ~S(t,i,  j+2) &
+	          ~S(t,i+1,j) &  S(t,i+1,j+1) & ~S(t,i+1,j+2) &
+	          ~S(t,i+2,j) & ~S(t,i+2,j+1) & ~S(t,i+2,j+2) ;
 
 // define outside at time=t
-#OUT(t) := ZBORDER(t,-1,n,-1,n) ;
+define OUT(t) ZBORDER(t,-1,n,-1,n) ;
 
 OUT(0) & OUT(1) & OUT(2) &   // set game borders to zero
 

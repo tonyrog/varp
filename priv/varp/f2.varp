@@ -1,4 +1,4 @@
-#R(x) := A(x); 
-#Q(y) := B(y,y);
+define R(x) A(x); 
+define Q(y) B(y,y);
 
 R(1) or Q(1)

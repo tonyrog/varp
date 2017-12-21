@@ -1,5 +1,5 @@
 
-1. Test backtrack over variables.
+1. Test backtrack over multi value variables.
 
 Example x1...x8
 
@@ -22,7 +22,26 @@ Bind pairwise
 
    Now multitask over the instances.
 
-3. Introduce CODE block, reason about sequential code
+
+3. Saturate over multivalue variable vector
+
+   saturate {x1,x2,x3} like
+
+   ~x1, ~x2, ~x3  => b000
+   ~x1, ~x2, x3   => b001
+   ~x1, x2, ~x3   => b010
+   ~x1, x2,  x3   => b011
+    x1, ~x2,~x3   => b100
+    x1, ~x2, x3   => b101
+    x1, x2, ~x3   => b110
+    x1, x2,  x3   => b111
+
+    Variable vectors like
+      {uint,X,n,i}
+      {int,X,n,i}
+      {bit,X,n,i}
+
+4. Introduce CODE block, reason about sequential code
 
 code {
    int x = 1;

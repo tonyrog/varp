@@ -8,6 +8,7 @@
 -module(varp_dimacs).
 
 -export([load/1, save/2]).
+-export([parse/1]).
 -export([format/1]).
 -export([from_cnf/1]).
 -import(lists, [reverse/1]).
@@ -15,20 +16,10 @@
 -define(l2a(X), list_to_atom((X))).
 
 load(File) ->
-    case file:open(File,[read]) of
-	{ok,Fd} ->
-	    try load_(Fd,File) of
-		Data ->
-		    file:close(Fd),
-		    Data
-	    catch
-		_:Reason ->
-		    {error,Reason}
-	    after
-		file:close(Fd)
-	    end;
-	Error ->
-	    Error
+    case file:read_file(File) of
+	{ok,Bin} ->
+	    parse(Bin);
+	Error -> Error
     end.
 
 %% File format:
@@ -42,55 +33,59 @@ load(File) ->
 %%
 %% Each integer I > 0 is mapped to {p,x,[I]}}
 %% ande I < 0 is mapped to {'not',{p,x,[I]}}
+%%
+%% special comment
+%% c <chars> 'is' <integer>
 %% 
-load_(Fd,File) ->
-    preamble(Fd,File,1).
+parse(Bin) ->
+    preamble(Bin,[],1).
 
-preamble(Fd,File,L) ->
-    case file:read_line(Fd) of
+preamble(Bin,Vs,L) ->
+    case binary_line(Bin) of
 	eof -> [];
-	{ok,[$c|_Comment]} -> 
-	    %% io:format("~s", [Comment]),
-	    preamble(Fd,File,L+1);
-	{ok,[$p|Line]} ->
+	{ok,[$c|Comment],Bin1} ->
+	    Vs1 = scan_var(Comment,Vs),
+	    preamble(Bin1,Vs1,L+1);
+	{ok,[$p|Line],Bin1} ->
 	    %% io:format("~s", [Line]),
-	    case string:tokens(Line, " \n") of
+	    case string:tokens(Line, " \r") of
 		["snf", Variables, Clauses] ->
-		    to_snf(Fd,File,L,list_to_integer(Variables),
+		    to_snf(Bin1,L,list_to_integer(Variables),
 			   list_to_integer(Clauses));
 		["cnf", Variables, Clauses] ->
-		    to_cnf(Fd,File,L,list_to_integer(Variables),
+		    to_cnf(Bin1,Vs,L,list_to_integer(Variables),
 			   list_to_integer(Clauses));
 		["sat", Variables] ->
-		    sat(Fd,L,list_to_integer(Variables));
+		    sat(Bin1,Vs,L,list_to_integer(Variables));
 		_ ->
 		    {error,{L,unknown_format}}
 	    end
     end.
 
 %% CNF format
-to_cnf(Fd,File,L,Vars,Clauses) ->
-    case to_cnf_(Fd,File,L,[], []) of
+to_cnf(Bin,Vs,L,Vars,Clauses) ->
+    case to_cnf_(Bin,Vs,L,[], []) of
 	{ok,Cs} ->
 	    {cnf,{Vars,Clauses,Cs}};
 	Error ->
 	    Error
     end.
 
-to_cnf_(Fd,File,L,Acc,Cs) ->
-    case file:read_line(Fd) of
+to_cnf_(Bin,Vs,L,Acc,Cs) ->
+    case binary_line(Bin) of
 	eof ->
 	    {ok,reverse(Cs)};
-	{ok,[$%|_]} ->  %% ????
+	{ok,[$%|_],_Bin1} ->  %% ????
 	    {ok,reverse(Cs)};
-	{ok,[$c|_Comment]} -> 
-	    to_cnf_(Fd,File,L+1,Acc,Cs);
-	{ok,Line} ->
+	{ok,[$c|Comment],Bin1} -> 
+	    Vs1 = scan_var(Comment,Vs),
+	    to_cnf_(Bin1,Vs1,L+1,Acc,Cs);
+	{ok,Line,Bin1} ->
 	    case add_literals(string:tokens(Line, " \n"),Acc) of
 		{false,Acc1} ->
-		    to_cnf_(Fd,File,L+1,Acc1,Cs);
+		    to_cnf_(Bin1,Vs,L+1,Acc1,Cs);
 		{true,Acc1} ->
-		    to_cnf_(Fd,File,L+1,[],[reverse(Acc1) | Cs])
+		    to_cnf_(Bin1,Vs,L+1,[],[reverse(Acc1) | Cs])
 	    end
     end.
 
@@ -104,28 +99,28 @@ add_literals([], Acc) ->
     {false, Acc}.
 
 %% SAT format
-sat(_Fd, _L, _Vars) ->
+sat(_Bin,_Vs,_L, _Vars) ->
     {error, not_implemented}.
 
 %% SNF (Symbolc CNF format)
-to_snf(Fd,File,L, Vars, Clauses) ->
-    case to_snf_(Fd,File,L,[], []) of
+to_snf(Bin,L,Vars,Clauses) ->
+    case to_snf_(Bin,L,[], []) of
 	{ok,Cs} ->
-	    {cnf,{Vars,Clauses,Cs}};
+	    {snf,{Vars,Clauses,Cs}};
 	Error ->
 	    Error
     end.
 
 %% collect tokens until . is found then call varp_snf parse
-to_snf_(Fd,File,Ln,Ts0,CLs) ->
-    case file:read_line(Fd) of
+to_snf_(Bin,Ln,Ts0,CLs) ->
+    case binary_line(Bin) of
 	eof ->
 	    {ok,reverse(CLs)};
-	{ok,[$%|_]} ->  %% ????
+	{ok,[$%|_],_Bin1} ->  %% ????
 	    {ok,reverse(CLs)};
-	{ok,[$c|_Comment]} ->
-	    to_snf_(Fd,File,Ln+1,Ts0,CLs);
-	{ok,Line} ->
+	{ok,[$c|_Comment],Bin1} ->
+	    to_snf_(Bin1,Ln+1,Ts0,CLs);
+	{ok,Line,Bin1} ->
 	    case varp_scan:string(Line) of
 		{ok,Ts1,Ln1} ->
 		    %% io:format("Ts0=~p, Ts1=~p\n", [Ts0,Ts1]),
@@ -134,21 +129,17 @@ to_snf_(Fd,File,Ln,Ts0,CLs) ->
 		    if Eol =:= true ->
 			    case varp_snf:parse(Ts2) of
 				{ok,CL} ->
-				    to_snf_(Fd,File,Ln1,[],[CL|CLs]);
+				    to_snf_(Bin1,Ln1,[],[CL|CLs]);
 				Error ->
-				    io:format("~s:~w: Error: ~p\n", 
-					      [File,Ln1,Error]),
-				    Error
+				    {error,Ln,Error}
 			    end;
 		       true ->
-			    to_snf_(Fd,File,Ln1,Ts2,CLs)
+			    to_snf_(Bin1,Ln1,Ts2,CLs)
 		    end;
 		Error ->
-		    io:format("~s~w: Error: ~p\n", [File,Ln,Error]),
-		    Error
+		    {error,Ln,Error}
 	    end
     end.
-
 
 save(File, Cs) ->
     file:write_file(File, format(Cs)).
@@ -206,3 +197,25 @@ from_cnf_([L|Ls], Acc1, Cs, Acc, D) ->
     end;
 from_cnf_([], Acc1, Cs, Acc, D) ->
     from_cnf_(Cs, [reverse(Acc1)|Acc], D).
+
+binary_line(Bin) ->
+    case binary:split(Bin,<<"\n">>) of
+	[<<>>] -> eof;
+	[<<>>,<<>>] -> eof;
+	[<<"\r">>,<<>>] -> eof;
+	[Line,Bin1] -> {ok,binary_to_list(Line),Bin1}
+    end.
+
+%% look for char+ <blank> is <blank> <integer>
+scan_var(Line,Vs) ->
+    case string:tokens(Line, " \t\r") of
+	[Var,"is",Var] ->
+	    try list_to_integer(Var) of
+		L -> [{Var,L}|Vs]
+	    catch
+		error:badarg ->
+		    Vs
+	    end;
+	_ ->
+	    Vs
+    end.

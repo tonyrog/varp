@@ -1,8 +1,6 @@
 -ifndef(__LOG_HRL__).
 -define(__LOG_HRL__, true).
 
--include("varp_option.hrl").
-
 -define(LOG_NONE, -1).
 -define(EMERGENCY, 0).
 -define(ALERT,     1).
@@ -17,13 +15,12 @@
 -define(warning(Opt, Fmt, As), ?log(Opt,?WARNING,Fmt,As)).
 -define(info(Opt, Fmt, As), ?log(Opt,?INFO,Fmt,As)).
 	
--define(log(Opt, Level, Fmt, As),
-	begin
-	    if Opt#option.log =/= ?LOG_NONE, Level =< Opt#option.log ->
-		    io:format(Fmt, As);
-	       true ->
-		    ok
-	    end
+-define(log(OptMap, Level, Fmt, As),
+	case Level =< maps:get(log,OptMap,?LOG_NONE) of
+	    true ->
+		io:format(Fmt, As);
+	    false ->
+		ok
 	end).
 
 -endif.

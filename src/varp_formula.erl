@@ -14,6 +14,10 @@
 -export([variable/2, alias/3]).
 -export([value/2, class/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
+-export([fmt_var_list/2]).
+-export([fmt_bind/4]).
+-export([fmt_bind/3]).
+-export([fmt_bind_list/2]).
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 
@@ -21,10 +25,11 @@
 -export([operation/4, operation/3]).
 -export([all/2, any/2]).
 -export([eqk/4, gtk/4]).
--export([set_bt_depth/2]).
--export([get_bt_depth/1]).
 -export([equal/3]).
 -export([is_equivalent/3]).
+-export([is_equal/3]).
+-export([is_bound/2]).
+-export([is_unbound/2]).
 -export([getopt/2, setopt/3]).
 -export([number_of_variables/1]).
 -export([number_of_bound/1]).
@@ -35,10 +40,11 @@
 -export([model/1]).
 -export([first_init/1]).
 -export([first_unbound/1]).
--export([next_unbound/2]).
+-export([next_unbound/2, next_unbound/3]).
 -export([latest_bound/1]).
 -export([info/3, debug/3]).
 -export([get_bindings/2]).
+-export([intersect/3]).
 -export([model_variables/2]).
 -export([show_fail/1]).
 -export([fmt_digraph/3]).
@@ -46,6 +52,7 @@
 -export([enqueue_all/1]).
 -export([eval/1]).
 -export([mark/1, mark/2]).
+-export([remove_mark/1, remove_mark/2]).
 -export([undo/1, undo/2]).
 -export([vfold_op/4]).
 
@@ -59,16 +66,22 @@
 
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
--define(pair(A,B),  [(A)|(B)]).
+
+
+-type pred() :: {p,Name::atom(),[integer()]}.
+
+-type var() :: pred() |
+	       {uint,pred(),Size::integer(),Bit::integer()} |
+	       {int,pred(),Size::integer(),Bit::integer()} |
+	       {bit,pred(),Size::integer(),Bit::integer()}.
 
 %% -define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
 -record(bs,
 	{
-	  depth :: integer(), %% backtrack/saturate depth
-	  option = #option {} :: [#option{}],  %% the options
-	  vs,                 %%  dict() model variables var <=> Vn
+	  option = #{} :: [#{}],  %% the options
+	  vs,                 %% map() model variables var <=> Vn
 	  vp,                 %% varc instance
 	  meta=[],            %% meta variable bindings during build
 	  defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
@@ -77,18 +90,22 @@
 	}).
 
 new() ->
-    new([]).
-
-new(Opts) ->
-    Opt = varp_option:setopts(Opts, #option{} ),
-    Vp  = varc:new(), %% [{initial_size,Size},{grow,Expand},{bcp,boolean()}]
+    new(varp_option:default_option()).
+%%
+%% FIXME
+%%  add options [{initial_size,Size},{grow,Expand},{bcp,boolean()}]
+%%
+new(OptMap) when is_map(OptMap) ->
+    Vp  = varc:new(),
     #bs {
-       option = Opt,
-       vs = dict:from_list([{true,?TRUE},{?TRUE,true},
-			    {false,?FALSE},{?FALSE,false}]),
-       meta = Opt#option.meta,
-       defs = Opt#option.defs,
-       decls = Opt#option.decls,
+       option = OptMap,
+       vs = #{ true => ?TRUE,
+	       ?TRUE => true,
+	       false => ?FALSE,
+	       ?FALSE => false},
+       meta = maps:get(meta,OptMap,[]),
+       defs = maps:get(defs,OptMap,[]),
+       decls = maps:get(decs,OptMap,[]),
        vp    = Vp
       }.
 
@@ -98,9 +115,43 @@ fresh_var(Bs) ->
 
 %% fixme: optional split clause if clause length is too long
 clause(Bs,Op,Ls) ->
-    _Ref = varc:add_clause(Bs#bs.vp,Op,Ls),
-    Bs.
-    
+    ?dbg("clause: {~w,~w}\n", [Op,Ls]),
+    L = length(Ls),
+    N = varc:get_max_clause_length(Bs#bs.vp),
+    if L =< N ->
+	    _Cix = add_clause(Bs,Op,Ls),
+	    Bs;
+       true ->
+	    build_clause_tree(Bs,Op,hd(Ls),tl(Ls),L-1,N)
+    end.
+
+add_clause(Bs,Op,Ls) ->
+    %% io:format("add_clause: ~w ~p\n", [Op,Ls]),
+    varc:add_clause(Bs#bs.vp,Op,Ls).
+
+build_clause_tree(Bs,Op,X,Ls,L,N) ->
+    Ls1 = build_branch_list(Bs,Op,Ls,L,N),
+    L1 = length(Ls1),
+    if L1 >= N ->
+	    build_clause_tree(Bs,Op,X,Ls1,L1,N);
+       true ->
+	    _Cix = add_clause(Bs,Op,[X|Ls1]),
+	    Bs
+    end.
+
+%% build clauses of size <= N retrun a list of clause variables
+build_branch_list(_Bs,_Op,[V],1,_N) -> [V];
+build_branch_list(_Bs,_Op,[],0,_N) -> [];
+build_branch_list(Bs,Op,Ls,L,N) when L >= N ->
+    V = varc:add_variable(Bs#bs.vp), %% child var
+    {Ls1,Ls2} = lists:split(N-1,Ls),
+    _Cix = add_clause(Bs,Op,[V|Ls1]),
+    [V|build_branch_list(Bs,Op,Ls2,L-(N-1),N)];
+build_branch_list(Bs,Op,Ls,_L,_N) ->
+    V = varc:add_variable(Bs#bs.vp),
+    _Cix = add_clause(Bs,Op,[V|Ls]),
+    [V].
+
 make_variable(Bs,V) ->
     {N,Bs1} = fresh_var(Bs),
     {N, alias(Bs1,V,N)}.
@@ -126,31 +177,52 @@ undo(Bs) ->
 undo(Bs,Mark) ->
     varc:undo(Bs#bs.vp,Mark).
 
+remove_mark(Bs) ->
+    varc:remove_mark(Bs#bs.vp, -1).
+
+remove_mark(Bs,Mark) ->
+    varc:remove_mark(Bs#bs.vp,Mark).
+
 mark(Bs) ->
-    varc:mark(Bs#bs.vp, 0).
+    varc:mark(Bs#bs.vp).
 
 mark(Bs,Level) ->
     varc:mark(Bs#bs.vp, Level).
 
 value(Bs,V) ->
-    varc:get(Bs#bs.vp, V).
+    case varc:get(Bs#bs.vp, V) of
+	?TRUE -> true;
+	?FALSE -> false;
+	W -> W
+    end.
 
 class(Bs,V) ->
     case varc:class(Bs#bs.vp, V) of
-	?TRUE -> ?TRUE;
+	?TRUE  -> ?TRUE;
 	?FALSE -> ?FALSE;
 	X -> abs(X)
     end.
+
+is_bound(Bs,Lit) ->
+    varc:is_bound(Bs#bs.vp,Lit).
+
+is_unbound(Bs,Lit) ->
+    not varc:is_bound(Bs#bs.vp,Lit).
+
+is_equal(Bs,LitA, LitB) ->
+    not varc:is_equal(Bs#bs.vp,LitA,LitB).
 
 equal(Bs,X,Y) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
     varc:put(Bs#bs.vp, X0, Y0).
 
+literal(true,_Bs)  -> ?TRUE;
+literal(false,_Bs) -> ?FALSE;
 literal(X, _Bs) when is_integer(X) -> X;
 literal({'not',X}, Bs) -> -literal(X, Bs);
 literal({bool,X}, Bs) -> literal(X, Bs);
-literal(X, Bs) -> dict:fetch(X, Bs#bs.vs).
+literal(X, Bs) -> maps:get(X, Bs#bs.vs).
 
 getopt(Bs,Key) ->
     varp_option:getopt(Key, Bs#bs.option).
@@ -185,6 +257,9 @@ first_unbound(Bs) ->
 next_unbound(Bs,I) ->
     varc:order_next(Bs#bs.vp, I).
 
+next_unbound(Bs,I,Skip) ->
+    varc:order_next(Bs#bs.vp,I,Skip).
+
 latest_bound(Bs) ->
     varc:get_bindings(Bs#bs.vp, -1).
 
@@ -195,44 +270,100 @@ debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
 get_bindings(Bs,Mark) when is_integer(Mark) -> 
     varc:get_bindings(Bs#bs.vp, Mark).
 
+%% Bs is under the assumption that Var = TRUE
+%% evaluate the bindings and build the intersection
+intersect(_Bs, Var, [{Var,false}|_B0]) -> %% we may have this bindings, ignore
+    erlang:error({unexpected_binding,{Var,false}});
+intersect(Bs, Var, [{X,true}|B0]) ->
+    %% !Var -> X
+    case value(Bs, X) of
+	true ->  %% Var -> X, !Var -> X   =>  X
+	    [{X,true} | intersect(Bs,Var,B0)];
+	false -> %% Var -> !X, !Var -> X  =>  Var=!X
+	    [{Var,-X} | intersect(Bs,Var,B0)];
+	_ ->
+	    intersect(Bs,Var,B0)
+    end;
+intersect(Bs, Var, [{X,false}|B0]) ->
+    %% !Var -> !X
+    case value(Bs, X) of
+	true ->  %% Var -> X, !Var -> !X   =>  Var=X
+	    [{Var,X} | intersect(Bs,Var,B0)];
+	false -> %% Var -> !X, !Var -> !X  =>  !X
+	    [{X,false} | intersect(Bs,Var,B0)];
+	_ ->
+	    intersect(Bs,Var,B0)
+    end;
+intersect(Bs, Var, [{X,Y}|B0]) ->
+    %% !Var => X=Y
+    X1 = value(Bs, X),
+    Y1 = value(Bs, Y),
+    if X1 =:= Y1 -> %% !Var -> X=Y, Var => X=Y => X=Y
+	    [{X,Y} | intersect(Bs,Var,B0)];
+	true ->
+	    intersect(Bs,Var,B0)
+    end;
+intersect(_Bs,_Var,[]) ->
+    [].
+
 %% compact version of fmt_var
-fmt_v(?TRUE,_)  -> "1";
-fmt_v(?FALSE,_) -> "0";
-fmt_v(X, Bs) ->
-    if X < 0 -> fmt_var_(-X, "~", "", Bs);
-       true ->  fmt_var_(X, "", "", Bs)
+fmt_v(_,?TRUE)  -> "1";
+fmt_v(_,?FALSE) -> "0";
+fmt_v(_,true)   -> "1";
+fmt_v(_,false)  -> "0";
+fmt_v(Bs,X) ->
+    if X < 0 -> fmt_var_(Bs,-X, "~", "");
+       true ->  fmt_var_(Bs,X, "", "")
     end.
 
-fmt_q(X, Bs) ->
-    fmt_var(X, "\"", Bs).
+fmt_q(Bs,X) ->
+    fmt_var(Bs,X, "\"").
 
-fmt_var(X, Bs) ->
-    fmt_var(X, "", Bs).
+fmt_var(Bs,X) ->
+    fmt_var(Bs,X, "").
 
-fmt_var(?TRUE, _Q, _Bs)  -> "true";
-fmt_var(?FALSE, _Q, _Bs) -> "false";
-fmt_var(X, Q, Bs) ->
+fmt_var(_Bs,?TRUE,_Q)  -> "true";
+fmt_var(_Bs,?FALSE,_Q) -> "false";
+fmt_var(_Bs,true,_Q)   -> "true";
+fmt_var(_Bs,false,_Q)  -> "false";
+fmt_var(Bs,X,Q) ->
     if X < 0 ->
-	    fmt_var_(-X, "~", Q, Bs);
+	    fmt_var_(Bs,-X, "~", Q);
        true ->
-	    fmt_var_(X, "", Q, Bs)
+	    fmt_var_(Bs,X, "", Q)
     end.
 
-fmt_var_(X, P, Q, Bs) ->
-    case dict:find(X, Bs#bs.vs) of
+fmt_var_(Bs,X,Pfx,Q) when is_integer(X) ->
+    case maps:find(X,Bs#bs.vs) of
 	error ->
-	    [Q,P,$$,integer_to_list(X),Q];
-	{ok,[{T,V,_N,I}|_Ns]} when ?is_vec_type(T),is_integer(I) ->
-	    [Q,P,io_lib:format("~p[~w]", [V,I]),Q];
+	    [Q,Pfx,$$,integer_to_list(X),Q];
+	{ok,[P={p,_,_}]} ->
+	    [Q,Pfx,fmt_pred_(P),Q];
+	{ok,[{T,P={p,_,_},_N,I}|_Ns]} when ?is_vec_type(T),is_integer(I) ->
+	    [Q,Pfx,fmt_pred_(P),"[",integer_to_list(I),"]",Q];
+
 	{ok,[{A,I}|_Ns]} when is_atom(A),is_integer(I) ->
-	    [Q,P,io_lib:format("~p[~w]", [A,I]),Q];
+	    [Q,Pfx,io_lib:format("~p[~w]", [A,I]),Q];
 	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
-	    [Q,P,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
+	    [Q,Pfx,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
 	{ok,[N|_Ns]} ->
-	    [Q,P,io_lib:format("~p", [N]),Q];
+	    [Q,Pfx,io_lib:format("~p", [N]),Q];
 	{ok,?TRUE} -> "true";
 	{ok,?FALSE} -> "false"
     end.
+
+fmt_pred_({p,P,[]}) -> 
+    atom_to_list(P);
+fmt_pred_({p,P,As}) -> 
+    [atom_to_list(P),"(",concat([io_lib:format("~w",[Ai])||Ai<-As], ","), ")"].
+    
+
+fmt_var_list(Bs,Xs) ->
+    concat([fmt_var(Bs,X)||X<-Xs],",").
+
+concat([], _) -> [];
+concat([H],_) -> [H];
+concat([H|T],S) -> [H,S | concat(T,S)].
 
 
 variable(Bs, V) ->
@@ -267,11 +398,6 @@ variable(Bs, V) ->
 	{ok,N} ->
 	    {N,Bs}
     end.
-
-set_bt_depth(Bs,D) when is_integer(D), D>=0 ->
-    Bs#bs { depth=D }.
-
-get_bt_depth(Bs) -> Bs#bs.depth.
 
 %%
 %%  {r,f1,..fn} => {q,eval(f1),...,eval(fn)}
@@ -341,32 +467,35 @@ push_meta(V,I,Bs) ->
 pop_meta(Bs = #bs { meta = [_|Meta]}) ->
     Bs#bs { meta = Meta }.
 
+-spec alias(Bs::#bs{},V::var(),N::integer()) -> #bs{}.
+
 alias(Bs,V,N) ->
+    %% io:format("alias ~w\n", [V]),
     case find_var(N,Bs) of
 	error ->
-	    set_var(V, N, Bs);
+	    set_var(Bs,V,N);
 	{ok,Vs} ->
-	    add_var(V,N,Vs,Bs)
+	    add_var(Bs,V,N,Vs)
     end.
 
 find_var(V, Bs) ->
-    dict:find(V, Bs#bs.vs).
+    maps:find(V, Bs#bs.vs).
 
 get_var(V, Bs) ->
-    dict:fetch(V, Bs#bs.vs).
+    maps:get(V, Bs#bs.vs).
 
-set_var(V, N, Bs) ->
-    Vs1 = dict:store(V, N, Bs#bs.vs),
-    Vs2 = dict:store(N, [V], Vs1),
-    Bs#bs { vs = Vs2 }.
+set_var(Bs, V, N) ->
+    Vs = Bs#bs.vs,
+    Vs1 = Vs#{ V => N,  N => [V] },
+    Bs#bs { vs = Vs1 }.
 
-add_var(V, N, Vs, Bs) ->
-    Vs1 = dict:store(V, N, Bs#bs.vs),
-    Vs2 = dict:store(N, [V|Vs], Vs1),
-    Bs#bs { vs = Vs2 }.
+add_var(Bs,V,N,Vs) ->
+    Vs = Bs#bs.vs,
+    Vs1 = Vs#{ V => N, N => [V|Vs] },
+    Bs#bs { vs = Vs1 }.
 
 fold_var(Fun, Acc, Bs) ->
-    dict:fold(Fun, Acc, Bs#bs.vs).
+    maps:fold(Fun, Acc, Bs#bs.vs).
 
 %%
 %% Generate the variable rules from a formula
@@ -374,10 +503,12 @@ fold_var(Fun, Acc, Bs) ->
 build(F) ->
     build(F,[]).
 
-build(F,Opts) ->
+build(F,Opts) when is_list(Opts) ->
+    build(F, varp_option:set_opts(Opts));
+build(F,Opts) when is_map(Opts) ->
     ?dbg("Formula: ~p\n", [F]),
     Bs = new(Opts),
-    Bs1 = build_code(proplists:get_value(defs,Opts,[]),Bs),
+    Bs1 = build_code(getopt(Bs,defs),Bs),
     try build_(F, Bs1) of
      	Value -> Value
     catch
@@ -1035,6 +1166,7 @@ select_bool(I,N,Xs) when I >= 0, I < N ->
 select_bool(_I,_N,_Xs) ->
     {bool,?FALSE}.
 
+%% FIXME: select bit vector / signed int?
 select_range(J,I,N,Xs) when J >= I, I>=0, J<N ->
     N1 = (J-I)+1,
     {uint,N1,lists:sublist(Xs,I+1,N1)};
@@ -1221,7 +1353,7 @@ operation('+',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {Carry,Cx,Bs1} = vadd(Ax1,Bx1,Bs),
-    Bs2 = set_carry_(Carry,(Bs1#bs.option)#option.carry,Bs1),
+    Bs2 = set_carry_(Carry,maps:get(carry,Bs1#bs.option),Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
@@ -1355,7 +1487,8 @@ operation('-',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {BorrowNot,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
-    Bs2 = set_carry_(negate(BorrowNot),(Bs1#bs.option)#option.borrow,Bs1),
+    Bs2 = set_carry_(negate(BorrowNot),
+		     maps:get(borrow,Bs1#bs.option),Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
 
@@ -1382,7 +1515,7 @@ operation('/',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {Qs,_Rs,DivZero,Bs1} = vdivrem(Ys1,Zs1,Bs),
-    Bs2 = set_carry_(DivZero,(Bs1#bs.option)#option.divz,Bs1),
+    Bs2 = set_carry_(DivZero,maps:get(divz,Bs1#bs.option),Bs1),
     {{uint,K,Qs},Bs2};
 
 %% DivZero  coould be used to generate a Exception output
@@ -1391,7 +1524,7 @@ operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {_Qs,Rs,DivZero,Bs1} = vdivrem(Ys1,Zs1,Bs), %% fixme vrem! 
-    Bs2 = set_carry_(DivZero,(Bs1#bs.option)#option.divz,Bs1),
+    Bs2 = set_carry_(DivZero,maps:get(divz,Bs1#bs.option),Bs1),
     {{uint,K,Rs},Bs2};
 
 operation('min',Y={bool,_Y},Z={bool,_Z},Bs) ->
@@ -1779,8 +1912,8 @@ minmax2(X1,X2,Bs) ->
 cnf_to_formula(Cs) ->
     {'ALL', [{'ANY', C} || C <- Cs]}.
 
-is_equivalent(X, Y, Bs) ->
-    class(X,Bs) =:= class(Y,Bs).
+is_equivalent(Bs, X, Y) ->
+    class(Bs,X) =:= class(Bs,Y).
 
 %% Return a list of input variables
 
@@ -1930,8 +2063,8 @@ fmt_digraph_fd(Fd, Bl, Bs) ->
 	      ok;
 	 ({{X1,D1,Y1},{X2,D2,Y2}}) ->
 	      io:format(Fd, "\"~s\" -> \"~s\";\n", 
-				  [fmt_bind(X1,Y1,D1,Bs),
-			 fmt_bind(X2,Y2,D2,Bs)])
+				  [fmt_bind(Bs,X1,Y1,D1),
+				   fmt_bind(Bs,X2,Y2,D2)])
       end, Bl),
     io:format(Fd, "}\n", []).
 
@@ -1940,27 +2073,32 @@ fmt_node(Fd,Attr,N={X,D,Y},Bs,Set) ->
 	true -> 
 	    Set;
 	false ->
-	    Name = fmt_bind(X,Y,D,Bs),
+	    Name = fmt_bind(Bs,X,Y,D),
 	    io:format(Fd, "\"~s\" [xlabel=\"~s\" ~s];\n",
 		      [Name,Name,Attr]),
 	    sets:add_element(N, Set)
     end.
 
+fmt_bind(Bs,X,Y,D) ->
+    io_lib:format("~s/~s(~w)", [fmt_v(Bs,X),fmt_v(Bs,Y),D]).
 
-fmt_bind(X,Y,D,Bs) ->
-    io_lib:format("~s/~s(~w)", [fmt_v(X,Bs),fmt_v(Y,Bs),D]).
+fmt_bind(Bs,X,Y) ->
+    io_lib:format("~s/~s", [fmt_v(Bs,X),fmt_v(Bs,Y)]).
 
+fmt_bind_list(Bs,Xs) ->
+    concat([fmt_bind(Bs,X,Y) || {X,Y} <- Xs],",").
+    
 
 fmt_fail([{decision,{X,D,Y}}|Bl], Bs) ->
-    io:format("\n<<~s/~s(~w)>> ", [fmt_v(X,Bs),fmt_v(Y,Bs),D]),
+    io:format("\n<<~s/~s(~w)>> ", [fmt_v(Bs,X),fmt_v(Bs,Y),D]),
     fmt_fail(Bl, Bs);
 fmt_fail([{true,{X,D,Y}}|Bl], Bs) ->
-    io:format("\n*~s/~s(~w)* ", [fmt_v(X,Bs),fmt_v(Y,Bs),D]),
+    io:format("\n*~s/~s(~w)* ", [fmt_v(Bs,X),fmt_v(Bs,Y),D]),
     fmt_fail(Bl, Bs);
 fmt_fail([{{X1,D1,Y1},{X,D,Y}}|Bl], Bs) ->
     io:format("[~s/~s(~w) -> ~s/~s(~w)] ", 
-	      [fmt_v(X1,Bs),fmt_v(Y1,Bs),D1,
-	       fmt_v(X,Bs),fmt_v(Y,Bs),D]),
+	      [fmt_v(Bs,X1),fmt_v(Bs,Y1),D1,
+	       fmt_v(Bs,X),fmt_v(Bs,Y),D]),
     fmt_fail(Bl, Bs);
 fmt_fail([mark|Bl], Bs) ->
     io:format("|", []),

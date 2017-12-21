@@ -11,7 +11,7 @@ Current options to varp
     method	collect|count	count or collect models
     max		unsigned()	max number of models to collect
     order	<order>
-    bcp		boolean()	do not use equivalnce classes
+    bcp		boolean()	do not use equivalence classes
     saturate	unsigned()	saturation vector width
     pair	boolean()    test two variables at a time
     threshold	unsigned()   take more rounds in saturation.

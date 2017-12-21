@@ -14,6 +14,9 @@
 -export([parse/1, parse/2]).
 -export([scan_file/1]).
 -export([file/1, string/1, file_expand_cnf/2]).
+-export([archive_path/1]).
+
+-include_lib("stdlib/include/zip.hrl").
 
 main(Args) ->
     application:start(varp),
@@ -48,8 +51,23 @@ main(Args) ->
 		_Error ->
 		    halt(1)
 	    end;
+	[F] -> %% check if batch mode, run tar/zip over all formulas
+	    case archive_type(F) of
+		undefined ->
+		    case load_files([F],Formula0,Defs0,Decls0,Code0,
+				    'and',Opts) of
+			{ok,{Defs,Decls,Code,Formula}} ->
+			    run(Mode,Formula,[{defs,Defs},
+					      {decls,Decls},
+					      {code,Code} | Opts]);
+			_Error ->
+			    halt(1)
+		    end;
+		Type ->
+		    run_batch(Mode,Type,F,[{max,1}|Opts])
+	    end;
 	Fs ->
-	    case load_files(Fs,Formula0,Defs0,Decls0,Code0,'and') of
+	    case load_files(Fs,Formula0,Defs0,Decls0,Code0,'and',Opts) of
 		{ok,{Defs,Decls,Code,Formula}} ->
 		    run(Mode,Formula,[{defs,Defs},
 				      {decls,Decls},
@@ -60,6 +78,22 @@ main(Args) ->
     end,
     %% io:format("varp: arguments = ~p\n", [As]),
     halt(0).
+
+run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
+    {ok,Fs} = archive_file_list(ArchiveType,ArchiveFile),
+    lists:foreach(
+      fun(F) ->
+	      AFile = filename:join(ArchiveFile,F),
+	      case load_files([AFile],true,[],[],[],'and',Opts) of
+		  {ok,{Defs,Decls,Code,Formula}} ->
+		      run(Mode,Formula,[{defs,Defs},
+					{decls,Decls},
+					{code,Code} | Opts]);
+		  Error ->
+		      io:format("~s: error ~p\n", [F,Error]),
+		      ok
+	      end
+      end, Fs).
 
 run(satisfy, Formula, Opts) ->
     R = run_formula(Formula,Opts++[{value,true}]),
@@ -115,20 +149,24 @@ result({N,_Mdls}, _) -> io:format("% ~w\n", [N]).
 
 
 %% load files and form a conjunction over all files
-load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp) ->
+load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp,Opts) ->
+    {ok, Data} = read_file(F),
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
-	    case varp_dimacs:load(F) of
-		Error={error,_Reason} ->
-		    io:format("~s: error: ~p\n", [F,_Reason]),
+	    case varp_dimacs:parse(Data) of
+		Error={error,Ln,Reason} ->
+		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
 		    Error;
 		Cnf = {cnf,{_NVars,_NClauses,_CLs}} ->
 		    io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
-		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp)
+		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp,Opts);
+		Snf = {snf,{_NVars,_NClauses,_CLs}} ->
+		    io:format("% loaded: ~s\n", [F]),
+		    Formula1 = join_f(JoinOp,Snf,Formula0),
+		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp,Opts)
 	    end;
        true ->
-	    {ok, Data} = file:read_file(F),
 	    case parse(F, Data) of
 		{ok,{Defs,Decls,Code,Formula}} ->
 		    io:format("% loaded: ~s\n", [F]),
@@ -137,13 +175,74 @@ load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp) ->
 			       Defs++Defs,
 			       Decls++Decls0,
 			       Code ++ Code0,
-			       JoinOp);
+			       JoinOp,Opts);
 		Error ->
 		    Error
 	    end
     end;
-load_files([],Formula,Defs,Decls,Code,_JoinOp) ->
+load_files([],Formula,Defs,Decls,Code,_JoinOp,_Opts) ->
     {ok,{Defs,Decls,Code,Formula}}.
+
+%% fixme analyze the path to see if there are 
+%% archive tar/tar.gz/tgz/zip compoinents in the path
+%% in such case open the archive and extract the file
+%% as binary
+
+-spec archive_path(FileName::string()) ->
+			  {file,DirName::string(),FileName::string()} |
+			  {archive,Type::gz|zip,Archive::string(),
+			   File::string()} |
+			  {error,term()}.
+
+archive_path(FileName) ->
+    case archive_path_(filename:split(FileName)) of
+	{file,Ps1,F} ->
+	    {file,fjoin(Ps1),F};
+	{archive,Type,Ps1,Fs} ->
+	    {archive,Type,fjoin(Ps1),fjoin(Fs)};
+	{error,_}=Error -> Error
+    end.
+     
+archive_path_([F]) ->
+    {file,[],F};
+archive_path_([D|Ds]) ->
+    case filelib:is_dir(D) of
+	true ->
+	    archive_path_(Ds, D);
+	false ->
+	    case archive_type(D) of
+		undefined ->
+		    archive_path_(Ds, D);
+		Type ->
+		    {archive,Type,[D],Ds}
+	    end
+    end.
+
+archive_path_(Ds, D) ->
+    case archive_path_(Ds) of
+	{archive,Type,Ds1,Fs} ->
+	    {archive,Type,[D|Ds1],Fs};
+	{file,Ds1,F} -> 
+	    {file,[D|Ds1],F};
+	Error={error,_} -> Error
+    end.
+
+archive_type(FileName) ->
+    archive_type(FileName, [{".tar.gz", tgz},
+			    {".tgz",    tgz},
+			    {".tar",    tar},
+			    {".zip",    zip}]).
+
+archive_type(FileName, [{Sfx,Type}|L]) ->
+    case lists:suffix(Sfx, FileName) of
+	true -> Type;
+	false -> archive_type(FileName, L)
+    end;
+archive_type(_FileName, []) ->
+    undefined.
+
+fjoin([]) -> "";
+fjoin(Fs) -> filename:join(Fs).
 
 
 %% load/parse formulas given on command line like -f "A && B"
@@ -178,6 +277,8 @@ process_args0(["prove"|As], _Mode, Opts, Bound) ->
     varp_option:process_args(As, prove, Opts, Bound);
 process_args0(["cnf"|As], _Mode, Opts, Bound) ->
     varp_option:process_args(As, cnf, Opts, Bound);
+process_args0(["snf"|As], _Mode, Opts, Bound) ->
+    varp_option:process_args(As, snf, Opts, Bound);
 process_args0(["help"|As], _Mode, Opts, Bound) ->
     varp_option:process_args(As, help, Opts, Bound);
 process_args0(["version"|As], _Mode, Opts, Bound) ->
@@ -208,7 +309,7 @@ prove_formula(Formula,Opts) ->
     varp_prover:prove_formula(Formula, [{max,2}|Opts]).
 
 file(File) ->
-    case file:read_file(File) of
+    case read_file(File) of
 	{ok,Binary} ->
 	    parse(File,Binary);
 	Error ->
@@ -216,11 +317,83 @@ file(File) ->
     end.
 
 scan_file(File) ->
-    case file:read_file(File) of
+    case read_file(File) of
 	{ok,Binary} ->    
 	    tokens(binary_to_list(Binary));
 	Error -> Error
     end.
+
+%% Archive aware file:read
+read_file(FileName) ->
+    case archive_path(FileName) of
+	{file,"",File} -> file:read_file(File);
+	{file,Dir,File} -> file:read_file(filename:join(Dir,File));
+	{archive,tgz,ArchiveFile,File} ->
+	    case file:open(ArchiveFile,[read,compressed,raw,binary]) of
+		{ok,Fd} ->
+		    case erl_tar:extract({file,Fd},[{files,[File]},memory]) of
+			{ok,[{File,Bin}]} ->
+			    file:close(Fd),
+			    {ok,Bin};
+			Error ->
+			    Error
+		    end;
+		Error -> Error
+	    end;
+	{archive,tar,ArchiveFile,File} ->
+	    case file:open(ArchiveFile,[read,binary,raw]) of
+		{ok,Fd} ->
+		    case erl_tar:extract({file,Fd},[{files,[File]},memory]) of
+			{ok,[{File,Bin}]} ->
+			    file:close(Fd),
+			    {ok,Bin};
+			Error ->
+			    Error
+		    end;
+		Error -> Error
+	    end;
+	{archive,zip,ArchiveFile,File} ->
+	    case zip:extract(ArchiveFile,[{file_list,[File]},memory]) of
+		{ok,[{File,Bin}]} ->
+		    {ok,Bin};
+		Error ->
+		    Error
+	    end
+    end.
+
+%% extract member names from archive file
+archive_file_list(ArchiveType,ArchiveFile) ->
+    case ArchiveType of
+	tgz ->
+	    case file:open(ArchiveFile,[read,binary,compressed,raw]) of
+		{ok,Fd} ->
+		    Res = erl_tar:table({file,Fd}),
+		    file:close(Fd),
+		    Res;
+		Error -> Error
+	    end;
+	tar ->
+	    case file:open(ArchiveFile,[read,binary,raw]) of
+		{ok,Fd} ->
+		    Res = erl_tar:table({file,Fd}),
+		    file:close(Fd),
+		    Res;
+		Error -> Error
+	    end;
+	zip ->
+	    case zip:table(ArchiveFile) of
+		{ok,List} ->
+		    {ok,zip_names(List)};
+		Error ->
+		    Error
+	    end
+    end.
+
+zip_names([#zip_comment{}|L]) -> zip_names(L);
+zip_names([#zip_file{name=Name}|L]) ->
+    [Name|zip_names(L)];
+zip_names([]) ->
+    [].
 
 parse(String) ->
     parse("*internal*", String).

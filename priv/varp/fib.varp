@@ -1,6 +1,6 @@
 
-define FIB(0) := 1:8/unsigned ;
-define FIB(1) := 1:8/unsigned ;
-define FIB(n) := FIB(n-1):8 + FIB(n-2):8 ;
+define FIB(0) 1:8/unsigned ;
+define FIB(1) 1:8/unsigned ;
+define FIB(n) FIB(n-1):8 + FIB(n-2):8 ;
 
 FIB(n)

@@ -10,31 +10,31 @@
 declare B(i):4;
 declare L(i):4;
 
-define INIT(i) := Init(i) and (B(i) == 0) and (L(i) == 0) ;
+define INIT(i)  Init(i) and (B(i) == 0) and (L(i) == 0) ;
 
-define FILL_SMALL(i) := Fill_small(i) and (B(i) == B(i-1)) and (L(i) == 3) ;
+define FILL_SMALL(i)  Fill_small(i) and (B(i) == B(i-1)) and (L(i) == 3) ;
 
-define FILL_BIG(i) := Fill_big(i) and (B(i) == 5) and (L(i) == L(i-1)) ;
+define FILL_BIG(i)  Fill_big(i) and (B(i) == 5) and (L(i) == L(i-1)) ;
 
-define EMPTY_SMALL(i) := Empty_small(i) and (L(i) == 0) and (B(i) == B(i-1)) ;
+define EMPTY_SMALL(i)  Empty_small(i) and (L(i) == 0) and (B(i) == B(i-1)) ;
 
-define EMPTY_BIG(i) := Empty_big(i) and (L(i) == L(i-1)) and (B(i) == 0) ;
+define EMPTY_BIG(i)  Empty_big(i) and (L(i) == L(i-1)) and (B(i) == 0) ;
 
-define SMALL_TO_BIG(i) := Small_to_big(i) and
+define SMALL_TO_BIG(i)  Small_to_big(i) and
 		    (B(i) == min(B(i-1) + L(i-1), 5)) and
 		    (L(i) == L(i-1)-(B(i)-B(i-1))) ;
 
-define BIG_TO_SMALL(i) := Big_to_small(i) and
+define BIG_TO_SMALL(i)  Big_to_small(i) and
 		    (L(i) == min(B(i-1) + L(i-1), 3)) and
 		    (B(i) == B(i-1)-(L(i)-L(i-1))) ;
 
-define NEXT(i) := [EQ 1](Fill_small(i), Fill_big(i), Empty_small(i), Empty_big(i),
+define NEXT(i)  [EQ 1](Fill_small(i), Fill_big(i), Empty_small(i), Empty_big(i),
 	           Small_to_big(i), Big_to_small(i)) and
 	    (FILL_SMALL(i) or FILL_BIG(i) or
 	    EMPTY_SMALL(i) or EMPTY_BIG(i) or
 	    SMALL_TO_BIG(i) or BIG_TO_SMALL(i)) ;
 
-define GOAL(i) := B(i) == 4 ;
+define GOAL(i)  B(i) == 4 ;
 
 INIT(0) and [A s=1..n] NEXT(s) and GOAL(n)
 

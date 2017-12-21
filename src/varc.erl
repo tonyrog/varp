@@ -21,9 +21,10 @@
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([class_next/2]).
--export([equal/3]).
--export([mark/2]).
+-export([is_equal/3]).
+-export([mark/1,mark/2]).
 -export([undo/1,undo/2]).
+-export([remove_mark/1, remove_mark/2]).
 -export([eval/1]).
 -export([add_clause/3]).
 -export([add_clause/4]).
@@ -104,36 +105,61 @@ info(_Vp, Item) when is_atom(Item) ->
 add_variable(_Vp) ->
     ?nif_stub().
 
+%%
+%% Get literal value 
+%%
+-spec get(Vp::varc(), Lit::literal()) -> integer().
+
 get(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
+
+%% put literal value
+-spec put(Vp::varc(), LitA::literal(), LibB::literal()) -> boolean().
 
 put(_Vp, LitA, LitB) when is_integer(LitA),
 			  is_integer(LitB) ->
     ?nif_stub().
 
-
+-spec class(Vp::varc(), Lit::literal()) -> integer().
 class(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
+-spec occure(Vp::varc(), Lit::literal()) -> integer().
 occure(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
+-spec is_variable(Vp::varc(), Lit::literal()) -> boolean().
 is_variable(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
+-spec is_bound(Vp::varc(), Lit::literal()) -> boolean().
 is_bound(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 class_next(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
-equal(_Vp, LitA, LitB) when is_integer(LitA),
-			    is_integer(LitB) ->
+-spec is_equal(Vp::varc(), LitA::literal(), LitB::literal()) -> boolean().
+is_equal(_Vp, LitA, LitB) when is_integer(LitA),
+			       is_integer(LitB) ->
     ?nif_stub().
+
+mark(Vp) ->
+    mark(Vp, 0).
 
 mark(_Vp,Level) when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
+%% remove latest mark
+remove_mark(Vp) ->
+    undo(Vp,-1).
+
+-spec remove_mark(Vp::varc(), Mark::integer()) -> ok.
+
+remove_mark(_Vp,_Mark) ->
+    ?nif_stub().
+
+%% undo until latest mark
 undo(Vp) ->
     undo(Vp,-1).
 
@@ -210,9 +236,10 @@ order_first(_Vp) ->
 order_next(Vp, Ix) ->
     order_next(Vp, Ix, 0).
 
-order_next(_Vp, Ix, Skip)
-  when is_integer(Ix), Ix > 0,
-       is_integer(Skip), Skip >= 0 ->
+%% return next unbound variable, after skipping Skip number of unbound
+-spec order_next(Vp::varc(), Ix::integer(), Skip::integer()) ->
+			integer() | false.
+order_next(_Vp, _Ix, _Skip) ->
     ?nif_stub().
 
 -spec order_sort(Vp::varc(), Sort::sort_key()) -> ok.
