@@ -228,7 +228,7 @@ pass(eval,_X,Bs) ->
 pass(saturate,_X,Bs) ->
     varp_saturate:saturate(Bs,varp_formula:getopt(Bs,saturate));
 pass(backtrack,_X,Bs) ->
-    backtrack_bs(Bs).
+    varp_backtrack:backtrack(Bs).
 
 %% check if there is already a "unique" model
 one_model(Bs) ->
@@ -237,7 +237,7 @@ one_model(Bs) ->
     if NV =:= NB ->
 	    Print = varp_formula:getopt(Bs,print),
 	    Mdl = varp_formula:model(Bs),
-	    print(Print,1,Mdl),
+	    varp_formula:print(Print,1,Mdl),
 	    case varp_formula:getopt(Bs,method) of
 		collect -> {1,[Mdl]};
 		count -> 1
@@ -291,163 +291,12 @@ backtrack(Bs,F) ->
 		      [varp_formula:getopt(Bs,method)]),
     case apply_opts(Bs,F) of
 	false -> no_models(Bs);
-	Bs1 -> backtrack_bs(eval(Bs1))
+	Bs1 -> varp_backtrack:backtrack(eval(Bs1))
     end.
-
-
-backtrack_bs(Bs) ->
-    N     = varp_formula:getopt(Bs,max),
-    Print = varp_formula:getopt(Bs,print),
-    case varp_formula:getopt(Bs,method) of
-	collect ->
-	    bt(Bs, fun({Count0,Acc},Bs1) ->
-			   Count = Count0+1,
-			   Mdl = varp_formula:model(Bs1),
-			   print(Print,Count,Mdl),
-			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,{Count,[Mdl|Acc]}}
-		   end, {0,[]});
-	count ->
-	    bt(Bs, fun(Count0,Bs1) -> 
-			   Count = Count0+1,
-			   if Print =:= false -> ok;
-			      true ->
-				   Mdl = varp_formula:model(Bs1),
-				   print(Print,Count,Mdl)
-			   end,
-			   if Count rem 1000 =:= 0 ->
-				   io:format("~w\n", [Count]);
-			      true -> 
-				   ok
-			   end,
-			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,Count} 
-		   end, 0)
-    end.
-
-print(true,I,Bindings) ->
-    Bindings1 = filter_bindings(Bindings),
-    io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
-print(literal,I,Bindings) ->
-    Bindings1 = filter_bindings(Bindings),
-    io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
-print(model,I,Bindings) ->
-    Bindings1 = filter_bindings(Bindings),
-    io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || 
-			    Bound <- Bindings1,
-			    element(2,Bound) =/= false ], ",")]);
-print(umodel,I,Bindings) ->
-    io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || 
-			    Bound <- Bindings,
-			    element(2,Bound) =/= false ], ",")]);
-print(erlang,_I,Bindings) ->
-    Bindings1 = filter_bindings(Bindings),
-    io:format("~w.\n", [Bindings1]);
-print(false,_I,_Bindings) ->
-    ok.
-
-filter_bindings(Bindings) ->
-    [ B || B={{p,V,_},_} <- Bindings, hd(atom_to_list(V)) =/= $_].
 
 format_model(Model) ->
-    concat([ format_binding(Bound) || Bound <- Model ], ",").
-
-format_binding({Var,Value}) ->
-    VarFmt = format_var(Var),
-    if Value =:= true -> VarFmt;
-       Value =:= false -> [$~|VarFmt];
-       is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
-    end.
-
-%% format_var(V) when is_atom(V) ->
-%%    [atom_to_list(V)];
-format_var({p,V,[]}) ->
-    [atom_to_list(V)];
-format_var({p,V,As}) ->
-    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+    concat([ varp_format:format_binding(Bound) || Bound <- Model ], ",").
 
 concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].
-
-%%
-%% Explicit recursion version, allow times backtracking
-%% mix alogorithms etc.
-%%
-bt(Bs,Func,Acc) ->
-    case bt_init(Bs) of
-	{model,_Stack} ->
-	    {_,Acc1} = Func(Acc,Bs),
-	    Acc1;
-	{true,Stack} ->
-	    {_,Acc1} = bt_loop(Stack,Func,Acc,Bs),
-	    Acc1;
-	false ->
-	    Acc
-    end.
-
-bt_loop(Stack,Func,Acc,Bs) ->
-    case bt_next(Stack,Bs) of
-	{model,Stack1} ->
-	    case Func(Acc,Bs) of
-		{true,Acc1} ->
-		    bt_undo(Bs,Stack1),
-		    bt_loop(Stack1,Func,Acc1,Bs);
-		{false,Acc1} ->
-		    {false,Acc1}
-	    end;
-	{true,Stack1} ->
-	    bt_loop(Stack1,Func,Acc,Bs);
-	false ->
-	    {false,Acc}
-    end.
-
-bt_undo(Bs,[{_,_,_,Mark}|_]) ->
-    varp_formula:undo(Bs,Mark);
-bt_undo(_Bs,[]) ->
-    ok.
-
-%% initalise backtrack stack
-bt_init(Bs) ->
-    I0 = varp_formula:first_init(Bs),
-    ?dbg("I0=~w N=~w\n", [I0,varp_formula:number_of_variables(Bs)]),
-    Next = varp_formula:next_unbound(Bs,I0),
-    ?dbg("Next=~p\n",[Next]),
-    case Next  of
-	false  -> {model,[]};
-	{I,Xi} -> {true,[{I,Xi,[true,false],0}]}
-    end.
-
-bt_next([{_,_,[],_}|Stack],Bs) ->
-    bt_undo(Bs,Stack), %% pop/undo
-    bt_next(Stack,Bs);
-bt_next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
-    ?dbg("~s~s/~w\n", [indent(Mark),varp_formula:fmt_var(Bs,Xi),V]),
-    varp_formula:mark(Bs,Mark),
-    case eq_eval(Bs,Xi,V,Mark) of
-	false -> %% hook this?
-	    varp_formula:undo(Bs,Mark),
-	    bt_next([{I,Xi,Vs,Mark}|Stack],Bs);
-	true ->
-	    case varp_formula:next_unbound(Bs,I) of
-		false -> 
-		    {model,[{I,Xi,Vs,Mark}|Stack]};
-		{J,Xj} ->
-		    {true,[{J,Xj,[true,false],Mark+1},{I,Xi,Vs,Mark}|Stack]}
-	    end
-    end;
-bt_next([],_Bs) ->
-    false.
-
-indent(D) -> lists:duplicate(D, $\s).
-
-eq_eval(Bs,V,Value,_D) ->
-    ?dbg("~seq_eval: ~s/~s\n", 
-	 [indent(_D),
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:fmt_var(Bs,Value)]),
-    varp_formula:equal(Bs,V,Value) andalso varp_formula:eval(Bs).

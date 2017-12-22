@@ -18,6 +18,7 @@
 -export([fmt_bind/4]).
 -export([fmt_bind/3]).
 -export([fmt_bind_list/2]).
+-export([print/3]).
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 
@@ -103,9 +104,9 @@ new(OptMap) when is_map(OptMap) ->
 	       ?TRUE => true,
 	       false => ?FALSE,
 	       ?FALSE => false},
-       meta = maps:get(meta,OptMap,[]),
-       defs = maps:get(defs,OptMap,[]),
-       decls = maps:get(decs,OptMap,[]),
+       meta = maps:get(meta,OptMap),
+       defs = maps:get(defs,OptMap),
+       decls = maps:get(decls,OptMap),
        vp    = Vp
       }.
 
@@ -357,14 +358,8 @@ fmt_pred_({p,P,[]}) ->
 fmt_pred_({p,P,As}) -> 
     [atom_to_list(P),"(",concat([io_lib:format("~w",[Ai])||Ai<-As], ","), ")"].
     
-
 fmt_var_list(Bs,Xs) ->
     concat([fmt_var(Bs,X)||X<-Xs],",").
-
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].
-
 
 variable(Bs, V) ->
     W = expand_meta(V, Bs),
@@ -1919,8 +1914,7 @@ is_equivalent(Bs, X, Y) ->
 
 model_variables(Bs,[]) ->
     List = fold_var(
-	     fun('$free',_,Acc) -> Acc;
-		(true,_,Acc) -> Acc;
+	     fun(true,_,Acc) -> Acc;
 		(false,_,Acc) -> Acc;
 		(_X,Y,Acc) when is_integer(Y) ->
 		     [Y | Acc];
@@ -2008,6 +2002,50 @@ model_bor({X,Bit}, Ms) ->
 	false ->
 	    [{X,Bit} | Ms]
     end.
+
+print(true,I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
+print(literal,I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
+print(model,I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || 
+			    Bound <- Bindings1,
+			    element(2,Bound) =/= false ], ",")]);
+print(umodel,I,Bindings) ->
+    io:format("~w: ~s\n",
+	      [I,concat([ format_binding(Bound) || 
+			    Bound <- Bindings,
+			    element(2,Bound) =/= false ], ",")]);
+print(erlang,_I,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
+    io:format("~w.\n", [Bindings1]);
+print(false,_I,_Bindings) ->
+    ok.
+
+filter_bindings(Bindings) ->
+    [ B || B={{p,V,_},_} <- Bindings, hd(atom_to_list(V)) =/= $_].
+
+format_binding({Var,Value}) ->
+    VarFmt = format_var(Var),
+    if Value =:= true -> VarFmt;
+       Value =:= false -> [$~|VarFmt];
+       is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
+    end.
+
+format_var({p,V,[]}) ->
+    [atom_to_list(V)];
+format_var({p,V,As}) ->
+    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+
+concat([], _) -> [];
+concat([H],_) -> [H];
+concat([H|T],S) -> [H,S | concat(T,S)].
 
 show_fail(Bs) ->
     io:format("FAIL:\n", []),

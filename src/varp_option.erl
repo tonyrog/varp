@@ -440,7 +440,11 @@ set_opts([], OptMap) ->
     OptMap.
 
 default_opts() ->
-    default_opts_(options_list(), #{}).
+    default_opts_(options_list(), 
+		  #{ decls => [],
+		     defs  => [],
+		     code  => [],
+		     meta  => []}).
 
 default_opts_([#{ key := Key, default := Value}|Opts], OptMap) ->
     default_opts_(Opts, setopt_(Key, Value, OptMap));
@@ -455,14 +459,14 @@ setopt(env,Env,OptMap) when is_list(Env) ->
 	     fun({X,V},E0) ->
 		     E1 = proplists:delete(X,E0),
 		     [{X,V} | E1]
-	     end, maps:get(meta, OptMap,[]), Env),
+	     end, maps:get(meta, OptMap), Env),
     OptMap#{ meta => Meta };
 setopt(defs,Ds,OptMap) when is_list(Ds) ->
     Defs = lists:foldl(
 	      fun({Px,Def},E0) ->
 		      E1 = proplists:delete(Px,E0),
 		      [{Px,Def} | E1]
-	      end, maps:get(defs, OptMap, []), Ds),
+	      end, maps:get(defs, OptMap), Ds),
     OptMap#{ defs => Defs };
 setopt(decls,Ds,OptMap) when is_list(Ds) ->
     Decls = lists:foldl(
@@ -471,10 +475,10 @@ setopt(decls,Ds,OptMap) when is_list(Ds) ->
 		      Px = {p,Name,Args1},
 		      E1 = proplists:delete(Px,E0),
 		      [{Px,Sign,Size} | E1]
-	      end, maps:get(decls, OptMap, []), Ds),
+	      end, maps:get(decls, OptMap), Ds),
     OptMap#{ decls => Decls };
 setopt(code,Code,OptMap) ->
-    OptMap#{ code => maps:get(code, OptMap, []) ++ Code };
+    OptMap#{ code => maps:get(code, OptMap) ++ Code };
 setopt(print,true,OptMap)   -> setopt_(print,true,OptMap);
 setopt(print,false,OptMap)  -> setopt_(print,false,OptMap);
 setopt(print,model,OptMap)  -> setopt_(print,model,OptMap);

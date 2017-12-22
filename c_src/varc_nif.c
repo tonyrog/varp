@@ -890,39 +890,30 @@ static ERL_NIF_TERM make_boolean(ErlNifEnv* env, int value)
     return value ? ATOM(true) : ATOM(false);
 }
 
-static int get_literal(ErlNifEnv* env, varc_t* vp, ERL_NIF_TERM arg, int* x)
+static int get_literal(ErlNifEnv* env, varc_t* vp, ERL_NIF_TERM arg, int* xp)
 {
-    int t;
+    int x;
 
-//    if (arg == ATOM(true)) {
-//	*x = TRUE;
-//	return 1;
-//    }
-//    if (arg == ATOM(false)) {
-//	*x = FALSE;
-//	return 1;
-//    }
-    if (!enif_get_int(env, arg, &t))
+    if (!enif_get_int(env, arg, &x))
 	return 0;
-    if (t < 0) {
-	if (-t >= (int)vp->vnext) return 0;
-	*x = t;
+    if (x < 0) {
+	if (-x >= (int)vp->vnext) return 0;
+	*xp = x;
 	return 1;
     }
-    else if (t > 0) {
-	if (t >= (int)vp->vnext) return 0;
-	*x = t;
+    else if (x > 0) {
+	if (x >= (int)vp->vnext) return 0;
+	*xp = x;
 	return 1;
     }
-    return 0;
+    else { // t == 0  => allow 0 as FALSE!
+	*xp = FALSE;
+	return 1;
+    }
 }
 
 static ERL_NIF_TERM make_literal(ErlNifEnv* env, int value)
 {
-//    if (value == TRUE)
-//	return ATOM(true);
-//    else if (value == FALSE)
-//	return ATOM(false);
     return enif_make_int(env, value);
 }
 
