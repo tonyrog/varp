@@ -260,11 +260,11 @@ no_models(Bs) ->
 	count -> 0
     end.
 
-eval_list([],Bs) ->
+eval_list(Bs,[]) ->
     eval(Bs);
-eval_list([{F,V}|Ps],Bs) ->
+eval_list(Bs,[{F,V}|Ps]) ->
     case varp_formula:equal(Bs,F,V) of
-	true -> eval_list(Ps,Bs);
+	true -> eval_list(Bs,Ps);
 	false -> false
     end.
 

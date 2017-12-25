@@ -21,7 +21,7 @@
 main(Args) ->
     application:start(varp),
     {Mode,Bound,Opts0,Files} = process_args0(Args, none, [], []),
-    Opts = [{env,Bound}|Opts0],
+    Opts = [{meta,Bound}|Opts0],
     {ReadIn,{Defs0,Decls0,Code0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
 	    {ok,{[],[],[],undefined}} -> {true,{[],[],[],undefined}};

@@ -542,9 +542,9 @@ quantifier -> '[' qtype expr ']' : {'$2',comma_list('$3')}.
 %%
 %% Declaration of boolean and integer "predicates"
 %%
-pdecl -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
-pdecl -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
-pdecl -> pexpr ':' sexpr                : {uint,'$3','$1'}.
+pdecl -> pexpr ':' sexpr '/' 'signed'   : {'$1',int,'$3'}.
+pdecl -> pexpr ':' sexpr '/' 'unsigned' : {'$1',uint,'$3'}.
+pdecl -> pexpr ':' sexpr                : {'$1',uint,'$3'}.
 
 pdecls -> pdecl : ['$1'].
 pdecls -> pdecls ',' pdecl : '$1'++['$3'].

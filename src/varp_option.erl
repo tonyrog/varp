@@ -27,9 +27,9 @@
 %%  -l123
 %%
 
--define(BOOL,{"true",true},{"1",true},{"false",false},{"0",false}).
+-define(BOOL,{"true",true},{"false",false},{"1",true},{"0",false}).
 
-options() ->    
+options() ->
     V1 = #{ long => "value",
 	    short => "v",
 	    key => value,
@@ -73,6 +73,7 @@ options() ->
 	    key => order,
 	    spec => {enums,
 		     [{"identity",identity},
+		      {"random",  random},
 		      {"reverse", reverse},
 		      {"depth",depth},
 		      {"occure",occure},
@@ -100,6 +101,13 @@ options() ->
 	    spec => {enums,[?BOOL]},
 	    default => true,
 	    description => "Use backtracking."
+	  },
+    V91 = #{ long => "backjump",
+	     short => "j",
+	     key => backjump,
+	     spec => {enums,[?BOOL]},
+	     default => false,
+	     description => "Use backjumping during backtrack."
 	  },
     V10 = #{ long => "pair",
 	     key => pair,
@@ -183,27 +191,49 @@ options() ->
 	     default => undefined,
 	     description => "This help."
 	   },
+    V21 = #{ key => meta,
+	     spec => {set,{string,term}},
+	     default => [],  %% ordset
+	     description => "Internal list of meta variables and values"},
+    V22 = #{ key => defs,
+	     spec => {set,{pred,term}},
+	     default => [],  %% ordset
+	     description => "Internal list of all definitions"},
+    V23 = #{ key => decls,
+	     spec => {set,{predpat,atom,integer}},
+	     default => [],  %% ordset
+	     description => "Internal list of all declarations"},
+    V24 = #{ key => code,
+	     spec => {append,list},
+	     default => [],
+	     description => "Internal list of all code"},
+
     %% now build a map from long/short => Vi (will be a literal)
-    #{ "value" => V1, "v" => V1,
-       "print" => V2, "p" => V2,
-       "partial" => V3,
-       "method"  => V4,
-       "max" => V5, "n" => V5,
-       "order" => V6,
-       "bcp" => V7,
-       "saturate" => V8, "s" => V8,
-       "backtrack" => V9, "b" => V9,
-       "pair" => V10,
-       "assoc" => V11,
-       "threshold" => V12,
-       "carry" => V13,
-       "borrow" => V14,
-       "divz" => V15,
-       "log" => V16,
-       "output" => V17, "o" => V17,
-       "formula" => V18, "f" => V18,
-       "version" => V19, "V" => V19,
-       "help" => V20, "h" => V20
+    #{ value => V1, "value" => V1, "v" => V1,
+       print => V2, "print" => V2, "p" => V2,
+       partial => V3, "partial" => V3,
+       mathod  => V4, "method"  => V4,
+       max => V5, "max" => V5, "n" => V5,
+       order => V6, "order" => V6,
+       bcp => V7, "bcp" => V7,
+       saturate => V8, "saturate" => V8, "s" => V8,
+       backtrack => V9, "backtrack" => V9, "b" => V9,
+       backjump => V91, "backjump" => V91, "j" => V91,
+       pair => V10, "pair" => V10,
+       assoc => V11, "assoc" => V11,
+       threshold => V12, "threshold" => V12,
+       carry => V13, "carry" => V13,
+       borrow => V14, "borrow" => V14,
+       divz => V15, "divz" => V15,
+       log => V16, "log" => V16,
+       output => V17, "output" => V17, "o" => V17,
+       formula => V18, "formula" => V18, "f" => V18,
+       version => V19, "version" => V19, "V" => V19,
+       help => V20, "help" => V20, "h" => V20,
+       meta => V21,
+       defs => V22,
+       decls => V23,
+       code => V24
      }.
 
 %% list of options with unique key
@@ -255,10 +285,12 @@ process_args(["-"++OptName|As],Mode,Opts,Bound) ->
 	    end
     end;
 process_args([Var,"=",Value|As],Mode,Opts,Bound) ->
-    %% V = list_to_atom(Var),
-    case string:to_integer(Value) of
-	{N,""} -> process_args(As,Mode,Opts,[{Var,N}|Bound]);
-	_ -> process_args(As,Mode,Opts,[{Var,Value}|Bound])
+    try list_to_integer(Value) of
+	N ->
+	    process_args(As,Mode,Opts,[{Var,N}|Bound])
+    catch
+	error:badarg ->
+	    process_args(As,Mode,Opts,[{Var,Value}|Bound])
     end;
 process_args([A|As],Mode,Opts,Bound) ->
     case string:chr(A,$=) of
@@ -366,8 +398,8 @@ usage() ->
     io:format("  <Mode> = satisfy|falsify|prove|cnf|snf|version|help\n"),
     io:format("Options\n"),
     lists:foreach(
-      fun(I=#{long:=LongOpt,spec:=Spec,
-	      default:=Def,description:=Desc }) ->
+      fun(I=#{ long:=LongOpt, spec:=Spec,
+	       default:=Def, description:=Desc }) ->
 	      ShortOpt = maps:get(short,I,undefined),
 	      Names = [["--",LongOpt],"|",["-",LongOpt],
 		       if ShortOpt =:= undefined -> "";
@@ -381,7 +413,9 @@ usage() ->
 				[Names,format_spec(Spec),
 				 format_value(Def),
 				 Desc])
-	      end
+	      end;
+	 (#{ key := _Key }) -> %% ignore internal options
+	      ok
       end, options_list()),
     halt(1).
 
@@ -414,6 +448,7 @@ format_spec({multiple,T}) -> "{"++format_spec(T)++"}*";
 format_spec(unsigned) -> "unsigned integer";
 format_spec(integer)  -> "integer";
 format_spec(string)   -> "string";
+format_spec(atom)     -> "atom";
 format_spec(void)     -> "void";
 format_spec({enums,Vs}) when is_list(Vs) ->
     string:join([Name || {Name,_Enum} <- Vs], "|").
@@ -422,7 +457,6 @@ format_value(N) when is_integer(N) -> integer_to_list(N);
 format_value(A) when is_atom(A) -> atom_to_list(A);
 format_value(L) when is_list(L) -> L.
 
-
 %%
 %% Set options
 %%
@@ -430,12 +464,8 @@ format_value(L) when is_list(L) -> L.
 set_opts(Opts) when is_list(Opts) ->
     set_opts(Opts, default_opts()).
 
-set_opts([{Opt,Value}|Opts], OptMap) ->
-    set_opts(Opts, setopt(Opt,Value, OptMap));
-set_opts([debug|Opts], OptMap) ->
-    set_opts(Opts, setopt(log, debug, OptMap));
-set_opts([Opt|Opts], OptMap) when is_atom(Opt) ->
-    set_opts(Opts, setopt(Opt,true,OptMap));
+set_opts([{Opt,Value} | Opts], OptMap) ->
+    set_opts(Opts, setopt(Opt,Value,OptMap));
 set_opts([], OptMap) ->
     OptMap.
 
@@ -447,88 +477,152 @@ default_opts() ->
 		     meta  => []}).
 
 default_opts_([#{ key := Key, default := Value}|Opts], OptMap) ->
-    default_opts_(Opts, setopt_(Key, Value, OptMap));
+    default_opts_(Opts, OptMap#{ Key => Value});
 default_opts_([], OptMap) ->
     OptMap.
 
-setopt(value,true,OptMap)  -> setopt_(value,true,OptMap);
-setopt(value,false,OptMap) -> setopt_(value,false,OptMap);
-setopt(value,none,OptMap)  -> setopt_(value,none,OptMap);
-setopt(env,Env,OptMap) when is_list(Env) ->
-    Meta = lists:foldl(
-	     fun({X,V},E0) ->
-		     E1 = proplists:delete(X,E0),
-		     [{X,V} | E1]
-	     end, maps:get(meta, OptMap), Env),
-    OptMap#{ meta => Meta };
-setopt(defs,Ds,OptMap) when is_list(Ds) ->
-    Defs = lists:foldl(
-	      fun({Px,Def},E0) ->
-		      E1 = proplists:delete(Px,E0),
-		      [{Px,Def} | E1]
-	      end, maps:get(defs, OptMap), Ds),
-    OptMap#{ defs => Defs };
-setopt(decls,Ds,OptMap) when is_list(Ds) ->
-    Decls = lists:foldl(
-	      fun({Sign,Size,{p,Name,Args}},E0) ->
-		      Args1 = ['_' || _ <- Args], %% anonymous list
-		      Px = {p,Name,Args1},
-		      E1 = proplists:delete(Px,E0),
-		      [{Px,Sign,Size} | E1]
-	      end, maps:get(decls, OptMap), Ds),
-    OptMap#{ decls => Decls };
-setopt(code,Code,OptMap) ->
-    OptMap#{ code => maps:get(code, OptMap) ++ Code };
-setopt(print,true,OptMap)   -> setopt_(print,true,OptMap);
-setopt(print,false,OptMap)  -> setopt_(print,false,OptMap);
-setopt(print,model,OptMap)  -> setopt_(print,model,OptMap);
-setopt(print,literal,OptMap)  -> setopt_(print,literal,OptMap);
-setopt(print,erlang,OptMap)  -> setopt_(print,erlang,OptMap);
-setopt(partial,true,OptMap)   -> setopt_(partial,true,OptMap);
-setopt(partial,false,OptMap)  -> setopt_(partial,false,OptMap);
-setopt(method,collect,OptMap) -> setopt_(method,collect,OptMap);
-setopt(method,count,OptMap) -> setopt_(method,count,OptMap);
-setopt(max,N,OptMap) when is_integer(N), N>=0 ->
-    setopt_(max,N,OptMap);
-%% fixme check all order options! (normalize?)
-setopt(order,Order,OptMap) -> setopt_(order,Order,OptMap);
-setopt(bcp,Bool,OptMap) when is_boolean(Bool) ->
-    setopt_(bcp, Bool, OptMap);
-setopt(saturate,K,OptMap) when is_integer(K),K>=0 ->
-    setopt_(saturate,K,OptMap);
-setopt(threshold,K,OptMap) when is_integer(K),K>=0 ->
-    setopt_(threshold,K,OptMap);
-setopt(pair,true,OptMap) -> setopt_(pair,true,OptMap);
-setopt(pair,false,OptMap) -> setopt_(pair,false,OptMap);
-setopt(assoc,left,OptMap) -> setopt_(assoc,left,OptMap);
-setopt(assoc,right,OptMap) -> setopt_(assoc,right,OptMap);
-setopt(assoc,middle,OptMap) -> setopt_(assoc,middle,OptMap);
-setopt(carry,true,OptMap)    ->    setopt_(carry,true,OptMap);
-setopt(carry,false,OptMap)   ->   setopt_(carry,false,OptMap);
-setopt(carry,ignore,OptMap)  ->  setopt_(carry,ignore,OptMap);
-setopt(borrow,true,OptMap)   ->   setopt_(borrow,true,OptMap);
-setopt(borrow,false,OptMap)  ->  setopt_(borrow,false,OptMap);
-setopt(borrow,ignore,OptMap) -> setopt_(borrow,ignore,OptMap);
-setopt(divz,true,OptMap) ->   setopt_(divz,true,OptMap);
-setopt(divz,false,OptMap) ->  setopt_(divz,false,OptMap);
-setopt(divz,ignore,OptMap) -> setopt_(divz,ignore,OptMap);
-setopt(log,debug,OptMap) -> setopt_(log,?DEBUG,OptMap);
-setopt(log,info,OptMap)  -> setopt_(log,?INFO, OptMap);
-setopt(log,notice,OptMap) -> setopt_(log,?NOTICE,OptMap);
-setopt(log,warning,OptMap) -> setopt_(log,?WARNING,OptMap);
-setopt(log,error,OptMap) -> setopt_(log,?ERROR,OptMap);
-setopt(log,critical,OptMap) -> setopt_(log,?CRITICAL,OptMap);
-setopt(log,alert,OptMap) -> setopt_(log,?ALERT,OptMap);
-setopt(log,emergency,OptMap) -> setopt_(log,?EMERGENCY,OptMap);
-setopt(log,none,OptMap) -> setopt_(log,?LOG_NONE,OptMap);
-setopt(log,Level,OptMap) when Level >= ?LOG_NONE, Level =< ?DEBUG -> 
-    setopt_(log,Level,OptMap);
-setopt(backtrack,true,OptMap) -> setopt_(backtrack,true,OptMap);
-setopt(backtrack,false,OptMap) -> setopt_(backtrack,false,OptMap);
-setopt(formula,_,OptMap) -> OptMap.  %% not used internally
+setopt(Key, Value, OptMap) when is_atom(Key) ->
+    case maps:find(Key, options()) of
+	{ok,OptInfo=#{ key := Key, spec := Spec }} ->
+	    OldValue = case maps:find(Key, OptMap) of
+			   error -> maps:get(default,OptInfo);
+			   {ok,Value0} -> Value0
+		       end,
+	    case validate_value(Key, Spec, Value, OldValue) of
+		{true,Value1} ->
+		    %% io:format("~p => ~p\n", [Key,Value1]),
+		    OptMap# { Key => Value1 };
+		true ->
+		    %% io:format("~p => ~p\n", [Key,Value]),
+		    OptMap# { Key => Value };
+		false ->
+		    erlang:error(badarg)
+	    end;
+	_ ->
+	    erlang:error(badkey)
+    end.
 
-setopt_(Key, Value, OptMap) ->
-    OptMap#{ Key => Value }.
+%%
+%% Check value against spec
+%%
+validate_value(log,{enums,_Enums},Level,_Old) when is_atom(Level) ->
+    %% special? fixme!
+    Map = #{  debug => ?DEBUG,
+	      info  => ?INFO,
+	      notice => ?NOTICE,
+	      warning => ?WARNING,
+	      error => ?ERROR,
+	      critical => ?CRITICAL,
+	      alert => ?ALERT,
+	      emergency => ?EMERGENCY,
+	      none => ?LOG_NONE },
+    case maps:find(Level, Map) of
+	error -> false;
+	{ok,Value} -> {true,Value}
+    end;
+validate_value(log,{enums,_Enums},Level,_Old) when is_integer(Level) ->
+    %% special? fixme!
+    if Level >= ?LOG_NONE, Level =< ?DEBUG -> {true,Level};
+       true -> false
+    end;
+validate_value(_Key,{enums,Enums},Value,_Old) ->
+    case lists:keyfind(Value, 2, Enums) of
+	false -> false;
+	_ -> true
+    end;
+validate_value(_Key,unsigned,Value,_Old) ->
+    is_integer(Value) andalso Value >= 0;
+validate_value(_Key,integer,Value,_Old) ->
+    is_integer(Value);
+validate_value(_Key,string,Value,_Old) ->
+    is_string(Value);
+validate_value(_Key,atom,Value,_Old) ->
+    is_atom(Value);
+validate_value(_Key, void, Value,_Old) ->
+    (Value =:= "") orelse (value =:= undefined);
+validate_value(_Key, term, _Value,_Old) ->  %% any value
+    true;
+validate_value(_Key, pred, Value,_Old) ->  %% predicate
+    case Value of
+	{p,_Name,_Args} when is_list(_Args) -> true;
+	_ -> false
+    end;
+validate_value(_Key, predpat, Value,_Old) ->  %% predicate pattern
+    case Value of
+	{p,Name,Args} -> {true,{p,Name,['_' || _ <- Args]}};
+	_ -> false
+    end;
+validate_value(Key,{multiple,Type},ValueList,Old) -> %% list of TYpe
+    %% fixme zip over old value list?
+    is_list(ValueList) andalso 
+	lists:all(fun(Value) -> validate_value(Key,Type,Value,Old) end,
+		  ValueList);
+validate_value(_Key,{append,list},ValueList,Old) ->
+    if is_list(ValueList) ->
+	    {true,Old ++ ValueList};
+       true ->
+	    false
+    end;
+validate_value(Key,{set,Type},Set,OldSet) ->
+    Set1 = 
+	lists:foldl(fun (_E,false) -> false;
+			(E,Acc) ->
+			    case validate_value(Key,Type,E,undefined) of
+				true -> [E|Acc];
+				{true,E1} -> [E1|Acc];
+				false -> false
+			    end
+		    end, [], Set),
+    case Set1 of
+	false -> false;
+	_ ->  {true,ordsets:union(Set1,OldSet)}
+    end;
+validate_value(_Key,{},Value,_Old) ->
+    Value =:= {};
+validate_value(Key,{T1},Value,_Old) ->
+    case is_tuple(Value) andalso (tuple_size(Value) =:= 1) of
+	true ->
+	    try {valid_element(Key,T1,element(1,Value))} of
+		Tuple -> {true,Tuple}
+	    catch
+		error:badarg -> false
+	    end;
+	false -> false
+    end;
+validate_value(Key,{T1,T2},Value,_Old) ->
+    case is_tuple(Value) andalso (tuple_size(Value) =:= 2) of
+	true ->
+	    try {valid_element(Key,T1,element(1,Value)),
+		 valid_element(Key,T2,element(2,Value))} of
+		Tuple -> {true,Tuple}
+	    catch
+		error:badarg -> false
+	    end;
+	false -> false
+    end;
+validate_value(Key,{T1,T2,T3},Value,_Old) ->
+    case is_tuple(Value) andalso (tuple_size(Value) =:= 3) of
+	true ->
+	    try {valid_element(Key,T1,element(1,Value)),
+		 valid_element(Key,T2,element(2,Value)),
+		 valid_element(Key,T3,element(3,Value))} of
+		Tuple -> {true,Tuple}
+	    catch
+		error:badarg -> false
+	    end;
+	false -> false
+    end.
+
+valid_element(Key,Type,Value) ->
+    case validate_value(Key,Type,Value,undefined) of
+	true -> Value;
+	{true,Value1} -> Value1
+    end.
+
+is_string([C|Cs]) when is_integer(C), C >= 0, C =< 16#ffffffff ->
+    is_string(Cs);
+is_string([]) -> true;
+is_string(_) -> false.
 
 %%
 %% Get options

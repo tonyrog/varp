@@ -10,7 +10,7 @@
 -compile(export_all).
 
 -define(dbg(F,A), ok).
-%%-define(dbg(F,A), io:format((F),(A))).
+%% -define(dbg(F,A), io:format((F),(A))).
 
 backtrack(false) ->
     false;
@@ -61,6 +61,10 @@ bt(Bs,Func,Acc) ->
 	    Acc
     end.
 
+-define(BT_ORDER, [true,false]).
+-define(BT_FIRST, hd(?BT_ORDER)).
+-define(BT_LAST,  hd(tl(?BT_ORDER))).
+
 %% initalise backtrack stack
 init(Bs) ->
     I0 = varp_formula:first_init(Bs),
@@ -69,13 +73,20 @@ init(Bs) ->
     ?dbg("Next=~p\n",[Next]),
     case Next  of
 	false  -> {model,[]};
-	{I,Xi} -> {true,[{I,Xi,[true,false],0}]}
+	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,0}]}
     end.
 
-next([{_,_Xi,[],_}|Stack],Bs) ->
-    %% io:format("backjump?: stack = ~p\n", [stack(Stack)]),
-    undo(Bs,Stack), %% pop/undo
-    next(Stack,Bs);
+next([{_,Xi,[],_}|Stack1],Bs) ->
+    case varp_formula:getopt(Bs, backjump) of
+	true ->
+	    case backjump(Bs,Xi,Stack1) of
+		false -> false;
+		Stack2 -> next(Stack2,Bs)
+	    end;
+	false ->
+	    undo(Bs,Stack1),
+	    next(Stack1,Bs)
+    end;
 next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
     ?dbg("~s~s/~w\n", [indent(Mark),varp_formula:fmt_var(Bs,Xi),V]),
     varp_formula:mark(Bs,Mark),
@@ -88,16 +99,66 @@ next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
 		false -> 
 		    {model,[{I,Xi,Vs,Mark}|Stack]};
 		{J,Xj} ->
-		    {true,[{J,Xj,[true,false],Mark+1},{I,Xi,Vs,Mark}|Stack]}
+		    {true,[{J,Xj,?BT_ORDER,Mark+1},{I,Xi,Vs,Mark}|Stack]}
 	    end
     end;
 next([],_Bs) ->
     false.
 
+%% Given contradaction in both branches, we 
+%% example:
+%%    [A,B,C,D,E,F]
+%%    [A,B,C,D,E,~F]
+%% find the shortest prefix that is not contradictory:
+%%    [A,B,C,D,~F]
+%%    [A,B,C,~F]
+%%    [A,B,~F]
+%%    [A,~F]
+%%    [~F]   (contradiction ?)
+
+backjump(Bs, Xi, Stack) ->
+    %% io:format("backjump: ~p\n", [Stack]),
+    varp_formula:undo(Bs,0), %% undo all bindings
+    bj(Bs, {Xi,hd(tl(?BT_ORDER))}, Stack, 0).
+
+bj(_Bs, _Bn, [], _N) ->
+    false;
+bj(Bs, Bn, Stack0=[_|Stack], N) ->
+    Ys = [Bn | stack(Stack)],
+    %% io:format("eval_list: ~p\n", [Ys]),
+    varp_formula:mark(Bs,0),
+    case varp_prover:eval_list(Bs,Ys) of
+	false ->
+	    varp_formula:undo(Bs,0),
+	    %% io:format("bj=~p\n", [Ys]),
+	    bj(Bs, Bn, Stack, N+1);
+	Bs1 ->
+	    %% if N > 0 -> io:format("bj = ~w\n", [N]); true -> ok end,
+	    varp_formula:undo(Bs1,0),
+	    bj_reinstall(Bs1,lists:reverse(Stack)),
+	    Stack0
+    end.
+
+bj_reinstall(Bs,[{_I,Xi,Vs,Mark}|Stack]) ->
+    case Vs of
+	[] ->
+	    varp_formula:mark(Bs,Mark),
+	    eq_eval(Bs,Xi,?BT_LAST,Mark),
+	    bj_reinstall(Bs, Stack);
+	[V] when V =:= ?BT_LAST ->
+	    varp_formula:mark(Bs,Mark),
+	    eq_eval(Bs,Xi,?BT_FIRST,Mark),
+	    bj_reinstall(Bs, Stack)
+    end;
+bj_reinstall(_Bs,[]) ->
+    ok.
+
 %% Get a list of bound values on backtrack stack
-stack([{_,Xi,[true],_}|Stack])  -> [{Xi,false}|stack(Stack)];
-stack([{_,Xi,[false],_}|Stack]) -> [{Xi,true}|stack(Stack)];
-stack([{_,Xi,[],_}|Stack])      -> [{Xi,none}|stack(Stack)];
+%% Value are in order [true,false]
+stack([{_,Xi,[V],_}|Stack]) when V =:= hd(tl(?BT_ORDER))->
+    [{Xi,hd(?BT_ORDER)}|stack(Stack)];
+stack([{_,Xi,[],_}|Stack]) ->
+    [{Xi,hd(tl(?BT_ORDER))}|stack(Stack)];
 stack([]) -> [].
 
 loop(Stack,Func,Acc,Bs) ->
@@ -122,11 +183,10 @@ undo(_Bs,[]) ->
     ok.
 
 eq_eval(Bs,V,Value,_D) ->
-    ?dbg("~seq_eval: ~s/~s\n", 
-	 [indent(_D),
+    ?dbg("~seq_eval: ~w, ~s/~s\n", 
+	 [indent(_D), V,
 	  varp_formula:fmt_var(Bs,V),
 	  varp_formula:fmt_var(Bs,Value)]),
     varp_formula:equal(Bs,V,Value) andalso varp_formula:eval(Bs).
 
 indent(D) -> lists:duplicate(D, $\s).
-
