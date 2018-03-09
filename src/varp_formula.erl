@@ -77,8 +77,8 @@
 	       {int,pred(),Size::integer(),Bit::integer()} |
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
--define(dbg(F,A), io:format((F),(A))).
-%%-define(dbg(F,A), ok).
+%% -define(dbg(F,A), io:format((F),(A))).
+-define(dbg(F,A), ok).
 
 -record(bs,
 	{

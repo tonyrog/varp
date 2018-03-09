@@ -188,7 +188,7 @@ prod(N,File) ->
 prod(N) when is_integer(N), N>1 ->
     put(next_var, 2), %% FIXME!
     Nv = integer_bits(N),
-    L  = (length(Nv)+1) div 2,
+    L  = length(Nv)-1,
     Is = lists:seq(0,L-1),
     X  = [{bit_index,{p,'X',[]},I}||I<-Is],
     Y  = [{bit_index,{p,'Y',[]},I}||I<-Is],
@@ -200,7 +200,9 @@ prod(N) when is_integer(N), N>1 ->
     Cs2 = gt_1(X,Cs1),
     %% Y>1
     Cs3 = gt_1(Y,Cs2),
-    {Cs3,[],Decls}.
+    %% X<Y
+    Cs4 = lt(X,Y,Cs3),
+    {Cs4,[],Decls}.
     %%
     %% {Cs4,Ls1} = normalize_clauses(Cs3),
     %% {Cs4,Ls1}.
@@ -251,6 +253,20 @@ gt_0(Xs,Cs) ->
 gt_1([_|Xs],Cs) ->    
     [Xs | Cs].
 
+%% X<Y == (xn<yn) || (xn=yn)&&(xn-1<yn-1)
+lt(X,Y,Cs) ->
+    {Out,Cs1} = lt_(lists:reverse(X), lists:reverse(Y), Cs),
+    [[Out]|Cs1].
+
+lt_([Xi],[Yi],Cs) ->
+    clt(Xi,Yi,Cs);
+lt_([Xi|Xs],[Yi|Ys],Cs) ->
+    {Lt,Cs1} = clt(Xi,Yi,Cs),
+    {Eq,Cs2} = ceq(Xi,Yi,Cs1),
+    {Lt1,Cs3} = lt_(Xs,Ys,Cs2),
+    {And,Cs4} = cand(Eq,Lt1,Cs3),
+    cor(Lt,And,Cs4).
+
 multiply(X, Y, Cs) ->
     {X1,Y1} = extend(X,Y),
     multiply_(Y1,X1,lists:duplicate(length(X1),false),[],Cs).
@@ -291,10 +307,74 @@ add_([{Ai,Bi}|Inputs],Cin,Cout,Sum,Cs) ->
 add_([],_Cin,Cout,Sum,Cs) ->
     {Cout,lists:reverse(Sum),Cs}.
 
+%%  (OUT == (A & B))
+%%   0   1   0 0 0
+%%   0   1   0 0 1
+%%   0   1   1 0 0
+%%   0   0   1 1 1 * (~A ~B OUT)
+%%   1   0   0 0 0 * (A B ~OUT)
+%%   1   0   0 0 1 * (A ~B ~OUT)
+%%   1   0   1 0 0 * (~A B ~OUT)
+%%   1   1   1 1 1
+%%
+%%   (A ~B ~OUT) (A B ~OUT) => (A ~OUT)
+%%   (~A B ~OUT) (A B ~OUT) => (B ~OUT)
+%%
 cand(A,B,Cs) ->
     cand(A,B,create_var(),Cs).
 cand(A,B,Out,Cs) ->
     {Out,[[neg(A),neg(B),Out],[A,neg(Out)],[B,neg(Out)] | Cs]}.
+
+%%  (OUT == (A | B))
+%%   0   1   0 0 0
+%%   0   0   0 1 1 * (A ~B OUT)
+%%   0   0   1 1 0 * (~A B OUT)
+%%   0   0   1 1 1 * (~A ~B OUT)
+%%   1   0   0 0 0 * (A B ~OUT)
+%%   1   1   0 1 1
+%%   1   1   1 1 0
+%%   1   1   1 1 1
+%%
+cor(A,B,Cs) ->
+    cor(A,B,create_var(),Cs).
+
+cor(A,B,Out,Cs) ->
+    {Out,[[A,neg(B),Out],[neg(A),B,Out],
+	  [neg(A),neg(B),Out],[A,B,neg(Out)] | Cs]}.
+
+%%  OUT ==   A = B  
+%%   0   0   0 1 0 *  (A B OUT) 
+%%   0   1   0 0 1
+%%   0   1   1 0 0
+%%   0   0   1 1 1 *  (~A ~B OUT) 
+%%   1   1   0 1 0 
+%%   1   0   0 0 1 *  (A ~B ~OUT) 
+%%   1   0   1 0 0 *  (~A B ~OUT)
+%%   1   1   1 1 1 
+
+ceq(A,B,Cs) ->
+    ceq(A,B,create_var(),Cs).
+
+ceq(A,B,Out,Cs) ->
+    {Out,[[A,B,Out],[neg(A),neg(B),Out],
+	  [A,neg(B),neg(Out)],[neg(A),B,neg(Out)] | Cs]}.
+
+%%  OUT ==   A < B  
+%%   0   1   0 0 0 
+%%   0   0   0 1 1 * (A ~B OUT)
+%%   0   1   1 0 0
+%%   0   1   1 0 1 
+%%   1   0   0 0 0 * (A B ~OUT)
+%%   1   1   0 1 1 
+%%   1   0   1 0 0 * (~A B ~OUT)
+%%   1   0   1 0 1 * (~A ~B ~OUT)
+
+clt(A,B,Cs) ->
+    clt(A,B,create_var(),Cs).
+
+clt(A,B,Out,Cs) ->
+    {Out,[[A,neg(B),Out],[A,B,neg(Out)],
+	  [neg(A),B,neg(Out)],[neg(A),neg(B),neg(Out)]|Cs]}.
 
 %% full adder in CNF form
 %% input A, B, and carry in Cin
@@ -382,7 +462,7 @@ format_symbol(false) -> "false";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);
 format_symbol(I) when is_integer(I) -> [$T|integer_to_list(I)];
 format_symbol({bit_index,V,I}) ->
-    atom_to_list(V)++"["++integer_to_list(I)++"]";
+    format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({p,V,[]}) -> atom_to_list(V);
 format_symbol({p,V,As}) ->
     [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
