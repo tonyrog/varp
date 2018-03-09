@@ -724,7 +724,7 @@ decl(D) ->
 op({Op,_Ln})     -> Op.
 
 line([H|_]) -> line(H);
-line({_,Ln}) -> Ln.
+line(T) when is_tuple(T) -> element(2,T).
 
 constant(N) when N >= 0   -> {uint,varp_math:integer_size(N),N};
 constant(N) when N < 0   -> {int,varp_math:integer_size(N),N}.

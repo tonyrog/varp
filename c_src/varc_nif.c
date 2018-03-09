@@ -75,6 +75,8 @@ static ERL_NIF_TERM varc_class_next(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_occure(ErlNifEnv* env, int argc,
 				const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
+			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_is_equal(ErlNifEnv* env, int argc,
 				  const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_mark(ErlNifEnv* env, int argc,
@@ -151,6 +153,8 @@ typedef struct _undo_t {
     int y;                // old value
 } undo_t;
 
+// maybe keep a separate mark stack?
+
 #define CLAUSE_OP_OR   0
 #define CLAUSE_OP_AND  1
 #define CLAUSE_OP_XOR  2
@@ -190,7 +194,7 @@ typedef struct _varref_t
 {
     struct _varref_t* next;   // MUST BE FIRST
     unsigned clause;          // clause index
-    unsigned pos;             // clause pos
+    unsigned pos;             // literal position in clause
 } varref_t;
 
 // FIXME: split structure to allow parallell access?
@@ -198,7 +202,7 @@ typedef struct _variable_t
 {
     int value;         // current value
     int klass;         // class index
-    int occure;        // occure counter
+    unsigned  key[2];  // sort keys
     varref_t* ref;     // reference list
 } variable_t;
 
@@ -212,20 +216,18 @@ typedef struct _varc_t {
     unsigned int vnext;      // next free variable number
     unsigned int vsize;      // allocated size of value/class map
     unsigned int vnum;       // number of variables
-
     unsigned int cnext;      // next clause number
     unsigned int csize;      // allocated size of value/class map
     unsigned int cnum;       // number of clauses
-
     int bcp;                 // boolean constraint propagation
-
     unsigned int grow;       // how much to expand value/class map
     variable_t*  var_map;    // variable/class map 
     int*         order_map;  // variable order table
     clause_t** clause_map;   // clause_map[v] = class chain of variable v
     undo_t*  undo_stack;     // undo stack
     unsigned int undo_stack_size;  // total size of undo stack
-    unsigned int value_stack_size;  // number of values in undo stack
+    unsigned int value_stack_size; // number of value bindings in undo stack
+    unsigned int klass_stack_size; // number of class bindings in undo stack
     uint64_t  clause_eval_counter; // performance counter
     uint64_t  eval_counter;        // performance counter
     clause_t* eval_queue_hd; // eval queue head
@@ -255,19 +257,20 @@ ErlNifFunc varc_funcs[] =
 {
     NIF_FUNC( "new",                 0,  varc_new ),
     NIF_FUNC( "new",                 1,  varc_new ),
-    NIF_FUNC( "new",                 2,  varc_new ),
     NIF_FUNC( "info",                2,  varc_info ),
     NIF_FUNC( "add_variable",        1,  varc_add_variable ),
     NIF_FUNC( "get",                 2,  varc_get ),
     NIF_FUNC( "put",                 3,  varc_put ),
     NIF_FUNC( "class",               2,  varc_class ),
     NIF_FUNC( "occure",              2,  varc_occure ),
+    NIF_FUNC( "depth",               2,  varc_depth ),
     NIF_FUNC( "is_variable",         2,  varc_is_variable ),
     NIF_FUNC( "is_bound",            2,  varc_is_bound ),
     NIF_FUNC( "class_next",          2,  varc_class_next ),
     NIF_FUNC( "is_equal",            3,  varc_is_equal ),
     NIF_FUNC( "mark",                2,  varc_mark ),
     NIF_FUNC( "remove_mark",         2,  varc_remove_mark ),
+    NIF_FUNC( "undo",                1,  varc_undo ),
     NIF_FUNC( "undo",                2,  varc_undo ),
     NIF_FUNC( "eval",                1,  varc_eval ),
     NIF_FUNC( "add_clause",          3,  varc_add_clause ),
@@ -308,6 +311,10 @@ DECL_ATOM(ok);
 DECL_ATOM(true);
 DECL_ATOM(false);
 DECL_ATOM(undefined);
+DECL_ATOM(default);
+DECL_ATOM(grow);
+DECL_ATOM(size);
+DECL_ATOM(bcp);
 DECL_ATOM(error);
 DECL_ATOM(and);
 DECL_ATOM(or);
@@ -321,9 +328,17 @@ DECL_ATOM(identity);
 DECL_ATOM(reverse);
 DECL_ATOM(random);
 DECL_ATOM(occure);
+DECL_ATOM(occure_ascending);
+DECL_ATOM(occure_descending);
 DECL_ATOM(depth);
+DECL_ATOM(depth_ascending);
+DECL_ATOM(depth_descending);
 DECL_ATOM(depth_occure);
+DECL_ATOM(depth_occure_ascending);
+DECL_ATOM(depth_occure_descending);
 DECL_ATOM(occure_depth);
+DECL_ATOM(occure_depth_ascending);
+DECL_ATOM(occure_depth_descending);
 
 // info
 DECL_ATOM(max_clause_length);
@@ -333,6 +348,9 @@ DECL_ATOM(number_of_bound_variables);
 DECL_ATOM(number_of_unbound_variables);
 DECL_ATOM(clause_eval_counter);
 DECL_ATOM(eval_counter);
+DECL_ATOM(undo_stack_size);
+DECL_ATOM(value_stack_size);
+DECL_ATOM(class_stack_size);
 
 static heap_t* new_heap_block(heap_t* next)
 {
@@ -552,12 +570,13 @@ static inline int is_literal(int x)
     return !((x == TRUE) || (x == FALSE));
 }
 
+// return true if variable is constant or bound to other variable
 static int is_bound(varc_t* vp, int x)
 {
     variable_t* p;
     if (x < 0) x = -x;
     p = &vp->var_map[x];
-    return (p->value != UNDEF) || (p->klass != UNDEF);
+    return (p->value != UNDEF);
 }
 
 // Save binding on the undo stack
@@ -571,18 +590,16 @@ static void push(varc_t* vp, undo_type_t what, int x, int y)
     up->y = y;
     up->next = vp->undo_stack;
     vp->undo_stack = up;
-    if (what == VALUE)
-	vp->value_stack_size++;
     vp->undo_stack_size++;
 }
 
 // put clause on eval queue
-static int enqueue_clause(varc_t* vp, clause_t* cp)
+static int enqueue_clause(varc_t* vp, clause_t* cp, int dead)
 {
     TRACE("enqueue_clause %d T=%s F=%s flags=%x\r\n", 
 	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F),
 	  cp->flags);
-    if (cp->flags & (CLAUSE_FLAG_INQUEUE|CLAUSE_FLAG_DEAD))
+    if (cp->flags & (CLAUSE_FLAG_INQUEUE|dead))
 	return 0;
     cp->next = NULL;
     if (vp->eval_queue_tl == NULL)
@@ -614,7 +631,8 @@ static void init_variable(variable_t* vptr, int value, int klass)
 {
     vptr->value = value;
     vptr->klass = klass;
-    vptr->occure = 0;
+    vptr->key[0] = 0;
+    vptr->key[1] = 0;
     vptr->ref = NULL;
 }
 
@@ -641,7 +659,7 @@ static int enqueue_all(varc_t* vp)
     for (i = 0; i < (int)vp->cnum; i++) {
 	clause_t* cp;
 	if ((cp = vp->clause_map[i]) != NULL)
-	    count += enqueue_clause(vp, cp);
+	    count += enqueue_clause(vp, cp, 0);
     }
     return count;
 }
@@ -661,7 +679,7 @@ static void enqueue_varref(varc_t* vp,varref_t* vrp,int x,int y)
 	    bitset_set(&cp->mask_T, &cp->mask_T, pos);
 	else if (y1 == FALSE)
 	    bitset_set(&cp->mask_F, &cp->mask_F, pos);
-	enqueue_clause(vp,cp);
+	enqueue_clause(vp,cp,CLAUSE_FLAG_DEAD);
 	vrp = vrp->next;
     }
 }
@@ -779,6 +797,8 @@ static int put(varc_t* vp, int x, int y)
     }
     // x is not a positive literal
     push(vp, VALUE, x, vp->var_map[x].value);  // push old value of x
+    vp->value_stack_size++;
+    
     enqueue_var(vp, x, y);
     vp->var_map[x].value = y;  // new value of x
     // if y is a literal then x and y classes are joined
@@ -788,12 +808,14 @@ static int put(varc_t* vp, int x, int y)
 	    yc = -yc;
 	    push(vp, CLASS, yc, vp->var_map[yc].klass);
 	    vp->var_map[yc].klass = -x;
+	    vp->klass_stack_size++;
 	}
     }
     else {
 	if (yc != TRUE) {
 	    push(vp, CLASS, yc, vp->var_map[yc].klass);
 	    vp->var_map[yc].klass = x;
+	    vp->klass_stack_size++;
 	}
     }
     return 0;
@@ -815,7 +837,6 @@ static int add_varref(varc_t* vp,int lit,clause_t* cp,unsigned pos)
     vptr->ref = vrp;
     vrp->clause = cp->cix;
     vrp->pos = pos;
-    vptr->occure++;
     return 0;
 }
 
@@ -867,7 +888,7 @@ static int insert_clause(ErlNifEnv* env, varc_t* vp, clause_t* cp)
 
     cp->cix = cix;
 
-    enqueue_clause(vp, cp);
+    enqueue_clause(vp,cp,0);
 
     if (vp->cnext == vp->csize) {
 	unsigned int old_csize = vp->csize;
@@ -882,6 +903,18 @@ static int insert_clause(ErlNifEnv* env, varc_t* vp, clause_t* cp)
     vp->cnum++;
     vp->clause_map[cix] = cp;
     return cix;
+}
+
+static int get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, int* bool)
+{
+    (void) env;
+    if (term == ATOM(true))
+	*bool = 1;
+    else if (term == ATOM(false))
+	*bool = 0;
+    else
+	return 0;
+    return 1;
 }
 
 static ERL_NIF_TERM make_boolean(ErlNifEnv* env, int value)
@@ -942,8 +975,6 @@ static inline void unbound_literals(clause_t* cp, bitset_t* unbound)
 // eval an OR clause using bitmasks mask_F and mask_T
 // clause is x0 = OR(x1,....,xn-1)
 //
-// addme: if all but one, xi, are false then x0=xi
-//
 static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 {
     int i;
@@ -956,11 +987,9 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 	    bitset_t unbound;
 	    unbound_literals(cp, &unbound);
 	    TRACE(" lit[0]=T, unbound=%s\r\n", bitset_format(&unbound));
-	    if (bitset_is_singleton(&unbound)) {
-		if ((i = bitset_first(&unbound))) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[i-1], TRUE);
-		}
+	    if (bitset_single_pos(&unbound,&i)) {
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		PUTA(vp, cp->lit[i], TRUE);
 	    }
 	    else if (bitset_is_empty(&unbound)) {
 		if (bitset_is_nset(&cp->mask_F,1,cp->size-1))
@@ -971,6 +1000,7 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
     else if (bitset_is_set(&cp->mask_F,0)) { // x0 == FALSE?
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	TRACE(" lit[i]=F%s\r\n", "");
+	// LIGHTER version may set bitmask once and simplify enqueue_varref 
 	for (i = 1; i < cp->size; i++) {
 	    PUTA(vp, cp->lit[i], FALSE);
 	}
@@ -986,8 +1016,15 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], FALSE);
 	}
-	else {
-	    TRACE(" lit[0]= nope%s\r\n", "");
+	else if (!vp->bcp) { // if all but one, xi, are false then x0=xi
+	    // e.g  x0=0,x2,0  => x0=x2
+	    bitset_t unbound;
+	    unbound_literals(cp, &unbound);
+	    bitset_clear(&unbound,&unbound,0);
+	    if (bitset_single_pos(&unbound,&i)) {  // one of x1..xn is unbound
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		PUTA(vp, cp->lit[0], cp->lit[i]);
+	    }
 	}
     }
     return 0;
@@ -996,9 +1033,6 @@ static int eval_or_clause_mask(varc_t* vp, clause_t* cp)
 //
 // eval an OR clause using bitmasks mask_F and mask_T
 // clause is x0 = AND(x1,....,xn-1)
-//
-// addme !bcp: if all but one, xi, are true then x0=xi
-//
 //
 static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 {
@@ -1017,11 +1051,9 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 	if (bitset_is_nclear(&cp->mask_F,1,cp->size-1)) { // clause not dead
 	    bitset_t unbound;
 	    unbound_literals(cp, &unbound);
-	    if (bitset_is_singleton(&unbound)) {
-		if ((i = bitset_first(&unbound))) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		    PUTA(vp, cp->lit[i-1], FALSE);
-		}
+	    if (bitset_single_pos(&unbound,&i)) {
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		PUTA(vp, cp->lit[i], FALSE);
 	    }
 	    else if (bitset_is_empty(&unbound)) {
 		if (bitset_is_nset(&cp->mask_T,1,cp->size-1))
@@ -1033,12 +1065,20 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 	if (bitset_any(&cp->mask_F)) { // there is at least one FALSE literal
 	    cp->flags |= CLAUSE_FLAG_DEAD;
 	    PUTA(vp, cp->lit[0], FALSE);
+	}	
+	else if (bitset_is_nset(&cp->mask_T,1,cp->size-1)) { // all TRUE
+	    TRACE(" lit[0]=T, all true%s\r\n", "");
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    PUTA(vp, cp->lit[0], TRUE);
 	}
-	else {
-	    if (bitset_is_nset(&cp->mask_T,1,cp->size-1)) { // all TRUE
-		TRACE(" lit[0]=T, all true%s\r\n", "");
+	else if (!vp->bcp) { // if all but one, xi, are true then x0=xi
+	    // e.g  x0=1,x2,1  => x0=x2	    
+	    bitset_t unbound;
+	    unbound_literals(cp, &unbound);
+	    bitset_clear(&unbound,&unbound,0);
+	    if (bitset_single_pos(&unbound,&i)) {  // one of x1..xn is unbound
 		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTA(vp, cp->lit[0], TRUE);
+		PUTA(vp, cp->lit[0], cp->lit[i]);
 	    }
 	}
     }
@@ -1049,10 +1089,13 @@ static int eval_and_clause_mask(varc_t* vp, clause_t* cp)
 // eval an XOR clause using bitmasks mask_F and mask_T
 // clause is x0 = XOR(x1,....,xn-1)
 //
-
+// x0 = 1,0,1,0,xi,0,1,0  => x0=xi  (parity=0) x0=!xi (parity=1)
+// 1 = 1,0,1,x1,0,1,x2    => x1=x2  (parity=1) x1=!x2 (parity=0)
+// 0 = 1,0,1,x1,0,1,x2    => x1=!x2 (parity=1) x1=x2  (parity=0)
+// 
 static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
 {
-    int i;
+    int i,j;
 
     TRACE("eval_xor_clause_mask %d T=%s F=%s\r\n", 
 	  cp->cix,  bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
@@ -1061,36 +1104,48 @@ static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
 	bitset_t unbound;
 	unbound_literals(cp, &unbound);
 	TRACE(" lit[0]=T, unbound=%s\r\n", bitset_format(&unbound));
-	if (bitset_is_singleton(&unbound)) { // one unbound position
-	    if ((i = bitset_first(&unbound))) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (!bitset_parity(&cp->mask_T))  // x0 is counted
-		    PUTA(vp, cp->lit[i-1], FALSE);
-		else
-		    PUTA(vp, cp->lit[i-1], TRUE);
-	    }
+	if (bitset_single_pos(&unbound, &i)) {
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    if (!bitset_parity(&cp->mask_T))  // x0 is counted
+		PUTA(vp, cp->lit[i], FALSE);
+	    else
+		PUTA(vp, cp->lit[i], TRUE);
 	}
 	else if (bitset_is_empty(&unbound)) {
 	    if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
 		return -1;
+	}
+	else if (!vp->bcp) {
+	    if (bitset_pair_pos(&unbound, &i, &j)) {
+		if (bitset_parity(&cp->mask_T)) // x0 is counted!!!
+		    PUTA(vp, cp->lit[i], -cp->lit[j]);
+		else
+		    PUTA(vp, cp->lit[i], cp->lit[j]);
+	    }
 	}
     }
     else if (bitset_is_set(&cp->mask_F,0)) { // x0 = FALSE
 	bitset_t unbound;
 	unbound_literals(cp, &unbound);
 	TRACE(" lit[0]=F, unbound=%s\r\n", bitset_format(&unbound));
-	if (bitset_is_singleton(&unbound)) { // one unbound position
-	    if ((i = bitset_first(&unbound))) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
-		    PUTA(vp, cp->lit[i-1], TRUE);
-		else
-		    PUTA(vp, cp->lit[i-1], FALSE);
-	    }
+	if (bitset_single_pos(&unbound,&i)) { // one unbound position
+	    cp->flags |= CLAUSE_FLAG_DEAD;
+	    if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
+		PUTA(vp, cp->lit[i], TRUE);
+	    else
+		PUTA(vp, cp->lit[i], FALSE);
 	}
 	else if (bitset_is_empty(&unbound)) {
 	    if (bitset_parity(&cp->mask_T))  // x0 is counted!!!
 		return -1;
+	}
+	else if (!vp->bcp) {
+	    if (bitset_pair_pos(&unbound, &i, &j)) {
+		if (bitset_parity(&cp->mask_T))  // x0=0!
+		    PUTA(vp, cp->lit[i], -cp->lit[j]);
+		else
+		    PUTA(vp, cp->lit[i], cp->lit[j]);
+	    }
 	}
     }
     else {
@@ -1103,6 +1158,14 @@ static int eval_xor_clause_mask(varc_t* vp, clause_t* cp)
 		PUTA(vp, cp->lit[0], TRUE);
 	    else
 		PUTA(vp, cp->lit[0], FALSE);
+	}
+	else if (!vp->bcp) {
+	    if (bitset_single_pos(&unbound,&i)) { // one of x1..xn is unbound
+		if (bitset_parity(&cp->mask_T))
+		    PUTA(vp, cp->lit[0], -cp->lit[i]);
+		else
+		    PUTA(vp, cp->lit[0], cp->lit[i]);
+	    }
 	}
     }
     return 0;
@@ -1161,14 +1224,12 @@ static void cleanup(varc_t* vp)
 	cleanup_allocator(&vp->clause_allocator[i]);
 }
 
-
 static void varc_dtor(ErlNifEnv* env, void* obj)
 {
     (void) env;
     TRACE("dtor called %s\r\n", "");
     cleanup((varc_t*) obj);
 }
-
 
 static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
@@ -1177,30 +1238,53 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     unsigned int grow   = DEFAULT_MAP_GROW;
     unsigned int vsize  = DEFAULT_MAP_SIZE;
     unsigned int csize  = DEFAULT_MAP_SIZE;
+    int bcp = 0;
     ERL_NIF_TERM t;
     int i;
+
+    if (argc == 1) {
+	ERL_NIF_TERM list = argv[0];
+	ERL_NIF_TERM head, tail;
+	
+	while (enif_get_list_cell(env, list, &head, &tail)) {
+	        const ERL_NIF_TERM* elem;
+		int arity;
+		if (!enif_get_tuple(env, head, &arity, &elem) || (arity != 2))
+		    return enif_make_badarg(env);
+		if (elem[0] == ATOM(grow)) {
+		    if (elem[1] == ATOM(default))
+			grow = DEFAULT_MAP_GROW;
+		    else if (!enif_get_uint(env, elem[1], &grow))
+			return enif_make_badarg(env);
+		    else if ((grow <= 0) || (grow >  MAX_MAP_EXPAND))
+			return enif_make_badarg(env);
+		}
+		else if (elem[0] == ATOM(size)) {
+		    if (elem[1] == ATOM(default))
+			vsize = DEFAULT_MAP_SIZE;
+		    else if (!enif_get_uint(env, elem[1], &vsize))
+			return enif_make_badarg(env);
+		    else if ((vsize < 2) || (vsize > MAX_MAP_SIZE))
+			return enif_make_badarg(env);
+		}
+		else if (elem[0] == ATOM(bcp)) {
+		    if (elem[1] == ATOM(default))
+			bcp = 0;
+		    else if (!get_boolean(env, elem[1], &bcp))
+			return enif_make_badarg(env);
+		}
+		else
+		    return enif_make_badarg(env);
+		list = tail;
+	}
+	if (!enif_is_empty_list(env, list))
+	    return enif_make_badarg(env);
+    }
     
     if (!(vp = enif_alloc_resource(varc_res, sizeof(varc_t))))
 	goto error;
-
     memset(vp, 0, sizeof(varc_t));
 
-    if (argc >= 1) {
-	if (!enif_get_uint(env, argv[0], &vsize))
-	    return enif_make_badarg(env);
-	if (vsize == 0)
-	    vsize = DEFAULT_MAP_SIZE;
-	else if ((vsize < 2) || (vsize > MAX_MAP_SIZE))
-	    return enif_make_badarg(env);
-    }
-    if (argc >= 2) {
-	if (!enif_get_uint(env, argv[1], &grow))
-	    return enif_make_badarg(env);
-	if (grow == 0)
-	    grow = DEFAULT_MAP_GROW;
-	else if (grow >  MAX_MAP_EXPAND)
-	    return enif_make_badarg(env);
-    }
     vp->vnext = 2;
     vp->vsize = vsize;
     vp->vnum  = 0;
@@ -1213,8 +1297,7 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     vp->cnext = 0;
     vp->csize = csize;
     vp->cnum = 0;
-
-    vp->bcp = 1;  // Fixme: config
+    vp->bcp  = bcp;
 
     if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
 	goto error;
@@ -1229,6 +1312,7 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     }
     vp->undo_stack_size = 0;
     vp->value_stack_size = 0;
+    vp->klass_stack_size = 0;
     vp->eval_counter = 0;
     vp->clause_eval_counter = 0;
     
@@ -1330,68 +1414,72 @@ static ERL_NIF_TERM varc_order_next(ErlNifEnv* env, int argc,
     return ATOM(false);
 }
 
-static void order_reset(varc_t* vp)
+// install variables as:
+// bound-variables 0,1,...b  unbound-variables u....n
+// return u (first unbound index)
+//
+static int order_reset(varc_t* vp)
 {
-    int i;
-    for (i = 2; i < (int)vp->vnext; i++)
-	vp->order_map[i] = i;
-}
+    int i, u, b;
 
-static void order_r_reset(varc_t* vp)
-{
-    int i;
-    for (i = 2; i < (int)vp->vnext; i++)
-	vp->order_map[(vp->vnext-i)+1] = i;
-}
+    vp->order_map[0] = 0;
+    vp->order_map[1] = 1;
+    b = 1;
+    u = vp->vnext;
 
-static void order_identity(varc_t* vp, int arg)
-{
-    if (arg < 0)
-	order_r_reset(vp);
-    else
-	order_reset(vp);
-}
-
-static void order_reverse(varc_t* vp, int arg)
-{
-    UNUSED(arg);
-    int i = 2;
-    int j = (int)vp->vnext-1;
-    while(i < j) {
-	int t = vp->order_map[i];
-	vp->order_map[i] = vp->order_map[j];
-	vp->order_map[j] = t;
-	i++;
-	j--;
+    for (i = 2; i < (int)vp->vnext; i++) {
+	if (is_bound(vp, i))
+	    vp->order_map[++b] = i;
+	else
+	    vp->order_map[--u] = i;
     }
+    return u;
+}
+
+// reverse elements in range [a,b] in order map
+static void order_map_reverse(varc_t* vp, int a, int b)
+{
+    while(a < b) {
+	int t = vp->order_map[a];
+	vp->order_map[a] = vp->order_map[b];
+	vp->order_map[b] = t;
+	a++;
+	b--;
+    }
+}
+
+static int order_identity(varc_t* vp, int arg)
+{
+    int u = order_reset(vp);
+    if (arg >= 0)
+	order_map_reverse(vp, u, vp->vnext-1);
+    return u;
 }
 
 static void shuffle_array(varc_t* vp, int* a, size_t n)
 {
     int i;
-    // fprintf(stderr, "shuffle %lu\r\n", n);
     for (i = n-1; i >= 1; i--) {
 	int j = arc4_random_uniform(&vp->as, n);
-	// fprintf(stderr, "  swap %d, %d\r\n", i, j);
 	if (i != j) {
 	    int t = a[i];
 	    a[i] = a[j];
 	    a[j] = t;
 	}
     }
-    // fprintf(stderr, "done\r\n");
 }
 
-static void order_random(varc_t* vp, int arg)
+static int order_random(varc_t* vp, int arg)
 {
-    order_reset(vp);
-    if (!arg) 
+    int u = order_reset(vp);
+    if (!arg)
 	arc4_stir(&vp->as);
     else {
 	arc4_init(&vp->as);
 	arc4_add_random(&vp->as, (uint8_t*)&arg, sizeof(arg));
     }
-    shuffle_array(vp, vp->order_map+2, vp->vnext-2);
+    shuffle_array(vp, vp->order_map+u, vp->vnext-u);
+    return u;
 }
 
 // this is INSANE!!!
@@ -1406,50 +1494,227 @@ static void order_random(varc_t* vp, int arg)
 #define QSORT_R_ARGS(a,b,arg) (arg, a, b)
 #endif
 
-static int cmp_occure_inc QSORT_R_ARGS(const void* a,const void* b,void* arg)
+static int cmp_k0_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
 {
     varc_t* vp = (varc_t*) arg;
-    return vp->var_map[*((int*)a)].occure - vp->var_map[*((int*)b)].occure;
+    return vp->var_map[*((int*)a)].key[0] - vp->var_map[*((int*)b)].key[0];
 }
 
-static int cmp_occure_dec QSORT_R_ARGS(const void* b, const void* a,void* arg)
+static int cmp_k0_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
 {
     varc_t* vp = (varc_t*) arg;
-    return vp->var_map[*((int*)b)].occure - vp->var_map[*((int*)a)].occure;
+    return vp->var_map[*((int*)b)].key[0] - vp->var_map[*((int*)a)].key[0];
 }
 
-static void order_occure(varc_t* vp, int arg)
+static int cmp_k01_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
 {
-    order_reset(vp);
+    varc_t* vp = (varc_t*) arg;
+    int r;
+    r = vp->var_map[*((int*)a)].key[0] - vp->var_map[*((int*)b)].key[0];
+    if (r == 0)
+	r = vp->var_map[*((int*)a)].key[1] - vp->var_map[*((int*)b)].key[1];
+    return r;
+}
+
+static int cmp_k01_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
+{
+    varc_t* vp = (varc_t*) arg;
+    int r;
+    r = vp->var_map[*((int*)b)].key[0] - vp->var_map[*((int*)a)].key[0];
+    if (r == 0)
+	r = vp->var_map[*((int*)b)].key[1] - vp->var_map[*((int*)a)].key[1];
+    return r;
+}
+
+static int cmp_k1_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
+{
+    varc_t* vp = (varc_t*) arg;
+    return vp->var_map[*((int*)a)].key[1] - vp->var_map[*((int*)b)].key[1];
+}
+
+static int cmp_k1_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
+{
+    varc_t* vp = (varc_t*) arg;
+    return vp->var_map[*((int*)b)].key[1] - vp->var_map[*((int*)a)].key[1];
+}
+
+static int cmp_k10_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
+{
+    varc_t* vp = (varc_t*) arg;
+    int r;
+    r = vp->var_map[*((int*)a)].key[1] - vp->var_map[*((int*)b)].key[1];
+    if (r == 0)
+	r = vp->var_map[*((int*)a)].key[0] - vp->var_map[*((int*)b)].key[0];
+    return r;
+}
+
+static int cmp_k10_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
+{
+    varc_t* vp = (varc_t*) arg;
+    int r;
+    r = vp->var_map[*((int*)b)].key[1] - vp->var_map[*((int*)a)].key[1];
+    if (r == 0)
+	r = vp->var_map[*((int*)b)].key[0] - vp->var_map[*((int*)a)].key[0];
+    return r;
+}
+
+// scan through all variables and calculate the occure count, key[k]
+static void calc_occure(varc_t* vp, int k)
+{
+    int i;
+    
+    for (i = 2; i < (int)vp->vnext; i++)
+	vp->var_map[i].key[k] = 0;
+
+    for (i = 0; i < (int)vp->cnext; i++) {
+	clause_t* cp = vp->clause_map[i];
+	if (cp != NULL) {
+	    int j;
+	    for (j = 0; j < cp->size; j++) {
+		int x = get(vp, cp->lit[j]);
+		if (x < 1)
+		    vp->var_map[-x].key[k]++;
+		else if (x > 1)
+		    vp->var_map[x].key[k]++;
+	    }
+	}
+    }
+}
+
+// scan through all variables and calculate the occure count, key[k]
+// idea is to queue clauses and calculate 
+// x0.depth = max(xi.depth)+1 for each clause
+// and queue clauses when a new value is calculated for a literal
+//
+
+static void enqueue_depth_var(varc_t* vp, int x, int k, int d)
+{
+    variable_t* vptr = &vp->var_map[x];
+    int t = vptr->key[k];
+    // iterate over klass?
+    if (d >= t) {
+	varref_t* vrp = vptr->ref;
+	vptr->key[k] = d+1;
+	// printf("depth %d = %d\r\n", x, d+1);
+
+	while(vrp != NULL) {
+	    clause_t* cp = vp->clause_map[vrp->clause];
+	    enqueue_clause(vp,cp,0);
+	    vrp = vrp->next;
+	}
+    }
+}
+
+static void calc_depth(varc_t* vp, int k)
+{
+    int i;
+    clause_t* cp;
+    
+    clear_queue(vp);  // maybe warn if not empty?
+    
+    for (i = 2; i < (int)vp->vnext; i++)
+	vp->var_map[i].key[k] = 0;
+
+    // first enqueue all triples and set depth x0 = 1
+    for (i = 0; i < (int)vp->cnext; i++) {
+	if ((cp = vp->clause_map[i]) != NULL) {
+	    int x = get(vp, cp->lit[0]);
+	    if (x < 1)
+		vp->var_map[-x].key[k] = 1;
+	    else if (x > 1)
+		vp->var_map[x].key[k] = 1;
+	}
+	enqueue_clause(vp,cp,0);
+    }
+
+    while((cp = dequeue_clause(vp)) != NULL) {
+	int j, x, d=0, t;
+	for (j = 1; j < cp->size; j++) {
+	    x = get(vp, cp->lit[j]);
+	    if (x < 1)
+		t = vp->var_map[-x].key[k];
+	    else if (x > 1)
+		t = vp->var_map[x].key[k];
+	    else
+		t = 0;
+	    if (t > d) d = t;
+	}
+	// update x0
+	x = get(vp, cp->lit[0]);
+	if (x < 1) {
+	    enqueue_depth_var(vp, -x, k, d);
+	}
+	else if (x > 1) {
+	    enqueue_depth_var(vp, x, k, d);
+	}
+    }
+}
+
+static int order_occure(varc_t* vp, int arg)
+{
+    int u;
+    
+    calc_occure(vp, 0);    // calculate / recalculate occure count 
+    u = order_reset(vp);   // install identity order
 
     // qsort_r extra argument in different positions between bsd/gnu
-    if (arg < 0)
-	QSORT_R(vp->order_map+2, vp->vnext-2, sizeof(int),
-		cmp_occure_inc, vp);
+    if (arg >= 0)
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k0_asc, vp);
     else
-	QSORT_R(vp->order_map+2, vp->vnext-2, sizeof(int),
-		cmp_occure_dec, vp);
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k0_des, vp);
+    return u;
 }
 
-static void order_depth(varc_t* vp, int arg)
+static int order_depth(varc_t* vp, int arg)
 {
-    UNUSED(vp);
     UNUSED(arg);
-    // FIXME
+    int u;
+    
+    calc_depth(vp, 1);    // calculate / recalculate depth count 
+    u = order_reset(vp);   // install identity order
+    if (arg >= 0)
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k1_asc, vp);
+    else
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k1_des, vp);
+    return u;
 }
 
-static void order_occure_depth(varc_t* vp, int arg)
+static int order_occure_depth(varc_t* vp, int arg)
 {
-    UNUSED(vp);
     UNUSED(arg);
-    // FIXME
+    int u;
+
+    calc_occure(vp, 0);
+    calc_depth(vp, 1);
+    u = order_reset(vp);   // install identity order
+    if (arg >= 0)
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k01_asc, vp);
+    else
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k01_des, vp);
+    return u;
 }
 
-static void order_depth_occure(varc_t* vp, int arg)
+static int order_depth_occure(varc_t* vp, int arg)
 {
-    UNUSED(vp);
     UNUSED(arg);
-    // FIXME
+    int u;
+
+    calc_occure(vp, 0);
+    calc_depth(vp, 1);
+    u = order_reset(vp);   // install identity order
+    if (arg >= 0)
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k10_asc, vp);
+    else
+	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
+		cmp_k10_des, vp);
+    return u;
 }
 
 static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
@@ -1457,7 +1722,8 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 {
     varc_t* vp;
     int arg = 0;
-
+    int ret;
+    
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (argc > 2) {
@@ -1465,22 +1731,36 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
     }
     if (argv[1] == ATOM(identity))
-	order_identity(vp, arg);
+	ret = order_identity(vp, arg);
     else if (argv[1] == ATOM(random))
-	order_random(vp, arg);
+	ret = order_random(vp, arg);
     else if (argv[1] == ATOM(occure))
-	order_occure(vp, arg);
+	ret = order_occure(vp, arg);
     else if (argv[1] == ATOM(depth))
-	order_depth(vp, arg);
+	ret = order_depth(vp, arg);    
     else if (argv[1] == ATOM(occure_depth))
-	order_occure_depth(vp, arg);
+	ret = order_occure_depth(vp, arg);
     else if (argv[1] == ATOM(depth_occure))
-	order_depth_occure(vp, arg);
-    else if (argv[1] == ATOM(reverse))
-	order_reverse(vp, arg);
+	ret = order_depth_occure(vp, arg);
+    else if (argv[1] == ATOM(occure_ascending))
+	ret = order_occure(vp, 1);
+    else if (argv[1] == ATOM(occure_descending))
+	ret = order_occure(vp, -1);
+    else if (argv[1] == ATOM(depth_ascending))
+	ret = order_depth(vp, 1);
+    else if (argv[1] == ATOM(depth_descending))
+	ret = order_depth(vp, -1);
+    else if (argv[1] == ATOM(occure_depth_ascending))
+	ret = order_occure_depth(vp, 1);
+    else if (argv[1] == ATOM(occure_depth_descending))
+	ret = order_occure_depth(vp, -1);
+    else if (argv[1] == ATOM(depth_occure_ascending))
+	ret = order_depth_occure(vp, 1);
+    else if (argv[1] == ATOM(depth_occure_descending))
+	ret = order_depth_occure(vp, -1);    
     else
 	return enif_make_badarg(env);
-    return ATOM(ok);
+    return enif_make_int(env, ret);
 }
 
 //
@@ -1531,9 +1811,23 @@ static ERL_NIF_TERM varc_occure(ErlNifEnv* env, int argc,
     if (!get_literal(env, vp, argv[1], &lit))
 	return enif_make_badarg(env);
     ix = (lit < 1) ? -lit : lit;
-    return enif_make_int(env, vp->var_map[ix].occure);
+    return enif_make_int(env, vp->var_map[ix].key[0]);
 }
 
+static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
+			       const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    int ix, lit;
+    varc_t* vp;
+
+    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
+	return enif_make_badarg(env);    
+    if (!get_literal(env, vp, argv[1], &lit))
+	return enif_make_badarg(env);
+    ix = (lit < 1) ? -lit : lit;
+    return enif_make_int(env, vp->var_map[ix].key[1]);
+}
 
 static ERL_NIF_TERM varc_is_variable(ErlNifEnv* env, int argc,
 				const ERL_NIF_TERM argv[])
@@ -1622,6 +1916,8 @@ static ERL_NIF_TERM varc_put(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[2], &y))
 	return enif_make_badarg(env);
+    if (vp->bcp && !is_constant(y))
+	return enif_make_badarg(env);
     if (put(vp, x, y) < 0)
 	return ATOM(false);
     return ATOM(true);
@@ -1636,16 +1932,19 @@ static ERL_NIF_TERM varc_mark(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_uint(env, argv[1], &mark))
+    if (!enif_get_uint(env, argv[1], &mark) || (mark == 0))
 	return enif_make_badarg(env);
     push(vp, MARK, mark, 0);
     return ATOM(true);
 }
+
 //
 // undo mark
 //   undo all bindings until mark is found
+//   mark must exist!
 // undo count (=-mark)
 //   undo count number of marks
+// undo 0 = undo everything (mark can not exist)
 //
 static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
@@ -1658,11 +1957,27 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &mark))
-	return enif_make_badarg(env);
+    if (argc == 1)
+	mark = 0;
+    else {
+	if (!enif_get_int(env, argv[1], &mark))
+	    return enif_make_badarg(env);
+    }
     if (mark < 0)
 	count = -mark;
 
+    // find the mark - improve by link marks or separate mark stack?
+    if ((count == 0) && (mark != 0)) {
+	up = vp->undo_stack;
+	while(up != NULL) {
+	    if ((up->what == MARK) && (up->x == mark))
+		goto found;
+	    up = up->next;
+	}
+	// mark not found!
+	return enif_make_badarg(env);
+    }
+found:
     up = vp->undo_stack;
     while(up != NULL) {
 	int x, y;
@@ -1684,6 +1999,7 @@ static ERL_NIF_TERM varc_undo(ErlNifEnv* env, int argc,
 	    break;
 	case CLASS:
 	    vp->var_map[x].klass = y;
+	    vp->klass_stack_size--;
 	    break;
 	case MARK:
 	    if (count) count--;
@@ -1846,6 +2162,24 @@ static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
     else if (argv[1] == ATOM(eval_counter)) {
 	return enif_make_uint64(env, vp->eval_counter);
     }
+    else if (argv[1] == ATOM(undo_stack_size)) {
+	return enif_make_uint64(env, vp->undo_stack_size);
+    }
+    else if (argv[1] == ATOM(value_stack_size)) {
+	return enif_make_uint64(env, vp->value_stack_size);
+    }
+    else if (argv[1] == ATOM(class_stack_size)) {
+	return enif_make_uint64(env, vp->klass_stack_size);
+    }
+    else if (argv[1] == ATOM(bcp)) {
+	return make_boolean(env, vp->bcp);
+    }
+    else if (argv[1] == ATOM(grow)) {
+	return enif_make_uint(env, vp->grow);
+    }
+    else if (argv[1] == ATOM(size)) {
+	return enif_make_uint(env, vp->vsize);
+    }
     return enif_make_badarg(env);
 }
 
@@ -1930,11 +2264,9 @@ static ERL_NIF_TERM varc_del_clause(ErlNifEnv* env, int argc,
 	int lit = cp->lit[i];
 	if ((lit != TRUE) && (lit != FALSE)) {
 	    if (lit < 0) {
-		vp->var_map[-lit].occure--;
 		del_varref(vp,&vp->var_map[-lit].ref,cix,i);
 	    }
 	    else {
-		vp->var_map[lit].occure--;
 		del_varref(vp,&vp->var_map[lit].ref,cix,i);
 	    }
 	}
@@ -2157,6 +2489,10 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(true);
     LOAD_ATOM(false);
     LOAD_ATOM(undefined);
+    LOAD_ATOM(default);
+    LOAD_ATOM(grow);
+    LOAD_ATOM(size);
+    LOAD_ATOM(bcp);    
     LOAD_ATOM(error);
     LOAD_ATOM(and);
     LOAD_ATOM(or);
@@ -2170,9 +2506,18 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(reverse);
     LOAD_ATOM(random);
     LOAD_ATOM(occure);
+    LOAD_ATOM(occure_ascending);
+    LOAD_ATOM(occure_descending);
     LOAD_ATOM(depth);
+    LOAD_ATOM(depth_ascending);
+    LOAD_ATOM(depth_descending);    
     LOAD_ATOM(depth_occure);
-    LOAD_ATOM(occure_depth);    
+    LOAD_ATOM(depth_occure_ascending);
+    LOAD_ATOM(depth_occure_descending);    
+    LOAD_ATOM(occure_depth);
+    LOAD_ATOM(occure_depth_ascending);
+    LOAD_ATOM(occure_depth_descending);    
+    
     // info
     LOAD_ATOM(max_clause_length);
     LOAD_ATOM(number_of_clauses);
@@ -2180,7 +2525,10 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(number_of_bound_variables);
     LOAD_ATOM(number_of_unbound_variables);
     LOAD_ATOM(clause_eval_counter);
-    LOAD_ATOM(eval_counter);    
+    LOAD_ATOM(eval_counter);
+    LOAD_ATOM(undo_stack_size);
+    LOAD_ATOM(value_stack_size);
+    LOAD_ATOM(class_stack_size);
 }
 
 

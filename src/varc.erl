@@ -18,6 +18,7 @@
 -export([put/3]).
 -export([class/2]).
 -export([occure/2]).
+-export([depth/2]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([class_next/2]).
@@ -47,9 +48,8 @@
 -export([order_sort/2, order_sort/3]).
 -export([order_all/1]).
 
--export([sat/1, sat/2]).
--export([saturate/2]).
-
+-export([get_info/1]).
+-export([info_keys/0]).
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
@@ -57,10 +57,6 @@
 -export([get_number_of_unbound_variables/1]).
 -export([get_clause_eval_counter/1]).
 -export([get_eval_counter/1]).
-
--export([init_vector/2]).
--export([next_vector/2]).
--export([expand_vector/2]).
 
 -ifdef(debug).
 -define(debug(F,A), io:format((F),(A))).
@@ -128,6 +124,10 @@ class(_Vp, Lit) when is_integer(Lit) ->
 occure(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
+-spec depth(Vp::varc(), Lit::literal()) -> integer().
+depth(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
 -spec is_variable(Vp::varc(), Lit::literal()) -> boolean().
 is_variable(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
@@ -152,16 +152,16 @@ mark(_Vp,Level) when is_integer(Level), Level >= 0 ->
 
 %% remove latest mark
 remove_mark(Vp) ->
-    undo(Vp,-1).
+    remove_mark(Vp,-1).
 
 -spec remove_mark(Vp::varc(), Mark::integer()) -> ok.
 
 remove_mark(_Vp,_Mark) ->
     ?nif_stub().
 
-%% undo until latest mark
-undo(Vp) ->
-    undo(Vp,-1).
+%% undo every thing
+undo(_Vp) ->
+    ?nif_stub().
 
 -spec undo(Vp::varc(), Mark::integer()) -> ok.
 
@@ -242,12 +242,13 @@ order_next(Vp, Ix) ->
 order_next(_Vp, _Ix, _Skip) ->
     ?nif_stub().
 
--spec order_sort(Vp::varc(), Sort::sort_key()) -> ok.
+-spec order_sort(Vp::varc(), Sort::sort_key()) -> integer().
 			
 order_sort(_Vp, _Sort) ->
     ?nif_stub().
 
--spec order_sort(Vp::varc(), Sort::sort_key(),Arg::sort_value()) -> ok.
+-spec order_sort(Vp::varc(), Sort::sort_key(),Arg::sort_value()) -> 
+			integer().
 
 order_sort(_Vp, _Sort, _Arg) ->
     ?nif_stub().
@@ -279,6 +280,26 @@ order_all_(V, I, Acc) ->
 	{I1,Var} -> order_all_(V, I1, [Var|Acc])
     end.
 
+get_info(Vp) ->
+    [ {Key,info(Vp, Key)} || Key <- info_keys()].
+
+info_keys() ->
+    [
+     max_clause_length,
+     number_of_clauses,
+     number_of_variables,
+     number_of_bound_variables,
+     number_of_unbound_variables,
+     clause_eval_counter,
+     eval_counter,
+     undo_stack_size,
+     value_stack_size,
+     class_stack_size,
+     bcp,
+     grow,
+     size
+    ].
+
 get_number_of_variables(Vp) ->
     info(Vp, number_of_variables).
 
@@ -299,208 +320,3 @@ get_clause_eval_counter(Vp) ->
 
 get_eval_counter(Vp) ->
     info(Vp, eval_counter).
-
-%% satify the rules, stop at first model or return false
-sat(V) ->
-    sat(V,0).
-
-sat(V,M) ->
-    put(conflicts, 0),
-    case eval(V) of
-	false -> 0;
-	true ->
-	    case order_first(V) of
-		false -> model(V), 1;
-		{I,Var} -> sat__(V,I,0,M,1,Var)
-	    end
-    end.
-
-sat_(V,I,N,M,D) ->
-    case eval(V) of
-	false ->
-	    put(conflicts, get(conflicts)+1),
-	    N;
-	true ->
-	    case order_next(V,I) of
-		false -> model(V), N+1;
-		{I1,Var} -> sat__(V,I1,N,M,D+1,Var)
-	    end
-    end.
-
-sat__(V,I,N,M,D,Var) ->
-    mark(V, D),
-    clear_queue(V),
-    put(V, Var, false),
-    N1 = sat_(V,I,N,M,D),
-    undo(V),
-    if M > 0, N1 >= M -> N1;
-       true ->
-	    mark(V, D),
-	    clear_queue(V),
-	    put(V, Var, true),
-	    N2 = sat_(V,I,N1,M,D),
-	    undo(V),
-	    N2
-    end.
-
-model(V) ->
-    io:format("~w\n", [varc:get_bindings(V, 0)]).
-
-%%
-%% Create a variable "vector" of K unbound variables
-%%
-init_vector(_Vp, 0) ->
-    [];
-init_vector(Vp, K) ->
-    case order_first(Vp) of
-	false -> [];
-	{I1,X1} -> init_vector_(Vp,K-1,I1,[{I1,X1}])
-    end.
-
-init_vector_(_Vp,0,_I,Vec) -> 
-    Vec;
-init_vector_(Vp,K,I0,Vec) ->
-    case order_next(Vp,I0) of
-	false -> Vec;
-	{I1,X1} -> init_vector_(Vp,K-1,I1,[{I1,X1}|Vec])
-    end.
-
-%%
-%% Select next vector return [] when no more vectors
-%%
-next_vector(Vp, Vec) ->
-    next_vector_(Vp, Vec, 0).
-    
-next_vector_(Vp, [{I,_Xi}|Vec], Skip) ->
-    case order_next(Vp,I,Skip) of
-	false ->
-	    case next_vector_(Vp, Vec, Skip+1) of
-		[] -> [];
-		Vec1=[{J,_Xj}|_] ->
-		    case order_next(Vp,J) of
-			false -> [];
-			{K,Xk} ->
-			    [{K,Xk}|Vec1]
-		    end
-	    end;
-	{J,Xj} -> [{J,Xj}|Vec]
-    end;
-next_vector_([], _Bs, _) ->
-    [].
-
-%% add one extra unbound variable to "vector"
-expand_vector(_Vp, []) -> [];
-expand_vector(Vp, Vec) ->
-    J = lists:max([I || {I,_} <- Vec]),
-    case order_next(Vp,J) of
-	false -> Vec;
-	{K,Xk} -> Vec++[{K,Xk}]
-    end.
-
-
-%% saturate clause set
-saturate(Vp,0) ->
-    eval(Vp);
-saturate(Vp,1) -> %% K=1 only now
-    B0 = get_number_of_bound_variables(Vp),
-    case eval(Vp) of
-	false -> false;
-	true  ->
-	    case order_first(Vp) of
-		false -> false;
-		{I,Var} -> 
-		    R = saturate_(Vp,I,1,Var),
-		    B1 = get_number_of_bound_variables(Vp),		    
-		    io:format("saturate-1 bound ~w variables\n",
-			      [B1-B0]),
-		    R
-	    end
-    end.
-
-saturate_(Vp,I,D,Var) ->
-    case saturate_1(Vp,D,Var) of
-	false -> false;
-	true ->
-	    case order_next(Vp,I) of
-		false -> true;
-		{I1,Var1} ->
-		    saturate_(Vp,I1,D,Var1)
-	    end
-    end.
-
-%% do one variable
-%% false is contradiction true is ok
-saturate_1(Vp,D,Var) ->
-    %% io:format("saturate1_: var=~w\n", [Var]),
-    mark(Vp, D),
-    clear_queue(Vp),
-    case put(Vp,Var,false) and eval(Vp) of
-	false ->
-	    undo(Vp),
-	    put(Vp, Var, true) and eval(Vp);
-	true ->	    
-	    Bs0 = get_bindings(Vp, D), %% Var=false is present!
-	    undo(Vp),
-	    mark(Vp, D),
-	    clear_queue(Vp), %% needed?
-	    case put(Vp,Var,true) and eval(Vp) of
-		false ->
-		    undo(Vp),
-		    put(Vp,Var,false) and eval(Vp);
-		true ->
-		    %% intersect bindings Bs0 with current bindings
-		    Bs = intersect(Vp, Var, Bs0),
-		    %% io:format("intersect Bs=~w\n", [Bs]),
-		    undo(Vp),
-		    clear_queue(Vp), %% needed?
-		    _ = [ put(Vp,B,V) || {B,V} <- Bs],
-		    eval(Vp)
-	    end
-    end.
-
-%% Vp is under the assumption that Var = TRUE
-%% The bindings Bs0 are from the evaluation when Var = FALSE
-%% evaluate the bindings and build the intersection
-intersect(Vp, Var, [{Var,false}|Bs0]) -> %% we may have this bindings, ignore
-    intersect(Vp,Var,Bs0);
-intersect(Vp, Var, [{X,true}|Bs0]) ->
-    %% !Var -> X
-    case get(Vp, X) of
-	true ->  %% Var -> X, !Var -> X   =>  X
-	    [{X,true} | intersect(Vp,Var,Bs0)];
-	false -> %% Var -> !X, !Var -> X  =>  Var=!X
-	    [{Var,-X} | intersect(Vp,Var,Bs0)];
-	_ ->
-	    intersect(Vp,Var,Bs0)
-    end;
-intersect(Vp, Var, [{X,false}|Bs0]) ->
-    %% !Var -> !X
-    case get(Vp, X) of
-	true ->  %% Var -> X, !Var -> !X   =>  Var=X
-	    [{Var,X} | intersect(Vp,Var,Bs0)];
-	false -> %% Var -> !X, !Var -> !X  =>  !X
-	    [{X,false} | intersect(Vp,Var,Bs0)];
-	_ ->
-	    intersect(Vp,Var,Bs0)
-    end;
-intersect(Vp, Var, [{X,Y}|Bs0]) ->
-    %% !Var => X=Y
-    case {get(Vp, X),get(Vp,Y)} of
-	{Z,Z} -> %% !Var -> X=Y, Var => X=Y => X=Y
-	    [{X,Y} | intersect(Vp,Var,Bs0)];
-	_ ->
-	    intersect(Vp,Var,Bs0)
-    end;
-intersect(_Vp,_Var,[]) ->
-    [].
-
-
-	    
-	    
-	    
-
-    
-
-	    
-    
-    

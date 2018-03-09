@@ -9,8 +9,10 @@
 
 -compile(export_all).
 
+-define(START_MARK, 2).
+
 -define(dbg(F,A), ok).
-%% -define(dbg(F,A), io:format((F),(A))).
+%%-define(dbg(F,A), io:format((F),(A))).
 
 backtrack(false) ->
     false;
@@ -68,18 +70,16 @@ bt(Bs,Func,Acc) ->
 %% initalise backtrack stack
 init(Bs) ->
     I0 = varp_formula:first_init(Bs),
-    ?dbg("I0=~w N=~w\n", [I0,varp_formula:number_of_variables(Bs)]),
     Next = varp_formula:next_unbound(Bs,I0),
-    ?dbg("Next=~p\n",[Next]),
     case Next  of
 	false  -> {model,[]};
-	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,0}]}
+	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?START_MARK}]}
     end.
 
 next([{_,Xi,[],_}|Stack1],Bs) ->
     case varp_formula:getopt(Bs, backjump) of
 	true ->
-	    case backjump(Bs,Xi,Stack1) of
+	    case backjump(Bs,Xi,?BT_LAST,Stack1) of
 		false -> false;
 		Stack2 -> next(Stack2,Bs)
 	    end;
@@ -88,7 +88,6 @@ next([{_,Xi,[],_}|Stack1],Bs) ->
 	    next(Stack1,Bs)
     end;
 next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
-    ?dbg("~s~s/~w\n", [indent(Mark),varp_formula:fmt_var(Bs,Xi),V]),
     varp_formula:mark(Bs,Mark),
     case eq_eval(Bs,Xi,V,Mark) of
 	false -> %% hook this?
@@ -96,7 +95,7 @@ next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
 	    next([{I,Xi,Vs,Mark}|Stack],Bs);
 	true ->
 	    case varp_formula:next_unbound(Bs,I) of
-		false -> 
+		false ->
 		    {model,[{I,Xi,Vs,Mark}|Stack]};
 		{J,Xj} ->
 		    {true,[{J,Xj,?BT_ORDER,Mark+1},{I,Xi,Vs,Mark}|Stack]}
@@ -116,49 +115,81 @@ next([],_Bs) ->
 %%    [A,~F]
 %%    [~F]   (contradiction ?)
 
-backjump(Bs, Xi, Stack) ->
-    %% io:format("backjump: ~p\n", [Stack]),
-    varp_formula:undo(Bs,0), %% undo all bindings
-    bj(Bs, {Xi,hd(tl(?BT_ORDER))}, Stack, 0).
+backjump(Bs, Xi, Xv, Stack) ->
+    %% io:format("backjump: ~1000p\n", [Stack]),
+    varp_formula:undo(Bs,?START_MARK), %% undo all bindings
+    Stack1 = bj(Bs, {Xi,Xv}, Stack, 0),
+    %% io:format("backjump: stack1=~1000p\n", [Stack1]),
+    %% J = length(Stack)-length(Stack1),
+    %% if J > 0 ->
+    %% io:format("backjump length=~w\n", [J]);
+    %% true -> ok
+    %% end,
+    Stack1.
 
 bj(_Bs, _Bn, [], _N) ->
-    false;
+    [];
 bj(Bs, Bn, Stack0=[_|Stack], N) ->
     Ys = [Bn | stack(Stack)],
-    %% io:format("eval_list: ~p\n", [Ys]),
-    varp_formula:mark(Bs,0),
+    varp_formula:mark(Bs,?START_MARK),
     case varp_prover:eval_list(Bs,Ys) of
 	false ->
-	    varp_formula:undo(Bs,0),
-	    %% io:format("bj=~p\n", [Ys]),
+	    varp_formula:undo(Bs,?START_MARK),
 	    bj(Bs, Bn, Stack, N+1);
 	Bs1 ->
-	    %% if N > 0 -> io:format("bj = ~w\n", [N]); true -> ok end,
-	    varp_formula:undo(Bs1,0),
+	    varp_formula:undo(Bs1,?START_MARK),
 	    bj_reinstall(Bs1,lists:reverse(Stack)),
 	    Stack0
     end.
 
-bj_reinstall(Bs,[{_I,Xi,Vs,Mark}|Stack]) ->
-    case Vs of
-	[] ->
-	    varp_formula:mark(Bs,Mark),
-	    eq_eval(Bs,Xi,?BT_LAST,Mark),
-	    bj_reinstall(Bs, Stack);
-	[V] when V =:= ?BT_LAST ->
-	    varp_formula:mark(Bs,Mark),
-	    eq_eval(Bs,Xi,?BT_FIRST,Mark),
-	    bj_reinstall(Bs, Stack)
+
+backjump1(Bs, Xi, Xv, Stack) ->
+    io:format("backjump1: ~1000p\n", [Stack]),
+    varp_formula:undo(Bs,?START_MARK), %% undo all bindings
+    varp_formula:mark(Bs,?START_MARK), %% mark point again
+    ?dbg("~w=~w,",[Xi,Xv]),
+    case eqv(Bs,Xi,Xv) of
+	false ->
+	    varp_formula:undo(Bs,?START_MARK),
+	    bj_reinstall(Bs,Stack),
+	    Stack;
+	true ->
+	    Stack1 = bj1(Bs, lists:reverse(Stack), []),
+	    io:format("backjump1: stack1=~1000p\n", [Stack1]),
+	    varp_formula:undo(Bs,?START_MARK),
+	    bj_reinstall(Bs,Stack1),
+	    io:format("backjump length=~w\n", [length(Stack)-length(Stack1)]),
+	    Stack1
+    end.
+
+bj1(Bs, [E={_I,Xi,Vs,_Mark}|Stack], Acc) ->
+    Xv = if Vs =:= [] -> ?BT_LAST; true -> ?BT_FIRST end,
+    case eqv(Bs,Xi,Xv) of
+	true ->
+	    ?dbg("~w=~w,",[Xi,Xv]),
+	    bj1(Bs, Stack, [E|Acc]);
+	false ->
+	    ?dbg("!~w=~w\n",[Xi,Xv]),
+	    [E|Acc]
     end;
+bj1(_Bs, [], Acc) ->
+    ?dbg("![]\n",[]),
+    Acc.
+
+bj_reinstall(Bs,[{_I,Xi,Vs,Mark}|Stack]) ->
+    Xv = if Vs =:= [] -> ?BT_LAST; true -> ?BT_FIRST end,
+    varp_formula:mark(Bs,Mark),
+    true = eqv(Bs,Xi,Xv),
+    bj_reinstall(Bs, Stack);
 bj_reinstall(_Bs,[]) ->
     ok.
 
 %% Get a list of bound values on backtrack stack
 %% Value are in order [true,false]
-stack([{_,Xi,[V],_}|Stack]) when V =:= hd(tl(?BT_ORDER))->
-    [{Xi,hd(?BT_ORDER)}|stack(Stack)];
 stack([{_,Xi,[],_}|Stack]) ->
-    [{Xi,hd(tl(?BT_ORDER))}|stack(Stack)];
+    [{Xi,?BT_LAST}|stack(Stack)];
+stack([{_,Xi,[_],_}|Stack]) ->
+    [{Xi,?BT_FIRST}|stack(Stack)];
 stack([]) -> [].
 
 loop(Stack,Func,Acc,Bs) ->
@@ -187,6 +218,9 @@ eq_eval(Bs,V,Value,_D) ->
 	 [indent(_D), V,
 	  varp_formula:fmt_var(Bs,V),
 	  varp_formula:fmt_var(Bs,Value)]),
+    eqv(Bs,V,Value).
+
+eqv(Bs,V,Value) ->
     varp_formula:equal(Bs,V,Value) andalso varp_formula:eval(Bs).
 
 indent(D) -> lists:duplicate(D, $\s).

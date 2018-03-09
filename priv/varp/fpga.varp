@@ -1,36 +1,23 @@
 
-define F0(i)  false ;
-define F1(i)  not X(i) and not Y(i) ;
-define F2(i)  not X(i) and Y(i) ;
-define F3(i)  F1(i) or F2(i) ;
-define F4(i)  X(i) and (not Y(i)) ;
-define F5(i)  F1(i) or F4(i) ;
-define F6(i)  X(i) xor Y(i) ;
-define F7(i)  not (X(i) and Y(i)) ;
-define F8(i)  X(i) and Y(i) ;
-define F9(i)  F1(i) or F8(i) ;
-define F10(i) F2(i) or F8(i) ;
-define F11(i) F1(i) or F2(i) or F8(i) ;
-define F12(i) F4(i) or F8(i) ;
-define F13(i) F1(i) or F4(i) or F8(i) ;
-define F14(i) X(i) or Y(i) ;
-define F15(i) true ;
+// 3 bit fpga
+define F0_3(i) (~X3(i) and ~X2(i) and ~X1(i)) ;
+define F1_3(i) (~X3(i) and ~X2(i) and  X1(i)) ;
+define F2_3(i) (~X3(i) and  X2(i) and ~X1(i)) ;
+define F3_3(i) (~X3(i) and  X2(i) and  X1(i)) ;
+define F4_3(i) ( X3(i) and ~X2(i) and ~X1(i)) ;
+define F5_3(i) ( X3(i) and ~X2(i) and  X1(i)) ;
+define F6_3(i) ( X3(i) and  X2(i) and ~X1(i)) ;
+define F7_3(i) ( X3(i) and  X2(i) and  X1(i)) ;
 
 define FPGA(i)
-	   ((F(i):4 == 0:4) && F0(i)) ||
-	   ((F(i):4 == 1:4) && F1(i)) ||
-	   ((F(i):4 == 2:4) && F2(i)) ||
-	   ((F(i):4 == 3:4) && F3(i)) ||
-	   ((F(i):4 == 4:4) && F4(i)) ||
-	   ((F(i):4 == 5:4) && F5(i)) ||
-	   ((F(i):4 == 6:4) && F6(i)) ||
-	   ((F(i):4 == 7:4) && F7(i)) ||
-	   ((F(i):4 == 8:4) && F8(i)) ||
-	   ((F(i):4 == 9:4) && F9(i)) ||
-	   ((F(i):4 == 10:4) && F10(i)) ||
-	   ((F(i):4 == 11:4) && F11(i)) ||
-	   ((F(i):4 == 12:4) && F12(i)) ||
-	   ((F(i):4 == 13:4) && F13(i)) ||
-	   ((F(i):4 == 14:4) && F14(i)) ||
-	   ((F(i):4 == 15:4) && F15(i)) ;
+	   ((F(i):3 == 0) && F0_3(i))  ||
+	   ((F(i):3 == 1) && F1_3(i))  ||
+	   ((F(i):3 == 2) && F2_3(i))  ||
+	   ((F(i):3 == 3) && F3_3(i))  ||
+	   ((F(i):3 == 4) && F4_3(i))  ||
+	   ((F(i):3 == 5) && F5_3(i))  ||
+	   ((F(i):3 == 6) && F6_3(i))  ||
+	   ((F(i):3 == 7) && F7_3(i)) ;
+
+FPGA(1) && [EQ 1]{X1(1),X2(1),X3(1)}
 

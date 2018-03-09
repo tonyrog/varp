@@ -20,7 +20,8 @@
 
 main(Args) ->
     application:start(varp),
-    {Mode,Bound,Opts0,Files} = process_args0(Args, none, [], []),
+    {Mode,Bound,Opts0,Files} = process_args0(Args, none),
+    %% io:format("opts0 = ~p\n", [Opts0]),
     Opts = [{meta,Bound}|Opts0],
     {ReadIn,{Defs0,Decls0,Code0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
@@ -158,18 +159,18 @@ load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp,Opts) ->
 		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
 		    Error;
 		Cnf = {cnf,{_NVars,_NClauses,_CLs}} ->
-		    io:format("% loaded: ~s\n", [F]),
+		    %% io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
 		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp,Opts);
 		Snf = {snf,{_NVars,_NClauses,_CLs}} ->
-		    io:format("% loaded: ~s\n", [F]),
+		    %% io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Snf,Formula0),
 		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp,Opts)
 	    end;
        true ->
 	    case parse(F, Data) of
 		{ok,{Defs,Decls,Code,Formula}} ->
-		    io:format("% loaded: ~s\n", [F]),
+		    %% io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
 		    load_files(Fs,Formula1,
 			       Defs++Defs,
@@ -269,22 +270,22 @@ join_f(_JoinOp,A,undefined) -> A;
 join_f(JoinOp,A,B) -> {JoinOp,A,B}.
 
 %% check "base" mode satisfy|falsify|prove
-process_args0(["satisfy"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, satisfy, Opts, Bound);
-process_args0(["falsify"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, falsify, Opts, Bound);
-process_args0(["prove"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, prove, Opts, Bound);
-process_args0(["cnf"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, cnf, Opts, Bound);
-process_args0(["snf"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, snf, Opts, Bound);
-process_args0(["help"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, help, Opts, Bound);
-process_args0(["version"|As], _Mode, Opts, Bound) ->
-    varp_option:process_args(As, version, Opts, Bound);
-process_args0(As, Mode, Opts, Bound) ->
-    varp_option:process_args(As, Mode, Opts, Bound).
+process_args0(["satisfy"|As], _Mode) ->
+    varp_option:process_args(As, satisfy);
+process_args0(["falsify"|As], _Mode) ->
+    varp_option:process_args(As, falsify);
+process_args0(["prove"|As], _Mode) ->
+    varp_option:process_args(As, prove);
+process_args0(["cnf"|As], _Mode) ->
+    varp_option:process_args(As, cnf);
+process_args0(["snf"|As], _Mode) ->
+    varp_option:process_args(As, snf);
+process_args0(["help"|As], _Mode) ->
+    varp_option:process_args(As, help);
+process_args0(["version"|As], _Mode) ->
+    varp_option:process_args(As, version);
+process_args0(As, Mode) ->
+    varp_option:process_args(As, Mode).
 
 
 read_in() ->

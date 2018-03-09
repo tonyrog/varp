@@ -13,6 +13,7 @@
 -export([clause/3]).
 -export([variable/2, alias/3]).
 -export([value/2, class/2]).
+-export([get_info/1]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
 -export([fmt_var_list/2]).
 -export([fmt_bind/4]).
@@ -37,7 +38,7 @@
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
 -export([eval_counter/1]).
--export([order/2]).
+-export([order/2, order/3]).
 -export([model/1]).
 -export([first_init/1]).
 -export([first_unbound/1]).
@@ -76,7 +77,7 @@
 	       {int,pred(),Size::integer(),Bit::integer()} |
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
-%% -define(dbg(F,A), io:format((F),(A))).
+%%-define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
 -record(bs,
@@ -97,7 +98,7 @@ new() ->
 %%  add options [{initial_size,Size},{grow,Expand},{bcp,boolean()}]
 %%
 new(OptMap) when is_map(OptMap) ->
-    Vp  = varc:new(),
+    Vp  = varc:new([{bcp,maps:get(bcp,OptMap)}]),
     #bs {
        option = OptMap,
        vs = #{ true => ?TRUE,
@@ -157,9 +158,14 @@ make_variable(Bs,V) ->
     {N,Bs1} = fresh_var(Bs),
     {N, alias(Bs1,V,N)}.
 
-order(Bs,Order) ->
-    _Result = varc:order_sort(Bs#bs.vp, Order),
-    Bs.
+order(Bs,random) ->
+    <<Seed:24>> = crypto:strong_rand_bytes(3),
+    order(Bs,random,Seed);
+order(Bs,Order) when is_atom(Order) ->
+    varc:order_sort(Bs#bs.vp, Order).
+
+order(Bs,How,Arg) when is_atom(How) ->
+    varc:order_sort(Bs#bs.vp, How, Arg).
 
 clear_queue(Bs) ->
     varc:clear_queue(Bs#bs.vp),
@@ -196,6 +202,9 @@ value(Bs,V) ->
 	?FALSE -> false;
 	W -> W
     end.
+
+get_info(Bs) ->
+    varc:get_info(Bs#bs.vp).
 
 class(Bs,V) ->
     case varc:class(Bs#bs.vp, V) of
@@ -272,39 +281,44 @@ get_bindings(Bs,Mark) when is_integer(Mark) ->
     varc:get_bindings(Bs#bs.vp, Mark).
 
 %% Bs is under the assumption that Var = TRUE
+intersect(Bs, Var, B0) ->
+    intersect_(Bs, varc:info(Bs#bs.vp, bcp), Var, B0).
+
 %% evaluate the bindings and build the intersection
-intersect(_Bs, Var, [{Var,false}|_B0]) -> %% we may have this bindings, ignore
-    erlang:error({unexpected_binding,{Var,false}});
-intersect(Bs, Var, [{X,true}|B0]) ->
+ %% we may have this bindings, crash!
+
+intersect_(Bs,Bcp,Var,[{X,true}|B0]) ->
     %% !Var -> X
     case value(Bs, X) of
 	true ->  %% Var -> X, !Var -> X   =>  X
-	    [{X,true} | intersect(Bs,Var,B0)];
-	false -> %% Var -> !X, !Var -> X  =>  Var=!X
-	    [{Var,-X} | intersect(Bs,Var,B0)];
+	    [{X,true} | intersect_(Bs,Bcp,Var,B0)];
+	false when not Bcp -> %% Var -> !X, !Var -> X  =>  Var=!X
+	    [{Var,-X} | intersect_(Bs,Bcp,Var,B0)];
 	_ ->
-	    intersect(Bs,Var,B0)
+	    intersect_(Bs,Bcp,Var,B0)
     end;
-intersect(Bs, Var, [{X,false}|B0]) ->
+intersect_(Bs,Bcp,Var,[{X,false}|B0]) ->
     %% !Var -> !X
     case value(Bs, X) of
-	true ->  %% Var -> X, !Var -> !X   =>  Var=X
-	    [{Var,X} | intersect(Bs,Var,B0)];
 	false -> %% Var -> !X, !Var -> !X  =>  !X
-	    [{X,false} | intersect(Bs,Var,B0)];
+	    [{X,false} | intersect_(Bs,Bcp,Var,B0)];
+	true when not Bcp ->  %% Var -> X, !Var -> !X   =>  Var=X
+	    [{Var,X} | intersect_(Bs,Bcp,Var,B0)];
 	_ ->
-	    intersect(Bs,Var,B0)
+	    intersect_(Bs,Bcp,Var,B0)
     end;
-intersect(Bs, Var, [{X,Y}|B0]) ->
-    %% !Var => X=Y
-    X1 = value(Bs, X),
-    Y1 = value(Bs, Y),
-    if X1 =:= Y1 -> %% !Var -> X=Y, Var => X=Y => X=Y
-	    [{X,Y} | intersect(Bs,Var,B0)];
-	true ->
-	    intersect(Bs,Var,B0)
+intersect_(Bs,Bcp=false,Var,[{X,Y}|B0]) ->
+    Y1 = varc:get(Bs#bs.vp, X),
+    if Y =:= ?TRUE,  Y1 =:= ?FALSE -> %% !Var => X, Var => !X
+	    [{Var,-X} | intersect_(Bs,Bcp,Var,B0)];
+       Y =:= ?FALSE, Y1 =:= ?TRUE -> %% !Var => !X, Var => X
+	    [{Var,X} | intersect_(Bs,Bcp,Var,B0)];
+       true ->
+	    intersect_(Bs,Bcp,Var,B0)
     end;
-intersect(_Bs,_Var,[]) ->
+intersect_(Bs,Bcp=true,Var,[_|B0]) ->
+    intersect_(Bs,Bcp,Var,B0);
+intersect_(_Bs,_Bcp,_Var,[]) ->
     [].
 
 %% compact version of fmt_var
@@ -505,10 +519,10 @@ build(F,Opts) when is_map(Opts) ->
     Bs = new(Opts),
     Bs1 = build_code(getopt(Bs,defs),Bs),
     try build_(F, Bs1) of
-     	Value -> Value
+      	Value -> Value
     catch
-     	throw:contradiction -> 
-	    {{bool,?FALSE},Bs1}
+      	throw:contradiction -> 
+     	    {{bool,?FALSE},Bs1}
     end.
 
 build_code([], Bs) ->
@@ -645,6 +659,15 @@ build_({cnf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
     build_(cnf_to_formula(Cs),Bs);
 build_({cnf,Cs},Bs) ->
     build_(cnf_to_formula(Cs),Bs);
+
+build_({snf,{[],[]}},Bs) ->
+    build_(false, Bs);
+build_({snf,{Cs,Ls}},Bs) when is_list(Cs), is_list(Ls) ->
+    build_({'and',{'ALL',Ls},snf_to_formula(Cs)},Bs);
+build_({snf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
+    build_(snf_to_formula(Cs),Bs);
+build_({snf,Cs},Bs) ->
+    build_(snf_to_formula(Cs),Bs);
 
 build_({subst,Rx,Py,F},Bs) ->
     Bs1 = Bs#bs { subst = [{Rx,Py}|Bs#bs.subst]},
@@ -1907,6 +1930,9 @@ minmax2(X1,X2,Bs) ->
 cnf_to_formula(Cs) ->
     {'ALL', [{'ANY', C} || C <- Cs]}.
 
+snf_to_formula(Cs) ->
+    {'ALL', [{'ANY', C} || C <- Cs]}.
+
 is_equivalent(Bs, X, Y) ->
     class(Bs,X) =:= class(Bs,Y).
 
@@ -1937,47 +1963,47 @@ collect_model(Bs) ->
       fun (?TRUE,_,Ms) -> Ms;
 	  (?FALSE,_,Ms) -> Ms;
 	  (Y,Xs, Ms) when is_integer(Y) ->
-	      model_vars(Xs,Y,Bs,Ms);
+	      model_vars(Bs,Xs,Y,Ms);
 	  (_, _, Ms) -> Ms
       end, [], Bs).
 
 %% collect all alias variables    
-model_vars([{bit,X,N,I}|Xs],Y,Bs,Ms) ->
+model_vars(Bs,[{bit,X,N,I}|Xs],Y,Ms) ->
     case value(Bs,Y) of
 	true ->
-	    model_vars(Xs,Y,Bs,model_bitset(X,N,I,1,Ms));
+	    model_vars(Bs,Xs,Y,model_bitset(X,N,I,1,Ms));
 	false ->
-	    model_vars(Xs,Y,Bs,model_bitset(X,N,I,0,Ms))
+	    model_vars(Bs,Xs,Y,model_bitset(X,N,I,0,Ms))
     end;
-model_vars([{uint,X,_N,I}|Xs],Y,Bs,Ms) ->
+model_vars(Bs,[{uint,X,_N,I}|Xs],Y,Ms) ->
     case value(Bs,Y) of
 	true ->
-	    model_vars(Xs,Y,Bs,model_bor({X,(1 bsl I)}, Ms));
+	    model_vars(Bs,Xs,Y,model_bor({X,(1 bsl I)}, Ms));
 	false ->
-	    model_vars(Xs,Y,Bs,model_bor({X,0}, Ms))
+	    model_vars(Bs,Xs,Y,model_bor({X,0}, Ms))
     end;
-model_vars([{int,X,N,I}|Xs],Y,Bs,Ms) ->
+model_vars(Bs,[{int,X,N,I}|Xs],Y,Ms) ->
     case value(Bs,Y) of
 	true ->
 	    if I =:= N-1 ->
-		    model_vars(Xs,Y,Bs,model_bor({X,(-1 bsl I)}, Ms));
+		    model_vars(Bs,Xs,Y,model_bor({X,(-1 bsl I)}, Ms));
 	       true ->
-		    model_vars(Xs,Y,Bs,model_bor({X,(1 bsl I)}, Ms))
+		    model_vars(Bs,Xs,Y,model_bor({X,(1 bsl I)}, Ms))
 	    end;
 	false ->
-	    model_vars(Xs,Y,Bs,model_bor({X,0}, Ms))
+	    model_vars(Bs,Xs,Y,model_bor({X,0}, Ms))
     end;
-model_vars([X|Xs],Y,Bs,Ms) when is_integer(Y) ->
+model_vars(Bs,[X|Xs],Y,Ms) when is_integer(Y) ->
     case value(Bs,Y) of
 	true -> 
-	    model_vars(Xs,Y,Bs,[{X,true} | Ms]);
+	    model_vars(Bs,Xs,Y,[{X,true} | Ms]);
 	false ->
-	    model_vars(Xs,Y,Bs,[{X,false} | Ms]);
+	    model_vars(Bs,Xs,Y,[{X,false} | Ms]);
 	_Z -> %% unbound...
 	    %%model_vars(Xs,Y,Bs,[{X,Z} | Ms])
-	    model_vars(Xs,Y,Bs,Ms)
+	    model_vars(Bs,Xs,Y,Ms)
     end;
-model_vars([],_Y,_Bs,Ms) ->
+model_vars(_Bs,[],_Y,Ms) ->
     Ms.
 
 model_bitset(X,N,I,V,Ms) ->

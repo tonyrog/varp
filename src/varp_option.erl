@@ -13,6 +13,7 @@
 -export([usage/0]).
 
 -export([options/0]).
+-export([process_args/2]).
 -export([process_args/4]).
 
 %% -include("varp_option.hrl").
@@ -72,13 +73,21 @@ options() ->
     V6 = #{ long => "order",
 	    key => order,
 	    spec => {enums,
-		     [{"identity",identity},
-		      {"random",  random},
-		      {"reverse", reverse},
-		      {"depth",depth},
-		      {"occure",occure},
-		      {"depth_occure",depth_occure},
-		      {"occure_depth",occure_depth}]},
+		     [{"identity", identity},
+		      {"random",   random},
+		      {"depth",    depth_ascending},
+		      {"+depth",   depth_ascending},
+		      {"-depth",   depth_descending},
+		      {"occure",   occure_ascending},
+		      {"+occure",  occure_ascending},
+		      {"-occure",  occure_descending},
+		      {"depth,occure", depth_occure_ascending},
+		      {"+depth,occure", depth_occure_ascending},
+		      {"-depth,occure", depth_occure_descending},
+		      {"occure,depth", occure_depth_ascending},
+		      {"+occure,depth", occure_depth_ascending},
+		      {"-occure,depth", occure_depth_descending}
+		     ]},
 	    default => identity,
 	    description => "Specifiy variable order."
 	  },
@@ -92,8 +101,8 @@ options() ->
 	    short => "s",
 	    key => saturate,
 	    spec => unsigned, 
-	    default => 0,
-	    description => "Saturation vector width."
+	    default => undefined,
+	    description => "Saturation level."
 	  },
     V9 = #{ long => "backtrack",
 	    short => "b",
@@ -112,7 +121,7 @@ options() ->
     V10 = #{ long => "pair",
 	     key => pair,
 	     spec => {enums,[?BOOL]},
-	     default => true,
+	     default => false,
 	     description => "Add extra variable in saturation."
 	   },
     V11 = #{ long => "assoc",
@@ -130,6 +139,13 @@ options() ->
 	     default => 0,
 	     description => "Threshold for bound variables in saturation round"
 	   },
+    V12t = #{ long  => "time",
+	      short => "t",
+	      key   => time,
+	      spec  => unsigned,
+	      default => infinity,
+	      description => "Max time to run saturation in milliseconds"
+	    },
     V13 = #{ long => "carry",
 	     key => carry,
 	     spec => {enums,[?BOOL,{"ignore",ignore}]},
@@ -200,19 +216,23 @@ options() ->
 	     default => [],  %% ordset
 	     description => "Internal list of all definitions"},
     V23 = #{ key => decls,
-	     spec => {set,{predpat,atom,integer}},
+	     spec => {set,{predpat,atom,{union,[integer,atom]}}},
 	     default => [],  %% ordset
 	     description => "Internal list of all declarations"},
     V24 = #{ key => code,
 	     spec => {append,list},
 	     default => [],
 	     description => "Internal list of all code"},
+    V25 = #{ key => saturations,
+	     spec => {list,term},
+	     default => [],
+	     description => "Internal sequence of saturations"},
 
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
        print => V2, "print" => V2, "p" => V2,
        partial => V3, "partial" => V3,
-       mathod  => V4, "method"  => V4,
+       method  => V4, "method"  => V4,
        max => V5, "max" => V5, "n" => V5,
        order => V6, "order" => V6,
        bcp => V7, "bcp" => V7,
@@ -222,6 +242,7 @@ options() ->
        pair => V10, "pair" => V10,
        assoc => V11, "assoc" => V11,
        threshold => V12, "threshold" => V12,
+       time => V12t, "time" => V12t, "t" => V12t,
        carry => V13, "carry" => V13,
        borrow => V14, "borrow" => V14,
        divz => V15, "divz" => V15,
@@ -233,7 +254,8 @@ options() ->
        meta => V21,
        defs => V22,
        decls => V23,
-       code => V24
+       code => V24,
+       saturations => V25
      }.
 
 %% list of options with unique key
@@ -247,6 +269,9 @@ key_options() ->
 %% generate a list of options from option map, with unique 'key'
 options_list() ->
     [V || {_,V} <- key_options()].
+
+process_args(Args, Mode) ->
+    process_args(Args, Mode, [], []).
 
 %% process long options and values
 process_args(["--"++OptName|As],Mode,Opts,Bound) ->
@@ -295,7 +320,7 @@ process_args([Var,"=",Value|As],Mode,Opts,Bound) ->
 process_args([A|As],Mode,Opts,Bound) ->
     case string:chr(A,$=) of
 	0 -> 
-	    {Mode, Bound, Opts,[A|As]};
+	    {Mode,Bound,lists:reverse(Opts),[A|As]};
 	I ->
 	    {Var,"="++Value0} = lists:split(I-1,A),
 	    {Value,As1} = 
@@ -313,7 +338,7 @@ process_args([A|As],Mode,Opts,Bound) ->
 	    end
     end;
 process_args([], Mode, Opts, Bound) ->
-    {Mode, Bound, Opts, []};
+    {Mode, Bound, lists:reverse(Opts), []};
 process_args(_, _Mode, _Opts, _Bound) ->
     usage().
 
@@ -339,8 +364,6 @@ get_option_name([C|Cs],Acc) when
     get_option_name(Cs,[C|Acc]);
 get_option_name(Cs,Acc) ->
     {lists:reverse(Acc), Cs}.
-
-
 
 match_value({multiple,Type}, Val, As) ->
     match_value(Type, Val, As);
@@ -457,6 +480,16 @@ format_value(N) when is_integer(N) -> integer_to_list(N);
 format_value(A) when is_atom(A) -> atom_to_list(A);
 format_value(L) when is_list(L) -> L.
 
+%% saturation options
+%% #{ 
+%%     saturate => 1      :: unsigned()             %% saturation level
+%%     pair => false      :: boolean()              %% add extra variable
+%%     order => undefined :: order(),               %% variable order
+%%     time  => infinity  :: infinity | integer(),  %% max time to run
+%%     threshold => 0,    :: integer()              %% fixpoint threshold
+%% }
+%%
+
 %%
 %% Set options
 %%
@@ -465,23 +498,38 @@ set_opts(Opts) when is_list(Opts) ->
     set_opts(Opts, default_opts()).
 
 set_opts([{Opt,Value} | Opts], OptMap) ->
+    %% io:format("set_opts: ~w ~w\n", [Opt,Value]),
     set_opts(Opts, setopt(Opt,Value,OptMap));
 set_opts([], OptMap) ->
     OptMap.
 
+%%    case getopt(saturate, OptMap) of
+%%	undefined ->
+%%	    OptMap;
+%%	_Level -> %% add the last saturation options
+%%	    List = getopt(saturations, OptMap),
+%%	    Sat  = get_saturate_opt(OptMap),
+%%	    io:format("s = ~p\n", [Sat]),
+%%	    List1 = List ++ [Sat],
+%%	    OptMap#{ saturate => undefined, saturations => List1 }
+%%    end.
+
 default_opts() ->
-    default_opts_(options_list(), 
-		  #{ decls => [],
-		     defs  => [],
-		     code  => [],
-		     meta  => []}).
+    default_opts_(options_list(), #{ }).
 
 default_opts_([#{ key := Key, default := Value}|Opts], OptMap) ->
     default_opts_(Opts, OptMap#{ Key => Value});
 default_opts_([], OptMap) ->
     OptMap.
 
+setopt(saturate, Level, OptMap) when is_integer(Level), Level > 0 ->
+    List = getopt(saturations, OptMap),
+    Sat  = get_saturate_opt(OptMap#{ saturate=>Level}),
+    io:format("s = ~p\n", [Sat]),
+    List1 = List ++ [Sat],
+    OptMap#{ saturate => Level, saturations => List1 };
 setopt(Key, Value, OptMap) when is_atom(Key) ->
+    %% io:format("key=~w, value=~w\n", [Key,Value]),
     case maps:find(Key, options()) of
 	{ok,OptInfo=#{ key := Key, spec := Spec }} ->
 	    OldValue = case maps:find(Key, OptMap) of
@@ -501,6 +549,15 @@ setopt(Key, Value, OptMap) when is_atom(Key) ->
 	_ ->
 	    erlang:error(badkey)
     end.
+
+get_saturate_opt(OptMap) ->
+    #{
+       saturate  => getopt(saturate, OptMap),
+       pair      => getopt(pair, OptMap),
+       order     => getopt(order, OptMap),
+       time      => getopt(time, OptMap),
+       threshold => getopt(threshold, OptMap)
+     }.
 
 %%
 %% Check value against spec
@@ -552,11 +609,15 @@ validate_value(_Key, predpat, Value,_Old) ->  %% predicate pattern
 	{p,Name,Args} -> {true,{p,Name,['_' || _ <- Args]}};
 	_ -> false
     end;
-validate_value(Key,{multiple,Type},ValueList,Old) -> %% list of TYpe
-    %% fixme zip over old value list?
-    is_list(ValueList) andalso 
-	lists:all(fun(Value) -> validate_value(Key,Type,Value,Old) end,
-		  ValueList);
+validate_value(Key,{union,Types},Value,Old) -> %% alternative types
+    validate_union(Key,Types,Value,Old);
+validate_value(Key,{multiple,Type},Value,Old) -> %% list of Type
+    case validate_value(Key,Type,Value,Old) of
+	true ->
+	    {true,Old++[Value]};
+	false ->
+	    false
+    end;
 validate_value(_Key,{append,list},ValueList,Old) ->
     if is_list(ValueList) ->
 	    {true,Old ++ ValueList};
@@ -576,6 +637,20 @@ validate_value(Key,{set,Type},Set,OldSet) ->
     case Set1 of
 	false -> false;
 	_ ->  {true,ordsets:union(Set1,OldSet)}
+    end;
+validate_value(Key,{list,Type},List,_OldList) ->
+    List1 =
+	lists:foldl(fun (_E,false) -> false;
+			(E,Acc) ->
+			    case validate_value(Key,Type,E,undefined) of
+				true -> [E|Acc];
+				{true,E1} -> [E1|Acc];
+				false -> false
+			    end
+		    end, [], List),
+    case List1 of
+	false -> false;
+	_ ->  {true,List1}
     end;
 validate_value(_Key,{},Value,_Old) ->
     Value =:= {};
@@ -612,6 +687,14 @@ validate_value(Key,{T1,T2,T3},Value,_Old) ->
 	    end;
 	false -> false
     end.
+
+validate_union(Key,[Type|Types],Value,Old) ->
+    case validate_value(Key,Type,Value,Old) of
+	true -> true;
+	false -> validate_union(Key,Types,Value,Old)
+    end;
+validate_union(_Key,[],_Value,_Old) ->
+    false.
 
 valid_element(Key,Type,Value) ->
     case validate_value(Key,Type,Value,undefined) of

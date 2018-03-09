@@ -17,11 +17,8 @@
 
 -compile(export_all).
 
-%% -define(TRUE,   1).
-%% -define(FALSE, -1).
 -define(dbg(F,A), ok).
 %% -define(dbg(F,A), io:format((F),(A))).
-
 
 apply_opts(Bs,F) ->
     case varp_formula:getopt(Bs,value) of
@@ -40,7 +37,9 @@ apply_opts_(false, _Bs) ->
 apply_opts_(_, Bs) ->
     case varp_formula:getopt(Bs,order) of
 	none -> Bs;
-	Order -> varp_formula:order(Bs,Order)
+	Order -> 
+	    varp_formula:order(Bs,Order),
+	    Bs
     end.
 
 run_formula(F) ->
@@ -136,7 +135,7 @@ saturate(Bs,0) ->
 saturate(Bs,K) when is_integer(K), K >= 1 ->
     case eval(Bs) of
 	false -> false;
-	Bs1 -> varp_saturate:saturate(Bs1,K)
+	Bs1 -> varp_saturate:saturate(Bs1,#{ saturate=>K })
     end.
 
 %% do plain backtrack over formula
@@ -157,10 +156,14 @@ method(X,Bs) ->
 passes([Pass|Ps],X,Bs) ->
     case pass_enabled(Pass,Bs) of
 	true -> pass_(Pass,Ps,X,Bs);
+	{true,Ps1} -> passes(Ps1++Ps,X,Bs);
 	false -> passes(Ps,X,Bs)
     end;
-passes([],_X,_Bs) ->
-    undefined.
+passes([],_X,Bs) ->
+    case one_model(Bs) of
+	false -> undefined;
+	R -> R
+    end.
 
 pass_(Pass,Ps,X,Bs) ->
     case one_model(Bs) of
@@ -168,7 +171,7 @@ pass_(Pass,Ps,X,Bs) ->
 	    ClauseCount0 = varp_formula:clause_eval_counter(Bs),
 	    EvalCount0   = varp_formula:eval_counter(Bs),
 	    Bound0       = varp_formula:number_of_bound(Bs),
-	    varp_formula:info(Bs, "pass ~s\n", [Pass]),
+	    varp_formula:info(Bs, "pass ~p\n", [Pass]),
 	    T0 = erlang:monotonic_time(),
 	    R = pass(Pass,X,Bs),
 	    T1 = erlang:monotonic_time(),
@@ -183,10 +186,10 @@ pass_(Pass,Ps,X,Bs) ->
 		false ->
 		    varp_formula:info(Bs,"    | contradiction\n", []),
 		    no_models(Bs);
-		0 ->
+		0 -> %% model count = 0
 		    varp_formula:info(Bs,"    | contradiction\n", []),
 		    no_models(Bs);
-		{0,[]} ->
+		{0,[]} -> %% model count = 0, no model collected
 		    varp_formula:info(Bs,"    | contradiction\n", []),
 		    no_models(Bs);
 		N when is_integer(N) -> N;
@@ -207,10 +210,15 @@ pass_enabled(apply,_Bs) ->
     true;
 pass_enabled(eval,_Bs) ->
     true;
+pass_enabled({saturate,Params},_Bs) ->
+    maps:get(saturate,Params,0) > 0;
 pass_enabled(saturate,Bs) ->
-    case varp_formula:getopt(Bs,saturate) of
-	0 -> false;
-	_ -> true
+    case varp_formula:getopt(Bs,saturations) of
+	[] ->
+	    false;
+	List -> 
+	    io:format("saturations = ~p\n", [List]),
+	    {true,[{saturate,Params}||Params<-List]}
     end;
 pass_enabled(backtrack,Bs) ->
     varp_formula:getopt(Bs,backtrack).
@@ -225,8 +233,11 @@ pass(apply,X,Bs) ->
     apply_opts(Bs,X);
 pass(eval,_X,Bs) ->
     eval_(varp_formula:enqueue_all(Bs));
+pass({saturate,Params},_X,Bs) ->
+    varp_saturate:saturate(Bs,Params);
 pass(saturate,_X,Bs) ->
-    varp_saturate:saturate(Bs,varp_formula:getopt(Bs,saturate));
+    Params = #{ saturate => varp_formula:getopt(Bs,saturate) },
+    varp_saturate:saturate(Bs,Params);
 pass(backtrack,_X,Bs) ->
     varp_backtrack:backtrack(Bs).
 

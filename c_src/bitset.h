@@ -134,6 +134,39 @@ static inline int bitset_first(bitset_t* src)
     return FIRST(*src);
 }
 
+// return 1 if src is singleton and return bit position in ip
+// return 0 otherwise
+static inline int bitset_single_pos(bitset_t* src, int* ip)
+{
+    if (bitset_is_singleton(src)) {
+	*ip = FIRST(*src)-1;
+	return 1;
+    }
+    return 0;
+}
+
+// return 1 if src contains a pair (two bits) and return bit positions
+// *ip the lower bit and *jp the higher bit position
+// return 0 otherwise
+static inline int bitset_pair_pos(bitset_t* src, int* ip, int* jp)
+{
+    int i;
+    if ((i = FIRST(*src)) > 0) { // first bit position
+	int j;
+	bitset_t src1;
+	bitset_clear(&src1, src, i-1);
+	if ((j = FIRST(src1)) > 0) { // next bit position
+	    bitset_clear(&src1, &src1, j-1);
+	    if (bitset_is_empty(&src1)) {
+		*ip = i-1;
+		*jp = j-1;
+		return 1;
+	    }
+	}
+    }
+    return 0;
+}
+
 // format a bitset
 
 static inline char* bitset_format_r(bitset_t* src, char* ptr, size_t maxsize)
