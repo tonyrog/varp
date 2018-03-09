@@ -106,13 +106,11 @@ exprs -> expr ',' exprs : ['$1' | '$3'].
 pexpr -> psymbol                    : { p, '$1', []}.
 pexpr -> psymbol '(' ')'            : { p, '$1', []}.
 pexpr -> psymbol '(' exprs ')'      : { p, '$1', '$3'}.
-pexpr -> psymbol '[' expr ']' : {uint,'$1',undefined,'$3'}.
-
+pexpr -> pexpr '[' expr ']' : {bit_index,'$1','$3'}.
 
 psymbol -> 'A' : 'A'.
 psymbol -> 'E' : 'E'.
 psymbol -> symbol : name('$1').
-
 
 Erlang code.
 

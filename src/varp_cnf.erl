@@ -8,37 +8,11 @@
 -module(varp_cnf).
 -export([rewrite/1]).
 -export([clauses/1]).
--export([succ_dimacs/2, succ/2]).
 -export([normalize_clause/1,normalize_clause/2]).
 -export([normalize_clauses/1,normalize_clauses/2]).
 -export([format/1]).
 
 -compile(export_all).
-
-%%
-%%
-%%
-satisfy(F0) ->
-    F = varp_expand:formula(F0),
-    Vs = lists:sort(varp_expand:variables(F)),
-    {A, _Ls} = clauses(F),
-    %% io:format("literals=~w\n",[_Ls]),
-    Af = {all, lists:map(fun(Cp) -> {any,Cp} end, A)},
-    case varp:satisfy({'and',{none,Vs}, Af}) of
-	false ->
-	    {A1,_Ls1} = normalize_clauses(succ_clauses(A,Vs)),
-	    %% io:format("literals1=~w\n",[_Ls1]),
-	    Af1 = {all, lists:map(fun(Cp) -> {any,Cp} end, A1)},
-	    case varp:prove({'imp',Af,Af1}) of
-		true -> false;
-		{false,{N,Ms}} -> {true,{N,Ms}}
-	    end;
-	{true,{N1,Ms1}} -> {true,{N1,Ms1}}
-    end.
-	    
-test_succ(C,Vs) ->
-    Cs = {all, lists:map(fun(Cp) -> {any,Cp} end, succ(C,Vs))},
-    varp:prove({'imp', {any,C}, Cs}).
 
 %%
 %% Formula to CNF form
@@ -208,15 +182,17 @@ pairs([_]) -> [];
 pairs([A|As]) -> [{A,Ai} || Ai <- As] ++ pairs(As).
 
 prod(N,File) ->
-    {CLs,Ls} = prod(N),
-    file:write_file(File, format(CLs ++ [[L]||L<-Ls])).
+    {CLs,Ls,Decls} = prod(N),
+    file:write_file(File, format(Decls,CLs ++ [[L]||L<-Ls])).
 
 prod(N) when is_integer(N), N>1 ->
     put(next_var, 2), %% FIXME!
     Nv = integer_bits(N),
     L  = (length(Nv)+1) div 2,
-    X  = [{p,'X',[I]}||I<-lists:seq(0,L-1)],
-    Y  = [{p,'Y',[I]}||I<-lists:seq(0,L-1)],
+    Is = lists:seq(0,L-1),
+    X  = [{bit_index,{p,'X',[]},I}||I<-Is],
+    Y  = [{bit_index,{p,'Y',[]},I}||I<-Is],
+    Decls = [{{p,'X',[]},uint,L},{{p,'Y',[]},uint,L}],
     {Prod,Cs} = multiply(X, Y, []),
     %% Prod=Nv
     Cs1 = assign(Prod,Nv,Cs),
@@ -224,23 +200,25 @@ prod(N) when is_integer(N), N>1 ->
     Cs2 = gt_1(X,Cs1),
     %% Y>1
     Cs3 = gt_1(Y,Cs2),
-    {Cs3,[]}.
+    {Cs3,[],Decls}.
     %%
     %% {Cs4,Ls1} = normalize_clauses(Cs3),
     %% {Cs4,Ls1}.
     %% {Cs5,Ls2} = subsume_clauses(Cs4),
-    %% {Cs5,Ls1++Ls2}.
+    %% {Cs5,Ls1++Ls2,Decls}.
 
 sum(N,File) ->
-    {CLs,Ls} = sum(N),
-    file:write_file(File, format(CLs ++ [[L]||L<-Ls])).
+    {CLs,Ls,Decls} = sum(N),
+    file:write_file(File, format(Decls,CLs ++ [[L]||L<-Ls])).
 
 sum(N) when is_integer(N), N>1 ->
     put(next_var, 2), %% FIXME!
     Nv = integer_bits(N),
     L  = length(Nv),
-    X  = [{p,'X',[I]}||I<-lists:seq(0,L-1)],
-    Y  = [{p,'Y',[I]}||I<-lists:seq(0,L-1)],
+    Is = lists:seq(0,L-1),
+    X  = [{bit_index,{p,'X',[]},I}||I<-Is],
+    Y  = [{bit_index,{p,'Y',[]},I}||I<-Is],
+    Decls = [{{p,'X',[]},uint,L},{{p,'Y',[]},uint,L}],
     {Cout,Sum,Cs} = add(X, Y, []),
     %% Prod=Nv
     Cs1 = assign(Sum++[Cout],Nv,Cs),
@@ -248,12 +226,12 @@ sum(N) when is_integer(N), N>1 ->
     Cs2 = gt_0(X,Cs1),
     %% Y>0
     Cs3 = gt_0(Y,Cs2),
-    {Cs3,[]}.
+    {Cs3,[],Decls}.
     %%
     %% {Cs4,Ls1} = normalize_clauses(Cs3),
     %% {Cs4,Ls1}.
     %% {Cs5,Ls2} = subsume_clauses(Cs4),
-    %% {Cs5,Ls1++Ls2}.
+    %% {Cs5,Ls1++Ls2,Decls}.
 
 integer_bits(N) ->
     [element((I-$0)+1,{false,true})||I<-lists:reverse(integer_to_list(N,2))].
@@ -360,11 +338,15 @@ extend(X,Y) ->
     end.
 
 format(CLs) ->
+    format([],CLs).
+
+format(Decls,CLs) ->
     NClauses = length(CLs),
     Vars = snf_vars(CLs),
     NVars = length(Vars),
     [["c auto generated from <file>\n"],
      ["p snf ", integer_to_list(NVars), " ", integer_to_list(NClauses), "\n"],
+     [[format_decl(D)] || D <- Decls],
      [[format_clause(C)," .","\n"] || C <- CLs],
      ["%\n"],
      [".\n"]].
@@ -382,7 +364,13 @@ snf_vars([],VSet) ->
 add_var(true,VSet) -> VSet;
 add_var(false,VSet) -> VSet;
 add_var(V,VSet) -> sets:add_element(V,VSet).
-    
+
+format_decl({Name,int,Sz}) ->
+    ["c declare ", format_symbol(Name),":",integer_to_list(Sz),"/signed","\n"];
+format_decl({Name,uint,Sz}) ->
+    ["c declare ",format_symbol(Name),":",integer_to_list(Sz),"/unsigned","\n"];
+format_decl(_) -> [].
+
 format_clause(C) ->
     concat([format_literal(L) || L <- C], " ").
 
@@ -393,12 +381,8 @@ format_symbol(true) -> "true";
 format_symbol(false) -> "false";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);
 format_symbol(I) when is_integer(I) -> [$T|integer_to_list(I)];
-format_symbol({uint,V,_Size,Bit}) -> 
-    atom_to_list(V)++"["++integer_to_list(Bit)++"]";
-format_symbol({int,V,_Size,Bit}) -> 
-    atom_to_list(V)++"["++integer_to_list(Bit)++"]";
-format_symbol({bit,V,_Size,Bit}) -> 
-    atom_to_list(V)++"["++integer_to_list(Bit)++"]";
+format_symbol({bit_index,V,I}) ->
+    atom_to_list(V)++"["++integer_to_list(I)++"]";
 format_symbol({p,V,[]}) -> atom_to_list(V);
 format_symbol({p,V,As}) ->
     [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
@@ -407,126 +391,3 @@ concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].
 
-%%
-%% triple to CNF clauses
-%% X : Y -> Z
-%%   [Z,~X,~Y]
-%%   [X,~Z],
-%%   [X,Y]
-%%
-triple(imp, X, Y, Z) ->
-    [[Z,-X,-Y], [X,-Z], [X,Y]];
-%%
-%% X : Y <-> Z
-%%   [X,~Y,~Z]
-%%   [X,Y,Z]
-%%   [Y,~X,~Z]
-%%   [Z,~X,~Z]
-%%
-triple(equ, X, Y, Z) ->
-    [[X,-Y,-Z],[X,Y,Z],[Y,-X,-Z],[Z,-X,-Z]].
-
-%%
-%% Generate clauses for some arithmetic operations
-%%
-
-%% generate integer as boolean variable vector
-bits(X, N, V) ->
-    lists:map(fun(I) ->
-		      Vi = {var,{X,I}},
-		      if V band (1 bsl I) =:= 0 -> 
-			      {'not',Vi};
-			 true -> 
-			      Vi
-		      end 
-	      end,
-	      lists:seq(0,N-1)).
-
-%% multiplier 2*N  bit input M bit output
-mult(N, M) ->
-    {any,
-     [{all,bits(x,M,Y*Z)++bits(y,N,Y)++bits(z,N,Z)} ||
-	 Y <- lists:seq(0,(1 bsl N)-1),
-	 Z <- lists:seq(0,(1 bsl N)-1)]}.
-
-%%
-%% Successor clauses generation
-%% 
-
-%% Vn is number of variables in the overall formula
-%% C is on form [I, -I]   (I = 1..Vn)
-%% DIMACS literals are translated into 2...N+1
-%%
-succ_dimacs(C, Vn) ->
-    Cover = lists:map(fun(I) when I < 0 -> {-I-1,1};
-			 (I) -> {I-1,0}
-		      end, C),
-    lists:map(fun(Cp) ->
-		      lists:map(fun({I,0}) -> I+1;
-				   ({I,1}) -> -(I+1)
-				end, Cp)
-	      end, succ_(Cover,Vn)).
-
-succ_clauses(Cs,Vs) ->
-    succ_clauses(Cs,Vs,[]).
-
-succ_clauses([C|Cs],Vs,As) ->
-    As1 = succ(C,Vs,As),
-    succ_clauses(Cs,Vs,As1);
-succ_clauses([],_Vs,As1) ->
-    As1.
-
-
-%% Vs is the variable ordering table [P0,P1,P2,....]
-%% C is on form [ v, {'not', w} ]
-succ(C,Vs) ->
-    succ(C,Vs,[]).
-
-succ(C,Vs,As) ->
-    Vn = length(Vs),
-    Cover = lists:map(fun({'not',V}) -> {index(V, Vs),1};
-			 (V) -> {index(V,Vs),0}
-		      end, C),
-    lists:foldl(fun(Cp,As1) ->
-		  [lists:map(fun({I,0}) -> lists:nth(I+1,Vs);
-				({I,1}) -> {'not',lists:nth(I+1,Vs)}
-			     end, Cp) | As1]
-	  end,As,succ_(Cover,Vn)).
-
-succ_(Cover,Vn) ->
-    case lists:keysort(1, Cover) of
-	[{I,0}|Is] ->
-	    %% least significant variable occur positive!
-	    Prefix = lists:map(fun(J) -> {J,0} end, lists:seq(0,I-1)),
-	    Succ = Prefix ++ [{I,1}|Is],
-	    [Succ];
-	[{I,1}|Is] ->
-	    Prefix = lists:map(fun(J) -> {J,0} end, lists:seq(0,I)),
-	    succ1_(I+1,Vn,Prefix,Is,[])
-    end.
-
-succ1_(I,Vn,Prefix,Is=[{J,_}|_],Cs) when I < J ->
-    Prefix1 = Prefix ++ [{I,0}],
-    Succ = Prefix++[{I,1}]++Is,
-    succ1_(I+1,Vn,Prefix1,Is,[Succ | Cs]);
-succ1_(I,Vn,Prefix,Is0=[{I,1}|Is],Cs) ->
-    Prefix1 = Prefix ++ [{I,0}],
-    Succ = Prefix++Is0,
-    succ1_(I+1,Vn,Prefix1,Is,[Succ | Cs]);
-succ1_(I,_Vn,Prefix,[{I,0}|Is],Cs) ->
-    Succ = Prefix++[{I,1}]++Is,
-    [Succ | Cs];
-succ1_(I,Vn,Prefix,[],Cs) when I < Vn ->
-    Prefix1 = Prefix ++ [{I,0}],
-    Succ = Prefix++[{I,1}],
-    succ1_(I+1,Vn,Prefix1,[],[Succ | Cs]);
-succ1_(Vn,Vn,Prefix,[],Cs) ->
-    Succ = Prefix,
-    [Succ | Cs].
-
-%% find index of variable V in Vs (0...N-1)
-index(V, Vs) ->    
-    index(V, 0, Vs).
-
-index(V, I, [V|_]) -> I;
-index(V, I, [_|Vs]) -> index(V,I+1,Vs).

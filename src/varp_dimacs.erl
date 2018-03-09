@@ -15,6 +15,8 @@
 
 -define(l2a(X), list_to_atom((X))).
 
+-include("varp_bic.hrl").
+
 load(File) ->
     case file:read_file(File) of
 	{ok,Bin} ->
@@ -50,7 +52,7 @@ preamble(Bin,Vs,L) ->
 	    %% io:format("~s", [Line]),
 	    case string:tokens(Line, " \r") of
 		["snf", Variables, Clauses] ->
-		    to_snf(Bin1,L,list_to_integer(Variables),
+		    to_snf(Bin1,Vs,L,list_to_integer(Variables),
 			   list_to_integer(Clauses));
 		["cnf", Variables, Clauses] ->
 		    to_cnf(Bin1,Vs,L,list_to_integer(Variables),
@@ -64,9 +66,9 @@ preamble(Bin,Vs,L) ->
 
 %% CNF format
 to_cnf(Bin,Vs,L,Vars,Clauses) ->
-    case to_cnf_(Bin,Vs,L,[], []) of
-	{ok,Cs} ->
-	    {cnf,{Vars,Clauses,Cs}};
+    case to_cnf_(Bin,Vs,L,[],[]) of
+	{ok,Vs1,Cs} ->
+	    {cnf,{Vars,Clauses,Vs1,[],Cs}};
 	Error ->
 	    Error
     end.
@@ -74,9 +76,9 @@ to_cnf(Bin,Vs,L,Vars,Clauses) ->
 to_cnf_(Bin,Vs,L,Acc,Cs) ->
     case binary_line(Bin) of
 	eof ->
-	    {ok,reverse(Cs)};
+	    {ok,Vs,reverse(Cs)};
 	{ok,[$%|_],_Bin1} ->  %% ????
-	    {ok,reverse(Cs)};
+	    {ok,Vs,reverse(Cs)};
 	{ok,[$c|Comment],Bin1} -> 
 	    Vs1 = scan_var(Comment,Vs),
 	    to_cnf_(Bin1,Vs1,L+1,Acc,Cs);
@@ -103,23 +105,24 @@ sat(_Bin,_Vs,_L, _Vars) ->
     {error, not_implemented}.
 
 %% SNF (Symbolc CNF format)
-to_snf(Bin,L,Vars,Clauses) ->
-    case to_snf_(Bin,L,[], []) of
-	{ok,Cs} ->
-	    {snf,{Vars,Clauses,Cs}};
+to_snf(Bin,Vs,L,Vars,Clauses) ->
+    case to_snf_(Bin,Vs,L,[],[]) of
+	{ok,Vs1,Cs} ->
+	    {snf,{Vars,Clauses,Vs1,[],Cs}};
 	Error ->
 	    Error
     end.
 
 %% collect tokens until . is found then call varp_snf parse
-to_snf_(Bin,Ln,Ts0,CLs) ->
+to_snf_(Bin,Vs,Ln,Ts0,CLs) ->
     case binary_line(Bin) of
 	eof ->
-	    {ok,reverse(CLs)};
+	    {ok,Vs,reverse(CLs)};
 	{ok,[$%|_],_Bin1} ->  %% ????
-	    {ok,reverse(CLs)};
-	{ok,[$c|_Comment],Bin1} ->
-	    to_snf_(Bin1,Ln+1,Ts0,CLs);
+	    {ok,Vs,reverse(CLs)};
+	{ok,[$c|Comment],Bin1} -> 
+	    Vs1 = scan_var(Comment,Vs),
+	    to_snf_(Bin1,Vs1,Ln+1,Ts0,CLs);
 	{ok,Line,Bin1} ->
 	    case varp_scan:string(Line) of
 		{ok,Ts1,Ln1} ->
@@ -129,17 +132,45 @@ to_snf_(Bin,Ln,Ts0,CLs) ->
 		    if Eol =:= true ->
 			    case varp_snf:parse(Ts2) of
 				{ok,CL} ->
-				    to_snf_(Bin1,Ln1,[],[CL|CLs]);
+				    %% CL1 = rewrite_snf_claus(CL,Vs),
+				    to_snf_(Bin1,Vs,Ln1,[],[CL|CLs]);
 				Error ->
 				    {error,Ln,Error}
 			    end;
 		       true ->
-			    to_snf_(Bin1,Ln1,Ts2,CLs)
+			    to_snf_(Bin1,Vs,Ln1,Ts2,CLs)
 		    end;
 		Error ->
 		    {error,Ln,Error}
 	    end
     end.
+
+%% translate symbolic literals etc
+%% rewrite_snf_claus(CL,Vs) ->
+%%     [rewrite_literal(L,Vs) || L <- CL].
+
+%% rewrite_literal({'not',V},Vs) -> rewrite_variable(V,Vs);
+%% rewrite_literal(V,Vs) -> rewrite_variable(V,Vs).
+
+%% rewrite_variable({uint,V,Size,#cconst{base=B,value=V}},Vs) ->
+%%     case lookup(V, Vs) of
+%% 	{{V,uint,Sz},_} -> {uint,V,Sz,integer_to_list(V,B)};
+%% 	false -> {uint,V,Size,integer_to_list(V,B)}
+%%     end;
+%% rewrite_variable({int,V,Size,#cconst{base=B,value=V}},Vs) ->
+%%     case lookup(V, Vs) of
+%% 	{{V,int,Sz},_} -> {int,V,Sz,integer_to_list(V,B)};
+%% 	false -> {uint,V,Size,integer_to_list(V,B)}
+%%     end;
+%% rewrite_variable(V,_Vs) -> V.
+
+%% lookup(V, [E={{V,_Type,_Size},_Ys}|_]) ->
+%%     E;
+%% lookup(V, [_|Vs]) ->
+%%     lookup(V, Vs);
+%% lookup(_V, []) ->
+%%     false.
+    
 
 save(File, Cs) ->
     file:write_file(File, format(Cs)).
@@ -206,16 +237,37 @@ binary_line(Bin) ->
 	[Line,Bin1] -> {ok,binary_to_list(Line),Bin1}
     end.
 
-%% look for char+ <blank> is <blank> <integer>
+%% look for:
+%%    <name> "is" <integer>
+%%    declare <name> ":" <size>/signed
+%%    declare <name> ":" <size>/unsigned
+%% 
 scan_var(Line,Vs) ->
-    case string:tokens(Line, " \t\r") of
-	[Var,"is",Var] ->
-	    try list_to_integer(Var) of
-		L -> [{Var,L}|Vs]
-	    catch
-		error:badarg ->
-		    Vs
-	    end;
+    case varp_scan:string(Line) of
+	{ok,[{symbol,_,V},{identifier,_,"is"},{decnum,_,N}],_} ->
+	    X = list_to_atom(V),
+	    Y = list_to_integer(N),
+	    [{{p,X,[]},Y}|Vs];
+	{ok,[{declare,_},{symbol,_,V},{':',_},
+	     {decnum,_,Size},{'/',_},{signed,_}],_} ->
+	    X = list_to_atom(V),
+	    Sz = list_to_integer(Size),
+	    [{{p,X,[]},int,Sz}|Vs];
+	{ok,[{declare,_},{symbol,_,V},{':',_},
+	     {decnum,_,Size},{'/',_},{unsigned,_}],_} ->
+	    X = list_to_atom(V),
+	    Sz = list_to_integer(Size),
+	    [{{p,X,[]},uint,Sz}|Vs];
 	_ ->
 	    Vs
     end.
+
+%% scan_is(Type,Size,[{decnum,_,N}|Is]) ->
+%%     [list_to_integer(N)|scan_is(Type,Size,Is)];
+%% scan_is(Type,Size,[{symbol,_,Var},{'[',_},{decnum,_,I},{']',_}|Is]) ->
+%%     [{Type,list_to_atom(Var),Size,list_to_integer(I)}|scan_is(Type,Size,Is)];
+%% scan_is(_Type,_Size,[]) ->
+%%     [].
+
+
+

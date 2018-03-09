@@ -77,8 +77,8 @@
 	       {int,pred(),Size::integer(),Bit::integer()} |
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
-%%-define(dbg(F,A), io:format((F),(A))).
--define(dbg(F,A), ok).
+-define(dbg(F,A), io:format((F),(A))).
+%%-define(dbg(F,A), ok).
 
 -record(bs,
 	{
@@ -377,7 +377,7 @@ fmt_var_list(Bs,Xs) ->
 
 variable(Bs, V) ->
     W = expand_meta(V, Bs),
-    ?dbg("variable expand: ~p -> ~w\n", [V,W]),
+    %% ?dbg("variable expand: ~p -> ~w\n", [V,W]),
     case find_var(W, Bs) of
 	error ->
 	    case W of
@@ -392,7 +392,7 @@ variable(Bs, V) ->
 			    Bnd2 = lists:zip(Names,Rs),
 			    Meta = Bnd2 ++ Bs#bs.meta,
 			    ?dbg("meta bind: ~p\n", [Meta]),
-			    {R,Bs1} = build_(Def, Bs#bs { meta=Meta}),
+			    {R,Bs1} = build__(Def, Bs#bs { meta=Meta}),
 			    Meta1 = lists:nthtail(length(Bnd2),Bs1#bs.meta),
 			    case R of
 				{bool,N} ->
@@ -518,7 +518,7 @@ build(F,Opts) when is_map(Opts) ->
     ?dbg("Formula: ~p\n", [F]),
     Bs = new(Opts),
     Bs1 = build_code(getopt(Bs,defs),Bs),
-    try build_(F, Bs1) of
+    try build__(F, Bs1) of
       	Value -> Value
     catch
       	throw:contradiction -> 
@@ -532,6 +532,12 @@ build_code(Defs, Bs) ->
 	undefined -> Bs;
 	Code -> varp_code:generate(Code, Bs)
     end.
+
+build__(F, Bs) ->
+    %% io:format("build__ ~p\n", [F]),
+    R={_F1,_} = build_(F, Bs),
+    %% io:format("build__ => ~p", [_F1]),
+    R.
 
 build_(undefined, Bs) ->
     {undefined, Bs};
@@ -602,25 +608,25 @@ build_({vec,Fs}, Bs) ->
     {Xs,Bs1} = build_list(Fs, Bs),
     {{bit,length(Xs),[X||{bool,X} <- Xs]},Bs1};
 build_({'=', V, F}, Bs) when is_atom(V) ->
-    {Y,Bs1} = build_(F, Bs),
+    {Y,Bs1} = build__(F, Bs),
     operation('=', V, Y, Bs1);
 
 build_({'-',F}, Bs) ->
-    {Y,Bs1} = build_(F, Bs),
+    {Y,Bs1} = build__(F, Bs),
     operation('-', Y, Bs1);
 build_({'not',A}, Bs) ->
-    {Y,Bs1} = build_(A, Bs),
+    {Y,Bs1} = build__(A, Bs),
     operation('not', Y, Bs1);
 build_({'~',A}, Bs) ->
-    {Y,Bs1} = build_(A, Bs),
+    {Y,Bs1} = build__(A, Bs),
     operation('~', Y, Bs1);
 build_({'!',A}, Bs) ->
-    {Y,Bs1} = build_(A, Bs),
+    {Y,Bs1} = build__(A, Bs),
     operation('!', Y, Bs1);
 
 build_({bit_index,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
-    case build_(A, Bs) of
+    case build__(A, Bs) of
 	{{uint,N,Xs}, Bs1} -> {select_bool(I1,N,Xs), Bs1};
 	{{int,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
 	{{bit,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
@@ -630,7 +636,7 @@ build_({bit_index,A,I},Bs) ->
 build_({bit_range,A,I,J},Bs) ->
     I1 = eval_meta(I,Bs),
     J1 = eval_meta(J,Bs),
-    case build_(A, Bs) of
+    case build__(A, Bs) of
 	{{uint,N,Xs}, Bs1} -> {select_range(I1,J1,N,Xs), Bs1};
 	{{int,N,Xs}, Bs1}  -> {select_range(I1,J1,N,Xs), Bs1};
 	{{bit,N,Xs}, Bs1}  -> {select_range(I1,J1,N,Xs), Bs1};
@@ -639,62 +645,55 @@ build_({bit_range,A,I,J},Bs) ->
 
 %% Fixme: implement shift for variable argument
 build_({'<<',A,K},Bs) when is_integer(K), K>=0 ->
-    {Y,Bs1} = build_(A,Bs),
+    {Y,Bs1} = build__(A,Bs),
     operation('<<',Y,K,Bs1);
 build_({'<<<',A,K},Bs) when is_integer(K), K>=0 ->
-    {Y,Bs1} = build_(A,Bs),
+    {Y,Bs1} = build__(A,Bs),
     operation('<<<',Y,K,Bs1);
 build_({'>>',A,K},Bs) when is_integer(K), K >= 0 ->
-    {Y,Bs1} = build_(A,Bs),
+    {Y,Bs1} = build__(A,Bs),
     operation('>>',Y,K,Bs1);
 build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
-    {Y,Bs1} = build_(A,Bs),
+    {Y,Bs1} = build__(A,Bs),
     operation('>>>',Y,K,Bs1);
 
-build_({cnf,{[],[]}},Bs) ->
-    build_(false, Bs);
-build_({cnf,{Cs,Ls}},Bs) when is_list(Cs), is_list(Ls) ->
-    build_({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
-build_({cnf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
-    build_(cnf_to_formula(Cs),Bs);
-build_({cnf,Cs},Bs) ->
-    build_(cnf_to_formula(Cs),Bs);
+build_({cnf,{[],[],_Decls}},Bs) ->
+    build__(false, Bs);
+build_({cnf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
+    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
 
-build_({snf,{[],[]}},Bs) ->
-    build_(false, Bs);
-build_({snf,{Cs,Ls}},Bs) when is_list(Cs), is_list(Ls) ->
-    build_({'and',{'ALL',Ls},snf_to_formula(Cs)},Bs);
-build_({snf,{_Vars,_Clauses,Cs}},Bs) when is_list(Cs) ->
-    build_(snf_to_formula(Cs),Bs);
-build_({snf,Cs},Bs) ->
-    build_(snf_to_formula(Cs),Bs);
+build_({snf,{[],[],_Decls}},Bs) ->
+    build__(false, Bs);
+build_({snf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
+    build__({'and',{'ALL',Ls},snf_to_formula(Cs)},Bs);
+
 
 build_({subst,Rx,Py,F},Bs) ->
     Bs1 = Bs#bs { subst = [{Rx,Py}|Bs#bs.subst]},
-    build_(F, Bs1);
+    build__(F, Bs1);
 build_({subst,SList,F},Bs) ->
     Bs1 = Bs#bs { subst = SList++Bs#bs.subst},
-    build_(F, Bs1);
+    build__(F, Bs1);
 build_({Op,A,B}, Bs) ->
-    {Y,Bs1} = build_(A, Bs),
-    {Z,Bs2} = build_(B, Bs1),
+    {Y,Bs1} = build__(A, Bs),
+    {Z,Bs2} = build__(B, Bs1),
     operation(Op,Y,Z,Bs2);
 build_({ite,C,T,E}, Bs) ->
-    {Cf,Bs1} = build_(C, Bs),
-    {Tf,Bs2} = build_(T, Bs1),
-    {Ef,Bs3} = build_(E, Bs2),
+    {Cf,Bs1} = build__(C, Bs),
+    {Tf,Bs2} = build__(T, Bs1),
+    {Ef,Bs3} = build__(E, Bs2),
     ite(Cf, Tf, Ef, Bs3);
 
 build_({'abs',[A]}, Bs) ->
-    {Y,Bs1} = build_(A, Bs),
+    {Y,Bs1} = build__(A, Bs),
     operation('abs', Y, Bs1);
 build_({'min',[A,B]}, Bs) ->
-    {A1,Bs1} = build_(A, Bs),
-    {B1,Bs2} = build_(B, Bs1),
+    {A1,Bs1} = build__(A, Bs),
+    {B1,Bs2} = build__(B, Bs1),
     operation('min', A1, B1, Bs2);
 build_({'max',[A,B]}, Bs) ->
-    {A1,Bs1} = build_(A, Bs),
-    {B1,Bs2} = build_(B, Bs1),
+    {A1,Bs1} = build__(A, Bs),
+    {B1,Bs2} = build__(B, Bs1),
     operation('max', A1, B1, Bs2);
 build_({'ALL',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
@@ -772,7 +771,7 @@ build_({{'LTE',[X1|Qs]},F}, Bs) ->
 -ifdef(__UNUSED__).
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
     Bs1 = push_meta(X, Xi, Bs),
-    case build_(F,Bs1) of
+    case build__(F,Bs1) of
 	{0,Bs2} ->
 	    Bs3 = pop_meta(Bs2),
 	    build_meta(F,X,Xs,Acc,Bs3);
@@ -801,7 +800,7 @@ build_quant_(F, [Expr|Qs], Bs) ->
 	true -> build_quant_(F, Qs, Bs)
     end;
 build_quant_(F, [], Bs) ->
-    case build_(F, Bs) of
+    case build__(F, Bs) of
 	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
 	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
 	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
@@ -1032,7 +1031,7 @@ vfold_op(Bs,_Op,D,[]) ->
     {D,Bs}.
 
 all([], Bs) ->
-    {?TRUE, Bs};
+    {{bool,?TRUE}, Bs};
 all([A], Bs) ->
     {A, Bs};
 all(As, Bs) ->
@@ -1041,7 +1040,7 @@ all(As, Bs) ->
     {{bool,X}, clause(Bs1,'and',[X|As1])}.
 
 any([], Bs) ->
-    {?FALSE, Bs};
+    {{bool,?FALSE}, Bs};
 any([A], Bs) ->
     {A, Bs};
 any(As, Bs) ->
@@ -1172,7 +1171,7 @@ vset_size([X|Xs],I,D) -> [X|vset_size(Xs,I-1,D)].
 args(Fs,Bs) when is_list(Fs) ->
     build_list(Fs, Bs);
 args(F,Bs) ->
-    case build_(F, Bs) of
+    case build__(F, Bs) of
 	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
 	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
 	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1}
@@ -1200,7 +1199,7 @@ build_list(Fs, Bs) ->
     build_list_(Fs, [], Bs).
     
 build_list_([F|Fs],Acc,Bs) ->
-    {X,Bs1} = build_(F,Bs),
+    {X,Bs1} = build__(F,Bs),
     build_list_(Fs,[X|Acc],Bs1);
 build_list_([],Acc,Bs) ->
     {reverse(Acc),Bs}.

@@ -158,14 +158,16 @@ load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp,Opts) ->
 		Error={error,Ln,Reason} ->
 		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
 		    Error;
-		Cnf = {cnf,{_NVars,_NClauses,_CLs}} ->
-		    %% io:format("% loaded: ~s\n", [F]),
+		Cnf = {cnf,{_NVars,_NClauses,Decls,_Ls,_CLs}} ->
+		    %% io:format("% loaded: ~p\n", [Cnf]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
-		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp,Opts);
-		Snf = {snf,{_NVars,_NClauses,_CLs}} ->
-		    %% io:format("% loaded: ~s\n", [F]),
+		    load_files(Fs,Formula1,Defs0,Decls0++Decls,Code0,
+			       JoinOp,Opts);
+		Snf = {snf,{_NVars,_NClauses,Decls,_Ls,_CLs}} ->
+		    %% io:format("% loaded: ~p\n", [Snf]),
 		    Formula1 = join_f(JoinOp,Snf,Formula0),
-		    load_files(Fs,Formula1,Defs0,Decls0,Code0,JoinOp,Opts)
+		    load_files(Fs,Formula1,Defs0,Decls0++Decls,Code0,
+			       JoinOp,Opts)
 	    end;
        true ->
 	    case parse(F, Data) of

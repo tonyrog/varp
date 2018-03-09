@@ -16,7 +16,6 @@
 -export([process_args/2]).
 -export([process_args/4]).
 
-%% -include("varp_option.hrl").
 -include("log.hrl").
 
 %%
