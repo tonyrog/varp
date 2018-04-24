@@ -1,0 +1,6 @@
+c CNF for X = (Y = Z)
+p snf 3 4
+X Y Z.
+X !Y !Z.
+!X Y !Z.
+!X !Y Z.

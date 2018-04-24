@@ -1,0 +1,6 @@
+// Simple formula that under saturate-2 should
+//   C=true
+
+(A -> (B -> C)) && (~A -> (B -> C))  &&
+(A -> (~B -> C)) && (~A -> (~B -> C))
+

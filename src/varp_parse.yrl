@@ -7,6 +7,7 @@ Terminals
 	symbol true false define declare code type
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
+        'SUM' 'PROD'
         '<->' '>>>' '<<<' '$' '..'
         hexnum octnum binnum decnum flonum chrnum
 	identifier string sizeof
@@ -529,11 +530,16 @@ qtype -> 'GT'    : op('$1').
 qtype -> 'GTE'   : op('$1').
 qtype -> 'LT'    : op('$1').
 qtype -> 'LTE'   : op('$1').
+qtype -> 'SUM'   : op('$1').
+qtype -> 'PROD'  : op('$1').
+    
 
 quantifier -> '[' 'ALL' ']'   : op('$2').
 quantifier -> '[' 'ANY' ']'   : op('$2').
 quantifier -> '[' 'NONE' ']'  : op('$2').
 quantifier -> '[' 'ONE'  ']'  : op('$2').
+quantifier -> '[' 'SUM' ']'   : op('$2').
+quantifier -> '[' 'PROD' ']'  : op('$2').
 quantifier -> '[' 'E' ']'     : 'ANY'.
 quantifier -> '[' 'E' '!' ']' : 'ONE'.
 quantifier -> '[' 'A' ']'     : 'ALL'.
@@ -568,7 +574,7 @@ lexpr0 -> '(' lexpr ')'             : '$2'.
 lexpr0 -> '{' lexprs '}'            : {vec,'$2'}.
 lexpr0 -> identifier '(' lexprs ')' : { name('$1'), '$3'}.
 lexpr0 -> quantifier '(' lexprs ')' : {'$1','$3'}.
-lexpr0 -> quantifier lexpr          : {'$1','$2'}.
+lexpr0 -> quantifier lexpr0         : {'$1','$2'}.
 
 lexpr0 -> lexpr_prim ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 lexpr0 -> lexpr_prim ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.

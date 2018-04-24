@@ -1,0 +1,80 @@
+// equivalence classes
+// Variables A,B,C,D,E
+// run with --bcp=1 -b0
+// pairs = binom(5,2) = 10
+// transitivity =
+//   5*4*3 / 2 = 30
+//   binom(5,2)*3
+//   (a,b) = (ac,bc), (ad,bd), (ae,be)
+//   one pair gives 3 rules
+//
+// number of clauses = (3+2)*bindom(5,2) = 50
+// 
+//  RULES Xij -> (i=j)
+//
+(!Xab || A || !B) &&
+(!Xab || !A || B) &&
+(!Xac || A || !C) &&
+(!Xac || !A || C) &&
+(!Xad || A || !D) &&
+(!Xad || !A || D) &&
+(!Xae || A || !E) &&
+(!Xae || !A || E) &&
+(!Xbc || B || !C) &&
+(!Xbc || !B || C) &&
+(!Xbd || B || !D) &&
+(!Xbd || !B || D) &&
+(!Xbe || B || !E) &&
+(!Xbe || !B || E) &&
+(!Xcd || C || !D) &&
+(!Xcd || !C || D) &&
+(!Xce || C || !E) &&
+(!Xce || !C || E) &&
+(!Xde || D || !E) &&
+(!Xde || !D || E) &&
+
+// ALL rules
+//   (Xij && Xjk) -> Xik
+
+(!Xac || !Xbc || Xab) &&
+(!Xad || !Xbd || Xab) &&
+(!Xae || !Xbe || Xab) &&
+// Xac
+(!Xab || !Xbc || Xac) &&
+(!Xad || !Xcd || Xac) &&
+(!Xae || !Xce || Xac) &&
+// Xad
+(!Xab || !Xbd || Xad) &&
+(!Xac || !Xcd || Xad) &&
+(!Xae || !Xde || Xad) &&
+// Xae
+(!Xab || !Xbe || Xae) &&
+(!Xac || !Xce || Xae) &&
+(!Xad || !Xde || Xae) &&
+// Xbc
+(!Xab || !Xac || Xbc) &&
+(!Xbd || !Xcd || Xbc) &&
+(!Xbe || !Xce || Xbc) &&
+// Xbd
+(!Xab || !Xad || Xbd) &&
+(!Xbc || !Xcd || Xbd) &&
+(!Xbe || !Xde || Xbd) &&
+// Xbe
+(!Xab || !Xae || Xbe) &&
+(!Xbc || !Xce || Xbe) &&
+(!Xbd || !Xde || Xbe) &&
+// Xcd
+(!Xac || !Xad || Xcd) &&
+(!Xbc || !Xbd || Xcd) &&
+(!Xce || !Xde || Xcd) &&
+// Xce
+(!Xac || !Xae || Xce) &&
+(!Xbc || !Xbe || Xce) &&
+(!Xcd || !Xde || Xce) &&
+// Xde
+(!Xad || !Xae || Xde) &&
+(!Xcd || !Xce || Xde) &&
+(!Xbd || !Xbe || Xde)
+
+// TEST
+//  && (Xab && Xcd && Xac) -> Xbd

@@ -1,0 +1,49 @@
+c K6 coding with model
+p snf 40 6
+
+c AB AC BC .
+c AB AD BD .
+AB AE BE .
+AB AF BF .
+AC AD CD .
+AC AE CE .
+AC AF CF .
+AD AE DE .
+AD AF DF .
+AE AF EF .
+
+BC BD CD .
+BC BE CE .
+BC BF CF .
+BD BE DE .
+BD BF DF .
+BE BF EF .
+CD CE DE .
+CD CF DF .
+CE CF EF .
+DE DF EF .
+
+!AB !AC !BC .
+!AB !AD !BD .
+!AB !AE !BE .
+!AB !AF !BF .
+!AC !AD !CD .
+!AC !AE !CE .
+!AC !AF !CF .
+!AD !AE !DE .
+!AD !AF !DF .
+!AE !AF !EF .
+
+!BC !BD !CD .
+!BC !BE !CE .
+!BC !BF !CF .
+!BD !BE !DE .
+!BD !BF !DF .
+!BE !BF !EF .
+!CD !CE !DE .
+!CD !CF !DF .
+!CE !CF !EF .
+!DE !DF !EF .
+
+!AE !AF !BE !BF !CD !CE !DF .
+!AE !AF !BE !BF !CD !CF !DE .

@@ -3,4 +3,4 @@
 // this could be like having size = 
 //
 [A n=isize(p)]
-(((A:n * B:n) == p:n) &&(A:n > B:n) && (B:n > 1))
+(((A:(n-1) * B:(n/2)) == p:n) && (A:(n-1) > B:(n/2)) && (B:(n/2) > 1))

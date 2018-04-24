@@ -104,14 +104,15 @@ next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
 next([],_Bs) ->
     false.
 
-%% Given contradaction in both branches, we 
+%% Given contradiction in both branches
+%% find the shortest prefix that has no conflict
 %% example:
-%%    [A,B,C,D,E,F]
-%%    [A,B,C,D,E,~F]
-%% find the shortest prefix that is not contradictory:
-%%    [A,B,C,D,~F]
-%%    [A,B,C,~F]
-%%    [A,B,~F]
+%%    [A,B,C,D,E,F]  has a conflict
+%%    [A,B,C,D,E,~F] has a conflict
+%%    [A,B,C,D,~F]   conflict
+%%    [A,B,C,~F]     conflict
+%%    [A,B,~F]       no conflict
+%%
 %%    [A,~F]
 %%    [~F]   (contradiction ?)
 

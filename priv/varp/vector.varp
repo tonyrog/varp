@@ -1,0 +1,9 @@
+//
+// Test with vector
+//
+
+declare X:4/unsigned;
+
+(X < 2) and
+(((X == 0) -> (A and B)) or
+((X == 1) -> (A or B)))

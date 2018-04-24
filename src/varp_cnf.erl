@@ -11,8 +11,456 @@
 -export([normalize_clause/1,normalize_clause/2]).
 -export([normalize_clauses/1,normalize_clauses/2]).
 -export([format/1]).
-
 -compile(export_all).
+
+-include("varp_bic.hrl").
+
+%% -define(dbg(F,As), ok).
+-define(dbg(F,As), io:format(F,As)).
+
+%%
+%% Special CNF prover
+%% backtrack over Clauses 
+%% for each variable v:
+%%   a) assume v=0 then for each clause C with v as negative literal 
+%%      C={..!v..a..!b..} set a=0, b=1 backtrack
+%% 
+%%   b) assume v=1 then for each clause C with v as positive literal 
+%%      C={..v..c..!d..} set c=0, d=1 backtrack
+%%   
+%%
+
+sat({snf,{_Nv,_Nc,Decl,Literals,CLs}}) ->
+    satisfy(CLs, Literals, Decl, 1);
+sat({cnf,{_Nv,_Nc,Decl,Literals,CLs}}) ->
+    satisfy(CLs, Literals, Decl, 1);
+sat({CLs, Literals, Decl}) ->
+    satisfy(CLs, Literals, Decl, 1).
+
+satisfy(SNF) ->
+    satisfy(SNF,-1).
+    
+satisfy({snf,{_Nv,_Nc,Decl,Literals,CLs}},N) ->
+    satisfy(CLs, Literals, Decl, N);
+satisfy({cnf,{_Nv,_Nc,Decl,Literals,CLs}},N) ->
+    satisfy(CLs, Literals, Decl, N);
+satisfy({CLs, Literals, Decl},N) ->
+    satisfy(CLs, Literals, Decl, N).
+
+satisfy(CLs, Ls, _Decl, N) ->
+    Vp = varc:new(),
+    Mark = 1,
+    varc:mark(Vp,Mark),
+    Vm = add_literals(Vp, Ls, #{}),
+    Vm1 = add_clauses(Vp, CLs, Vm),
+    ?dbg("bindings[~w]:  ~s\n", 
+	 [Mark,format_marked_bindings(Vp,Vm1,Mark)]),
+    case varc:eval(Vp) of
+	false -> 
+	    0;
+	true ->
+	    %% varc:order_sort(Vp, occur_descending),
+	    bt(Vp,Vm1,
+	       fun(Vpi,Acc) ->
+		       model(Vpi,Vm1),
+		       case Acc+1 of
+			   N -> {false,N};
+			   Acc1 -> {true,Acc1}
+		       end
+	       end, 0)
+    end.
+
+model(Vp,Vm) ->
+    M = varp_formula:model(Vp,Vm),
+    varp_formula:print(model,1,M).
+
+%%
+%% Explicit recursion version, allow times backtracking
+%% mix alogorithms etc.
+%%
+bt(Vp,Vm,Func,Acc) ->
+    case bt_init(Vp,Vm) of
+	{model,_Stack} ->
+	    {_,Acc1} = Func(Vp,Acc),
+	    Acc1;
+	{true,Stack} ->
+	    bt_loop(Vp,Vm,Stack,Func,Acc);
+	false ->
+	    Acc
+    end.
+
+bt_loop(Vp,Vm,Stack,Func,Acc) ->
+    case bt_next(Vp,Vm,Stack) of
+	{model,Stack1} ->
+	    case Func(Vp,Acc) of
+		{true,Acc1} ->
+		    bt_undo(Vp,Vm,Stack1),
+		    bt_loop(Vp,Vm,Stack1,Func,Acc1);
+		{false,Acc1} ->
+		    Acc1
+	    end;
+	{true,Stack1} ->
+	    bt_loop(Vp,Vm,Stack1,Func,Acc);
+	false ->
+	    Acc
+    end.
+
+-define(BT_START_MARK, 2).
+-define(BT_ORDER, [1,-1]).
+-define(BT_FIRST, hd(?BT_ORDER)).
+-define(BT_LAST,  hd(tl(?BT_ORDER))).
+
+%% initalise backtrack stack
+bt_init(Vp,_Vm) ->
+    case varc:order_first(Vp) of
+	false  -> {model,[]};
+	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?BT_START_MARK}]}
+    end.
+
+bt_next(Vp,Vm,[{_,_,[],_}|Stack1]) ->
+    ?dbg("empty next\n", []),
+    bt_undo(Vp,Vm,Stack1),
+    bt_next(Vp,Vm,Stack1);
+bt_next(Vp,Vm,Stack0=[{I,Xi,[V|_Vs],Mark}|_Stack]) ->
+    ?dbg("decision[~w]: ~s/~w=~w\n", [Mark,format_var(Vm,Xi),I,(V+1) div 2]),
+    varc:mark(Vp,Mark),
+    bt_next1(Vp,Vm,Stack0);
+bt_next(_Vp,_Vm,[]) ->
+    false.
+
+bt_next1(Vp,Vm,Stack0=[{_I,Xi,[V|_Vs],Mark}|_Stack]) ->
+    true = varc:put(Vp,Xi,V),
+    case varc:eval(Vp) of
+	false -> %% conflict
+	    bt_conflict(Vp,Vm,Stack0);
+	true ->
+	    ?dbg("bindings[~w]: ~s\n", 
+		 [Mark,format_marked_bindings(Vp,Vm,Mark)]),
+	    bt_next_var(Vp,Vm,Stack0)
+    end.
+
+bt_conflict(Vp,Vm,[]) ->
+    ?dbg("next = ~w\n", [varc:order_first(Vp)]),
+    bt_init(Vp,Vm);
+bt_conflict(Vp,Vm,Stack0=[{_I,_Xi,[],_Mark}|Stack]) ->
+    bt_undo(Vp,Vm,Stack0),
+    bt_conflict(Vp,Vm,Stack);
+bt_conflict(Vp,Vm,Stack0=[{I,Xi,Vs,Mark}|_Stack]) ->
+    ?dbg("xi/~w=~s\n", [I,format_var(Vm,Xi)]),
+    format_all_bindings(Vp,Vm),
+    {JMark,Clause,UIP} = conflict(Vp,Vm,Mark),
+    ?dbg("conflict clause=~s\n", [format_clause(Vm,Clause)]),
+    ?dbg(" mark=~w, jmark=~w, uip=~s\n", [Mark,JMark,format_literal(Vm,UIP)]),
+    {_J,Stack1} = bt_undo(Vp,Vm,Stack0,JMark),
+    add_conflict_clause(Vp,Vm,Clause),
+    %% [Vn|_] = tl(Vs),
+    Vn = -hd(Vs),
+    io:format(" set: ~s=~w\n", [format_var(Vm,Xi),(Vn+1) div 2]),
+    true = varc:put(Vp,Xi,Vn),
+    case varc:eval(Vp) of
+	false -> %% conflict
+	    bt_conflict(Vp,Vm,Stack1);
+	true ->
+	    ?dbg("bindings[~w]: ~s\n", 
+		 [JMark,format_marked_bindings(Vp,Vm,JMark)]),
+	    bt_next_var(Vp,Vm,Stack1)
+    end.
+
+
+add_conflict_clause(Vp,Vm,Clause) ->
+    L = length(Clause),
+    if L >= 64 ->
+	    ignore;
+       true ->
+	    Cix = varc:add_clause(Vp, 'or', [1|Clause]),
+	    io:format("add_clause: ~w, ~s\n", [Cix,format_clause(Vm,Clause)])
+    end.
+    
+
+format_all_bindings(Vp,Vm) ->
+    Bs = lists:map(
+	   fun({V,Val}) ->
+		   {Cix,_,ImpLev} = varc:implication_clause(Vp,V),
+		   {ImpLev,V,Val,Cix}
+	   end, varc:get_bindings(Vp,1)),
+    lists:foreach(
+      fun(G) ->
+	      [{Lev,_,_,_}|_] = G,
+	      io:format("bindings[~w]: ~s\n",[Lev,format_group(Vm,G)])
+      end, key_group_list(1,Bs)).
+
+format_group(Vm,[{_,V,Val,Cix}|G]) ->
+    case Cix of
+	-1 ->
+	    [ [format_binding(Vm,V,Val)," "] | format_group(Vm,G)];
+	_ ->
+	    [ [format_binding(Vm,V,Val),":",integer_to_list(Cix)," "] |
+	      format_group(Vm,G)]
+    end;
+format_group(_Vm,[]) ->
+    [].
+
+%% generate a list of key groups	      
+key_group_list(Pos,L) ->
+    case lists:keysort(Pos,L) of
+	[] -> [];
+	[H|T] -> key_group_list(Pos,[H],[],T)
+    end.
+
+key_group_list(Pos,Acc=[A|_],Gs,[H|T]) when 
+      element(Pos,A) =:= element(Pos,H) ->
+    key_group_list(Pos,[H|Acc],Gs,T);
+key_group_list(Pos,Acc,Gs,[H|T]) ->
+    key_group_list(Pos,[H],[lists:reverse(Acc)|Gs],T);
+key_group_list(_Pos,Acc,Gs,[]) ->
+    lists:reverse([lists:reverse(Acc)|Gs]).
+
+
+bt_continue(Vp,Vm,[]) ->
+    ?dbg("RESTART\n",[]),
+    bt_init(Vp,Vm);
+bt_continue(Vp,_Vm,[{I,Xi,Vs,Mark}|Stack]) ->
+    case varc:order_next(Vp,I) of
+	false ->
+	    {model,[{I,Xi,Vs,Mark}|Stack]};
+	{J,Xj} ->
+	    {true,[{J,Xj,?BT_ORDER,Mark+1},{I,Xi,Vs,Mark}|Stack]}
+    end.
+
+bt_next_var(Vp,Vm,[]) ->
+    bt_init(Vp,Vm);
+bt_next_var(Vp,Vm,[{I,Xi,[],Mark}|Stack]) ->
+    case varc:order_next(Vp,I) of
+	false ->
+	    ?dbg("next_var: xi/~w=~s, model\n", [I,format_var(Vm,Xi)]),
+	    {model,Stack};
+	{J,Xj} ->
+	    ?dbg("next_var: xi/~w=~s, xj/~w=~s\n", 
+		 [I,format_var(Vm,Xi),
+		  J,format_var(Vm,Xj)]),
+	    {true,[{J,Xj,?BT_ORDER,Mark+1}|Stack]}
+    end;
+bt_next_var(Vp,Vm,[{I,Xi,[_|Vs],Mark}|Stack]) ->
+    case varc:order_next(Vp,I) of
+	false ->
+	    ?dbg("next_var: xi/~w=~s, model\n", [I,format_var(Vm,Xi)]),
+	    {model,[{I,Xi,Vs,Mark}|Stack]};
+	{J,Xj} ->
+	    ?dbg("next_var: xi/~w=~s, xj/~w=~s\n", 
+		 [I,format_var(Vm,Xi),
+		  J,format_var(Vm,Xj)]),
+	    {true,[{J,Xj,?BT_ORDER,Mark+1},{I,Xi,Vs,Mark}|Stack]}
+    end.
+
+bt_undo(Vp,Vm,[{_,_,_,Mark}|Stack],JMark) when Mark > JMark ->
+    ?dbg("undo: ~w\n", [Mark]),
+    varc:undo(Vp, Mark),
+    bt_undo(Vp,Vm,Stack,JMark);
+bt_undo(_Vp,_Vm,Stack=[{J,_Xj,_Vs,_Mark}|_],_JMark) ->
+    {J,Stack};
+bt_undo(_Vp,_Vm,[],_JMark) ->
+    {2,[]}.
+
+
+bt_undo(Vp,_Vm,[{_,_,_,Mark}|_]) ->
+    ?dbg("undo: ~w\n", [Mark]),
+    varc:undo(Vp, Mark);
+bt_undo(_Vp,_Vm,[]) ->
+    ok.
+
+
+conflict(Vp,Vm,Level) ->
+    {CVar,CVal} = varc:get_latest_binding(Vp),
+    Lit = if CVal < 0 -> -CVar; true -> CVar end,
+    case find_first_uip(Vp,Vm,Level,Lit) of
+	{ok,[L]} ->
+	    {1,[-L],L};
+	{ok,CSrc} ->
+	    Clause = [-L||L<-CSrc],
+	    ?dbg("level = ~w\n", [[{I,implication_level(Vp,I)}||I<-CSrc]]),
+	    JMark = lists:max([implication_level(Vp,I)||I<-tl(CSrc)]),
+	    {JMark,Clause,hd(CSrc)}
+    end.
+
+find_first_uip(Vp,Vm,Level,CLit) ->
+    case implication_clause(Vp,CLit) of
+	-1 -> %% CLit is probably the decision variable
+	    ?dbg("conflict literal=~s, no cut\n",[format_literal(Vm,CLit)]),
+	    {ok,[CLit]};
+	Cix1 ->
+	    Cix2 = varc:conflict_clause(Vp),
+	    ?dbg("conflict literal=~s, Cix1=~w, Cix2=~w\n",
+		 [format_literal(Vm,CLit),Cix1,Cix2]),
+	    Marks = sets:from_list([CLit,-CLit]),
+	    {Q1,Marks1,Num1,CSrc1} =
+		enq_imp(Vp,Level,CLit,Cix1,queue:new(),Marks,0,[]),
+	    {Q2,Marks2,Num2,CSrc2} =
+		enq_imp(Vp,Level,-CLit,Cix2,Q1,Marks1,Num1,CSrc1),
+	    find_first_uip_(Vp,Level,Q2,Marks2,Num2,CSrc2)
+    end.
+
+find_first_uip_(Vp,Level,Q,Marks,Num,CSrc) ->
+    {{value,Imp},Q1} = queue:out(Q),
+    case sets:is_element(Imp, Marks) of
+	false ->
+	    find_first_uip_(Vp,Level,Q1,Marks,Num,CSrc);
+	true when Num =:= 1 ->
+	    {ok,[Imp|CSrc]};
+	true ->
+	    Marks1 = sets:del_element(Imp,Marks),
+	    Num1 = Num-1,
+	    case implication_clause(Vp,Imp) of
+		-1 when Num1 =:= 1 ->
+		    {ok,[Imp|CSrc]};
+		-1 ->
+		    find_first_uip_(Vp,Level,Q,Marks1,Num1,CSrc);
+		Cix ->
+		    {Q2,Marks2,Num2,CSrc1} = 
+			enq_imp(Vp,Level,
+				Imp,Cix,Q1,Marks1,Num1,CSrc),
+		    if Num2 =:= 1 ->
+			    {ok,CSrc1};
+		       true ->
+			    find_first_uip_(Vp,Level,Q2,
+					    Marks2,Num2,CSrc1)
+		    end
+	    end
+    end.
+
+enq_imp(Vp,Level,L,Ci,Q,Marks,Num,CSrc) ->
+    {'or',[1|Ls]} = varc:get_clause(Vp,Ci),
+    enq_imp_(Vp,Level,L,Ls,Q,Marks,Num,CSrc).
+
+enq_imp_(Vp,Level,L,[L|Ls],Q,Marks,Num,CSrc) ->
+    enq_imp_(Vp,Level,L,Ls,Q,Marks,Num,CSrc);
+enq_imp_(Vp,Level,L,[Li|Ls],Q,Marks,Num,CSrc) ->
+    Imp = -Li,
+    case sets:is_element(Imp,Marks) of
+	true ->
+	    enq_imp_(Vp,Level,L,Ls,Q,Marks,Num,CSrc);
+	false ->
+	    Marks1 = sets:add_element(Imp,Marks),
+	    ImpLev = implication_level(Vp,Imp),
+	    if  %% ImpLev =:= 1 -> %% constant, do not add to cut
+		%%    enq_imp_(Vp,Level,L,Ls,Q,Marks1,Num,CSrc);
+		ImpLev < Level ->
+		    %% marked but not counted
+		    enq_imp_(Vp,Level,L,Ls,Q,Marks1,Num,[Imp|CSrc]);
+	       true ->
+		    Num1 = Num+1,
+		    Q1 = queue:in(Imp, Q),
+		    enq_imp_(Vp,Level,L,Ls,Q1,Marks1,Num1,CSrc)
+	    end
+    end;
+enq_imp_(_Vp,_Level,_L,[],Q,Marks,Num,CSrc) ->
+    {Q,Marks,Num,CSrc}.
+
+implication_clause(Vp,Imp) ->
+    {Cix,_,_} = varc:implication_clause(Vp,Imp),
+    Cix.
+
+implication_level(Vp,Imp) ->
+    {_,_,ImpLev} = varc:implication_clause(Vp,Imp),
+    ImpLev.
+
+%% get binding list as literal list
+get_literal_bindings(Vp,Mark) ->
+    [if Val < 0 -> -Var; true -> Var end || 
+	{Var,Val} <- varc:get_bindings(Vp,Mark)].
+    
+%% set all literals except L to false
+%% return false if contradiction is found or no assignments where done
+%%         true if any literal was assigned 
+%%
+zclause(Vp,L,Ls) ->
+    zclause(Vp,L,Ls,false).
+
+zclause(Vp,L,[L|Ls],F) ->
+    zclause(Vp,L,Ls,F);
+zclause(Vp,L,[M|Ls],F) ->
+    %% io:format("ZPUT: ~w = ~w\n",[L,-1]),
+    case varc:get(Vp,M) of
+	-1 -> zclause(Vp,L,Ls,F);
+	1  -> false;
+	M  ->
+	    case peval(Vp,M,-1) of
+		false -> false;
+		true -> zclause(Vp,L,Ls,true)
+	    end
+    end;
+zclause(_Vp,_L,[],F) ->
+    F.
+
+peval(Vp, Xv, Val) ->
+    case varc:put(Vp, Xv, Val) of
+	true -> varc:eval(Vp);
+	false -> false
+    end.
+
+next(Vp, Xv) when Xv < 0 ->
+    -varc:class_next(Vp, -Xv);
+next(Vp, Xv) ->
+    varc:class_next(Vp, Xv).
+
+add_clauses(Vp, [CL|Clauses], Vm) ->
+    {Ls,Vm1} = add_clause(Vp, CL, [], Vm),
+    Cix = varc:add_clause(Vp, 'or', [1|Ls]),
+    io:format("~w: ~s\n", [Cix, format_clause(Vm1, Ls)]),
+    add_clauses(Vp, Clauses, Vm1);
+add_clauses(_Vp, [], Vm) ->
+    Vm.
+
+add_clause(V, [L|Ls], Acc, Vm) ->
+    {Li,Vm1} = add_literal(V,L,Vm),
+    add_clause(V, Ls, [Li|Acc], Vm1);
+add_clause(_V, [], Acc, Vm) ->
+    {lists:reverse(Acc),Vm}.
+
+add_literals(Vp, [L|Ls], Vm) ->
+    {Li,Vm1} = add_literal(Vp,L,Vm),
+    varc:put(Vp,Li,1),
+    add_literals(Vp,Ls,Vm1);
+add_literals(_Vp, [], Vm) ->
+    Vm.
+
+%% convert literals to internal variables/constants
+add_literal(_Vp,false,Vs) -> {-1,Vs};
+add_literal(_Vp,true,Vs) -> {1,Vs};
+add_literal(Vp,{'not',Var},Vs) ->
+    X = eval_var(Var),
+    case maps:find(X,Vs) of
+	error ->
+	    Xv = varc:add_variable(Vp),
+	    {-Xv,Vs#{ X => Xv, Xv => [X]}};
+	{ok,Xv} ->
+	    {-Xv,Vs}
+    end;
+add_literal(Vp,Var,Vs) ->
+    X = eval_var(Var),
+    case maps:find(X,Vs) of
+	error ->
+	    Xv = varc:add_variable(Vp),
+	    {Xv,Vs#{ X => Xv, Xv => [X]}};
+	{ok,Xv} ->
+	    {Xv,Vs}
+    end.
+
+eval_var({bit_index,Var,I}) -> 
+    {bit_index,eval_p(Var),eval_expr(I)};
+eval_var({uint,Var,Size,N}) -> 
+    {uint,eval_p(Var),eval_expr(Size),eval_expr(N)};
+eval_var({int,Var,Size,N}) -> 
+    {int,eval_p(Var),eval_expr(Size),eval_expr(N)};
+eval_var(true) -> true;
+eval_var(false) -> false;
+eval_var(Var) -> eval_p(Var).
+
+eval_p({p,Var,Es}) -> {p,Var,[eval_expr(E)||E<-Es]}.
+    
+
+eval_expr(#cconst{value=List,base=Base}) ->
+    list_to_integer(List,Base);
+eval_expr(E) when is_integer(E) -> E.
 
 %%
 %% Formula to CNF form
@@ -26,38 +474,40 @@ clauses(A) ->
     %% io:format("Cs1=~p\n", [Cs1]),
     {Cs2,Ls1} = normalize_clauses(Cs1),
     %% io:format("Cs2=~p, Ls1=~p\n", [Cs2,Ls1]),
-    {Cs3,Ls2} = subsume_clauses(Cs2),
-    %% io:format("Cs3=~p,Ls2=~p\n", [Cs3,Ls2]),
-    {Cs3,Ls1++Ls2}.
+    Cs3 = subsume_clauses(Cs2),
+    %% io:format("Cs3=~p,Ls2=~p\n", [Cs3]),
+    {Cs3,Ls1}.
 
 %%
-%% Normalize all clauses
+%% Normalize all clauses F
 %%
-normalize_clauses(Cs) ->
-    normalize_clauses(Cs,[]).
+normalize_clauses(F) ->
+    normalize_clauses(F,[]).
 
-normalize_clauses(Cs,Ls) ->
-    normalize_clauses_(Cs,Ls,[],[]).
+normalize_clauses(F,Ss) ->
+    normalize_clauses_(F,Ss,[],[]).
 
-normalize_clauses_([C|Cs],Ls,Acc,Ls1) ->
-    case normalize_clause(C,Ls) of
+normalize_clauses_([C|Cs],Ss,Acc,Ss1) ->
+    case normalize_clause(C,Ss) of
 	[] ->
-	    normalize_clauses_(Cs,Ls,Acc,Ls1);
-	[L] ->
-	    normalize_clauses_(Cs,Ls,Acc,[L|Ls1]);
-	D  -> 
-	    normalize_clauses_(Cs,Ls,[D|Acc],Ls1)
+	    normalize_clauses_(Cs,Ss,Acc,Ss1);
+	[L] -> %% clause contain one literal only add to singleton list
+	    normalize_clauses_(Cs,Ss,Acc,[L|Ss1]);
+	D  ->
+	    normalize_clauses_(Cs,Ss,[D|Acc],Ss1)
     end;
-normalize_clauses_([],Ls,Acc,[]) ->
-    {Acc,Ls};
-normalize_clauses_([],Ls,Acc,Ls1) -> %% one more round
-    normalize_clauses_(Acc,Ls1++Ls,[],[]).
-
+normalize_clauses_([],Ss,Acc,[]) ->
+    {Acc,Ss};
+normalize_clauses_([],Ss,Acc,Ss1) -> %% one more round
+    normalize_clauses_(Acc,Ss1++Ss,[],[]).
+    
 %% Normalize a clause.
 %%  Rule (after usort, where multiple literals are removed)
-%%      ~A ... A => []
-%%      A true B => []
-%%      A false B => A B
+%%  MULT:  .. A .. A .. => [.. A.. ]    remove multiples (usort)
+%%  TAUT:  .. !A .. A   => []           clause removed
+%%  CONST: .. true ..   => []           clause removed
+%%  CONST: .. false     => [..]         constant removed
+%%  UNSAT: false        =>              throw(false)
 %%
 normalize_clause(CL) ->
     normalize_clause(CL,[]).
@@ -65,29 +515,19 @@ normalize_clause(CL,Ls) ->
     normalize_clause_(lists:usort(CL),[],Ls).
 
 %% fixme: handle true,false and removed literals !
-normalize_clause_([false|As],CL,Ls) -> normalize_clause_(As,CL,Ls);
-normalize_clause_([true|_],_CL,_Ls) -> [];
-normalize_clause_([L={'not',A}|As],CL,Ls) ->
-    case lists:member(A,Ls) of
-	true -> 
-	    normalize_clause_(As,CL,Ls);  %% !A=false
-	false ->
-	    case lists:member(L,Ls) of
-		true -> [];  %% !A=true
-		false -> 
-		    normalize_clause_(As,[L|CL],Ls)
-	    end
-    end;
-normalize_clause_([A|As],CL,Ls) ->
-    case lists:member(A,Ls) of
+normalize_clause_([false|As],Acc,Ls) -> normalize_clause_(As,Acc,Ls);
+normalize_clause_([true|_],_Acc,_Ls) -> [];
+normalize_clause_([L|As],Acc,Ls) ->
+    %% UNIT check against singleton clause list
+    case lists:member(neg(L), Ls) of
 	true ->
-	    [];  %% A=true
+	    normalize_clause_(As,Acc,Ls);
 	false ->
-	    L = {'not',A},
-	    case lists:member(L,Ls) of
-		true -> normalize_clause_(As,CL,Ls);  %% !A=false
-		false -> 
-		    normalize_clause_(As,[A|CL],Ls)
+	    case lists:member(L, Ls) of
+		true ->
+		    [];
+		false ->  
+		    normalize_clause_(As,[L|Acc],Ls)
 	    end
     end;
 normalize_clause_([],CL,_Ls) ->
@@ -95,28 +535,63 @@ normalize_clause_([],CL,_Ls) ->
 
 %%
 %% Remove sub clauses, return clauses and a lists of
-%% removed literals
+%% removed literals. FIXME record literals removed from 
+%% F when clause is deleted!
 %%
-subsume_clauses(Cs) ->
-    CsL = lists:map(fun(C) -> {length(C), C} end, Cs),
-    CsL1 = lists:keysort(1, CsL),
-    {DLs,Ls} = subsume_clauses_(CsL1,[],[]),
-    {lists:map(fun({_,C}) -> C end, DLs), Ls}.
+subsume_clauses(F) ->
+    %% make set and sort descending set size
+    NCsL = [begin 
+		Set = sets:from_list(CL),
+		{sets:size(Set), Set}
+	    end || CL <- F],
+    CsL = [Set || {_,Set} <- lists:sort(fun(A,B) -> A>B end,NCsL)],
+    CsL1 = subsume_clauses_(CsL,[]),
+    [sets:to_list(CL) || CL <- CsL1].
 		  
-subsume_clauses_([CL|CLs],DLs,Ls) ->
-    CLs1 = subsume_clause_(CL,CLs),
-    subsume_clauses_(CLs1,[CL|DLs],Ls);
-subsume_clauses_([],DLs,Ls) ->
-    {DLs,Ls}.
-
-%% remove clauses DL that are subsumed by CL
-subsume_clause_(CL={_N,C},[DL={_M,D}|CLs]) ->
-    case C -- D of
-	[] -> subsume_clause_(CL, CLs);
-	_ -> [DL | subsume_clause_(CL, CLs)]
+subsume_clauses_([CL|CLs],Acc) ->
+    case has_sub_clause(CL,CLs) of
+	true -> subsume_clauses_(CLs,Acc);
+	false -> subsume_clauses_(CLs,[CL|Acc])
     end;
-subsume_clause_(_CL, []) ->
+subsume_clauses_([],Acc) ->
+    Acc.
+
+has_sub_clause(CL, [C|Cs]) ->
+    case sets:is_subset(C, CL) of
+	true -> true;
+	false -> has_sub_clause(CL, Cs)
+    end;
+has_sub_clause(_CL, []) ->
+    false.
+
+%%  CL1=(A,B,C,D)  CL2=(A,B,!C,D)
+%%
+%% CL3 = intersect(CL1,CL2) = A,B,D
+%% if CL1-CL3 == !CL2-CL3
+
+
+%% PURE A clause can be deleted if it contins L and !L does not
+%% occur in F, fixme: to handle models [L,~L] should be added instead
+purify(F) ->
+    Set = literals(F, sets:new()),
+    purify(F, Set).
+
+purify([CL|Cs], Set) ->
+    case lists:any(fun(L) -> not sets:is_element(neg(L), Set) end, CL) of
+	true -> purify(Cs, Set);
+	false -> [CL|purify(Cs,Set)]
+    end;
+purify([],_Set) ->
     [].
+
+%% build a set of all literals in F    
+literals([CL|Cs],Set) ->
+    Set1 = lists:foldl(
+	     fun(L,Si) -> sets:add_element(L,Si) end,
+	     Set, CL),
+    literals(Cs, Set1);
+literals([], Set) -> Set.
+
 
 clause_form({'and',A,B}) ->
     clause_form(A) ++ clause_form(B);
@@ -185,14 +660,20 @@ prod(N,File) ->
     {CLs,Ls,Decls} = prod(N),
     file:write_file(File, format(Decls,CLs ++ [[L]||L<-Ls])).
 
+prod_test() ->
+    SNF = prod(2*17),
+    satisfy(SNF).
+
 prod(N) when is_integer(N), N>1 ->
     put(next_var, 2), %% FIXME!
     Nv = integer_bits(N),
-    L  = length(Nv)-1,
-    Is = lists:seq(0,L-1),
-    X  = [{bit_index,{p,'X',[]},I}||I<-Is],
-    Y  = [{bit_index,{p,'Y',[]},I}||I<-Is],
-    Decls = [{{p,'X',[]},uint,L},{{p,'Y',[]},uint,L}],
+    Lx  = (length(Nv)+1) div 2,
+    Ly  = length(Nv)-1,
+    Ix = lists:seq(0,Lx-1),
+    Iy = lists:seq(0,Ly-1),
+    X  = [{uint,{p,'X',[]},Lx,I}||I<-Ix],
+    Y  = [{uint,{p,'Y',[]},Ly,I}||I<-Iy],
+    Decls = [{{p,'X',[]},uint,Lx},{{p,'Y',[]},uint,Ly}],
     {Prod,Cs} = multiply(X, Y, []),
     %% Prod=Nv
     Cs1 = assign(Prod,Nv,Cs),
@@ -202,12 +683,12 @@ prod(N) when is_integer(N), N>1 ->
     Cs3 = gt_1(Y,Cs2),
     %% X<Y
     Cs4 = lt(X,Y,Cs3),
-    {Cs4,[],Decls}.
+    %% {Cs4,[],Decls},
     %%
-    %% {Cs4,Ls1} = normalize_clauses(Cs3),
-    %% {Cs4,Ls1}.
-    %% {Cs5,Ls2} = subsume_clauses(Cs4),
-    %% {Cs5,Ls1++Ls2,Decls}.
+    {Cs5,Ls1} = normalize_clauses(Cs4),
+    %% {Cs5,Ls1,Decls}.
+    Cs6 = subsume_clauses(Cs5),
+    {Cs6,Ls1,Decls}.
 
 sum(N,File) ->
     {CLs,Ls,Decls} = sum(N),
@@ -218,8 +699,8 @@ sum(N) when is_integer(N), N>1 ->
     Nv = integer_bits(N),
     L  = length(Nv),
     Is = lists:seq(0,L-1),
-    X  = [{bit_index,{p,'X',[]},I}||I<-Is],
-    Y  = [{bit_index,{p,'Y',[]},I}||I<-Is],
+    X  = [{uint,{p,'X',[]},L,I}||I<-Is],
+    Y  = [{uint,{p,'Y',[]},L,I}||I<-Is],
     Decls = [{{p,'X',[]},uint,L},{{p,'Y',[]},uint,L}],
     {Cout,Sum,Cs} = add(X, Y, []),
     %% Prod=Nv
@@ -228,12 +709,11 @@ sum(N) when is_integer(N), N>1 ->
     Cs2 = gt_0(X,Cs1),
     %% Y>0
     Cs3 = gt_0(Y,Cs2),
-    {Cs3,[],Decls}.
     %%
-    %% {Cs4,Ls1} = normalize_clauses(Cs3),
-    %% {Cs4,Ls1}.
-    %% {Cs5,Ls2} = subsume_clauses(Cs4),
-    %% {Cs5,Ls1++Ls2,Decls}.
+    {Cs4,Ls1} = normalize_clauses(Cs3),
+    {Cs4,Ls1,Decls}.
+    %% Cs6 = subsume_clauses(Cs4),
+    %% {Cs6,Ls1,Decls}.
 
 integer_bits(N) ->
     [element((I-$0)+1,{false,true})||I<-lists:reverse(integer_to_list(N,2))].
@@ -255,7 +735,8 @@ gt_1([_|Xs],Cs) ->
 
 %% X<Y == (xn<yn) || (xn=yn)&&(xn-1<yn-1)
 lt(X,Y,Cs) ->
-    {Out,Cs1} = lt_(lists:reverse(X), lists:reverse(Y), Cs),
+    {X1,Y1} = extend(X,Y),
+    {Out,Cs1} = lt_(lists:reverse(X1), lists:reverse(Y1), Cs),
     [[Out]|Cs1].
 
 lt_([Xi],[Yi],Cs) ->
@@ -268,16 +749,16 @@ lt_([Xi|Xs],[Yi|Ys],Cs) ->
     cor(Lt,And,Cs4).
 
 multiply(X, Y, Cs) ->
-    {X1,Y1} = extend(X,Y),
-    multiply_(Y1,X1,lists:duplicate(length(X1),false),[],Cs).
+    %% lists:duplicate(length(Y),false)
+    multiply_(X,Y,[],[],Cs).
 
-multiply_([Yi|Ys],X,Prev,Out,Cs) ->
-    {M, Cs1} = mult_by_bit(X,Yi,Cs),
+multiply_([Xi|Xs],Y,Prev,Out,Cs) ->
+    {M, Cs1} = mult_by_bit(Y,Xi,Cs),
     {Cout,[S1|Sum],Cs2} = add(M,Prev,Cs1),
     Prev1 = Sum++[Cout],
     Out1 = Out++[S1],
-    multiply_(Ys,X,Prev1,Out1,Cs2);
-multiply_([],_X,Prev,Out,Cs) ->
+    multiply_(Xs,Y,Prev1,Out1,Cs2);
+multiply_([],_Y,Prev,Out,Cs) ->
     {Out ++ Prev, Cs}.
 
 mult_by_bit([A|X], B, Cs) ->
@@ -288,6 +769,10 @@ mult_by_bit([], _B, Cs) ->
     {[false], Cs}.
 
 %% simple sequential adder
+add(X,[],Cs) ->
+    {false,X,Cs};
+add([],Y,Cs) ->
+    {false,Y,Cs};
 add(X,Y,Cs) ->
     Cout = create_var(),
     add(X,Y,Cout,Cs).
@@ -399,8 +884,8 @@ full_adder(A,B,Cin,S,Cout,Cs) ->
 
 create_var() ->
     case get(next_var) of
-	undefined -> put(next_var,3), 2;
-	V -> put(next_var,V+1), V
+	undefined -> put(next_var,3), {p,2,[]};
+	V -> put(next_var,V+1), {p,V,[]}
     end.
 
 neg(true) -> false;
@@ -417,6 +902,59 @@ extend(X,Y) ->
        true -> {X,Y}
     end.
 
+%% convert boolean to integer
+uint1(X) when is_boolean(X) ->
+    erlang:phash2(X,31) band 1.
+
+%% generate full adder clauses
+%%    A B Cin  Cout S
+%%    1 1 1    1    1
+%%    1 1 0    1    0
+%%    1 0 1    1    0
+%%    0 1 1    1    0
+%%    0 0 0    0    0
+%%    0 0 1    0    1
+%%    0 1 0    0    1
+%%    1 0 0    0    1
+%%
+%%    S = (A xor B xor Cin)
+%%    Cout = ((A xor B) and Cin) or (A and B)
+%%
+full_adder() ->
+    cclauses_1(
+      fun(A,B,Cin,S) ->
+	      (S =:= (A xor B xor Cin))
+      end, ['A','B','Cin','S']) ++
+    cclauses_1(
+      fun(A,B,Cin,Cout) ->
+	      (Cout =:= ((A xor B) and Cin) or (A and B))
+      end, ['A','B','Cin','Cout']).
+
+%% Utility to create CNF clauses from a boolean function
+cclauses_1(F) ->
+    {arity,N} = erlang:fun_info(F, arity),
+    Vars = [list_to_atom("X"++integer_to_list(J))||J<-lists:seq(1,N)],
+    cclauses_1_(F, N, 0, (1 bsl N), [], Vars).
+
+cclauses_1(F,Vars) when is_list(Vars) ->
+    N = length(Vars),
+    cclauses_1_(F, N, 0, (1 bsl N), [], Vars).
+
+cclauses_1_(F, N, I, L, Acc, Vars) when I < L ->
+    Args = [(element(J+1,{false,true}))|| <<J:1>> <= <<I:N>>],
+    case apply(F,Args) of
+	false ->
+	    CL = [if A -> {'not',V};
+		     true -> V
+		  end || {V,A} <- lists:zip(Vars,Args)],
+	    cclauses_1_(F,N,I+1,L,[CL|Acc],Vars);
+	true ->
+	    cclauses_1_(F,N,I+1,L,Acc,Vars)
+    end;
+cclauses_1_(_F,_N,L,L,Acc,_Vars) ->
+    lists:reverse(Acc).
+
+
 format(CLs) ->
     format([],CLs).
 
@@ -427,9 +965,7 @@ format(Decls,CLs) ->
     [["c auto generated from <file>\n"],
      ["p snf ", integer_to_list(NVars), " ", integer_to_list(NClauses), "\n"],
      [[format_decl(D)] || D <- Decls],
-     [[format_clause(C)," .","\n"] || C <- CLs],
-     ["%\n"],
-     [".\n"]].
+     [[format_clause(C)," .","\n"] || C <- CLs]].
 
 snf_vars(CLs) -> snf_vars(CLs,sets:new()).
 snf_vars([C|CLs],VSet) ->
@@ -444,6 +980,39 @@ snf_vars([],VSet) ->
 add_var(true,VSet) -> VSet;
 add_var(false,VSet) -> VSet;
 add_var(V,VSet) -> sets:add_element(V,VSet).
+
+format_marked_bindings(Vp,Vs,Mark) ->
+    format_bindings(Vs,varc:get_bindings(Vp,Mark)).
+
+format_bindings(Vm,Bs) ->
+    [[format_binding(Vm,V,Val)," "] || {V,Val} <- Bs].
+
+format_binding(Vm,V,Val) ->
+    [format_var(Vm,V),"=",
+     case Val of 
+	 -1 -> "0";
+	 1 -> "1"
+     end].
+
+format_clause(Vm,CL) ->
+    List = format_literals(Vm,CL),
+    ["{",List,"}"].
+
+format_literals(Vm,Ls) ->
+    concat([format_literal(Vm,L)||L<-Ls],",").
+
+format_literal(Vm,X) when X<0 ->
+    ["-",format_var(Vm,-X)];
+format_literal(Vm,X) ->
+    format_var(Vm,X).
+
+format_var(Vs,X) ->
+    case maps:find(X,Vs) of
+	error -> 
+	    integer_to_list(X);
+	{ok,[Var]} ->
+	    format_symbol(Var)
+    end.
 
 format_decl({Name,int,Sz}) ->
     ["c declare ", format_symbol(Name),":",integer_to_list(Sz),"/signed","\n"];
@@ -461,8 +1030,15 @@ format_symbol(true) -> "true";
 format_symbol(false) -> "false";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);
 format_symbol(I) when is_integer(I) -> [$T|integer_to_list(I)];
+format_symbol({bit,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({uint,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({int,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({bit_index,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({p,T,[]}) when is_integer(T) -> [$T|integer_to_list(T)];
 format_symbol({p,V,[]}) -> atom_to_list(V);
 format_symbol({p,V,As}) ->
     [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
@@ -470,4 +1046,3 @@ format_symbol({p,V,As}) ->
 concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].
-

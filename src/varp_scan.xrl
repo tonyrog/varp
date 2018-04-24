@@ -74,6 +74,8 @@ GT                  : {token,{'GT',TokenLine}}.
 GTE                 : {token,{'GTE',TokenLine}}.
 LT                  : {token,{'LT',TokenLine}}.
 LTE                 : {token,{'LTE',TokenLine}}.
+SUM                 : {token,{'SUM',TokenLine}}.
+PROD                : {token,{'PROD',TokenLine}}.
 
 "(\^.|\.|[^\"])*"   : begin
 			  S = lists:sublist(TokenChars,2,TokenLen-2),

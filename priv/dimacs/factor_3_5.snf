@@ -1,0 +1,107 @@
+c auto generated from <file>
+p snf 20 103
+Y1 .
+X1 .
+!T12 .
+T17 .
+T15 .
+T13 .
+T5 .
+true !T4 !T16 T17 .
+true !T4 T12 .
+true !T16 T12 .
+true T12 T17 .
+false T4 T16 !T17 .
+false T4 !T12 .
+false T16 !T12 .
+false !T12 !T17 .
+!T4 !T16 T12 .
+!T4 T12 T17 .
+T4 T16 !T12 .
+T4 !T12 !T17 .
+!T16 T12 T17 .
+T16 !T12 !T17 .
+!T11 !T9 !T14 T15 .
+!T11 !T9 T16 .
+!T11 !T14 T16 .
+!T11 T16 T15 .
+T11 T9 T14 !T15 .
+T11 T9 !T16 .
+T11 T14 !T16 .
+T11 !T16 !T15 .
+!T9 !T14 T16 .
+!T9 T16 T15 .
+T9 T14 !T16 .
+T9 !T16 !T15 .
+!T14 T16 T15 .
+T14 !T16 !T15 .
+!T10 !T7 true T13 .
+!T10 !T7 T14 .
+!T10 true T14 .
+!T10 T14 T13 .
+T10 T7 false !T13 .
+T10 T7 !T14 .
+T10 false !T14 .
+T10 !T14 !T13 .
+!T7 true T14 .
+!T7 T14 T13 .
+T7 false !T14 .
+T7 !T14 !T13 .
+true T14 T13 .
+false !T14 !T13 .
+!X1 !Y1 T11 .
+X1 !T11 .
+Y1 !T11 .
+!X0 !Y1 T10 .
+X0 !T10 .
+Y1 !T10 .
+true true !T8 T9 .
+true true T4 .
+true !T8 T4 .
+true T4 T9 .
+false false T8 !T9 .
+false false !T4 .
+false T8 !T4 .
+false !T4 !T9 .
+true !T8 T4 .
+true T4 T9 .
+false T8 !T4 .
+false !T4 !T9 .
+!T8 T4 T9 .
+T8 !T4 !T9 .
+!T3 true !T6 T7 .
+!T3 true T8 .
+!T3 !T6 T8 .
+!T3 T8 T7 .
+T3 false T6 !T7 .
+T3 false !T8 .
+T3 T6 !T8 .
+T3 !T8 !T7 .
+true !T6 T8 .
+true T8 T7 .
+false T6 !T8 .
+false !T8 !T7 .
+!T6 T8 T7 .
+T6 !T8 !T7 .
+!T2 true true T5 .
+!T2 true T6 .
+!T2 true T6 .
+!T2 T6 T5 .
+T2 false false !T5 .
+T2 false !T6 .
+T2 false !T6 .
+T2 !T6 !T5 .
+true true T6 .
+true T6 T5 .
+false false !T6 .
+false !T6 !T5 .
+true T6 T5 .
+false !T6 !T5 .
+!X1 !Y0 T3 .
+X1 !T3 .
+Y0 !T3 .
+!X0 !Y0 T2 .
+X0 !T2 .
+Y0 !T2 .
+%
+.

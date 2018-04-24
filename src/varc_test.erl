@@ -221,24 +221,34 @@ or_clause(Bcp) ->
     true.
 
 or_conflict() ->
-    V = varc:new(),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    _X4 = varc:add_variable(V),
-    _X5 = varc:add_variable(V),
+    Vp = varc:new(),
+    X2 = varc:add_variable(Vp),
+    X3 = varc:add_variable(Vp),
+    _X4 = varc:add_variable(Vp),
+    _X5 = varc:add_variable(Vp),
 
-    C0 = varc:add_clause(V, 'or', ?TRUE, ?FALSE, ?FALSE, X2, X3),
-    C1 = varc:add_clause(V, 'or', ?TRUE, ?FALSE, ?FALSE, X2, -X3),
+    C0 = varc:add_clause(Vp, 'or', ?TRUE, ?FALSE, ?FALSE, X2, X3),
+    C1 = varc:add_clause(Vp, 'or', ?TRUE, ?FALSE, ?FALSE, X2, -X3),
     io:format("clauses=~p\n", [[C0,C1]]),
-    true = varc:eval(V),
+    true = varc:eval(Vp),
 
-    true = varc:mark(V, 1),
-    true = varc:put(V, X2, ?TRUE),
-    true = varc:eval(V),
+    true = varc:mark(Vp, 1),
+    true = varc:put(Vp,X2,?TRUE),
+    true = varc:eval(Vp),
 
-    varc:undo(V),
-    true = varc:put(V, X2, ?FALSE),
-    false = varc:eval(V),    
+    varc:undo(Vp),
+    true = varc:put(Vp,X2,?FALSE),
+    false = varc:eval(Vp),
+
+    {Conflict,_Pos,_Mark} = varc:conflict_clause(Vp),
+    [{CVar,CVal}] = varc:get_latest_binding(Vp),
+    CLit = if CVal < 0 -> -CVar; true -> CVar end,
+    Implication = varc:implication_clause(Vp, CLit),
+
+    io:format("conflict var: ~p\n", [CLit]),
+    io:format("conflict clause: ~p\n", [Conflict]),
+    io:format("implication clause: ~p\n", [Implication]), 
+
     ok.
 
 
@@ -482,11 +492,11 @@ order() ->
     Sort2 = varc:order_all(V),
     io:format("random,1003, F4=~w, Vs = ~p\n", [F4,Sort2]),
 
-    F5 = varc:order_sort(V, occure, 1),
-    io:format("occure>0, F5=~w, Vs = ~p\n", [F5,varc:order_all(V)]),
+    F5 = varc:order_sort(V, occur, 1),
+    io:format("occur>0, F5=~w, Vs = ~p\n", [F5,varc:order_all(V)]),
     
-    F6 = varc:order_sort(V, occure, -1),
-    io:format("occure<0, F6=~w, Vs = ~p\n", [F6,varc:order_all(V)]),
+    F6 = varc:order_sort(V, occur, -1),
+    io:format("occur<0, F6=~w, Vs = ~p\n", [F6,varc:order_all(V)]),
 
     F7 = varc:order_sort(V, depth, 1),
     io:format("depth>0, F7=~w, Vs = ~p\n", [F7,varc:order_all(V)]),
@@ -494,14 +504,14 @@ order() ->
     F8 = varc:order_sort(V, depth, -1),
     io:format("depth<0, F8=~w, Vs = ~p\n", [F8,varc:order_all(V)]),
 
-    F9 = varc:order_sort(V, occure_depth, 1),
-    io:format("occure,depth>0, F9=~w, Vs = ~p\n", [F9,varc:order_all(V)]),
-    F10 = varc:order_sort(V, occure_depth, -1),
-    io:format("occure,depth<0, F10=~w, Vs = ~p\n", [F10,varc:order_all(V)]),
+    F9 = varc:order_sort(V, occur_depth, 1),
+    io:format("occur,depth>0, F9=~w, Vs = ~p\n", [F9,varc:order_all(V)]),
+    F10 = varc:order_sort(V, occur_depth, -1),
+    io:format("occur,depth<0, F10=~w, Vs = ~p\n", [F10,varc:order_all(V)]),
 
-    F11 = varc:order_sort(V, depth_occure, 1),
-    io:format("depth,occure>0, F11=~w, Vs = ~p\n", [F11,varc:order_all(V)]),
-    F12 = varc:order_sort(V, depth_occure, -1),
-    io:format("depth,occure<0, F12=~w, Vs = ~p\n", [F12,varc:order_all(V)]),
+    F11 = varc:order_sort(V, depth_occur, 1),
+    io:format("depth,occur>0, F11=~w, Vs = ~p\n", [F11,varc:order_all(V)]),
+    F12 = varc:order_sort(V, depth_occur, -1),
+    io:format("depth,occur<0, F12=~w, Vs = ~p\n", [F12,varc:order_all(V)]),
 
     ok.

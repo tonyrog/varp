@@ -17,8 +17,10 @@
 -export([get/2]).
 -export([put/3]).
 -export([class/2]).
--export([occure/2]).
+-export([occur/2]).
 -export([depth/2]).
+-export([implication_clause/2]).
+-export([conflict_clause/1]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([class_next/2]).
@@ -42,7 +44,11 @@
 -export([get_queue_next/2]).
 -export([clear_queue/1]).
 -export([enqueue_all/1]).
+-export([get_latest_binding/1]).
+-export([get_nbindings/2]).
+-export([get_nbindings/3]).
 -export([get_bindings/2]).
+-export([get_bindings/3]).
 -export([order_init/1]).
 -export([order_first/1, order_next/2, order_next/3]).
 -export([order_sort/2, order_sort/3]).
@@ -67,8 +73,12 @@
 -type varc() :: reference().
 -type clause_type() :: 'and'|'or'|'xor'|'reg'.
 -type literal() :: integer().
--type sort_key()  :: identity|reverse|random|occure|depth|
-		     occure_depth|depth_occure.
+-type sort_key()  :: identity|random|occur|depth|
+		     occur_depth|depth_occur|
+		     occur_ascending|occur_descending|
+		     depth_ascending|depth_descending|
+		     occur_depth_ascending|occur_depth_descending|
+		     depth_occur_ascending|depth_occur_descending.
 -type sort_value() :: integer().
 
 -define(is_op(Op), (((Op) =:= 'and') 
@@ -120,12 +130,21 @@ put(_Vp, LitA, LitB) when is_integer(LitA),
 class(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
--spec occure(Vp::varc(), Lit::literal()) -> integer().
-occure(_Vp, Lit) when is_integer(Lit) ->
+-spec occur(Vp::varc(), Lit::literal()) -> integer().
+occur(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec depth(Vp::varc(), Lit::literal()) -> integer().
 depth(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
+-spec implication_clause(Vp::varc(), Lit::literal()) ->
+				{Cix::integer(),Pos::integer(),Mark::integer()}.
+implication_clause(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
+-spec conflict_clause(Vp::varc()) -> Cix::integer().
+conflict_clause(_Vp) ->
     ?nif_stub().
 
 -spec is_variable(Vp::varc(), Lit::literal()) -> boolean().
@@ -221,8 +240,27 @@ clear_queue(_Vp) ->
 enqueue_all(_Vp) ->
     ?nif_stub().
 
-get_bindings(_Vp, Level)
-  when is_integer(Level), Level >= 0 ->
+%% get the very latest binding
+-spec get_latest_binding(Vp::varc()) -> {Var::integer(),Value::integer()}|false.
+get_latest_binding(Vp) ->
+    case get_nbindings(Vp,1,false) of
+	[B={Var,_Val}|_] when is_integer(Var) -> B;
+	_ -> false
+    end.
+
+get_nbindings(Vp,N) when is_integer(N), N>= 0 ->
+    get_nbindings(Vp,N,false).
+
+get_nbindings(_Vp,N,_ClauseInfo) when is_integer(N), N>= 0 ->
+    ?nif_stub().
+
+%% get bindings until mark
+get_bindings(Vp, Mark) ->
+    get_bindings(Vp, Mark, false).
+
+%% get bindings and possible clause info until mark
+get_bindings(_Vp, Mark, _ClauseInfo)
+  when is_integer(Mark), Mark > 0 ->
     ?nif_stub().
 
 %% initial index to use if using order_next, instead of order_first

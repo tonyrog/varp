@@ -24,7 +24,7 @@ typedef unsigned int bitset_t;
 
 #define MAX_BITSET_SIZE ((int)(sizeof(bitset_t)*8))
 
-#define BITSET_NBITS(n) (((bitset_t)-1) >> (MAX_BITSET_SIZE-n))
+#define BITSET_NBITS(n) (((bitset_t)-1) >> (MAX_BITSET_SIZE-(n)))
 
 static inline void bitset_init(bitset_t* dst)
 {

@@ -1,0 +1,65 @@
+c auto generated from <file>
+p snf 16 63
+Y(0) Y(1) Y(2) Y(3) .
+X(0) X(1) X(2) X(3) .
+!T2 .
+T9 .
+!T7 .
+!T5 .
+!T3 .
+!X(3) !Y(3) !T8 T9 .
+!X(3) !Y(3) T2 .
+!X(3) !T8 T2 .
+!X(3) T2 T9 .
+X(3) Y(3) T8 !T9 .
+X(3) Y(3) !T2 .
+X(3) T8 !T2 .
+X(3) !T2 !T9 .
+!Y(3) !T8 T2 .
+!Y(3) T2 T9 .
+Y(3) T8 !T2 .
+Y(3) !T2 !T9 .
+!T8 T2 T9 .
+T8 !T2 !T9 .
+!X(2) !Y(2) !T6 T7 .
+!X(2) !Y(2) T8 .
+!X(2) !T6 T8 .
+!X(2) T8 T7 .
+X(2) Y(2) T6 !T7 .
+X(2) Y(2) !T8 .
+X(2) T6 !T8 .
+X(2) !T8 !T7 .
+!Y(2) !T6 T8 .
+!Y(2) T8 T7 .
+Y(2) T6 !T8 .
+Y(2) !T8 !T7 .
+!T6 T8 T7 .
+T6 !T8 !T7 .
+!X(1) !Y(1) !T4 T5 .
+!X(1) !Y(1) T6 .
+!X(1) !T4 T6 .
+!X(1) T6 T5 .
+X(1) Y(1) T4 !T5 .
+X(1) Y(1) !T6 .
+X(1) T4 !T6 .
+X(1) !T6 !T5 .
+!Y(1) !T4 T6 .
+!Y(1) T6 T5 .
+Y(1) T4 !T6 .
+Y(1) !T6 !T5 .
+!T4 T6 T5 .
+T4 !T6 !T5 .
+!X(0) !Y(0) true T3 .
+!X(0) !Y(0) T4 .
+!X(0) true T4 .
+!X(0) T4 T3 .
+X(0) Y(0) false !T3 .
+X(0) Y(0) !T4 .
+X(0) false !T4 .
+X(0) !T4 !T3 .
+!Y(0) true T4 .
+!Y(0) T4 T3 .
+Y(0) false !T4 .
+Y(0) !T4 !T3 .
+true T4 T3 .
+false !T4 !T3 .

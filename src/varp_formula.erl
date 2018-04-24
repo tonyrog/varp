@@ -39,7 +39,7 @@
 -export([clause_eval_counter/1]).
 -export([eval_counter/1]).
 -export([order/2, order/3]).
--export([model/1]).
+-export([model/1, model/2]).
 -export([first_init/1]).
 -export([first_unbound/1]).
 -export([next_unbound/2, next_unbound/3]).
@@ -377,7 +377,7 @@ fmt_var_list(Bs,Xs) ->
 
 variable(Bs, V) ->
     W = expand_meta(V, Bs),
-    %% ?dbg("variable expand: ~p -> ~w\n", [V,W]),
+    ?dbg("variable expand: ~p -> ~w\n", [V,W]),
     case find_var(W, Bs) of
 	error ->
 	    case W of
@@ -665,7 +665,9 @@ build_({cnf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
 build_({snf,{[],[],_Decls}},Bs) ->
     build__(false, Bs);
 build_({snf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
-    build__({'and',{'ALL',Ls},snf_to_formula(Cs)},Bs);
+    Bs1 = build_cnf(Cs, Bs),
+    {{bool,?TRUE}, Bs1};
+%% build__({'and',{'ALL',Ls},snf_to_formula(Cs)},Bs);
 
 
 build_({subst,Rx,Py,F},Bs) ->
@@ -707,6 +709,13 @@ build_({'NONE',Fs}, Bs) ->
 build_({'ONE',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     one(Xs, Bs1);
+build_({'SUM',Ys}, Bs) ->
+    {Xs,Bs1} = args(Ys,Bs),
+    %% io:format("SUM Xs  = ~p\n", [Xs]),
+    sum(Xs, Bs1);
+build_({'PROD',Ys}, Bs) ->
+    {Xs,Bs1} = args(Ys,Bs),
+    prod(Xs, Bs1);
 
 %% Quatifer version
 build_({{'ALL',Qs}, F}, Bs) ->
@@ -766,7 +775,35 @@ build_({{'LTE',[X1|Qs]},F}, Bs) ->
        is_integer(K),K > 0 ->
 	    N = length(Ys),
 	    gtk(N-K-1, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
-    end.
+    end;
+build_({{'SUM',Qs}, F}, Bs) ->
+    {Xs,Bs1} = build_iquant(F,Qs,Bs),
+    %% io:format("SUM ~p Xs  = ~p\n", [Qs,Xs]),
+    sum(Xs,Bs1);
+build_({{'PROD',Qs}, F}, Bs) ->
+    {Xs,Bs1} = build_iquant(F,Qs,Bs),
+    prod(Xs,Bs1).
+
+
+%%
+%% Special build of cnf/snf
+%%
+build_cnf([CL|CLs], Bs) ->
+    Bs1 = build_or_clause(CL, Bs),
+    build_cnf(CLs, Bs1);
+build_cnf([], Bs) ->
+    Bs.
+
+build_or_clause(CL, Bs) ->
+    build_or_clause(CL,[],Bs).
+
+build_or_clause([L|Ls], Acc, Bs) ->
+    {L1,Bs1} = build_(L, Bs),
+    build_or_clause(Ls, [L1|Acc], Bs1);
+build_or_clause([], Acc, Bs) ->
+    As1 = [A || {bool,A} <- lists:reverse(Acc)],
+    clause(Bs, 'or', [1|As1]).
+
 
 -ifdef(__UNUSED__).
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
@@ -786,6 +823,7 @@ build_meta(_F,_X,[],Acc,Bs) ->
     {Acc,Bs}.
 -endif.
 
+%% boolean version
 build_quant(Fs, Qs, Bs) when is_list(Fs), is_list(Qs) ->
     build_quant_list(Fs, Qs, Bs);
 build_quant(F, Qs, Bs) when is_list(Qs) ->
@@ -821,6 +859,44 @@ build_quant_list([F|Fs], Xs, Bs) ->
     {Xs1,Bs2} = build_quant_list(Fs,Xs,Bs1),
     {Xs0++Xs1,Bs2};
 build_quant_list([], _Xs, Bs) ->
+    {[],Bs}.
+
+
+%% integer/vector version
+
+build_iquant(Fs, Qs, Bs) when is_list(Fs), is_list(Qs) ->
+    build_iquant_list(Fs, Qs, Bs);
+build_iquant(F, Qs, Bs) when is_list(Qs) ->
+    build_iquant_(F, Qs, Bs).
+
+build_iquant_(F,[#cassign{op='=',lhs=V,rhs=D}|Qs], Bs) ->
+    Ds = eval_domain(D, Bs),
+    build_iquant_domain(F, V, Ds, Qs, Bs);
+build_iquant_(F, [Expr|Qs], Bs) ->
+    case eval_meta(Expr, Bs) of
+	false -> {[],Bs};
+	true -> build_iquant_(F, Qs, Bs)
+    end;
+build_iquant_(F, [], Bs) ->
+    case build__(F, Bs) of
+	{{bool,X},Bs1} -> {[{uint,1,[X]}], Bs1};
+	{X,Bs1} -> {[X],Bs1}
+    end.
+
+build_iquant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
+    Bs1 = push_meta(Vn, Y, Bs),
+    {Zs1,Bs2} = build_iquant_(F, Xs, Bs1),
+    Bs3 = pop_meta(Bs2),
+    {Zs2,Bs4} = build_iquant_domain(F, V, Ys, Xs, Bs3),
+    {Zs1++Zs2,Bs4};
+build_iquant_domain(_F, _V, [], _Xs, Bs) ->
+    {[], Bs}.
+
+build_iquant_list([F|Fs], Xs, Bs) ->
+    {Xs0,Bs1} = build_iquant(F, Xs, Bs),
+    {Xs1,Bs2} = build_iquant_list(Fs,Xs,Bs1),
+    {Xs0++Xs1,Bs2};
+build_iquant_list([], _Xs, Bs) ->
     {[],Bs}.
 
 %% expand domain expressions
@@ -1054,6 +1130,22 @@ none(As,Bs) ->
 
 one(Xs, Bs) ->
     eqk(1,length(Xs),Xs,Bs).
+
+sum([], Bs) ->
+    const_vector(uint,0,1,Bs);
+sum([X], Bs) ->
+    {X, Bs};
+sum([X|Xs], Bs) ->
+    {Xn,Bs1} = sum(Xs,Bs),
+    operation('+', X, Xn, Bs1).
+
+prod([], Bs) ->
+    const_vector(uint,1,1,Bs);
+prod([X], Bs) ->
+    {X, Bs};
+prod([X|Xs], Bs) ->
+    {Xn,Bs1} = prod(Xs,Bs),
+    operation('*', X, Xn, Bs1).
 
 -ifdef(__UNDEFINE__).
 %% Not used - size = 5n
@@ -1955,54 +2047,57 @@ model_variables(Bs,Ws) ->
 %% Integer:  [{a,15},{b,-7},{c,0}]
 %%
 model(Bs) ->
-    lists:keysort(1, collect_model(Bs)).
+    model(Bs#bs.vp, Bs#bs.vs).
+    
+model(Vp, Vs) ->
+    lists:keysort(1, collect_model(Vp,Vs)).
 
-collect_model(Bs) ->
-    fold_var(
+collect_model(Vp,Vs) ->
+    maps:fold(
       fun (?TRUE,_,Ms) -> Ms;
 	  (?FALSE,_,Ms) -> Ms;
-	  (Y,Xs, Ms) when is_integer(Y) ->
-	      model_vars(Bs,Xs,Y,Ms);
+	  (Y,Xs,Ms) when is_integer(Y) ->
+	      model_vars(Vp,Vs,Xs,Y,Ms);
 	  (_, _, Ms) -> Ms
-      end, [], Bs).
+      end, [], Vs).
 
 %% collect all alias variables    
-model_vars(Bs,[{bit,X,N,I}|Xs],Y,Ms) ->
-    case value(Bs,Y) of
-	true ->
-	    model_vars(Bs,Xs,Y,model_bitset(X,N,I,1,Ms));
-	false ->
-	    model_vars(Bs,Xs,Y,model_bitset(X,N,I,0,Ms))
+model_vars(Vp,Vs,[{bit,X,N,I}|Xs],Y,Ms) ->
+    case varc:get(Vp, Y) of
+	?TRUE ->
+	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,1,Ms));
+	?FALSE ->
+	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,0,Ms))
     end;
-model_vars(Bs,[{uint,X,_N,I}|Xs],Y,Ms) ->
-    case value(Bs,Y) of
-	true ->
-	    model_vars(Bs,Xs,Y,model_bor({X,(1 bsl I)}, Ms));
-	false ->
-	    model_vars(Bs,Xs,Y,model_bor({X,0}, Ms))
+model_vars(Vp,Vs,[{uint,X,_N,I}|Xs],Y,Ms) ->
+    case varc:get(Vp,Y) of
+	?TRUE ->
+	    model_vars(Vp,Vs,Xs,Y,model_bor({X,(1 bsl I)}, Ms));
+	?FALSE ->
+	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms))
     end;
-model_vars(Bs,[{int,X,N,I}|Xs],Y,Ms) ->
-    case value(Bs,Y) of
-	true ->
+model_vars(Vp,Vs,[{int,X,N,I}|Xs],Y,Ms) ->
+    case varc:get(Vp,Y) of
+	?TRUE ->
 	    if I =:= N-1 ->
-		    model_vars(Bs,Xs,Y,model_bor({X,(-1 bsl I)}, Ms));
+		    model_vars(Vp,Vs,Xs,Y,model_bor({X,(-1 bsl I)}, Ms));
 	       true ->
-		    model_vars(Bs,Xs,Y,model_bor({X,(1 bsl I)}, Ms))
+		    model_vars(Vp,Vs,Xs,Y,model_bor({X,(1 bsl I)}, Ms))
 	    end;
-	false ->
-	    model_vars(Bs,Xs,Y,model_bor({X,0}, Ms))
+	?FALSE ->
+	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms))
     end;
-model_vars(Bs,[X|Xs],Y,Ms) when is_integer(Y) ->
-    case value(Bs,Y) of
-	true -> 
-	    model_vars(Bs,Xs,Y,[{X,true} | Ms]);
-	false ->
-	    model_vars(Bs,Xs,Y,[{X,false} | Ms]);
+model_vars(Vp,Vs,[X|Xs],Y,Ms) when is_integer(Y) ->
+    case varc:get(Vp,Y) of
+	?TRUE -> 
+	    model_vars(Vp,Vs,Xs,Y,[{X,true}|Ms]);
+	?FALSE ->
+	    model_vars(Vp,Vs,Xs,Y,[{X,false}|Ms]);
 	_Z -> %% unbound...
 	    %%model_vars(Xs,Y,Bs,[{X,Z} | Ms])
-	    model_vars(Bs,Xs,Y,Ms)
+	    model_vars(Vp,Vs,Xs,Y,Ms)
     end;
-model_vars(_Bs,[],_Y,Ms) ->
+model_vars(_Vp,_Vs,[],_Y,Ms) ->
     Ms.
 
 model_bitset(X,N,I,V,Ms) ->
@@ -2053,8 +2148,15 @@ print(erlang,_I,Bindings) ->
 print(false,_I,_Bindings) ->
     ok.
 
-filter_bindings(Bindings) ->
-    [ B || B={{p,V,_},_} <- Bindings, hd(atom_to_list(V)) =/= $_].
+filter_bindings([B={{p,V,_},_}|Bs]) when is_atom(V) ->
+    case hd(atom_to_list(V)) of
+	$_ -> filter_bindings(Bs);
+	_  -> [B|filter_bindings(Bs)]
+    end;
+filter_bindings([B|Bs]) ->
+    [B|filter_bindings(Bs)];
+filter_bindings([]) ->
+    [].
 
 format_binding({Var,Value}) ->
     VarFmt = format_var(Var),
@@ -2063,8 +2165,10 @@ format_binding({Var,Value}) ->
        is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
     end.
 
-format_var({p,V,[]}) ->
+format_var({p,V,[]}) when is_atom(V) ->
     [atom_to_list(V)];
+format_var({p,V,[]}) when is_integer(V), V>1 ->
+    [$$,integer_to_list(V)];
 format_var({p,V,As}) ->
     [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
 

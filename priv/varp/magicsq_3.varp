@@ -1,0 +1,27 @@
+//
+//  | A(0,0)  A(0,1)  A(0,2)
+//  | A(1,0)  A(1,1)  A(1,2)
+//  | A(2,0)  A(2,1)  A(2,2)
+// 
+declare A(i,j):4;
+declare S:5;
+
+// 1 <= A(i,j) <= 9
+([A i=0..2, j=0..2] (A(i,j) >= 1)) &&
+([A i=0..2, j=0..2] (A(i,j) <= 9)) &&
+
+
+// Distinct elements
+([A k=0..7][A l=(k+1)..8] (A(k/3,k%3) != A(l/3,l%3))) &&
+
+// Row sums
+([A i=0..2] (S == [SUM j=0..2]A(i,j))) &&
+
+// Column sums
+([A j=0..2] (S == [SUM i=0..2]A(i,j))) &&
+
+// Diagonal sums
+(S == [SUM i=0..2]A(i,i)) &&
+(S == [SUM i=0..2]A(i,2-i)) &&
+
+true
