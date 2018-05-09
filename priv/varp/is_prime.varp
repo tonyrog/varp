@@ -1,6 +1,3 @@
 // Check if p (parameter) is prime
-// need currently need to set size
-// this could be like having size = 
-//
-[A n=isize(p)]
-(((A:(n-1) * B:(n/2)) == p:n) && (A:(n-1) > B:(n/2)) && (B:(n/2) > 1))
+[A n=isize(p),a=n-1,b=n/2]
+(((A:a * B:b) == p:n) && (A:a > B:b) && (B:b > 1))
