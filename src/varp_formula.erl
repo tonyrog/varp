@@ -10,7 +10,6 @@
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([fresh_var/1]).
--export([clause/3]).
 -export([variable/2, alias/3]).
 -export([value/2, class/2]).
 -export([get_info/1]).
@@ -23,6 +22,8 @@
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 -export([format_var/1]).
+-export([or_gate/3, and_gate/3, xor_gate/3]).
+-export([or_clause/2, and_clause/2]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -116,7 +117,33 @@ fresh_var(Bs) ->
     Var = varc:add_variable(Bs#bs.vp),
     {Var,Bs}.
 
-%% fixme: optional split clause if clause length is too long
+%% build an OR gate with Y as output and Xs as input
+%% Y = X1 or X2 .. or Xn
+or_gate(Bs,Y,Xs) ->
+    clause(Bs, 'or', [Y|Xs]).
+
+%% build an AND gate with Y as output and Xs as input
+%% Y = X1 and X2 .. and Xn =>  !Y = !X1 or !X2 ... !Xn
+%%
+and_gate(Bs,Y,Xs) ->
+    clause(Bs, 'or', [-Y|[-L||L<-Xs]]).
+
+%% build an OR gate with Y as output and Xs as input
+%% Y = X1 xor X2 .. xor Xn
+xor_gate(Bs,Y,Xs) ->
+    clause(Bs, 'xor', [Y|Xs]).
+
+%% build an OR clause with Xs as input
+%% 1 = X1 or X2 .. or Xn
+or_clause(Bs,Xs) ->
+    clause(Bs, 'or', [1|Xs]).
+
+%% build an AND clause with Xs as input
+%% 0 = X1 and X2 .. and Xn => 1 = !X1 or !X2 .. or !Xn
+and_clause(Bs,Xs) ->
+    clause(Bs, 'or', [1|[-L||L<-Xs]]).
+
+
 clause(Bs,Op,Ls) ->
     ?dbg("clause: {~w,~w}\n", [Op,Ls]),
     L = length(Ls),
@@ -810,7 +837,7 @@ build_or_clause([L|Ls], Acc, Bs) ->
     build_or_clause(Ls, [L1|Acc], Bs1);
 build_or_clause([], Acc, Bs) ->
     As1 = [A || {bool,A} <- lists:reverse(Acc)],
-    clause(Bs, 'or', [1|As1]).
+    or_clause(Bs, As1).
 
 
 -ifdef(__UNUSED__).
@@ -1121,7 +1148,7 @@ all([A], Bs) ->
 all(As, Bs) ->
     As1 = [A || {bool,A} <- As],
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X}, clause(Bs1,'and',[X|As1])}.
+    {{bool,X}, and_gate(Bs1,X,As1)}.
 
 any([], Bs) ->
     {{bool,?FALSE}, Bs};
@@ -1130,7 +1157,7 @@ any([A], Bs) ->
 any(As, Bs) ->
     As1 = [A || {bool,A} <- As],
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X}, clause(Bs1,'or',[X|As1])}.
+    {{bool,X}, or_gate(Bs1,X,As1)}.
 
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
@@ -1364,7 +1391,7 @@ operation('and',{bool,_Y},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause(Bs1,'and',[X,Y,Z])};
+    {{bool,X},and_gate(Bs1,X,[Y,Z])};
 
 operation('and',A,B,Bs) ->
     operation_('&',A,B,Bs);
@@ -1394,7 +1421,7 @@ operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause(Bs1,'or',[X,Y,Z])};
+    {{bool,X},or_gate(Bs1,X,[Y,Z])};
 
 operation('or',A,B,Bs) ->
     operation_('|',A,B,Bs);
@@ -1423,7 +1450,7 @@ operation('imp',{bool,?TRUE},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause(Bs1,'or',[X,-Y,Z])};
+    {{bool,X},or_gate(Bs1,X,[-Y,Z])};
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation_('~',A,Bs),
     operation_('|',An,B,Bs1);
@@ -1438,7 +1465,7 @@ operation('equ',{bool,?FALSE},{bool,?FALSE},Bs) ->
     {{bool,?TRUE},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause(Bs1,'xor',[X,-Y,Z])};
+    {{bool,X},xor_gate(Bs1,X,[-Y,Z])};
 
 operation('equ',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1457,7 +1484,7 @@ operation('equ',A,B,Bs) ->
 
 operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
-    {{bool,X},clause(Bs1,'xor',[X,Y,Z])};
+    {{bool,X},xor_gate(Bs1,X,[Y,Z])};
 operation('xor',A,B,Bs) ->
     operation_('^',A,B,Bs);
 operation('^',A,B,Bs) ->
@@ -1687,9 +1714,9 @@ operation('max',A,B,Bs) ->
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
 set_carry_({bool,Carry}, false, Bs) ->    %% never overflow
-    clause(Bs,'xor',[?FALSE,Carry,?FALSE]);
+    xor_gate(Bs,?FALSE,[Carry,?FALSE]);
 set_carry_({bool,Carry}, true, Bs) ->     %% only overflow
-    clause(Bs,'xor',[?FALSE,Carry,?TRUE]);
+    xor_gate(Bs,?FALSE,[Carry,?TRUE]);
 set_carry_({bool,_Carry}, ignore, Bs) ->  %% allow carry overflow
     Bs.
 

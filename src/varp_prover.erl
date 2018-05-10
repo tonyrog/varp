@@ -47,12 +47,16 @@ apply_opts_(_, Bs) ->
     end.
 
 display_order(Bs) ->
-    Order = collect_order(Bs,varp_formula:first_init(Bs),[]),
-    lists:foreach(fun(V) ->
-			  io:format("~s ",[varp_formula:fmt_var(Bs,V)])
-		  end, Order),
-    io:format("\n").
-
+    case false of %% varp_formula:getopt(Bs,display_order)
+	false ->
+	    ok;
+	true ->
+	    Order = collect_order(Bs,varp_formula:first_init(Bs),[]),
+	    lists:foreach(fun(V) ->
+				  io:format("~s ",[varp_formula:fmt_var(Bs,V)])
+			  end, Order),
+	    io:format("\n")
+    end.
 
 collect_order(Bs,I,Acc) ->
     case varp_formula:next_unbound(Bs,I) of
