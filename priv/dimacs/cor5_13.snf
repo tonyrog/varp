@@ -1,0 +1,5 @@
+c generate or X1..X13 with only 5-clauses
+p snf 4 13 
+X1 .. X5 .
+
+

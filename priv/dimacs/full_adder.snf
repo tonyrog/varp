@@ -1,0 +1,20 @@
+c full_adder(A,B,Ci,S,Co,Cs)
+c S = XOR(A,B,Ci)
+c Co = (A && B) || (A && Ci) || (B && Ci)
+c
+p snf 6 14
+
+!A !B !Ci S .
+!A !B Co .
+!A !Ci Co .
+!A Co S .
+A B Ci !S .
+A B !Co .
+A Ci !Co .
+A !Co !S .
+!B !Ci Co .
+!B Co S .
+B Ci !Co .
+B !Co !S .
+!Ci Co S .
+Ci !Co !S.

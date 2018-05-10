@@ -20,7 +20,7 @@
 -export([occur/2]).
 -export([depth/2]).
 -export([implication_clause/2]).
--export([conflict_clause/1]).
+-export([conflicting_clause/1]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([class_next/2]).
@@ -143,8 +143,8 @@ depth(_Vp, Lit) when is_integer(Lit) ->
 implication_clause(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
--spec conflict_clause(Vp::varc()) -> Cix::integer().
-conflict_clause(_Vp) ->
+-spec conflicting_clause(Vp::varc()) -> Cix::integer().
+conflicting_clause(_Vp) ->
     ?nif_stub().
 
 -spec is_variable(Vp::varc(), Lit::literal()) -> boolean().

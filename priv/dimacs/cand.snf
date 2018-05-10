@@ -1,0 +1,6 @@
+c test generation of triple X = Y and Z as CNF
+c X = Y and Z
+p snf 3 4
+!X Y.
+!X Z.
+X !Y !Z.

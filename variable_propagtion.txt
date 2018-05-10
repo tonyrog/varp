@@ -1,0 +1,108 @@
+
+1 - queue variables instead of triples
+
+each varaiable contains a list of literals
+per clause type that needs to be evaluated
+
+
+variable X
+
+CLAUSES:
+	 or_clause_pos	{1,A,B,C}, {1,C,A,B} ...
+	 or_clause_neg  {1,!A,C,B}
+
+	 bitmask in each clause tell what position in
+	 the clause that are undefined, cleared if false. 
+
+	 evaluating A=0 using bindings [C=0] will then investigate
+	 only the POS clause list since the NEG clause list will
+	 never trigger anything.
+
+	 {1,A=0,B,C=0} mask was 0b0011 and is updated to 0b1011
+	 this will trigger B=1 since there is only one zero bit.
+	 when setting B=1(=0) the following cases exist:
+
+	      B=0     contradiction mark clause as conflicting clause
+	      B=1     ignore, no need to queue B again
+	      B=U     set B=1 and queue B variable set implication clause
+
+	 when B is eventually in head of queue then evaluate clauses
+	 in the NEG list.
+
+GATES:
+	or_gate_pos    {A,B,C}, {X,A,B}
+	or_gate_neg    {X,!A,B}, {!A,B,C}
+
+or gates are evaluated as or_clauses iff the main
+literal is 1. If main variable is 0 all literals
+are set to 0. otherwise an evaluation check is done.
+
+	xor_gate_pos   {X,A,B,C}, {X,C,A,B} ...
+	xor_gate_neg   {X,!A,C,B}
+
+X = Y and Z => !X = !Y or !Z
+0 = Y and Z => 1 = !Y or !Z
+1 = Y and Z => Y/1 Z/1
+0 = Y or Z  => Y/0 Z/0
+
+GATE to CLAUSE transformation
+
+gate: X,Y,Z
+
+1 !X Y Z
+1 X !Y
+1 X !Z
+
+DETAILS
+
+For a variable X or_clause_pos and or_clause_neg point to
+a list of literal references
+
+variable A
+  or_clause_pos -> {cix=123, mask=0x1} -> {cix=234, mask=0x2} ...
+                          v                       v
+                       {1,A,B,C}             {1,C,A,B} ...
+
+  or_clause_neg -> {cix=345, mask=0x8} -> {cix=346, mask=0x2} ...
+                          v                       v
+                       {1,D,!C,B,!A}            {1,C,!A,!B} ...
+
+  or_gate       -> {cix=347, mask=0x8} -> {cix=348, mask=0x1} ...
+                                  v              v
+                       {X,D,!C,B,!A}            {A,C,D,!B} ...
+
+
+to evaluate a variable
+
+   A=0 then run or_clause_pos chain, ignore or_clause_neg chain
+   A=1 then run or_clause_neg chain, ignore or_clause_pos chain
+
+   while(litp != NULL) {
+   	cp = clause_map[litp->cix];
+	bitset_clear(&cp->mask_U, &cp->mask_U, litp->pos);
+	if (bitset_single_pos(&cp->mask_U, &pos)) {
+	   enqueue(cp->literals[pos], 1);
+	}
+	litp = litp->next;
+    }
+
+    if (or_gates_pos or or_gates_neg are defined then run them both) {
+    }
+
+BITMASKS:
+
+a)	each clause store a mask_T and a mask_F
+	for true positions and false positions
+
+b)	each clause store a mask_V for true and false
+	value and a mask_U for undefined positions
+
+c)	for CNF clause only mask_U is used to signal
+	undefined positions. Positions are clear if
+        literal at that position is false.
+
+	mask_U    0 0 1 0
+        clause  1 A B C D
+
+	A=0,B=0,D=0 => C=1
+

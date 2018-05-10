@@ -81,7 +81,7 @@ static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_implication_clause(ErlNifEnv* env, int argc,
 					    const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_conflict_clause(ErlNifEnv* env, int argc,
+static ERL_NIF_TERM varc_conflicting_clause(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_is_equal(ErlNifEnv* env, int argc,
 				  const ERL_NIF_TERM argv[]);
@@ -174,15 +174,6 @@ typedef struct _undo_t {  /* : object_t */
 #define CLAUSE_FLAG_INQUEUE 0x0001
 #define CLAUSE_FLAG_DEAD    0x0002
 
-typedef struct _clause_var_t  // not used yet...
-{
-    struct _clause_var_t* next;
-    struct _clause_var_t* prev;
-    bitset_t mask_F;             // bit mask of assigned positions
-    bitset_t mask_T;             // bit mask of assigned positions
-    uint16_t flags;              // INQUEUE ...
-} clause_var_t;
-
 typedef struct _clause_t  /* : object_t */
 {
     struct _clause_t* next;      // MUST BE FIRST
@@ -230,7 +221,7 @@ typedef struct _varc_t {
     unsigned int cnum;       // number of clauses
     int bcp;                 // boolean constraint propagation
     int mark;                // current mark
-    int conflict_clause;     // conflict clause from last eval
+    int conflicting_clause;     // conflict clause from last eval
     unsigned int grow;       // how much to expand value/class map
     variable_t*  var_map;    // variable/class map 
     int*         order_map;  // variable order table
@@ -276,7 +267,7 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "occur",               2,  varc_occur ),
     NIF_FUNC( "depth",               2,  varc_depth ),
     NIF_FUNC( "implication_clause",  2,  varc_implication_clause ),
-    NIF_FUNC( "conflict_clause",     1,  varc_conflict_clause ),
+    NIF_FUNC( "conflicting_clause",     1,  varc_conflicting_clause ),
     NIF_FUNC( "is_variable",         2,  varc_is_variable ),
     NIF_FUNC( "is_bound",            2,  varc_is_bound ),
     NIF_FUNC( "class_next",          2,  varc_class_next ),
@@ -394,7 +385,6 @@ static void* heap_alloc(heap_t** pool, size_t size)
 	*pool = hq;
 	hp = hq;
     }
-    size = ALIGN(size, HEAP_ALIGN);
     ptr = hp->current;
     hp->current += size;
     return ptr;
@@ -411,7 +401,7 @@ static void cleanup_heap(heap_t* hp)
 
 static int init_allocator(allocator_t* ap, size_t size)
 {
-    ap->size = size;
+    ap->size = ALIGN(size, HEAP_ALIGN);
     ap->heap_list = NULL;
     ap->free_list = NULL;
     return 0;
@@ -1370,29 +1360,30 @@ static ERL_NIF_TERM varc_add_variable(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varc_t* vp;
-    unsigned int var;
+    unsigned int vix;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
+
+    vix = vp->vnext++;
     if (vp->vnext == vp->vsize) {
 	unsigned int old_vsize = vp->vsize;
 	unsigned int new_vsize = old_vsize + vp->grow;
-	variable_t* ptr;
-	int* iptr;
+	variable_t* p;
+	int* ip;
 	// expand
-	if (!(ptr = enif_realloc(vp->var_map, new_vsize*sizeof(variable_t))))
+	if (!(p = enif_realloc(vp->var_map, new_vsize*sizeof(variable_t))))
 	    return enif_make_badarg(env);
-	if (!(iptr = enif_realloc(vp->order_map, new_vsize*sizeof(int))))
+	if (!(ip = enif_realloc(vp->order_map, new_vsize*sizeof(int))))
 	    return enif_make_badarg(env);
-	vp->var_map = ptr;
-	vp->order_map = iptr;
+	vp->var_map = p;
+	vp->order_map = ip;
 	vp->vsize = new_vsize;
     }
-    var = vp->vnext++;
     vp->vnum++;
-    init_variable(&vp->var_map[var], UNDEF, UNDEF);
-    vp->order_map[var] = var;
-    return enif_make_int(env, var);
+    init_variable(&vp->var_map[vix], UNDEF, UNDEF);
+    vp->order_map[vix] = vix;
+    return enif_make_int(env, vix);
 }
 
 static ERL_NIF_TERM varc_order_first(ErlNifEnv* env, int argc,
@@ -1891,14 +1882,14 @@ static ERL_NIF_TERM varc_is_variable(ErlNifEnv* env, int argc,
     return make_boolean(env, is_literal(x));
 }
 
-static ERL_NIF_TERM varc_conflict_clause(ErlNifEnv* env, int argc,
+static ERL_NIF_TERM varc_conflicting_clause(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varc_t* vp;
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    return enif_make_int(env, vp->conflict_clause);
+    return enif_make_int(env, vp->conflicting_clause);
 }
 
 static ERL_NIF_TERM varc_is_bound(ErlNifEnv* env, int argc,
@@ -2136,10 +2127,10 @@ static ERL_NIF_TERM varc_eval(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     vp->eval_counter++;
-    vp->conflict_clause = -1;
+    vp->conflicting_clause = -1;
     while((cp = dequeue_clause(vp)) != NULL) {
 	if (eval_clause(vp, cp) < 0) {
-	    vp->conflict_clause = cp->cix;
+	    vp->conflicting_clause = cp->cix;
 	    clear_queue(vp);
 	    return ATOM(false);  // contradiction
 	}
@@ -2369,7 +2360,7 @@ static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
     }
     switch(cp->op) {
     case CLAUSE_OP_AND: op = ATOM(and); break;
-    case CLAUSE_OP_OR: op = ATOM(or); break;
+    case CLAUSE_OP_OR:  op = ATOM(or); break;
     case CLAUSE_OP_XOR: op = ATOM(xor); break;
     case CLAUSE_OP_REG: op = ATOM(reg); break;
     default: op = ATOM(undefined); break;

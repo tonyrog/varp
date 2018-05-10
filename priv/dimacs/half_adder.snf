@@ -1,0 +1,11 @@
+c half_adder(A,B,S,Co)
+c S = XOR(A,B)
+c Co = (A && B)
+p snf 4 7
+!Co A.
+!Co B.
+Co !A !B.
+S !A B .
+S A !B .
+!S !A !B .
+!S A B .

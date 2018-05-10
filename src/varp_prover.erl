@@ -32,14 +32,32 @@ apply_opts(Bs,F) ->
 	    apply_opts_(Q, Bs)
     end.
 
-apply_opts_(false, _Bs) ->
+apply_opts_(false, Bs) ->
+    display_order(Bs),
     false;
 apply_opts_(_, Bs) ->
     case varp_formula:getopt(Bs,order) of
-	none -> Bs;
+	none -> 
+	    display_order(Bs),
+	    Bs;
 	Order -> 
 	    varp_formula:order(Bs,Order),
+	    display_order(Bs),
 	    Bs
+    end.
+
+display_order(Bs) ->
+    Order = collect_order(Bs,varp_formula:first_init(Bs),[]),
+    lists:foreach(fun(V) ->
+			  io:format("~s ",[varp_formula:fmt_var(Bs,V)])
+		  end, Order),
+    io:format("\n").
+
+
+collect_order(Bs,I,Acc) ->
+    case varp_formula:next_unbound(Bs,I) of
+	false -> lists:reverse(Acc);
+	{J,Xj} -> collect_order(Bs,J,[Xj|Acc])
     end.
 
 run_formula(F) ->

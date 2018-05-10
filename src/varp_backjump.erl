@@ -10,8 +10,8 @@
 
 -include("varp_bic.hrl").
 
-%% -define(dbg(F,As), ok).
--define(dbg(F,As), io:format(F,As)).
+-define(dbg(F,As), ok).
+%%-define(dbg(F,As), io:format(F,As)).
 
 -define(INITVAL, 1).
 
@@ -31,21 +31,51 @@ satisfy({cnf,{_Nv,_Nc,Decl,Literals,CLs}},N) ->
 satisfy({CLs, Literals, Decl},N) ->
     satisfy(CLs, Literals, Decl, N).
 
-satisfy(CLs, Ls, _Decl, _N) ->
+satisfy(CLs, Ls, Decl, _N) ->
+    {Vp,Vm} = install(CLs, Ls, Decl),
+    Level = 1,
+    case varc:eval(Vp) of
+	false -> 
+	    ?dbg("contradiction bindings[~w]:  ~s\n", 
+		 [Level,format_marked_bindings(Vp,Vm,Level)]),
+	    0;
+	true ->
+	    varc:order_sort(Vp, occur_descending),
+	    ClauseCount0 = varc:info(Vp,clause_eval_counter),
+	    EvalCount0   = varc:info(Vp,eval_counter),
+	    NumClauses0  = varc:info(Vp, number_of_clauses),
+	    NumVars0  = varc:info(Vp, number_of_variables),
+	    T0 = erlang:monotonic_time(),
+	    R = init(Vp, Vm),
+	    T1 = erlang:monotonic_time(),
+	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
+	    Ts = Time/1000000,
+	    ClauseCount1 = varc:info(Vp,clause_eval_counter),
+	    EvalCount1   = varc:info(Vp,eval_counter),
+	    NumClauses1  = varc:info(Vp, number_of_clauses),
+	    NumVars1  = varc:info(Vp, number_of_variables),
+	    io:format("    | eval: ~w, clause = ~w, time=~.2fs\n",
+		      [EvalCount1-EvalCount0,
+		       ClauseCount1-ClauseCount0, Ts]),
+	    io:format("    |   #add clauses=~w, #added variables=~w\n",
+		      [NumClauses1-NumClauses0, NumVars1-NumVars0]),
+	    R
+    end.
+
+install({snf,{_Nv,_Nc,Decl,Literals,CLs}}) ->
+    install(CLs, Literals, Decl);
+install({cnf,{_Nv,_Nc,Decl,Literals,CLs}}) ->
+    install(CLs, Literals, Decl);
+install({CLs, Literals, Decl}) ->
+    install(CLs, Literals, Decl).
+
+install(CLs, Ls, _Decl) ->
     Vp = varc:new(),
     Level = 1,
     varc:mark(Vp,Level),
     Vm = add_literals(Vp, Ls, #{}),
     Vm1 = add_clauses(Vp, CLs, Vm),
-    case varc:eval(Vp) of
-	false -> 
-	    ?dbg("contradiction bindings[~w]:  ~s\n", 
-		 [Level,format_marked_bindings(Vp,Vm1,Level)]),
-	    0;
-	true ->
-	    %% varc:order_sort(Vp, occur_descending),
-	    init(Vp, Vm1)
-    end.
+    {Vp,Vm1}.
 
 init(Vp,Vm) ->
     case varc:eval(Vp) of
@@ -80,26 +110,26 @@ contradiction(Vp,Vm,Xi,Level,Val,Stack) ->
     ?dbg("conflict clause=~s\n", [format_clause(Vm,Clause)]),
     ?dbg(" level=~w, jlevel=~w, uip=~s\n",
 	 [Level,JLevel,format_literal(Vm,UIP)]),
-    io:format("stack=~w\n", [Stack]),
+    ?dbg("stack=~w\n", [Stack]),
     ?dbg("undo: ~w\n", [Level]),
     varc:undo(Vp, Level),
     {K,Stack1} = backjump(Vp,Vm,Stack,JLevel),
-    io:format("stack1=~w\n", [Stack1]),
-    add_conflict_clause(Vp,Vm,Clause),
-    ?dbg(" neg decision: ~s=~w\n", [format_var(Vm,Xi),(-Val+1) div 2]),
-    true = varc:put(Vp,Xi,-Val),
+    ?dbg("stack1=~w\n", [Stack1]),
+    Vm1 = add_conflict_clause(Vp,Vm,Clause),
+    ?dbg(" neg decision: ~s=~w\n", [format_var(Vm1,Xi),(-Val+1) div 2]),
+    %% true = varc:put(Vp,Xi,-Val),
     case varc:eval(Vp) of
 	false ->
 	    ?dbg("decision contradiction\n", []),
-	    format_all_bindings(Vp,Vm),
+	    format_all_bindings(Vp,Vm1),
 	    case Stack1 of
 		[] -> 
 		    0;
 		[{_J,Xj,JVal,_}|Stack2] ->
-		    contradiction(Vp,Vm,Xj,JLevel,JVal,Stack2)
+		    contradiction(Vp,Vm1,Xj,JLevel,JVal,Stack2)
 	    end;
 	true ->
-	    next(Vp,Vm,Level+1,K,Stack1)
+	    next(Vp,Vm1,JLevel+1,K,Stack1)
     end.
 
 next(Vp,Vm,Level,I,Stack) ->
@@ -123,20 +153,26 @@ backjump(_Vp,_Vm,Stack=[{K,_,_,_}|_],_JMark) ->
 backjump(_Vp,_Vm,[],_JMark) ->
     {2,[]}.
 
-
 add_conflict_clause(Vp,Vm,Clause) ->
     L = length(Clause),
     if L >= 64 ->
-	    ignore;
+	    L2 = L div 2,
+	    {CL1,CL2} = lists:split(L2, Clause),
+	    Vi = varc:add_variable(Vp),
+	    Var = {p,'#',[Vi]},
+	    Vm1 = Vm#{ Var => Vi, Vi => [Var]},
+	    Vm2 = add_conflict_clause(Vp,Vm1,[Vi|CL1]),
+	    add_conflict_clause(Vp,Vm2,[-Vi|CL2]);
        true ->
 	    Cix = varc:add_clause(Vp, 'or', [1|Clause]),
-	    io:format("add_clause: ~w, ~s\n", [Cix,format_clause(Vm,Clause)])
+	    ?dbg("add_clause: ~w, ~s\n", [Cix,format_clause(Vm,Clause)]),
+	    Vm
     end.
 
 add_clauses(Vp, [CL|Clauses], Vm) ->
     {Ls,Vm1} = add_clause(Vp, CL, [], Vm),
     Cix = varc:add_clause(Vp, 'or', [1|Ls]),
-    io:format("~w: ~s\n", [Cix, format_clause(Vm1, Ls)]),
+    ?dbg("~w: ~s\n", [Cix, format_clause(Vm1, Ls)]),
     add_clauses(Vp, Clauses, Vm1);
 add_clauses(_Vp, [], Vm) ->
     Vm.
@@ -187,8 +223,8 @@ eval_var(true) -> true;
 eval_var(false) -> false;
 eval_var(Var) -> eval_p(Var).
 
-eval_p({p,Var,Es}) -> {p,Var,[eval_expr(E)||E<-Es]}.
-    
+eval_p({p,Var,Es}) when is_list(Es) -> {p,Var,[eval_expr(E)||E<-Es]};
+eval_p({p,Var,I}) when is_integer(I) -> {p,Var,I}.
 
 eval_expr(#cconst{value=List,base=Base}) ->
     list_to_integer(List,Base);
@@ -197,14 +233,13 @@ eval_expr(E) when is_integer(E) -> E.
 	    
 conflict_analysis(Vp,Vm,Level) ->
     Trail=[P|_] = lists:reverse(get_literal_bindings(Vp,Level)),
-    conflict_trail(Vp,Vm,-P,varc:conflict_clause(Vp),
+    conflict_trail(Vp,Vm,-P,varc:conflicting_clause(Vp),
 		   conflict_reason(Vp,-P),
 		   Trail,Level,sets:from_list([abs(P)]),1,[]).
 
 conflict_trail(Vp,Vm,P,Ci,Reason,Trail,Level,Seen,C,CL) ->
-    io:format("reason ~s:~w = ~s\n", 
-	      [format_literal(Vm,P),Ci,
-	       format_literals(Vm,Reason)]),
+    ?dbg("reason ~s:~w = ~s\n", 
+	 [format_literal(Vm,P),Ci,format_literals(Vm,Reason)]),
     conflict_reason(Vp,Vm,Trail,Reason,Level,Seen,C,CL).
 
 conflict_reason(Vp,Vm,Trail,[Q|Qs],Level,Seen,C,CL) ->
@@ -253,7 +288,7 @@ reason(Vp,P) ->
     end.
 
 conflict_reason(Vp,P) ->
-    case varc:conflict_clause(Vp) of
+    case varc:conflicting_clause(Vp) of
 	-1 -> [];
 	I ->
 	    {'or',[1|Ls]} = varc:get_clause(Vp,I),
@@ -269,7 +304,7 @@ format_all_bindings(Vp,Vm) ->
     lists:foreach(
       fun(G) ->
 	      [{Lev,_,_,_}|_] = G,
-	      io:format("bindings[~w]: ~s\n",[Lev,format_group(Vm,G)])
+	      ?dbg("bindings[~w]: ~s\n",[Lev,format_group(Vm,G)])
       end, key_group_list(1,Bs)).
 
 format_group(Vm,[{_,V,Val,Cix}|G]) ->
@@ -310,7 +345,6 @@ format_binding(Vm,V,Val) ->
 	 -1 -> "0";
 	 1 -> "1"
      end].
-
 
 format_clause(Vm,CL) ->
     List = format_literals(Vm,CL),
@@ -357,10 +391,8 @@ format_symbol({int,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({bit_index,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol({p,T,[]}) when is_integer(T) -> [$T|integer_to_list(T)];
-format_symbol({p,V,[]}) -> atom_to_list(V);
-format_symbol({p,V,As}) ->
-    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+format_symbol(Var={p,_,_}) ->
+    varp_formula:format_var(Var).
 
 concat([], _) -> [];
 concat([H],_) -> [H];

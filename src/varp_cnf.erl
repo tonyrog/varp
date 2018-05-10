@@ -33,8 +33,6 @@
 sat({snf,{_Nv,_Nc,Decl,Literals,CLs}}) ->
     satisfy(CLs, Literals, Decl, 1);
 sat({cnf,{_Nv,_Nc,Decl,Literals,CLs}}) ->
-    satisfy(CLs, Literals, Decl, 1);
-sat({CLs, Literals, Decl}) ->
     satisfy(CLs, Literals, Decl, 1).
 
 satisfy(SNF) ->
@@ -43,8 +41,6 @@ satisfy(SNF) ->
 satisfy({snf,{_Nv,_Nc,Decl,Literals,CLs}},N) ->
     satisfy(CLs, Literals, Decl, N);
 satisfy({cnf,{_Nv,_Nc,Decl,Literals,CLs}},N) ->
-    satisfy(CLs, Literals, Decl, N);
-satisfy({CLs, Literals, Decl},N) ->
     satisfy(CLs, Literals, Decl, N).
 
 satisfy(CLs, Ls, _Decl, N) ->
@@ -288,7 +284,7 @@ find_first_uip(Vp,Vm,Level,CLit) ->
 	    ?dbg("conflict literal=~s, no cut\n",[format_literal(Vm,CLit)]),
 	    {ok,[CLit]};
 	Cix1 ->
-	    Cix2 = varc:conflict_clause(Vp),
+	    Cix2 = varc:conflicting_clause(Vp),
 	    ?dbg("conflict literal=~s, Cix1=~w, Cix2=~w\n",
 		 [format_literal(Vm,CLit),Cix1,Cix2]),
 	    Marks = sets:from_list([CLit,-CLit]),
@@ -657,12 +653,8 @@ pairs([_]) -> [];
 pairs([A|As]) -> [{A,Ai} || Ai <- As] ++ pairs(As).
 
 prod(N,File) ->
-    {CLs,Ls,Decls} = prod(N),
+    {snf,{_Nv,_Nc,Decls,Ls,CLs}} = prod(N),
     file:write_file(File, format(Decls,CLs ++ [[L]||L<-Ls])).
-
-prod_test() ->
-    SNF = prod(2*17),
-    satisfy(SNF).
 
 prod(N) when is_integer(N), N>1 ->
     put(next_var, 2), %% FIXME!
@@ -688,7 +680,8 @@ prod(N) when is_integer(N), N>1 ->
     {Cs5,Ls1} = normalize_clauses(Cs4),
     %% {Cs5,Ls1,Decls}.
     Cs6 = subsume_clauses(Cs5),
-    {Cs6,Ls1,Decls}.
+    Nvs = length(X)+length(Y)+(get(next_var)-1),
+    {snf,{Nvs,length(Cs6),Decls,Ls1,Cs6}}.
 
 sum(N,File) ->
     {CLs,Ls,Decls} = sum(N),
@@ -749,7 +742,6 @@ lt_([Xi|Xs],[Yi|Ys],Cs) ->
     cor(Lt,And,Cs4).
 
 multiply(X, Y, Cs) ->
-    %% lists:duplicate(length(Y),false)
     multiply_(X,Y,[],[],Cs).
 
 multiply_([Xi|Xs],Y,Prev,Out,Cs) ->
@@ -792,74 +784,38 @@ add_([{Ai,Bi}|Inputs],Cin,Cout,Sum,Cs) ->
 add_([],_Cin,Cout,Sum,Cs) ->
     {Cout,lists:reverse(Sum),Cs}.
 
-%%  (OUT == (A & B))
-%%   0   1   0 0 0
-%%   0   1   0 0 1
-%%   0   1   1 0 0
-%%   0   0   1 1 1 * (~A ~B OUT)
-%%   1   0   0 0 0 * (A B ~OUT)
-%%   1   0   0 0 1 * (A ~B ~OUT)
-%%   1   0   1 0 0 * (~A B ~OUT)
-%%   1   1   1 1 1
-%%
-%%   (A ~B ~OUT) (A B ~OUT) => (A ~OUT)
-%%   (~A B ~OUT) (A B ~OUT) => (B ~OUT)
-%%
-cand(A,B,Cs) ->
-    cand(A,B,create_var(),Cs).
-cand(A,B,Out,Cs) ->
-    {Out,[[neg(A),neg(B),Out],[A,neg(Out)],[B,neg(Out)] | Cs]}.
+%% X = Y and Z
+cand(Y,Z,Cs) ->
+    cand(Y,Z,create_var(),Cs).
+cand(Y,Z,X,Cs) ->
+    {X,[[X,neg(Y),neg(Z)],[neg(X),Y],[neg(X),Z] | Cs]}.
 
-%%  (OUT == (A | B))
-%%   0   1   0 0 0
-%%   0   0   0 1 1 * (A ~B OUT)
-%%   0   0   1 1 0 * (~A B OUT)
-%%   0   0   1 1 1 * (~A ~B OUT)
-%%   1   0   0 0 0 * (A B ~OUT)
-%%   1   1   0 1 1
-%%   1   1   1 1 0
-%%   1   1   1 1 1
-%%
-cor(A,B,Cs) ->
-    cor(A,B,create_var(),Cs).
+%%  (X == Y or Z)
+cor(Y,Z,Cs) ->
+    cor(Y,Z,create_var(),Cs).
+cor(Y,Z,X,Cs) ->
+    {X,[[neg(X),Y,Z],[X,neg(Y)],[X,neg(Z)] | Cs]}.
 
-cor(A,B,Out,Cs) ->
-    {Out,[[A,neg(B),Out],[neg(A),B,Out],
-	  [neg(A),neg(B),Out],[A,B,neg(Out)] | Cs]}.
+%% X == Y -> Z
+cimp(Y,Z,Cs) ->
+    cimp(Y,Z,create_var(),Cs).
+cimp(Y,Z,X,Cs) ->
+    {X,[[neg(X),neg(Y),Z],[X,Y],[X,neg(Z)] | Cs]}.
 
-%%  OUT ==   A = B  
-%%   0   0   0 1 0 *  (A B OUT) 
-%%   0   1   0 0 1
-%%   0   1   1 0 0
-%%   0   0   1 1 1 *  (~A ~B OUT) 
-%%   1   1   0 1 0 
-%%   1   0   0 0 1 *  (A ~B ~OUT) 
-%%   1   0   1 0 0 *  (~A B ~OUT)
-%%   1   1   1 1 1 
+%% X == Y <-> Z
+ceq(Y,Z,Cs) ->
+    ceq(Y,Z,create_var(),Cs).
 
-ceq(A,B,Cs) ->
-    ceq(A,B,create_var(),Cs).
+ceq(Y,Z,X,Cs) ->
+    {X,[[X,Y,Z],[X,neg(Y),neg(Z)],
+	[neg(X),Y,neg(Z)],[neg(X),neg(Y),Z] | Cs]}.
 
-ceq(A,B,Out,Cs) ->
-    {Out,[[A,B,Out],[neg(A),neg(B),Out],
-	  [A,neg(B),neg(Out)],[neg(A),B,neg(Out)] | Cs]}.
+%% X == Y < Z
+clt(Y,Z,Cs) ->
+    clt(Y,Z,create_var(),Cs).
 
-%%  OUT ==   A < B  
-%%   0   1   0 0 0 
-%%   0   0   0 1 1 * (A ~B OUT)
-%%   0   1   1 0 0
-%%   0   1   1 0 1 
-%%   1   0   0 0 0 * (A B ~OUT)
-%%   1   1   0 1 1 
-%%   1   0   1 0 0 * (~A B ~OUT)
-%%   1   0   1 0 1 * (~A ~B ~OUT)
-
-clt(A,B,Cs) ->
-    clt(A,B,create_var(),Cs).
-
-clt(A,B,Out,Cs) ->
-    {Out,[[A,neg(B),Out],[A,B,neg(Out)],
-	  [neg(A),B,neg(Out)],[neg(A),neg(B),neg(Out)]|Cs]}.
+clt(Y,Z,X,Cs) ->
+    {X,[[X,Y,neg(Z)],[neg(X),Z],[neg(X),neg(Y)]|Cs]}.
 
 %% full adder in CNF form
 %% input A, B, and carry in Cin
@@ -882,10 +838,14 @@ full_adder(A,B,Cin,S,Cout,Cs) ->
      [neg(Cin), Cout, S],
      [Cin, neg(Cout), neg(S)] | Cs].
 
+half_adder(A,B,S,Co,Cs) ->
+    [[neg(Co),A], [neg(Co),B], [Co,neg(A),neg(B)],
+     [S,neg(A),neg(B)],[S,A,neg(B)],[neg(S),neg(A),neg(B)],[neg(S),A,B] | Cs].
+
 create_var() ->
     case get(next_var) of
 	undefined -> put(next_var,3), {p,2,[]};
-	V -> put(next_var,V+1), {p,V,[]}
+	V -> put(next_var,V+1), {p,'T',V}
     end.
 
 neg(true) -> false;
@@ -1038,10 +998,7 @@ format_symbol({int,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({bit_index,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol({p,T,[]}) when is_integer(T) -> [$T|integer_to_list(T)];
-format_symbol({p,V,[]}) -> atom_to_list(V);
-format_symbol({p,V,As}) ->
-    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+format_symbol(Var={p,_,_}) -> varp_formula:format_var(Var).
 
 concat([], _) -> [];
 concat([H],_) -> [H];

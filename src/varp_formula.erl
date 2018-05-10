@@ -22,6 +22,7 @@
 -export([print/3]).
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
+-export([format_var/1]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -162,9 +163,11 @@ order(Bs,random) ->
     <<Seed:24>> = crypto:strong_rand_bytes(3),
     order(Bs,random,Seed);
 order(Bs,Order) when is_atom(Order) ->
+    io:format("order ~w\n", [Order]),
     varc:order_sort(Bs#bs.vp, Order).
 
 order(Bs,How,Arg) when is_atom(How) ->
+    io:format("order ~w ~w\n", [How,Arg]),
     varc:order_sort(Bs#bs.vp, How, Arg).
 
 clear_queue(Bs) ->
@@ -609,27 +612,32 @@ build_({vec,Fs}, Bs) ->
     {{bit,length(Xs),[X||{bool,X} <- Xs]},Bs1};
 build_({'=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build__(F, Bs),
-    operation('=', V, Y, Bs1);
+    operation_('=', V, Y, Bs1);
 
 build_({'-',F}, Bs) ->
     {Y,Bs1} = build__(F, Bs),
-    operation('-', Y, Bs1);
+    operation_('-', Y, Bs1);
 build_({'not',A}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
-    operation('not', Y, Bs1);
+    operation_('not', Y, Bs1);
 build_({'~',A}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
-    operation('~', Y, Bs1);
+    operation_('~', Y, Bs1);
 build_({'!',A}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
-    operation('!', Y, Bs1);
+    operation_('!', Y, Bs1);
 
 build_({bit_index,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
-    case build__(A, Bs) of
+    A1 = case A of
+	     {p,Var,[]} -> {p,Var,[I1]};
+	     _ -> A
+	 end,
+    case build__(A1, Bs) of
 	{{uint,N,Xs}, Bs1} -> {select_bool(I1,N,Xs), Bs1};
 	{{int,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
 	{{bit,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+	{{bool,X},Bs1}     -> {{bool,X},Bs1};
 	{X,Bs1} -> {select_bool(I1,1,[X]),Bs1}
     end;
 
@@ -646,16 +654,16 @@ build_({bit_range,A,I,J},Bs) ->
 %% Fixme: implement shift for variable argument
 build_({'<<',A,K},Bs) when is_integer(K), K>=0 ->
     {Y,Bs1} = build__(A,Bs),
-    operation('<<',Y,K,Bs1);
+    operation_('<<',Y,K,Bs1);
 build_({'<<<',A,K},Bs) when is_integer(K), K>=0 ->
     {Y,Bs1} = build__(A,Bs),
-    operation('<<<',Y,K,Bs1);
+    operation_('<<<',Y,K,Bs1);
 build_({'>>',A,K},Bs) when is_integer(K), K >= 0 ->
     {Y,Bs1} = build__(A,Bs),
-    operation('>>',Y,K,Bs1);
+    operation_('>>',Y,K,Bs1);
 build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
     {Y,Bs1} = build__(A,Bs),
-    operation('>>>',Y,K,Bs1);
+    operation_('>>>',Y,K,Bs1);
 
 build_({cnf,{[],[],_Decls}},Bs) ->
     build__(false, Bs);
@@ -679,7 +687,7 @@ build_({subst,SList,F},Bs) ->
 build_({Op,A,B}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
     {Z,Bs2} = build__(B, Bs1),
-    operation(Op,Y,Z,Bs2);
+    operation_(Op,Y,Z,Bs2);
 build_({ite,C,T,E}, Bs) ->
     {Cf,Bs1} = build__(C, Bs),
     {Tf,Bs2} = build__(T, Bs1),
@@ -688,15 +696,15 @@ build_({ite,C,T,E}, Bs) ->
 
 build_({'abs',[A]}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
-    operation('abs', Y, Bs1);
+    operation_('abs', Y, Bs1);
 build_({'min',[A,B]}, Bs) ->
     {A1,Bs1} = build__(A, Bs),
     {B1,Bs2} = build__(B, Bs1),
-    operation('min', A1, B1, Bs2);
+    operation_('min', A1, B1, Bs2);
 build_({'max',[A,B]}, Bs) ->
     {A1,Bs1} = build__(A, Bs),
     {B1,Bs2} = build__(B, Bs1),
-    operation('max', A1, B1, Bs2);
+    operation_('max', A1, B1, Bs2);
 build_({'ALL',Fs}, Bs) ->
     {Xs,Bs1} = args(Fs,Bs),
     all(Xs, Bs1);
@@ -1102,7 +1110,7 @@ vfold_op(Bs,_Op,_D,[A]) ->
     {{bool,A},Bs};
 vfold_op(Bs,Op,D,[Y|As]) ->
     {Z,Bs1} = vfold_op(Bs,Op,D,As),
-    operation(Op,{bool,Y},Z,Bs1);
+    operation_(Op,{bool,Y},Z,Bs1);
 vfold_op(Bs,_Op,D,[]) ->
     {D,Bs}.
 
@@ -1126,7 +1134,7 @@ any(As, Bs) ->
 
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
-    operation('not',A,Bs1).
+    operation_('not',A,Bs1).
 
 one(Xs, Bs) ->
     eqk(1,length(Xs),Xs,Bs).
@@ -1137,7 +1145,7 @@ sum([X], Bs) ->
     {X, Bs};
 sum([X|Xs], Bs) ->
     {Xn,Bs1} = sum(Xs,Bs),
-    operation('+', X, Xn, Bs1).
+    operation_('+', X, Xn, Bs1).
 
 prod([], Bs) ->
     const_vector(uint,1,1,Bs);
@@ -1145,7 +1153,7 @@ prod([X], Bs) ->
     {X, Bs};
 prod([X|Xs], Bs) ->
     {Xn,Bs1} = prod(Xs,Bs),
-    operation('*', X, Xn, Bs1).
+    operation_('*', X, Xn, Bs1).
 
 -ifdef(__UNDEFINE__).
 %% Not used - size = 5n
@@ -1158,11 +1166,11 @@ one__([], Bs) -> {{{bool,?FALSE},{bool,?FALSE}},Bs};
 one__([A],Bs) -> {{A,A}, Bs};
 one__([A|As],Bs) ->
     {{One,Or},Bs1} = one__(As,Bs),
-    {A1,Bs2} = operation('and',negate(A),One,Bs1),
-    {A2,Bs3} = operation('and',negate(One),negate(Or),Bs2),
-    {A3,Bs4} = operation('and',A,A2,Bs3),
-    {One1,Bs5} = operation('or',A1,A3,Bs4),
-    {O1,Bs6} = operation('or',A,Or,Bs5),
+    {A1,Bs2} = operation_('and',negate(A),One,Bs1),
+    {A2,Bs3} = operation_('and',negate(One),negate(Or),Bs2),
+    {A3,Bs4} = operation_('and',A,A2,Bs3),
+    {One1,Bs5} = operation_('or',A1,A3,Bs4),
+    {O1,Bs6} = operation_('or',A,Or,Bs5),
     {{One1,O1},Bs6}.
 -endif.
 
@@ -1178,7 +1186,7 @@ eqk(K,N,Xs,Bs) ->
     {A,B} = lists:split(N-K, Xs1),
     {A1,Bs2} = any(A,Bs1),
     {B1,Bs3} = all(B,Bs2),
-    operation('and', negate(A1), B1, Bs3).
+    operation_('and', negate(A1), B1, Bs3).
 
 gtk(0,_N, Xs, Bs) ->
     any(Xs,Bs);
@@ -1189,7 +1197,7 @@ gtk(K,N,Xs,Bs) ->
     {A,B} = lists:split(N-K, Xs1),
     {A1,Bs2} = any(A,Bs1),
     {B1,Bs3} = all(B,Bs2),
-    operation('and', A1, B1, Bs3).
+    operation_('and', A1, B1, Bs3).
 
 %% negate all input variables
 negate({bool,X}) -> {bool,-X}.
@@ -1295,6 +1303,18 @@ build_list_([F|Fs],Acc,Bs) ->
     build_list_(Fs,[X|Acc],Bs1);
 build_list_([],Acc,Bs) ->
     {reverse(Acc),Bs}.
+
+%%
+%% 
+%%
+operation_(Op, A, Bs) ->
+    %% io:format("operation: ~w ~w\n", [Op,[A]]),
+    operation(Op,A,Bs).
+
+operation_(Op, A,B, Bs) ->
+    %% io:format("operation: ~w ~w\n", [Op,[A,B]]),
+    operation(Op,A,B,Bs).
+
 %%
 %% Unary operator
 %%
@@ -1324,7 +1344,7 @@ operation('-', A, Bs) ->
 
 operation('abs', A={int,N,Ys}, Bs) ->
     Sign = sign_bit(A),
-    {{_,_,Zs},Bs1} = operation('-',A,Bs),
+    {{_,_,Zs},Bs1} = operation_('-',A,Bs),
     {Xs,Bs2} = vite(Sign, Zs, Ys, Bs1),
     {{int,N,Xs},Bs2};
 operation('abs', A={uint,_N,_Ys}, Bs) ->
@@ -1334,7 +1354,7 @@ operation('abs', A={uint,_N,_Ys}, Bs) ->
 %% Binary operator
 %%
 operation('&&', A, B, Bs) ->
-    operation('and', A, B, Bs);
+    operation_('and', A, B, Bs);
 
 operation('and',{bool,?TRUE},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
@@ -1347,7 +1367,7 @@ operation('and',{bool,Y},{bool,Z}, Bs) ->
     {{bool,X},clause(Bs1,'and',[X,Y,Z])};
 
 operation('and',A,B,Bs) ->
-    operation('&',A,B,Bs);
+    operation_('&',A,B,Bs);
 operation('&',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1364,7 +1384,7 @@ operation('&',A,B,Bs) ->
     end;
 
 operation('||', A, B, Bs) ->
-    operation('or', A, B, Bs);
+    operation_('or', A, B, Bs);
 
 operation('or',{bool,?FALSE},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
@@ -1377,7 +1397,7 @@ operation('or',{bool,Y},{bool,Z}, Bs) ->
     {{bool,X},clause(Bs1,'or',[X,Y,Z])};
 
 operation('or',A,B,Bs) ->
-    operation('|',A,B,Bs);
+    operation_('|',A,B,Bs);
 operation('|',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1405,8 +1425,8 @@ operation('imp',{bool,Y},{bool,Z}, Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},clause(Bs1,'or',[X,-Y,Z])};
 operation('imp',A,B,Bs) ->
-    {An,Bs1} = operation('~',A,Bs),
-    operation('|',An,B,Bs1);
+    {An,Bs1} = operation_('~',A,Bs),
+    operation_('|',An,B,Bs1);
 
 operation('equ',{bool,?TRUE},{bool,?FALSE},Bs) ->
     {{bool,?FALSE},Bs};    
@@ -1439,7 +1459,7 @@ operation('xor',{bool,Y},{bool,Z},Bs) ->
     {X,Bs1} = fresh_var(Bs),
     {{bool,X},clause(Bs1,'xor',[X,Y,Z])};
 operation('xor',A,B,Bs) ->
-    operation('^',A,B,Bs);
+    operation_('^',A,B,Bs);
 operation('^',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1469,7 +1489,7 @@ operation('+',A,B,Bs) ->
 %% FIXME:
 %% A < B  <=>  A - B < 0
 operation('<',{bool,Y},{bool,Z},Bs) ->  %% Y < Z
-    operation('and', negate({bool,Y}),{bool,Z}, Bs);
+    operation_('and', negate({bool,Y}),{bool,Z}, Bs);
 operation('<',{int,An,Ax},{int,Bn,Bx},Bs) when An>1, Bn>1 ->
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(int,Ax,An,Cn),
@@ -1477,11 +1497,11 @@ operation('<',{int,An,Ax},{int,Bn,Bx},Bs) when An>1, Bn>1 ->
     {Ax2,[Ak]} = lists:split(Cn-1,Ax1),
     {Bx2,[Bk]} = lists:split(Cn-1,Bx1),
     %% abs(X) < abs(Y)
-    {Q,Bs1}  = operation('equ',{bool,Ak},{bool,Bk},Bs),
+    {Q,Bs1}  = operation_('equ',{bool,Ak},{bool,Bk},Bs),
     {Lt,Bs2} = vless(Ax2,Bx2,Bs1),
-    {A1,Bs3} = operation('and',Q,Lt,Bs2),
+    {A1,Bs3} = operation_('and',Q,Lt,Bs2),
     %%  Y<0  AND Z>=0
-    {L,Bs4} = operation('<',{bool,Bk},{bool,Ak},Bs3),
+    {L,Bs4} = operation_('<',{bool,Bk},{bool,Ak},Bs3),
     any([A1,L],Bs4);
 operation('<',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1495,23 +1515,23 @@ operation('<',A,B,Bs) ->
 %%    Zs1 = vextend(Type2,Zs,M,K),
 %%    vless(Ys1,Zs1,Bs);
 operation('>',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
-    operation('and', {bool,Y}, negate({bool,Z}), Bs);
+    operation_('and', {bool,Y}, negate({bool,Z}), Bs);
 operation('>',Y,Z,Bs) ->
-    operation('<', Z, Y, Bs);
+    operation_('<', Z, Y, Bs);
 operation('<=',Y,Z,Bs) ->
-    {C,Bs1} = operation('<', Z, Y, Bs),
+    {C,Bs1} = operation_('<', Z, Y, Bs),
     {negate(C),Bs1};
 operation('>=',Y,Z,Bs) ->
-    operation('<=',Z,Y,Bs);
+    operation_('<=',Z,Y,Bs);
 
 operation('!=',{bool,Y},{bool,Z},Bs) ->
-    operation('xor',{bool,Y},{bool,Z},Bs);
+    operation_('xor',{bool,Y},{bool,Z},Bs);
 operation('!=',Y,Z,Bs) ->
-    {C,Bs1} = operation('==', Y, Z, Bs),
+    {C,Bs1} = operation_('==', Y, Z, Bs),
     {negate(C),Bs1};
 
 operation('==',{bool,Y},{bool,Z},Bs) ->
-    operation('equ',{bool,Y},{bool,Z},Bs);
+    operation_('equ',{bool,Y},{bool,Z},Bs);
 operation('==',A,B,Bs) ->
     %% fixme: warn about different sign (uint == int) ?
     {At,An,Ax} = varg(A),
@@ -1522,10 +1542,10 @@ operation('==',A,B,Bs) ->
     veq(Ax1,Bx1,Bs);
 
 operation('<->', A, B, Bs) ->
-    operation('==', A, B, Bs);
+    operation_('==', A, B, Bs);
 
 operation('->', A, B, Bs) ->
-    operation('imp', A, B, Bs);
+    operation_('imp', A, B, Bs);
 
 %%
 %% Alias operation
@@ -1637,7 +1657,7 @@ operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
     {{uint,K,Rs},Bs2};
 
 operation('min',Y={bool,_Y},Z={bool,_Z},Bs) ->
-    operation('and',Y,Z,Bs);
+    operation_('and',Y,Z,Bs);
 operation('min',A,B,Bs) ->
     %% integer type?
     {At,An,Ax} = varg(A),
@@ -1651,7 +1671,7 @@ operation('min',A,B,Bs) ->
     {{Ct,Cn,Cx},Bs2};
 
 operation('max',Y={bool,_Y},Z={bool,_Z},Bs) ->
-    operation('or',Y,Z,Bs);
+    operation_('or',Y,Z,Bs);
 operation('max',A,B,Bs) ->
     %% integer type?
     {At,An,Ax} = varg(A),
@@ -2165,12 +2185,19 @@ format_binding({Var,Value}) ->
        is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
     end.
 
-format_var({p,V,[]}) when is_atom(V) ->
-    [atom_to_list(V)];
-format_var({p,V,[]}) when is_integer(V), V>1 ->
-    [$$,integer_to_list(V)];
-format_var({p,V,As}) ->
-    [atom_to_list(V),"(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"].
+format_var({p,T,As}) when is_integer(T) ->
+    [$T,integer_to_list(As)|format_param(As)];
+format_var({p,V,As}) when is_atom(V) ->
+    [atom_to_list(V)|format_param(As)];
+format_var({p,Name,As}) when is_list(Name); is_binary(Name) ->
+    [Name|format_param(As)].
+
+format_param([]) -> "";
+format_param(As) when is_list(As) ->
+    ["(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"];
+format_param(I) when is_integer(I) ->
+    ["(",integer_to_list(I),")"].
+
 
 concat([], _) -> [];
 concat([H],_) -> [H];

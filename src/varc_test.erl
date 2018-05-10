@@ -240,7 +240,7 @@ or_conflict() ->
     true = varc:put(Vp,X2,?FALSE),
     false = varc:eval(Vp),
 
-    {Conflict,_Pos,_Mark} = varc:conflict_clause(Vp),
+    {Conflict,_Pos,_Mark} = varc:conflicting_clause(Vp),
     [{CVar,CVal}] = varc:get_latest_binding(Vp),
     CLit = if CVal < 0 -> -CVar; true -> CVar end,
     Implication = varc:implication_clause(Vp, CLit),

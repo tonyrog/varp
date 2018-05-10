@@ -1,0 +1,34 @@
+c auto generated from <file>
+p snf 28 30
+c declare X:2/unsigned
+c declare Y:3/unsigned
+!T23 .
+!T19 .
+!T17 .
+T16 .
+!T6 .
+T4 .
+!Y[1] .
+Y[2] .
+!T22 .
+!T21 .
+T7 .
+!T3 .
+T5 .
+!T12 .
+!T20 .
+!T18 .
+!T14 .
+!T14 .
+!T10 .
+Y[0] .
+X[0] .
+!T8 .
+T2 .
+T9 .
+T11 .
+T13 .
+!T15 .
+!T8 .
+X[1] .
+T24 .
