@@ -1,0 +1,5 @@
+// check if p (parameter) is prime
+// (A*A - B*B = p, A>B)
+
+[A n=isize(p),c=n-1,d=n/2]
+((((C:c * C:c) - (D:d * D:d)) == p:n) && (C:c > D:d))
