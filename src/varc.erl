@@ -71,7 +71,7 @@
 -endif.
 
 -type varc() :: reference().
--type clause_type() :: 'and'|'or'|'xor'|'reg'.
+-type clause_type() :: 'or' | 'xor'.
 -type literal() :: integer().
 -type sort_key()  :: identity|random|occur|depth|
 		     occur_depth|depth_occur|
@@ -81,10 +81,7 @@
 		     depth_occur_ascending|depth_occur_descending.
 -type sort_value() :: integer().
 
--define(is_op(Op), (((Op) =:= 'and') 
-		    orelse ((Op) =:= 'or') 
-		    orelse ((Op) =:= 'xor')
-		    orelse ((Op) =:= 'reg'))).
+-define(is_op(Op), (((Op) =:= 'or') orelse ((Op) =:= 'xor'))).
 
 -define(nif_stub(),
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).

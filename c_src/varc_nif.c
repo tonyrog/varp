@@ -116,6 +116,8 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 #define ALIGN(ptr,align) ((((intptr_t) (ptr))+(align)-1) & ~((align)-1))
 #define PAD(ptr,align)   (((align)-AMASK(ptr,align)) & ((align)-1))
 
+#define ABS(x) (((x)<0) ? (-(x)) : (x))
+
 #define	RANDOMDEV	"/dev/urandom"
 
 // #define TRACE(f,va...) fprintf(stderr, (f), va)
@@ -162,14 +164,7 @@ typedef struct _undo_t {  /* : object_t */
 // maybe keep a separate mark stack?
 
 #define CLAUSE_OP_OR   0
-#define CLAUSE_OP_AND  1
-#define CLAUSE_OP_XOR  2
-#define CLAUSE_OP_REG  3
-/*
-#define CLAUSE_OP_GTK  4
-#define CLAUSE_OP_GTEK 5
-#define CLAUSE_OP_EQK  6
-*/
+#define CLAUSE_OP_XOR  1
 
 #define CLAUSE_FLAG_INQUEUE 0x0001
 #define CLAUSE_FLAG_DEAD    0x0002
@@ -177,12 +172,14 @@ typedef struct _undo_t {  /* : object_t */
 typedef struct _clause_t  /* : object_t */
 {
     struct _clause_t* next;      // MUST BE FIRST
-    int      size;               // number of literals
+    unsigned asize;              // allocated size
+    unsigned size;               // number of literals
     int      cix;                // clause index
+    unsigned  key[1];            // sort values
     bitset_t mask_F;             // bit mask positions = FALSE
     bitset_t mask_T;             // bit mask positions = TRUE
     uint16_t flags;              // INQUEUE ...
-    uint16_t op;                 // OR|AND|XOR
+    uint16_t op;                 // OR|XOR
     int      lit[0];
 } clause_t;
 
@@ -194,12 +191,19 @@ typedef struct _varref_t  /* : object_t */
     unsigned pos;             // literal position in clause
 } varref_t;
 
-// FIXME: split structure to allow parallell access?
+#define VAR_FLAG_INQUEUE 0x0001
+
+#define VAR_OCCUR_KEY 0
+#define VAR_DEPTH_KEY 1
+#define VAR_MARK_KEY  2
+
 typedef struct _variable_t
 {
+    struct _variable_t* next; // variable list
+    unsigned flags;           // VAR_FLAG_INQUEUE ...
     int value;         // current value
     int klass;         // class index
-    unsigned  key[2];  // sort keys
+    unsigned  key[3];  // sort keys
     varref_t* ref;     // reference list
     int       cix;     // implication clause, latest put
     int       li;      // position in implication clause
@@ -234,6 +238,8 @@ typedef struct _varc_t {
     uint64_t  eval_counter;        // performance counter
     clause_t* eval_queue_hd; // eval queue head
     clause_t* eval_queue_tl; // eval queue tail
+    variable_t* var_queue_hd; // var queue head
+    variable_t* var_queue_tl; // var queue tail    
 
     arc4_stream_t as;        // random stream 
 
@@ -321,10 +327,8 @@ DECL_ATOM(grow);
 DECL_ATOM(size);
 DECL_ATOM(bcp);
 DECL_ATOM(error);
-DECL_ATOM(and);
 DECL_ATOM(or);
 DECL_ATOM(xor);
-DECL_ATOM(reg);
 DECL_ATOM(inqueue);
 DECL_ATOM(dead);
 DECL_ATOM(flags);
@@ -544,20 +548,22 @@ static clause_t* clause_alloc(varc_t* vp, uint16_t op, int size)
 	return NULL;
 
     cp->next = NULL;
-    cp->size = size;
+    cp->asize = size;
+    cp->size  = size;
     bitset_init(&cp->mask_F);
     bitset_init(&cp->mask_T);
     cp->flags = 0;
+    cp->key[0] = 0;
     cp->op = op;
     return cp;
 }
 
 static void clause_free(varc_t* vp, clause_t* cp)
 {
-    if (cp->size > 32)
+    if (cp->asize > 32)
 	enif_free(cp);
     else
-	varc_free(&vp->clause_allocator[cp->size], (object_t*) cp);
+	varc_free(&vp->clause_allocator[cp->asize], (object_t*) cp);
 }
 
 static inline int is_variable(int x)
@@ -637,10 +643,55 @@ static void init_variable(variable_t* vptr, int value, int klass)
     vptr->klass = klass;
     vptr->key[0] = 0;
     vptr->key[1] = 0;
+    vptr->key[2] = 0;
     vptr->ref = NULL;
     vptr->cix = -1;
     vptr->li = -1;
     vptr->mark = 0;
+    vptr->next = NULL;
+    vptr->flags = 0;
+}
+
+static void clear_variable_queue(varc_t* vp)
+{
+    variable_t* vptr;
+
+    vptr = vp->var_queue_hd;
+    while(vptr) {
+	variable_t* vptrn = vptr->next;
+	vptr->next = NULL;
+	vptr->flags &= ~VAR_FLAG_INQUEUE;
+	vptr = vptrn;
+    }
+    vp->var_queue_hd = NULL;
+    vp->var_queue_tl = NULL;
+}
+
+static int enqueue_variable(varc_t* vp, variable_t* vptr)
+{
+    if (vptr->flags & VAR_FLAG_INQUEUE)
+	return 0;
+    vptr->next = NULL;
+    if (vp->var_queue_tl == NULL)
+	vp->var_queue_hd = vptr;
+    else
+	vp->var_queue_tl->next = vptr;
+    vp->var_queue_tl = vptr;
+    vptr->flags |= VAR_FLAG_INQUEUE;
+    return 1;
+}
+
+static variable_t* dequeue_variable(varc_t* vp)
+{
+    variable_t* vptr;
+
+    if ((vptr = vp->var_queue_hd) != NULL) {
+	if ((vp->var_queue_hd = vptr->next) == NULL)
+	    vp->var_queue_tl = NULL;
+	vptr->next = NULL;
+	vptr->flags &= ~VAR_FLAG_INQUEUE;
+    }
+    return vptr;
 }
 
 static void clear_queue(varc_t* vp)
@@ -1018,7 +1069,7 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	cp->flags |= CLAUSE_FLAG_DEAD;
 	TRACE(" lit[i]=F%s\r\n", "");
 	// LIGHTER version may set bitmask once and simplify enqueue_varref 
-	for (i = 1; i < cp->size; i++) {
+	for (i = 1; i < (int)cp->size; i++) {
 	    PUTT(vp, cp->lit[i], FALSE, i, cp->cix);
 	}
     }
@@ -1036,61 +1087,6 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 	}
 	else if (!vp->bcp) { // if all but one, xi, are false then x0=xi
 	    // e.g  x0=0,x2,0  => x0=x2
-	    bitset_t unbound;
-	    unbound_literals(cp, &unbound);
-	    bitset_clear(&unbound,&unbound,0);
-	    if (bitset_single_pos(&unbound,&i)) {  // one of x1..xn is unbound
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTT(vp, cp->lit[0], cp->lit[i], 0, cp->cix);
-	    }
-	}
-    }
-    return 0;
-}
-
-//
-// eval an OR clause using bitmasks mask_F and mask_T
-// clause is x0 = AND(x1,....,xn-1)
-//
-static int eval_and_clause(varc_t* vp, clause_t* cp)
-{
-    int i;
-
-    TRACE("eval_and_clause_mask %d T=%s F=%s\r\n", 
-	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
-
-    if (bitset_is_set(&cp->mask_T,0)) {  // x0 = TRUE
-	cp->flags |= CLAUSE_FLAG_DEAD;
-	for (i = 1; i < cp->size; i++) {
-	    PUTT(vp, cp->lit[i], TRUE, i, cp->cix);
-	}
-    }
-    else if (bitset_is_set(&cp->mask_F,0)) {  // x0 = FALSE
-	if (bitset_is_nclear(&cp->mask_F,1,cp->size-1)) { // clause not dead
-	    bitset_t unbound;
-	    unbound_literals(cp, &unbound);
-	    if (bitset_single_pos(&unbound,&i)) {
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		PUTT(vp, cp->lit[i], FALSE, i, cp->cix);
-	    }
-	    else if (bitset_is_empty(&unbound)) {
-		if (bitset_is_nset(&cp->mask_T,1,cp->size-1))
-		    return -1;
-	    }
-	}
-    }
-    else {
-	if (bitset_any(&cp->mask_F)) { // there is at least one FALSE literal
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTT(vp, cp->lit[0], FALSE, 0, cp->cix);
-	}	
-	else if (bitset_is_nset(&cp->mask_T,1,cp->size-1)) { // all TRUE
-	    TRACE(" lit[0]=T, all true%s\r\n", "");
-	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    PUTT(vp, cp->lit[0], TRUE, 0, cp->cix);
-	}
-	else if (!vp->bcp) { // if all but one, xi, are true then x0=xi
-	    // e.g  x0=1,x2,1  => x0=x2	    
 	    bitset_t unbound;
 	    unbound_literals(cp, &unbound);
 	    bitset_clear(&unbound,&unbound,0);
@@ -1189,32 +1185,12 @@ static int eval_xor_clause(varc_t* vp, clause_t* cp)
     return 0;
 }
 
-//
-// eval an REG clause using bitmasks mask_F and mask_T
-// clause is REG(x0,....,xn-1)
-// This is a way to group literal into registers that can be
-// viewed by looking at mask_T
-//
-static int eval_reg_clause(varc_t* vp, clause_t* cp)
-{
-    bitset_t unbound;
-    (void) vp;
-    
-    unbound_literals(cp, &unbound);
-    if (bitset_is_empty(&unbound)) {
-	printf("REG %d = %llu\r\n", cp->cix, cp->mask_T);
-    }
-    return 0;
-}
-
 static int eval_clause(varc_t* vp, clause_t* cp)
 {
     vp->clause_eval_counter++;
     switch(cp->op) {
     case CLAUSE_OP_OR:  return eval_or_clause(vp, cp);
-    case CLAUSE_OP_AND: return eval_and_clause(vp, cp);
     case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
-    case CLAUSE_OP_REG: return eval_reg_clause(vp, cp);
     default: return -1;
     }
 }
@@ -1578,93 +1554,94 @@ static int cmp_k10_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
 }
 
 // scan through all variables and calculate the occur count, key[k]
-static void calc_occur(varc_t* vp, int k)
+static void calc_occur(varc_t* vp)
 {
     int i;
     
     for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i].key[k] = 0;
+	vp->var_map[i].key[VAR_OCCUR_KEY] = 0;
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
 	if (cp != NULL) {
 	    int j;
-	    for (j = 0; j < cp->size; j++) {
+	    for (j = 0; j < (int)cp->size; j++) {
 		int x = get(vp, cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x].key[k]++;
+		    vp->var_map[-x].key[VAR_OCCUR_KEY]++;
 		else if (x > 1)
-		    vp->var_map[x].key[k]++;
+		    vp->var_map[x].key[VAR_OCCUR_KEY]++;
 	    }
 	}
     }
 }
 
-// scan through all variables and calculate the occur count, key[k]
-// idea is to queue clauses and calculate 
-// x0.depth = max(xi.depth)+1 for each clause
-// and queue clauses when a new value is calculated for a literal
-//
-
-static void enqueue_depth_var(varc_t* vp, int x, int k, int d)
-{
-    variable_t* vptr = &vp->var_map[x];
-    int t = vptr->key[k];
-    // iterate over klass?
-    if (d >= t) {
-	varref_t* vrp = vptr->ref;
-	vptr->key[k] = d+1;
-	// printf("depth %d = %d\r\n", x, d+1);
-
-	while(vrp != NULL) {
-	    clause_t* cp = vp->clause_map[vrp->cix];
-	    enqueue_clause(vp,cp,0);
-	    vrp = vrp->next;
-	}
-    }
-}
-
-static void calc_depth(varc_t* vp, int k)
+static void calc_depth(varc_t* vp)
 {
     int i;
-    clause_t* cp;
+    variable_t* vptr;
     
-    clear_queue(vp);  // maybe warn if not empty?
+    clear_variable_queue(vp);  // maybe warn if not empty?
     
-    for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i].key[k] = 0;
-
-    // first enqueue all clauses and set depth x0 = 1
-    for (i = 0; i < (int)vp->cnext; i++) {
-	if ((cp = vp->clause_map[i]) != NULL) {
-	    int x = get(vp, cp->lit[0]);
-	    if (x < 1)
-		vp->var_map[-x].key[k] = 1;
-	    else if (x > 1)
-		vp->var_map[x].key[k] = 1;
-	}
-	enqueue_clause(vp,cp,0);
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i].key[VAR_DEPTH_KEY] = 0;
+	vp->var_map[i].key[VAR_MARK_KEY] = 0;
     }
 
-    while((cp = dequeue_clause(vp)) != NULL) {
-	int j, x, d=0, t;
-	for (j = 1; j < cp->size; j++) {
-	    x = get(vp, cp->lit[j]);
-	    if (x < 1)
-		t = vp->var_map[-x].key[k];
-	    else if (x > 1)
-		t = vp->var_map[x].key[k];
-	    else
-		t = 0;
-	    if (t > d) d = t;
+    // mark all output variables & clear clause key
+    for (i = 0; i < (int)vp->cnext; i++) {
+	clause_t* cp;
+	if ((cp = vp->clause_map[i]) != NULL) {
+	    int j;
+	    int x = ABS(cp->lit[0]);
+	    cp->key[0] = 0;  // input edge counter
+	    if (x > 1)
+		vp->var_map[x].key[VAR_MARK_KEY] = 1;
+	    for (j = 1; j < (int)cp->size; j++) {
+		if (ABS(cp->lit[j]) == 1)  // calculate constants here!
+		    cp->key[0]++;
+	    }
 	}
-	// update x0
-	x = get(vp, cp->lit[0]);
-	if (x < 1) {
-	    enqueue_depth_var(vp, -x, k, d);
+    }
+
+    // set all unmarked variables to depth=1 and enqueue them
+    for (i = 2; i < (int)vp->vnext; i++) {
+	if (vp->var_map[i].key[VAR_MARK_KEY] == 0) {
+	    vp->var_map[i].key[VAR_DEPTH_KEY] = 1;
+	    // printf("var %d depth=%d\r\n", i, vp->var_map[i].key[VAR_DEPTH_KEY]);
+	    enqueue_variable(vp, &vp->var_map[i]);
 	}
-	else if (x > 1) {
-	    enqueue_depth_var(vp, x, k, d);
+    }
+
+    // each variable in the queue calc depth on output 
+
+    while((vptr = dequeue_variable(vp)) != NULL) {
+	varref_t* rp = vptr->ref;
+	while(rp) {
+	    if (rp->pos > 0) {
+		clause_t* cp = vp->clause_map[rp->cix];
+		cp->key[0]++;
+		// wont work if we have constant as literals!
+		if (cp->key[0]+1 == cp->size) {
+		    int y = ABS(cp->lit[0]);  // output
+		    if (y > 1) {
+			int depth = 0;
+			for (i = 1; i < (int)cp->size; i++) {
+			    int x = ABS(cp->lit[i]);
+			    if (x > 1) {
+				int d = vp->var_map[x].key[VAR_DEPTH_KEY];
+				if (d > depth)
+				    depth = d;
+			    }
+			}
+			vp->var_map[y].key[VAR_DEPTH_KEY] = depth+1;
+			// printf("var %d depth=%d\r\n", y,
+			//  vp->var_map[y].key[VAR_DEPTH_KEY]);
+			enqueue_variable(vp, &vp->var_map[y]);
+		    }
+		}
+	    }
+	    rp = rp->next;
 	}
     }
 }
@@ -1673,7 +1650,7 @@ static int order_occur(varc_t* vp, int arg)
 {
     int u;
     
-    calc_occur(vp, 0);    // calculate / recalculate occur count 
+    calc_occur(vp);    // calculate / recalculate occur count 
     u = order_reset(vp);   // install identity order
 
     // qsort_r extra argument in different positions between bsd/gnu
@@ -1691,7 +1668,7 @@ static int order_depth(varc_t* vp, int arg)
     UNUSED(arg);
     int u;
     
-    calc_depth(vp, 1);    // calculate / recalculate depth count 
+    calc_depth(vp);    // calculate / recalculate depth count 
     u = order_reset(vp);   // install identity order
     if (arg >= 0)
 	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
@@ -1707,8 +1684,8 @@ static int order_occur_depth(varc_t* vp, int arg)
     UNUSED(arg);
     int u;
 
-    calc_occur(vp, 0);
-    calc_depth(vp, 1);
+    calc_occur(vp);
+    calc_depth(vp);
     u = order_reset(vp);   // install identity order
     if (arg >= 0)
 	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
@@ -1724,8 +1701,8 @@ static int order_depth_occur(varc_t* vp, int arg)
     UNUSED(arg);
     int u;
 
-    calc_occur(vp, 0);
-    calc_depth(vp, 1);
+    calc_occur(vp);
+    calc_depth(vp);
     u = order_reset(vp);   // install identity order
     if (arg >= 0)
 	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
@@ -2139,50 +2116,66 @@ static ERL_NIF_TERM varc_eval(ErlNifEnv* env, int argc,
     return ATOM(true);
 }
 
+// set or SKIP literal
+// y = FALSE or x1 or x2 => y = x1 or x2
+// y = FALSE xor x       => y = x1 xor x2
+
+static int set_clause_literal(varc_t* vp, int lit, clause_t* cp, int i)
+{
+//    if ((i == 0) || (lit != FALSE)) {
+	cp->lit[i] = lit;
+	if (add_varref(vp, lit, cp, i) < 0)
+	    return -1;
+	return i+1;
+//    }
+//    return i;
+}
+
+
 static ERL_NIF_TERM add_clause_list(ErlNifEnv* env, varc_t* vp, int op,
 				    ERL_NIF_TERM list, size_t size)
 {
-    clause_t* ptr;
+    clause_t* cp;
     ERL_NIF_TERM head, tail;
     int i, cix;
 
-    if ((ptr = clause_alloc(vp, op, size)) == NULL)
+    if ((cp = clause_alloc(vp, op, size)) == NULL)
 	return enif_make_badarg(env);
-    if ((cix = insert_clause(env, vp, ptr)) < 0)
+    if ((cix = insert_clause(env, vp, cp)) < 0)
 	return enif_make_badarg(env);
     i = 0;
     while(enif_get_list_cell(env, list, &head, &tail)) {
-	int x;
-	if (!get_literal(env, vp, head, &x))  // should not fail!
+	int lit;
+	if (!get_literal(env, vp, head, &lit))  // should not fail!
 	    return enif_make_badarg(env);
-	ptr->lit[i] = x;
-	if (add_varref(vp, x, ptr, i) < 0)
+	if ((i=set_clause_literal(vp, lit, cp, i)) < 0)
 	    return enif_make_badarg(env);
-	i++;
 	list = tail;
     }
+    cp->size = i;
     return enif_make_int(env, cix);
 }
 
 static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
 				     const ERL_NIF_TERM* array, size_t size)
 {
-    clause_t* ptr;
-    int i, cix;
+    clause_t* cp;
+    int i, j, cix;
 
-    if ((ptr = clause_alloc(vp, op, size)) == NULL)
+    if ((cp = clause_alloc(vp, op, size)) == NULL)
 	return enif_make_badarg(env);
-    if ((cix = insert_clause(env, vp, ptr)) < 0)
+    if ((cix = insert_clause(env, vp, cp)) < 0)
 	return enif_make_badarg(env);
 
-    for (i = 0; i < (int)size; i++) {
-	int x;
-	if (!get_literal(env, vp, array[i], &x))  // should not fail!
+    i = 0;
+    for (j = 0; j < (int)size; j++) {
+	int lit;
+	if (!get_literal(env, vp, array[j], &lit))  // should not fail!
 	    return enif_make_badarg(env);
-	ptr->lit[i] = x;
-	if (add_varref(vp, x, ptr, i) < 0)
+	if ((i=set_clause_literal(vp, lit, cp, i)) < 0)
 	    return enif_make_badarg(env);
     }
+    cp->size = i;    
     return enif_make_int(env, cix);
 }
 
@@ -2254,14 +2247,10 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
 
-    if (argv[1] == ATOM(and))
-	op = CLAUSE_OP_AND;
-    else if (argv[1] == ATOM(or))
+    if (argv[1] == ATOM(or))
 	op = CLAUSE_OP_OR;
     else if (argv[1] == ATOM(xor))
 	op = CLAUSE_OP_XOR;
-    else if (argv[1] == ATOM(reg))
-	op = CLAUSE_OP_REG;
     else
 	return enif_make_badarg(env);
 
@@ -2315,7 +2304,7 @@ static ERL_NIF_TERM varc_del_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     // remove all varrefs
-    for (i = 0; i < cp->size; i++) {
+    for (i = 0; i < (int)cp->size; i++) {
 	int lit = cp->lit[i];
 	if ((lit != TRUE) && (lit != FALSE)) {
 	    if (lit < 0) {
@@ -2359,10 +2348,8 @@ static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
 	list = enif_make_list_cell(env, elem, list);
     }
     switch(cp->op) {
-    case CLAUSE_OP_AND: op = ATOM(and); break;
     case CLAUSE_OP_OR:  op = ATOM(or); break;
     case CLAUSE_OP_XOR: op = ATOM(xor); break;
-    case CLAUSE_OP_REG: op = ATOM(reg); break;
     default: op = ATOM(undefined); break;
     }
     return enif_make_tuple2(env, op, list);
@@ -2629,10 +2616,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(size);
     LOAD_ATOM(bcp);    
     LOAD_ATOM(error);
-    LOAD_ATOM(and);
     LOAD_ATOM(or);
     LOAD_ATOM(xor);
-    LOAD_ATOM(reg);
     LOAD_ATOM(inqueue);
     LOAD_ATOM(dead);
     LOAD_ATOM(flags);

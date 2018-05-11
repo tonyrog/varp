@@ -19,6 +19,10 @@ backtrack(false) ->
 backtrack(Bs) ->
     N     = varp_formula:getopt(Bs,max),
     Print = varp_formula:getopt(Bs,print),
+    Order = varp_formula:getopt(Bs,order),
+    if Order =:= undefined -> ok;
+       true -> varp_formula:order(Bs, Order)
+    end,
     case varp_formula:getopt(Bs,method) of
 	collect ->
 	    bt(Bs, fun({Count0,Acc},Bs1) ->

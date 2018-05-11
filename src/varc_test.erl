@@ -23,9 +23,6 @@ all() ->
     or_clause(true),
     or_clause(false),
     or_conflict(),
-    and_eval(),
-    and_clause(true),
-    and_clause(false),
     xor_eval(),
     xor_clause(true),
     xor_clause(false),
@@ -38,14 +35,14 @@ test1() ->
     X4 = varc:add_variable(V),
     X5 = varc:add_variable(V),
     
-    C0 = varc:add_clause(V, 'and', [X2, X3, X4]),
-    C1 = varc:add_clause(V, 'and', [X3, X4, X5]),
+    C0 = varc:add_clause(V, 'or', [X2, X3, X4]),
+    C1 = varc:add_clause(V, 'or', [X3, X4, X5]),
 
     R0 = varc:get_clause(V, C0),
-    R0 = {'and', [X2, X3, X4]},
+    R0 = {'or', [X2, X3, X4]},
 
     R1 = varc:get_clause(V, C1),
-    R1 = {'and', [X3, X4, X5]}.
+    R1 = {'or', [X3, X4, X5]}.
 
 
 test2() ->
@@ -55,14 +52,14 @@ test2() ->
     X4 = varc:add_variable(V),
     X5 = varc:add_variable(V),
     
-    C0 = varc:add_clause(V, 'and', X2, X3, X4),
-    C1 = varc:add_clause(V, 'and', X3, X4, X5),
+    C0 = varc:add_clause(V, 'or', X2, X3, X4),
+    C1 = varc:add_clause(V, 'or', X3, X4, X5),
 
     R0 = varc:get_clause(V, C0),
-    R0 = {'and', [X2, X3, X4]},
+    R0 = {'or', [X2, X3, X4]},
 
     R1 = varc:get_clause(V, C1),
-    R1 = {'and', [X3, X4, X5]}.
+    R1 = {'or', [X3, X4, X5]}.
     
 %%
 %% Test clause / queue 
@@ -77,15 +74,15 @@ test3() ->
     X7 = varc:add_variable(V),
     X8 = varc:add_variable(V),
 
-    C0 = varc:add_clause(V, 'and', X2, X3, X4),
-    C1 = varc:add_clause(V, 'and', X3, X4, X5),
-    C2 = varc:add_clause(V, 'and', X4, X5, X6, X7),
-    C3 = varc:add_clause(V, 'and', X6, X7, X8),
+    C0 = varc:add_clause(V, 'or', X2, X3, X4),
+    C1 = varc:add_clause(V, 'or', X3, X4, X5),
+    C2 = varc:add_clause(V, 'or', X4, X5, X6, X7),
+    C3 = varc:add_clause(V, 'or', X6, X7, X8),
 
-    {'and',[X2,X3,X4]} = varc:get_clause(V, C0),
-    {'and',[X3,X4,X5]} = varc:get_clause(V, C1),
-    {'and',[X4,X5,X6,X7]} = varc:get_clause(V, C2),
-    {'and',[X6,X7,X8]} = varc:get_clause(V, C3),
+    {'or',[X2,X3,X4]} = varc:get_clause(V, C0),
+    {'or',[X3,X4,X5]} = varc:get_clause(V, C1),
+    {'or',[X4,X5,X6,X7]} = varc:get_clause(V, C2),
+    {'or',[X6,X7,X8]} = varc:get_clause(V, C3),
 
     true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X2)),
     true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
@@ -240,8 +237,8 @@ or_conflict() ->
     true = varc:put(Vp,X2,?FALSE),
     false = varc:eval(Vp),
 
-    {Conflict,_Pos,_Mark} = varc:conflicting_clause(Vp),
-    [{CVar,CVal}] = varc:get_latest_binding(Vp),
+    Conflict = varc:conflicting_clause(Vp),
+    {CVar,CVal} = varc:get_latest_binding(Vp),
     CLit = if CVal < 0 -> -CVar; true -> CVar end,
     Implication = varc:implication_clause(Vp, CLit),
 
@@ -250,88 +247,6 @@ or_conflict() ->
     io:format("implication clause: ~p\n", [Implication]), 
 
     ok.
-
-
-    
-and_eval() ->
-    V = varc:new(),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
-
-    4 = varc:get_number_of_variables(V),
-    X2 = varc:get(V, X2),
-    X3 = varc:get(V, X3),
-    X4 = varc:get(V, X4),
-    X5 = varc:get(V, X5),
-
-    C0 = varc:add_clause(V, 'and', X2, ?TRUE, ?FALSE, ?TRUE, ?FALSE),
-    C1 = varc:add_clause(V, 'and', X3, ?TRUE, ?TRUE, ?TRUE, ?TRUE),
-    C2 = varc:add_clause(V, 'and', X4, ?FALSE, ?FALSE, ?FALSE, ?FALSE),
-    C3 = varc:add_clause(V, 'and', X5, ?TRUE, ?FALSE, ?TRUE, ?FALSE, ?TRUE),
-    io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
-    io:format("queue=~p\n", [varc:get_queue(V)]),
-    true = varc:eval(V),
-    
-    V2 = varc:get(V, X2),
-    io:format("X1 = ~w\n", [V2]),
-    true = V2 =:= ?FALSE,
-
-    V3 = varc:get(V, X3),
-    io:format("X2 = ~w\n", [V3]),
-    true = V3 =:= ?TRUE,
-
-    V4 = varc:get(V, X4),
-    io:format("X3 = ~w\n", [V4]),
-    true = V4 =:= ?FALSE,
-
-    V5 = varc:get(V, X5),
-    io:format("X4 = ~w\n", [V5]),
-    true = V5 =:= ?FALSE,
-
-    io:format("Bindings = ~w\n", [varc:get_bindings(V,0)]),
-
-    true.
-
-and_clause(Bcp) ->
-    V = varc:new([{bcp,Bcp}]),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
-
-    C0 = varc:add_clause(V, 'and', ?FALSE, ?TRUE, X2, ?TRUE, ?TRUE),
-    C1 = varc:add_clause(V, 'and', ?TRUE, ?TRUE, X3, ?TRUE, ?TRUE),
-    C2 = varc:add_clause(V, 'and', X4, ?TRUE, ?TRUE, X5, ?TRUE),
-    io:format("and clauses=~p\n", [[C0,C1,C2]]),
-    io:format("and queue=~p\n", [varc:get_queue(V)]),
-    true = varc:eval(V),
-
-    V2 = varc:get(V, X2),
-    io:format("X2 = ~w\n", [V2]),
-    true = V2 =:= ?FALSE,
-
-    V3 = varc:get(V, X3),
-    io:format("X3 = ~w\n", [V3]),
-    true = V3 =:= ?TRUE,
-
-    V4 = varc:get(V, X4),
-    V5 = varc:get(V, X5),
-    io:format("X4=~w, X5=~w\n", [V4,V5]),
-
-    case varc:info(V,bcp) of
-	false ->
-	    true = V4 =:= X5;
-	true ->
-	    true = V4 =:= X4,
-	    true = V5 =:= X5,
-	    ok
-    end,
-    io:format("and Bindings = ~w\n", [varc:get_bindings(V,0)]),
-    io:format("info = ~w\n", [varc:get_info(V)]),
-    true.
-
 
 xor_eval() ->
     V = varc:new(),
@@ -471,8 +386,8 @@ order() ->
     X6 = varc:add_variable(V),
     X7 = varc:add_variable(V),
     
-    _C0 = varc:add_clause(V, 'and', [X2, X3, X4]),
-    _C1 = varc:add_clause(V, 'and', [X3, X4, X5]),
+    _C0 = varc:add_clause(V, 'or', [-X2, -X3, -X4]),
+    _C1 = varc:add_clause(V, 'or', [-X3, -X4, -X5]),
     _C2 = varc:add_clause(V, 'or',  [X6, X2, X3]),
     _C3 = varc:add_clause(V, 'or',  [X7, X6, X2]),
 

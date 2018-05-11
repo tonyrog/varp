@@ -143,7 +143,57 @@ or_clause(Bs,Xs) ->
 and_clause(Bs,Xs) ->
     clause(Bs, 'or', [1|[-L||L<-Xs]]).
 
-
+clause(Bs,'or',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
+    case varp_option:getopt(clause,Bs#bs.option) of
+	false -> %% install as gate
+	    add_clause(Bs,'or',Ls),
+	    Bs;
+	true -> %% install as clauses
+	    add_clause(Bs,'or',[1,-X,Y,Z]),
+	    add_clause(Bs,'or',[1,X,-Y]),
+	    add_clause(Bs,'or',[1,X,-Z]),
+	    Bs
+    end;
+clause(Bs,'xor',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% xor 2-gate
+    case varp_option:getopt(clause,Bs#bs.option) of
+	false -> %% install as gate
+	    add_clause(Bs,'xor',Ls),
+	    Bs;
+	true -> %% install as clauses
+	    add_clause(Bs,'or',[1,X,-Y,Z]),
+	    add_clause(Bs,'or',[1,X,Y,-Z]),
+	    add_clause(Bs,'or',[1,-X,-Y,-Z]),
+	    add_clause(Bs,'or',[1,-X,Y,Z]),
+	    Bs
+    end;
+clause(Bs,'or',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
+    case varp_option:getopt(clause,Bs#bs.option) of
+	false ->
+	    L = length(Ls),
+	    N = varc:get_max_clause_length(Bs#bs.vp),
+	    if L =< N ->
+		    _Cix = add_clause(Bs,'or',Ls),
+		    Bs;
+	       true ->
+		    build_clause_tree(Bs,'or',hd(Ls),tl(Ls),L-1,N)
+	    end;
+	true -> %% install n-gate as clauses
+	    build_gate_tree(Bs,'or',hd(Ls),tl(Ls))
+    end;
+clause(Bs,'xor',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
+    case varp_option:getopt(clause,Bs#bs.option) of
+	false ->
+	    L = length(Ls),
+	    N = varc:get_max_clause_length(Bs#bs.vp),
+	    if L =< N ->
+		    _Cix = add_clause(Bs,'xor',Ls),
+		    Bs;
+	       true ->
+		    build_clause_tree(Bs,'xor',hd(Ls),tl(Ls),L-1,N)
+	    end;
+	true -> %% install n-gate as clauses
+	    build_gate_tree(Bs,'xor',hd(Ls),tl(Ls))
+    end;
 clause(Bs,Op,Ls) ->
     ?dbg("clause: {~w,~w}\n", [Op,Ls]),
     L = length(Ls),
@@ -156,8 +206,24 @@ clause(Bs,Op,Ls) ->
     end.
 
 add_clause(Bs,Op,Ls) ->
-    %% io:format("add_clause: ~w ~p\n", [Op,Ls]),
+    %% io:format("add_clause: ~w ~w\n", [Op,Ls]),
     varc:add_clause(Bs#bs.vp,Op,Ls).
+
+build_gate_tree(Bs,Op,X,Ls) ->
+    case lists:split(Ls, length(Ls) div 2) of
+	{[A],[B]} ->
+	    clause(Bs,'or',[X,A,B]);
+	{[A],[B1,B2]} ->
+	    X1 = varc:add_variable(Bs#bs.vp),
+	    Bs1=clause(Bs,'or',[X1,B1,B2]),
+	    clause(Bs1,'or',[X,A,X1]);
+	{As,Bs} ->
+	    X1 = varc:add_variable(Bs#bs.vp),
+	    Bs2=build_gate_tree(Bs,Op,X1,As),
+	    X2 = varc:add_variable(Bs#bs.vp),
+	    Bs3=build_gate_tree(Bs2,Op,X2,Bs),
+	    clause(Bs3,'or',[X,X1,X2])
+    end.
 
 build_clause_tree(Bs,Op,X,Ls,L,N) ->
     Ls1 = build_branch_list(Bs,Op,Ls,L,N),

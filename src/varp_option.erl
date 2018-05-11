@@ -96,6 +96,13 @@ options() ->
 	    default => false,
 	    description => "Do not use equivalence classes."
 	  },
+    V71 = #{ long => "clause",
+	     short => "c",
+	     key => clause,
+	     spec => {enums,[?BOOL]},
+	     default => false,
+	     description => "Use clause form."
+	   },
     V8 = #{ long => "saturate",
 	    short => "s",
 	    key => saturate,
@@ -235,6 +242,7 @@ options() ->
        max => V5, "max" => V5, "n" => V5,
        order => V6, "order" => V6,
        bcp => V7, "bcp" => V7,
+       clause => V71, "clause" => V71, "c" => V71,
        saturate => V8, "saturate" => V8, "s" => V8,
        backtrack => V9, "backtrack" => V9, "b" => V9,
        backjump => V91, "backjump" => V91, "j" => V91,
