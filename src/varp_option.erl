@@ -28,19 +28,24 @@
 %%
 
 -define(BOOL,{"true",true},{"false",false},{"1",true},{"0",false}).
+-define(ORDER,{"undefined",undefined},{"identity",identity},
+	{"random",random},{"depth",'+depth'},
+	{"+depth",'+depth'},{"-depth",'-depth'},
+	{"occur",'+occur'},{"+occur",'+occur'},
+	{"-occur",'-occur'}).
 
 options() ->
     V1 = #{ long => "value",
 	    short => "v",
 	    key => value,
-	    spec => {enums,[?BOOL,{"none", none}]},
+	    spec => {enum,[?BOOL,{"none", none}]},
 	    default => none,
 	    description => "Main formula variable value."
 	  },
     V2 = #{ long => "print",
 	    short => "p",
 	    key => print,
-	    spec => {enums,
+	    spec => {enum,
 		     [?BOOL,
 		      {"literal",literal},
 		      {"erlang",erlang},
@@ -50,13 +55,13 @@ options() ->
 	  },
     V3 = #{ long => "partial",
 	    key => partial,
-	    spec => {enums,[?BOOL]},
+	    spec => {enum,[?BOOL]},
 	    default => false,
 	    description => "Print partial models when possible."
 	  },
     V4 = #{ long => "method",
 	    key => method,
-	    spec => {enums,
+	    spec => {enum,
 		     [{"collect", collect},
 		      {"count", count}]},
 	    default => collect,
@@ -71,35 +76,32 @@ options() ->
 	  },
     V6 = #{ long => "order",
 	    key => order,
-	    spec => {enums,
-		     [{"identity", identity},
-		      {"random",   random},
-		      {"depth",    depth_ascending},
-		      {"+depth",   depth_ascending},
-		      {"-depth",   depth_descending},
-		      {"occur",    occur_ascending},
-		      {"+occur",   occur_ascending},
-		      {"-occur",   occur_descending},
-		      {"depth,occur", depth_occur_ascending},
-		      {"+depth,occur", depth_occur_ascending},
-		      {"-depth,occur", depth_occur_descending},
-		      {"occur,depth", occur_depth_ascending},
-		      {"+occur,depth", occur_depth_ascending},
-		      {"-occur,depth", occur_depth_descending}
-		     ]},
-	    default => identity,
+	    spec => {list,{enum,[?ORDER]}},
+	    default => [identity],
 	    description => "Specifiy variable order."
 	  },
+    V61 = #{ long => "order_first",
+	     key => order_first,
+	     spec => {list,variable},
+	     default => [],
+	     description => "Sort variables first."
+	   },
+    V62 = #{ long => "order_last",
+	     key => order_last,
+	     spec => {list,variable},
+	     default => [],
+	     description => "Sort variables last."
+	   },
     V7 = #{ long => "bcp",
 	    key => bcp,
-	    spec => {enums,[?BOOL]},
+	    spec => {enum,[?BOOL]},
 	    default => false,
 	    description => "Do not use equivalence classes."
 	  },
     V71 = #{ long => "clause",
 	     short => "c",
 	     key => clause,
-	     spec => {enums,[?BOOL]},
+	     spec => {enum,[?BOOL]},
 	     default => false,
 	     description => "Use clause form."
 	   },
@@ -113,26 +115,26 @@ options() ->
     V9 = #{ long => "backtrack",
 	    short => "b",
 	    key => backtrack,
-	    spec => {enums,[?BOOL]},
+	    spec => {enum,[?BOOL]},
 	    default => true,
 	    description => "Use backtracking."
 	  },
     V91 = #{ long => "backjump",
 	     short => "j",
 	     key => backjump,
-	     spec => {enums,[?BOOL]},
+	     spec => {enum,[?BOOL]},
 	     default => false,
 	     description => "Use backjumping during backtrack."
 	  },
     V10 = #{ long => "pair",
 	     key => pair,
-	     spec => {enums,[?BOOL]},
+	     spec => {enum,[?BOOL]},
 	     default => false,
 	     description => "Add extra variable in saturation."
 	   },
     V11 = #{ long => "assoc",
 	     key => assoc,
-	     spec => {enums,
+	     spec => {enum,
 		      [{"left",left},
 		       {"right",right},
 		       {"middle",middle}]}, 
@@ -154,25 +156,25 @@ options() ->
 	    },
     V13 = #{ long => "carry",
 	     key => carry,
-	     spec => {enums,[?BOOL,{"ignore",ignore}]},
+	     spec => {enum,[?BOOL,{"ignore",ignore}]},
 	     default => ignore,
 	     description => "How to handle carry in addition."
 	   },
     V14 = #{ long => "borrow",
 	     key => borrow,
-	     spec => {enums,[?BOOL,{"ignore",ignore}]},
+	     spec => {enum,[?BOOL,{"ignore",ignore}]},
 	     default => ignore,
 	     description => "How to handle borrow in subtraction."
 	   },
     V15 = #{ long => "divz",
 	     key => divz,
-	     spec => {enums,[?BOOL,{"ignore",ignore}]},
+	     spec => {enum,[?BOOL,{"ignore",ignore}]},
 	     default => false,
 	     description => "How to handle divide by zero."
 	   },
     V16 = #{ long => "log",
 	     key => log,
-	     spec => {enums,
+	     spec => {enum,
 		      [{"debug",?DEBUG},
 		       {"info",?INFO},
 		       {"notice",?NOTICE},
@@ -241,6 +243,8 @@ options() ->
        method  => V4, "method"  => V4,
        max => V5, "max" => V5, "n" => V5,
        order => V6, "order" => V6,
+       order_first => V61, "order_first" => V61,
+       order_last => V62, "order_last" => V62,
        bcp => V7, "bcp" => V7,
        clause => V71, "clause" => V71, "c" => V71,
        saturate => V8, "saturate" => V8, "s" => V8,
@@ -287,6 +291,7 @@ process_args(["--"++OptName|As],Mode,Opts,Bound) ->
 	{#{ key:=help },_Val} -> usage();
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=ValSpec },Val} ->
+	    %%io:format("Match value = ~p ~p\n", [ValSpec,Val]),
 	    case match_value(ValSpec,Val,As) of
 		false -> usage();
 		{ok,Value,As1} ->
@@ -301,6 +306,7 @@ process_args(["-"++OptName|As],Mode,Opts,Bound) ->
 		{#{ key:=help },_Val} -> usage();
 		{#{ key:=version },_Val} -> version();
 		{#{ key:=Key,spec:=ValSpec },Val} ->
+		    %%io:format("Match value = ~p ~p\n", [ValSpec,Val]),
 		    case match_value(ValSpec,Val,As) of
 			false -> usage();
 			{ok,Value,As1} ->
@@ -310,6 +316,7 @@ process_args(["-"++OptName|As],Mode,Opts,Bound) ->
 	{#{ key:=help },_Val} -> usage();
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=ValSpec },Val} ->
+	    %%io:format("Match value = ~p ~p\n", [ValSpec,Val]),
 	    case match_value(ValSpec,Val,As) of
 		false -> usage(Key,Val);
 		{ok,Value,As1} ->
@@ -367,47 +374,68 @@ get_option_name(Cs) ->
     get_option_name(Cs,[]).
 
 get_option_name([C|Cs],Acc) when 
-      C >= $a, C =< $z; C >= $A, C =< $Z ->
+      C >= $a, C =< $z; C >= $A, C =< $Z; C =:= $_ ->
     get_option_name(Cs,[C|Acc]);
 get_option_name(Cs,Acc) ->
     {lists:reverse(Acc), Cs}.
 
-match_value({multiple,Type}, Val, As) ->
-    match_value(Type, Val, As);
+match_value(Spec, [$=|Val], As) ->
+    match_value(Spec, Val, As);
+match_value({multiple,Spec}, Val, As) ->
+    match_value(Spec, Val, As);
+match_value({list,variable},Val,As) ->
+    %% trick
+    {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
+    {ok,{_Decls,{vec,VarList}}} = varp_parse:parse(Ts),
+    {ok, VarList, As};
+match_value({list,Spec}, Val, As) ->
+    Vals = string:tokens(Val, ", "),
+    match_values(Spec, Vals, As);
 match_value(void, "", As) ->
     {ok,true,As};
-match_value(Spec, [$=|Val], As) ->
-    case match_value(Spec, Val) of
-	{ok,Value} -> {ok,Value,As};
-	false  -> false
-    end;
+
 match_value(Spec, [], [Val|As]) ->
-    case match_value(Spec, Val) of
+    case match_val_(Spec, Val) of
 	{ok,Value} -> {ok,Value,As};
 	false  -> false
     end;
 match_value(Spec, Val, As) ->
-    case match_value(Spec, Val) of
+    case match_val_(Spec, Val) of
 	{ok,Value} -> {ok,Value,As};
 	false  -> false
     end.
 
-match_value(integer, Val) ->
+%% Match a value list
+match_values(Spec,Vs,As) ->
+    match_values(Spec,Vs,[],As).
+
+match_values(Spec,[V|Vs],Acc,As) ->
+    case match_value(Spec,V,As) of
+	{ok,Value,As1} ->
+	    match_values(Spec,Vs,[Value|Acc],As1);
+	false ->
+	    false
+    end;
+match_values(_Spec,[],Acc,As) ->
+    {ok,lists:reverse(Acc),As}.
+
+
+match_val_(integer, Val) ->
     try list_to_integer(Val) of
 	N -> {ok,N}
     catch
 	error:badarg -> false
     end;
-match_value(unsigned, Val) ->
+match_val_(unsigned, Val) ->
     try list_to_integer(Val) of
 	N when N>=0 -> {ok,N};
 	_ -> false
     catch
 	error:badarg -> false
     end;
-match_value(string, Val) ->
+match_val_(string, Val) ->
     {ok,Val};
-match_value({enums,List}, Val) when is_list(List) ->
+match_val_({enum,List}, Val) when is_list(List) ->
     case proplists:get_value(Val,List) of
 	undefined -> false;
 	Enum -> {ok,Enum}
@@ -475,17 +503,25 @@ usage(Key,Value) when is_atom(Key) ->
     end.
 
 format_spec({multiple,T}) -> "{"++format_spec(T)++"}*";
+format_spec({list,T}) -> "["++format_spec(T)++"]";
 format_spec(unsigned) -> "unsigned integer";
 format_spec(integer)  -> "integer";
 format_spec(string)   -> "string";
+format_spec(variable) -> "variable";
 format_spec(atom)     -> "atom";
 format_spec(void)     -> "void";
-format_spec({enums,Vs}) when is_list(Vs) ->
+format_spec({enum,Vs}) when is_list(Vs) ->
     string:join([Name || {Name,_Enum} <- Vs], "|").
 
 format_value(N) when is_integer(N) -> integer_to_list(N);
 format_value(A) when is_atom(A) -> atom_to_list(A);
-format_value(L) when is_list(L) -> L.
+format_value(L) when is_list(L) ->
+    try list_to_binary(L) of
+	Bin -> binary_to_list(Bin)
+    catch
+	error:_ -> 
+	    string:join([format_value(V)||V<-L], ",")
+    end.
 
 %% saturation options
 %% #{ 
@@ -505,7 +541,7 @@ set_opts(Opts) when is_list(Opts) ->
     set_opts(Opts, default_opts()).
 
 set_opts([{Opt,Value} | Opts], OptMap) ->
-    %% io:format("set_opts: ~w ~w\n", [Opt,Value]),
+    io:format("set_opts: ~w ~p\n", [Opt,Value]),
     set_opts(Opts, setopt(Opt,Value,OptMap));
 set_opts([], OptMap) ->
     OptMap.
@@ -569,7 +605,7 @@ get_saturate_opt(OptMap) ->
 %%
 %% Check value against spec
 %%
-validate_value(log,{enums,_Enums},Level,_Old) when is_atom(Level) ->
+validate_value(log,{enum,_Enums},Level,_Old) when is_atom(Level) ->
     %% special? fixme!
     Map = #{  debug => ?DEBUG,
 	      info  => ?INFO,
@@ -584,12 +620,12 @@ validate_value(log,{enums,_Enums},Level,_Old) when is_atom(Level) ->
 	error -> false;
 	{ok,Value} -> {true,Value}
     end;
-validate_value(log,{enums,_Enums},Level,_Old) when is_integer(Level) ->
+validate_value(log,{enum,_Enums},Level,_Old) when is_integer(Level) ->
     %% special? fixme!
     if Level >= ?LOG_NONE, Level =< ?DEBUG -> {true,Level};
        true -> false
     end;
-validate_value(_Key,{enums,Enums},Value,_Old) ->
+validate_value(_Key,{enum,Enums},Value,_Old) ->
     case lists:keyfind(Value, 2, Enums) of
 	false -> false;
 	_ -> true
@@ -602,11 +638,11 @@ validate_value(_Key,string,Value,_Old) ->
     is_string(Value);
 validate_value(_Key,atom,Value,_Old) ->
     is_atom(Value);
-validate_value(_Key, void, Value,_Old) ->
+validate_value(_Key,void, Value,_Old) ->
     (Value =:= "") orelse (value =:= undefined);
-validate_value(_Key, term, _Value,_Old) ->  %% any value
+validate_value(_Key,term, _Value,_Old) ->  %% any value
     true;
-validate_value(_Key, pred, Value,_Old) ->  %% predicate
+validate_value(_Key,pred, Value,_Old) ->  %% predicate
     case Value of
 	{p,_Name,_Args} when is_list(_Args) -> true;
 	_ -> false
@@ -614,6 +650,15 @@ validate_value(_Key, pred, Value,_Old) ->  %% predicate
 validate_value(_Key, predpat, Value,_Old) ->  %% predicate pattern
     case Value of
 	{p,Name,Args} -> {true,{p,Name,['_' || _ <- Args]}};
+	_ -> false
+    end;
+validate_value(_Key,variable, Value,_Old) ->  %% variable / pred / vector
+    case Value of
+	{p,_Name,_Args} when is_list(_Args) -> true;
+	{bit_index,_,_} -> true;
+	{bit_range,_,_,_} -> true;
+	{int,_,_} -> true;
+	{uint,_,_} -> true;
 	_ -> false
     end;
 validate_value(Key,{union,Types},Value,Old) -> %% alternative types
@@ -657,7 +702,7 @@ validate_value(Key,{list,Type},List,_OldList) ->
 		    end, [], List),
     case List1 of
 	false -> false;
-	_ ->  {true,List1}
+	_ ->  {true,lists:reverse(List1)}
     end;
 validate_value(_Key,{},Value,_Old) ->
     Value =:= {};

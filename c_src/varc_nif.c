@@ -99,6 +99,10 @@ static ERL_NIF_TERM varc_order_next(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_order_sort_first(ErlNifEnv* env, int argc,
+					  const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_order_sort_last(ErlNifEnv* env, int argc,
+					 const ERL_NIF_TERM argv[]);
 
 #define MAX_CLAUSE_LENGTH  MAX_BITSET_SIZE
 
@@ -193,9 +197,8 @@ typedef struct _varref_t  /* : object_t */
 
 #define VAR_FLAG_INQUEUE 0x0001
 
-#define VAR_OCCUR_KEY 0
-#define VAR_DEPTH_KEY 1
-#define VAR_MARK_KEY  2
+#define VAR_MARK_KEY  0
+// sort keys are number 1 and 2
 
 typedef struct _variable_t
 {
@@ -226,9 +229,10 @@ typedef struct _varc_t {
     int bcp;                 // boolean constraint propagation
     int mark;                // current mark
     int conflicting_clause;     // conflict clause from last eval
-    unsigned int grow;       // how much to expand value/class map
-    variable_t*  var_map;    // variable/class map 
-    int*         order_map;  // variable order table
+    unsigned int grow;        // how much to expand value/class map
+    variable_t*  var_map;     // variable/class map 
+    int*         order_map;   // variable order table
+    int          sort_key[2]; // sort order -1,-2,1,2
     clause_t** clause_map;   // clause_map[v] = class chain of variable v
     undo_t*  undo_stack;     // undo stack
     unsigned int undo_stack_size;  // total size of undo stack
@@ -301,8 +305,9 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "get_nbindings",       3,  varc_get_nbindings ),
     NIF_FUNC( "order_first",         1,  varc_order_first ),
     NIF_FUNC( "order_next",          3,  varc_order_next ),
-    NIF_FUNC( "order_sort",          2,  varc_order_sort ),
-    NIF_FUNC( "order_sort",          3,  varc_order_sort ),
+    NIF_FUNC( "order_sort",          4,  varc_order_sort ),
+    NIF_FUNC( "order_sort_first",    2,  varc_order_sort_first ),
+    NIF_FUNC( "order_sort_last",     2,  varc_order_sort_last ),    
 };
 
 // Atom macros
@@ -321,7 +326,6 @@ ErlNifFunc varc_funcs[] =
 DECL_ATOM(ok);
 DECL_ATOM(true);
 DECL_ATOM(false);
-DECL_ATOM(undefined);
 DECL_ATOM(default);
 DECL_ATOM(grow);
 DECL_ATOM(size);
@@ -333,8 +337,8 @@ DECL_ATOM(inqueue);
 DECL_ATOM(dead);
 DECL_ATOM(flags);
 DECL_ATOM(mask);
+DECL_ATOM(undefined);
 DECL_ATOM(identity);
-DECL_ATOM(reverse);
 DECL_ATOM(random);
 DECL_ATOM(occur);
 DECL_ATOM(occur_ascending);
@@ -342,12 +346,6 @@ DECL_ATOM(occur_descending);
 DECL_ATOM(depth);
 DECL_ATOM(depth_ascending);
 DECL_ATOM(depth_descending);
-DECL_ATOM(depth_occur);
-DECL_ATOM(depth_occur_ascending);
-DECL_ATOM(depth_occur_descending);
-DECL_ATOM(occur_depth);
-DECL_ATOM(occur_depth_ascending);
-DECL_ATOM(occur_depth_descending);
 
 // info
 DECL_ATOM(max_clause_length);
@@ -1431,135 +1429,38 @@ static int order_reset(varc_t* vp)
     return u;
 }
 
-// reverse elements in range [a,b] in order map
-static void order_map_reverse(varc_t* vp, int a, int b)
-{
-    while(a < b) {
-	int t = vp->order_map[a];
-	vp->order_map[a] = vp->order_map[b];
-	vp->order_map[b] = t;
-	a++;
-	b--;
-    }
-}
 
-static int order_identity(varc_t* vp, int arg)
-{
-    int u = order_reset(vp);
-    if (arg >= 0)
-	order_map_reverse(vp, u, vp->vnext-1);
-    return u;
-}
-
-static void shuffle_array(varc_t* vp, int* a, size_t n)
+static void order_k_identity(varc_t* vp, int k)
 {
     int i;
-    for (i = n-1; i >= 1; i--) {
-	int j = arc4_random_uniform(&vp->as, n);
-	if (i != j) {
-	    int t = a[i];
-	    a[i] = a[j];
-	    a[j] = t;
-	}
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i].key[k] = i;
     }
 }
 
-static int order_random(varc_t* vp, int arg)
+static void order_k_random(varc_t* vp, int k)
 {
-    int u = order_reset(vp);
-    if (!arg)
-	arc4_stir(&vp->as);
-    else {
-	arc4_init(&vp->as);
-	arc4_add_random(&vp->as, (uint8_t*)&arg, sizeof(arg));
+    int i;
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i].key[k] = arc4_random_uniform(&vp->as, 0x7fffffff);
     }
-    shuffle_array(vp, vp->order_map+u, vp->vnext-u);
-    return u;
 }
 
-// this is INSANE!!!
-#if defined(_GNU_SOURCE)
-#define QSORT_R(base,nmemb,size,compar,arg) \
-    qsort_r((base),(nmemb),(size),(compar),(arg))
-#define QSORT_R_ARGS(a,b,arg) (a, b, arg)
- 
-#elif defined(__APPLE__)
-#define QSORT_R(base,nmemb,size,compar,arg) \
-    qsort_r((base),(nmemb),(size),(arg),(compar))
-#define QSORT_R_ARGS(a,b,arg) (arg, a, b)
-#endif
-
-static int cmp_k0_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
+static void order_k_undefined(varc_t* vp, int k)
 {
-    varc_t* vp = (varc_t*) arg;
-    return vp->var_map[*((int*)a)].key[0] - vp->var_map[*((int*)b)].key[0];
-}
-
-static int cmp_k0_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    return vp->var_map[*((int*)b)].key[0] - vp->var_map[*((int*)a)].key[0];
-}
-
-static int cmp_k01_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    int r;
-    r = vp->var_map[*((int*)a)].key[0] - vp->var_map[*((int*)b)].key[0];
-    if (r == 0)
-	r = vp->var_map[*((int*)a)].key[1] - vp->var_map[*((int*)b)].key[1];
-    return r;
-}
-
-static int cmp_k01_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    int r;
-    r = vp->var_map[*((int*)b)].key[0] - vp->var_map[*((int*)a)].key[0];
-    if (r == 0)
-	r = vp->var_map[*((int*)b)].key[1] - vp->var_map[*((int*)a)].key[1];
-    return r;
-}
-
-static int cmp_k1_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    return vp->var_map[*((int*)a)].key[1] - vp->var_map[*((int*)b)].key[1];
-}
-
-static int cmp_k1_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    return vp->var_map[*((int*)b)].key[1] - vp->var_map[*((int*)a)].key[1];
-}
-
-static int cmp_k10_asc QSORT_R_ARGS(const void* a,const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    int r;
-    r = vp->var_map[*((int*)a)].key[1] - vp->var_map[*((int*)b)].key[1];
-    if (r == 0)
-	r = vp->var_map[*((int*)a)].key[0] - vp->var_map[*((int*)b)].key[0];
-    return r;
-}
-
-static int cmp_k10_des QSORT_R_ARGS(const void* a, const void* b,void* arg)
-{
-    varc_t* vp = (varc_t*) arg;
-    int r;
-    r = vp->var_map[*((int*)b)].key[1] - vp->var_map[*((int*)a)].key[1];
-    if (r == 0)
-	r = vp->var_map[*((int*)b)].key[0] - vp->var_map[*((int*)a)].key[0];
-    return r;
+    int i;
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i].key[k] = 0;
+    }
 }
 
 // scan through all variables and calculate the occur count, key[k]
-static void calc_occur(varc_t* vp)
+static void order_k_occur(varc_t* vp, int k)
 {
     int i;
     
     for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i].key[VAR_OCCUR_KEY] = 0;
+	vp->var_map[i].key[k] = 0;
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
@@ -1568,15 +1469,15 @@ static void calc_occur(varc_t* vp)
 	    for (j = 0; j < (int)cp->size; j++) {
 		int x = get(vp, cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x].key[VAR_OCCUR_KEY]++;
+		    vp->var_map[-x].key[k]++;
 		else if (x > 1)
-		    vp->var_map[x].key[VAR_OCCUR_KEY]++;
+		    vp->var_map[x].key[k]++;
 	    }
 	}
     }
 }
 
-static void calc_depth(varc_t* vp)
+static void order_k_depth(varc_t* vp, int k)
 {
     int i;
     variable_t* vptr;
@@ -1584,7 +1485,7 @@ static void calc_depth(varc_t* vp)
     clear_variable_queue(vp);  // maybe warn if not empty?
     
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[VAR_DEPTH_KEY] = 0;
+	vp->var_map[i].key[k] = 0;
 	vp->var_map[i].key[VAR_MARK_KEY] = 0;
     }
 
@@ -1607,7 +1508,7 @@ static void calc_depth(varc_t* vp)
     // set all unmarked variables to depth=1 and enqueue them
     for (i = 2; i < (int)vp->vnext; i++) {
 	if (vp->var_map[i].key[VAR_MARK_KEY] == 0) {
-	    vp->var_map[i].key[VAR_DEPTH_KEY] = 1;
+	    vp->var_map[i].key[k] = 1;
 	    // printf("var %d depth=%d\r\n", i, vp->var_map[i].key[VAR_DEPTH_KEY]);
 	    enqueue_variable(vp, &vp->var_map[i]);
 	}
@@ -1621,7 +1522,6 @@ static void calc_depth(varc_t* vp)
 	    if (rp->pos > 0) {
 		clause_t* cp = vp->clause_map[rp->cix];
 		cp->key[0]++;
-		// wont work if we have constant as literals!
 		if (cp->key[0]+1 == cp->size) {
 		    int y = ABS(cp->lit[0]);  // output
 		    if (y > 1) {
@@ -1629,12 +1529,12 @@ static void calc_depth(varc_t* vp)
 			for (i = 1; i < (int)cp->size; i++) {
 			    int x = ABS(cp->lit[i]);
 			    if (x > 1) {
-				int d = vp->var_map[x].key[VAR_DEPTH_KEY];
+				int d = vp->var_map[x].key[k];
 				if (d > depth)
 				    depth = d;
 			    }
 			}
-			vp->var_map[y].key[VAR_DEPTH_KEY] = depth+1;
+			vp->var_map[y].key[k] = depth+1;
 			// printf("var %d depth=%d\r\n", y,
 			//  vp->var_map[y].key[VAR_DEPTH_KEY]);
 			enqueue_variable(vp, &vp->var_map[y]);
@@ -1646,117 +1546,153 @@ static void calc_depth(varc_t* vp)
     }
 }
 
-static int order_occur(varc_t* vp, int arg)
+// this is INSANE!!!
+#if defined(_GNU_SOURCE)
+#define QSORT_R(base,nmemb,size,compar,arg) \
+    qsort_r((base),(nmemb),(size),(compar),(arg))
+#define QSORT_R_ARGS(a,b,arg) (a, b, arg)
+ 
+#elif defined(__APPLE__)
+#define QSORT_R(base,nmemb,size,compar,arg) \
+    qsort_r((base),(nmemb),(size),(arg),(compar))
+#define QSORT_R_ARGS(a,b,arg) (arg, a, b)
+#endif
+
+static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
 {
-    int u;
-    
-    calc_occur(vp);    // calculate / recalculate occur count 
-    u = order_reset(vp);   // install identity order
+    varc_t* vp = (varc_t*) arg;
+    int k1 = vp->sort_key[0];
+    int k2 = vp->sort_key[1];
+    variable_t* ap = &vp->var_map[*((int*)a)];
+    variable_t* bp = &vp->var_map[*((int*)b)];
+    int r = 0;
 
-    // qsort_r extra argument in different positions between bsd/gnu
-    if (arg >= 0)
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k0_asc, vp);
-    else
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k0_des, vp);
-    return u;
-}
-
-static int order_depth(varc_t* vp, int arg)
-{
-    UNUSED(arg);
-    int u;
-    
-    calc_depth(vp);    // calculate / recalculate depth count 
-    u = order_reset(vp);   // install identity order
-    if (arg >= 0)
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k1_asc, vp);
-    else
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k1_des, vp);
-    return u;
-}
-
-static int order_occur_depth(varc_t* vp, int arg)
-{
-    UNUSED(arg);
-    int u;
-
-    calc_occur(vp);
-    calc_depth(vp);
-    u = order_reset(vp);   // install identity order
-    if (arg >= 0)
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k01_asc, vp);
-    else
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k01_des, vp);
-    return u;
-}
-
-static int order_depth_occur(varc_t* vp, int arg)
-{
-    UNUSED(arg);
-    int u;
-
-    calc_occur(vp);
-    calc_depth(vp);
-    u = order_reset(vp);   // install identity order
-    if (arg >= 0)
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k10_asc, vp);
-    else
-	QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int),
-		cmp_k10_des, vp);
-    return u;
+    if (k1 > 0) {
+	r = ap->key[k1] - bp->key[k1];
+	if (r==0) {
+	    if (k2 > 0)
+		r = ap->key[k2] - bp->key[k2];
+	    else if (k2 < 0)
+		r = bp->key[-k2] - ap->key[-k2];
+	}
+    }
+    else if (k1 < 0) {
+	r = bp->key[-k1] - ap->key[-k1];
+	if (r==0) {
+	    if (k2 > 0)
+		r = ap->key[k2] - bp->key[k2];
+	    else if (k2 < 0)
+		r = bp->key[-k2] - ap->key[-k2];
+	}
+    }
+    else { // k1 == 0
+	if (k2 > 0)
+	    r = ap->key[k2] - bp->key[k2];
+	else if (k2 < 0)
+	    r = bp->key[-k2] - ap->key[-k2];
+    }
+    return r;
 }
 
 static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
+    (void) argc;
     varc_t* vp;
     int arg = 0;
-    int ret;
+    int u;
+    int i;
     
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (argc > 2) {
-	if (!enif_get_int(env, argv[2], &arg))
-	    return enif_make_badarg(env);
-    }
-    if (argv[1] == ATOM(identity))
-	ret = order_identity(vp, arg);
-    else if (argv[1] == ATOM(random))
-	ret = order_random(vp, arg);
-    else if (argv[1] == ATOM(occur))
-	ret = order_occur(vp, arg);
-    else if (argv[1] == ATOM(depth))
-	ret = order_depth(vp, arg);    
-    else if (argv[1] == ATOM(occur_depth))
-	ret = order_occur_depth(vp, arg);
-    else if (argv[1] == ATOM(depth_occur))
-	ret = order_depth_occur(vp, arg);
-    else if (argv[1] == ATOM(occur_ascending))
-	ret = order_occur(vp, 1);
-    else if (argv[1] == ATOM(occur_descending))
-	ret = order_occur(vp, -1);
-    else if (argv[1] == ATOM(depth_ascending))
-	ret = order_depth(vp, 1);
-    else if (argv[1] == ATOM(depth_descending))
-	ret = order_depth(vp, -1);
-    else if (argv[1] == ATOM(occur_depth_ascending))
-	ret = order_occur_depth(vp, 1);
-    else if (argv[1] == ATOM(occur_depth_descending))
-	ret = order_occur_depth(vp, -1);
-    else if (argv[1] == ATOM(depth_occur_ascending))
-	ret = order_depth_occur(vp, 1);
-    else if (argv[1] == ATOM(depth_occur_descending))
-	ret = order_depth_occur(vp, -1);    
-    else
+    if (!enif_get_int(env, argv[3], &arg))
 	return enif_make_badarg(env);
-    return enif_make_int(env, ret);
+
+    if ((argv[1] == ATOM(random)) || (argv[2] == ATOM(random))) {
+	if (!arg)
+	    arc4_stir(&vp->as);
+	else {
+	    arc4_init(&vp->as);
+	    arc4_add_random(&vp->as, (uint8_t*)&arg, sizeof(arg));
+	}
+    }
+
+    // generate the sort keys 1 and 2
+    for (i = 1; i < 3; i++) {
+	int k = i;
+	if (argv[i] == ATOM(identity))
+	    order_k_identity(vp, k);
+	else if (argv[i] == ATOM(undefined))
+	    order_k_undefined(vp, k);	
+	else if (argv[i] == ATOM(random))
+	    order_k_random(vp, k);
+	else if ((argv[i] == ATOM(occur)) ||
+		 (argv[i] == ATOM(occur_ascending))) {
+	    order_k_occur(vp, k);
+	}
+	else if (argv[i] == ATOM(occur_descending)) {
+	    order_k_occur(vp, k);
+	    k = -k;
+	}
+	else if ((argv[i] == ATOM(depth)) ||
+		 (argv[i] == ATOM(depth_ascending))) {
+	    order_k_depth(vp, k);
+	}
+	else if (argv[i] == ATOM(depth_descending)) {
+	    order_k_depth(vp, k);
+	    k = -k;
+	}
+	else
+	    return enif_make_badarg(env);
+	vp->sort_key[i-1] = k;
+    }
+    u = order_reset(vp);   // install identity order
+    QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int), cmp_keys, vp);
+    return ATOM(ok);
+}
+
+static ERL_NIF_TERM varc_order_sort_first(ErlNifEnv* env, int argc,
+					  const ERL_NIF_TERM argv[])
+{
+    (void) argc;
+    varc_t* vp;
+    ERL_NIF_TERM list = argv[1];
+    ERL_NIF_TERM head, tail;
+    
+    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    while (enif_get_list_cell(env, list, &head, &tail)) {
+	int x;
+	if (!get_literal(env, vp, head, &x))
+	    return enif_make_badarg(env);
+	list = tail;
+    }
+    if (enif_is_empty_list(env, list))
+	return ATOM(ok);
+    return enif_make_badarg(env);
+}
+
+static ERL_NIF_TERM varc_order_sort_last(ErlNifEnv* env, int argc,
+					 const ERL_NIF_TERM argv[])
+{
+    (void) argc;
+    varc_t* vp;
+    ERL_NIF_TERM list = argv[1];
+    ERL_NIF_TERM head, tail;
+    
+    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    while (enif_get_list_cell(env, list, &head, &tail)) {
+	int x;
+	if (!get_literal(env, vp, head, &x))
+	    return enif_make_badarg(env);
+	list = tail;
+    }
+    if (enif_is_empty_list(env, list))
+	return ATOM(ok);
+    return enif_make_badarg(env);    
 }
 
 //
@@ -1795,6 +1731,7 @@ static ERL_NIF_TERM varc_class(ErlNifEnv* env, int argc,
     return enif_make_int(env, x);
 }
 
+// varc key[0]!
 static ERL_NIF_TERM varc_occur(ErlNifEnv* env, int argc,
 				const ERL_NIF_TERM argv[])
 {
@@ -1803,13 +1740,14 @@ static ERL_NIF_TERM varc_occur(ErlNifEnv* env, int argc,
     varc_t* vp;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
-	return enif_make_badarg(env);    
+	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &lit))
 	return enif_make_badarg(env);
     ix = (lit < 1) ? -lit : lit;
     return enif_make_int(env, vp->var_map[ix].key[0]);
 }
 
+// varc key[1]!
 static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[])
 {
@@ -1818,7 +1756,7 @@ static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
     varc_t* vp;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
-	return enif_make_badarg(env);    
+	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &lit))
 	return enif_make_badarg(env);
     ix = (lit < 1) ? -lit : lit;
@@ -2623,20 +2561,13 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(flags);
     LOAD_ATOM(mask);
     LOAD_ATOM(identity);
-    LOAD_ATOM(reverse);
     LOAD_ATOM(random);
     LOAD_ATOM(occur);
-    LOAD_ATOM(occur_ascending);
-    LOAD_ATOM(occur_descending);
+    LOAD_ATOM_STRING(occur_ascending, "+occur");
+    LOAD_ATOM_STRING(occur_descending,"-occur");
     LOAD_ATOM(depth);
-    LOAD_ATOM(depth_ascending);
-    LOAD_ATOM(depth_descending);    
-    LOAD_ATOM(depth_occur);
-    LOAD_ATOM(depth_occur_ascending);
-    LOAD_ATOM(depth_occur_descending);    
-    LOAD_ATOM(occur_depth);
-    LOAD_ATOM(occur_depth_ascending);
-    LOAD_ATOM(occur_depth_descending);    
+    LOAD_ATOM_STRING(depth_ascending, "+depth");
+    LOAD_ATOM_STRING(depth_descending, "-depth");
     
     // info
     LOAD_ATOM(max_clause_length);

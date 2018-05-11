@@ -40,7 +40,9 @@
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
 -export([eval_counter/1]).
--export([order/2, order/3]).
+-export([order/2, order/4]).
+-export([order_sort_first/2]).
+-export([order_sort_last/2]).
 -export([model/1, model/2]).
 -export([first_init/1]).
 -export([first_unbound/1]).
@@ -252,16 +254,39 @@ make_variable(Bs,V) ->
     {N,Bs1} = fresh_var(Bs),
     {N, alias(Bs1,V,N)}.
 
-order(Bs,random) ->
-    <<Seed:24>> = crypto:strong_rand_bytes(3),
-    order(Bs,random,Seed);
-order(Bs,Order) when is_atom(Order) ->
-    io:format("order ~w\n", [Order]),
-    varc:order_sort(Bs#bs.vp, Order).
+order_sort_last(Bs, VarList) ->
+    Last = variable_list(Bs,VarList),
+    io:format("last=~w\n",[Last]),
+    varc:order_sort_last(Bs#bs.vp, Last).
 
-order(Bs,How,Arg) when is_atom(How) ->
-    io:format("order ~w ~w\n", [How,Arg]),
-    varc:order_sort(Bs#bs.vp, How, Arg).
+order_sort_first(Bs, VarList) ->
+    First = variable_list(Bs,VarList),
+    io:format("first=~w\n",[First]),
+    varc:order_sort_first(Bs#bs.vp, First).
+
+variable_list(Bs, [V|Vs]) ->
+    case variable(Bs, V) of
+	{I,_Bs} when is_integer(I) ->
+	    [abs(I)|variable_list(Bs,Vs)];
+	{Is,_Bs} when is_list(Is) ->
+	    Is ++ variable_list(Bs,Vs)
+    end;
+variable_list(_Bs, []) ->
+    [].
+
+order(Bs,[Key1,Key2]) -> order(Bs,Key1,Key2,-1);
+order(Bs,[Key1]) -> order(Bs,Key1,undefined,-1).
+
+order(Bs,Key1,Key2,Arg) when is_atom(Key1), is_atom(Key2), is_integer(Arg) ->
+    Arg1 = if Key1 =:= random,Arg =:= -1;
+	      Key2 =:= random,Arg =:= -1 ->
+		   <<Seed:24>> = crypto:strong_rand_bytes(3),
+		   Seed;
+	      true ->
+		   Arg
+	   end,
+    io:format("order ~w, ~w, ~w\n", [Key1,Key2,Arg1]),
+    varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
 
 clear_queue(Bs) ->
     varc:clear_queue(Bs#bs.vp),

@@ -54,6 +54,11 @@ while		: {token,{while,TokenLine}}.
 code                : {token,{'code',TokenLine}}.
 declare             : {token,{'declare',TokenLine}}.
 define              : {token,{'define',TokenLine}}.
+order               : {token,{'order',TokenLine}}.
+depth               : {token,{'depth',TokenLine}}.
+occur               : {token,{'occur',TokenLine}}.
+random              : {token,{'random',TokenLine}}.
+identity            : {token,{'identity',TokenLine}}.
 true                : {token,{'true',TokenLine}}.
 false               : {token,{'false',TokenLine}}.
 and                 : {token,{'and',TokenLine}}.

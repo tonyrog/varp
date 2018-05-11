@@ -23,9 +23,9 @@ main(Args) ->
     {Mode,Bound,Opts0,Files} = process_args0(Args, none),
     %% io:format("opts0 = ~p\n", [Opts0]),
     Opts = [{meta,Bound}|Opts0],
-    {ReadIn,{Defs0,Decls0,Code0,Formula0}} =
+    {ReadIn,{Defs0,Decls0,Code0,Order0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
-	    {ok,{[],[],[],undefined}} -> {true,{[],[],[],undefined}};
+	    {ok,{[],[],[],[],undefined}} -> {true,{[],[],[],[],undefined}};
 	    {ok,R0} -> {false,R0};
 	    __Error -> halt(1)
 	end,
@@ -40,12 +40,14 @@ main(Args) ->
 		    run(Mode,Formula0,[{defs,Defs0}|Opts]);
 		{ok,Data} ->
 		    case parse("*stdin*", Data) of
-			{ok,{Defs,Decls,Code,Formula}} ->
+			{ok,{Defs,Decls,Code,Order,Formula}} ->
 			    Formula1 = join_f('and',Formula0,Formula),
+			    OrderOpts = order_decl(Order0++Order),
 			    run(Mode,Formula1,
-				[{defs,Defs0++Defs},
-				 {decls,Decls0++Decls},
-				 {code,Code0++Code}|Opts]);
+				OrderOpts++
+				    [{defs,Defs0++Defs},
+				     {decls,Decls0++Decls},
+				     {code,Code0++Code}|Opts]);
 			_Error ->
 			    halt(1)
 		    end;
@@ -55,12 +57,15 @@ main(Args) ->
 	[F] -> %% check if batch mode, run tar/zip over all formulas
 	    case archive_type(F) of
 		undefined ->
-		    case load_files([F],Formula0,Defs0,Decls0,Code0,
+		    case load_files([F],Formula0,Defs0,Decls0,Code0,Order0,
 				    'and',Opts) of
-			{ok,{Defs,Decls,Code,Formula}} ->
-			    run(Mode,Formula,[{defs,Defs},
-					      {decls,Decls},
-					      {code,Code} | Opts]);
+			{ok,{Defs,Decls,Code,Order,Formula}} ->
+			    OrderOpts = order_decl(Order),
+			    run(Mode,Formula,
+				OrderOpts++
+				    [{defs,Defs},
+				     {decls,Decls},
+				     {code,Code} | Opts]);
 			_Error ->
 			    halt(1)
 		    end;
@@ -68,11 +73,14 @@ main(Args) ->
 		    run_batch(Mode,Type,F,[{max,1}|Opts])
 	    end;
 	Fs ->
-	    case load_files(Fs,Formula0,Defs0,Decls0,Code0,'and',Opts) of
-		{ok,{Defs,Decls,Code,Formula}} ->
-		    run(Mode,Formula,[{defs,Defs},
-				      {decls,Decls},
-				      {code,Code} | Opts]);
+	    case load_files(Fs,Formula0,Defs0,Decls0,Code0,Order0,
+			    'and',Opts) of
+		{ok,{Defs,Decls,Code,Order,Formula}} ->
+		    OrderOpts = order_decl(Order),
+		    run(Mode,Formula,
+			OrderOpts++[{defs,Defs},
+				    {decls,Decls},
+				    {code,Code} | Opts]);
 		_Error ->
 		    halt(1)
 	    end
@@ -85,11 +93,13 @@ run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
     lists:foreach(
       fun(F) ->
 	      AFile = filename:join(ArchiveFile,F),
-	      case load_files([AFile],true,[],[],[],'and',Opts) of
-		  {ok,{Defs,Decls,Code,Formula}} ->
-		      run(Mode,Formula,[{defs,Defs},
-					{decls,Decls},
-					{code,Code} | Opts]);
+	      case load_files([AFile],true,[],[],[],[],'and',Opts) of
+		  {ok,{Defs,Decls,Code,Order,Formula}} ->
+		      OrderOpts = order_decl(Order),
+		      run(Mode,Formula,
+			  OrderOpts++[{defs,Defs},
+				      {decls,Decls},
+				      {code,Code} | Opts]);
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
 		      ok
@@ -148,9 +158,35 @@ result(undefined,_) ->      io:format("\n", []);
 result(N, _) when is_integer(N) -> io:format("% ~w\n", [N]);
 result({N,_Mdls}, _) -> io:format("% ~w\n", [N]).
 
+order_decl([]) -> [];
+order_decl(Vs) -> order_decl(Vs,[]).
+
+order_decl([Key1,Key2|Vs],Opts) when is_atom(Key1), is_atom(Key2) ->
+    order_decl(Vs,[{order,[Key1,Key2]}|Opts]);
+order_decl([Key1|Vs],Opts) when is_atom(Key1) ->
+    order_decl(Vs,[{order,[Key1]}|Opts]);
+order_decl([V|Vs],[{order_list,Ls}|Opts]) when is_tuple(V) ->
+    order_decl(Vs, [{order_list,Ls++[V]}|Opts]);
+order_decl([V|Vs],Opts) when is_tuple(V) ->
+    order_decl(Vs, [{order_list,[V]}|Opts]);
+order_decl([],Opts) ->
+    case lists:reverse(Opts) of
+	[{order_list,L1},{order,K},{order_list,L2}] ->
+	    [{order,K},{order_first,L1},{order_last,L2}];
+	[{order_list,L1},{order,K}] ->
+	    [{order,K},{order_first,L1}];
+	[{order,K},{order_list,L2}] ->
+	    [{order,K},{order_last,L2}];
+	[{order_list,L1}] ->
+	    [{order_first,L1}];
+	[{order,K}] ->
+	    [{order,K}];
+	[] ->
+	    []
+    end.
 
 %% load files and form a conjunction over all files
-load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp,Opts) ->
+load_files([F|Fs],Formula0,Defs0,Decls0,Code0,Order0,JoinOp,Opts) ->
     {ok, Data} = read_file(F),
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
@@ -161,30 +197,31 @@ load_files([F|Fs],Formula0,Defs0,Decls0,Code0,JoinOp,Opts) ->
 		Cnf = {cnf,{_NVars,_NClauses,Decls,_Ls,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Cnf]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
-		    load_files(Fs,Formula1,Defs0,Decls0++Decls,Code0,
+		    load_files(Fs,Formula1,Defs0,Decls0++Decls,Code0,Order0,
 			       JoinOp,Opts);
 		Snf = {snf,{_NVars,_NClauses,Decls,_Ls,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Snf]),
 		    Formula1 = join_f(JoinOp,Snf,Formula0),
-		    load_files(Fs,Formula1,Defs0,Decls0++Decls,Code0,
+		    load_files(Fs,Formula1,Defs0,Decls0++Decls,Code0,Order0,
 			       JoinOp,Opts)
 	    end;
        true ->
 	    case parse(F, Data) of
-		{ok,{Defs,Decls,Code,Formula}} ->
+		{ok,{Defs,Decls,Code,Order,Formula}} ->
 		    %% io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
 		    load_files(Fs,Formula1,
-			       Defs++Defs,
-			       Decls++Decls0,
-			       Code ++ Code0,
+			       Defs0 ++ Defs,
+			       Decls0 ++ Decls,
+			       Code0 ++ Code,
+			       Order0 ++ Order,
 			       JoinOp,Opts);
 		Error ->
 		    Error
 	    end
     end;
-load_files([],Formula,Defs,Decls,Code,_JoinOp,_Opts) ->
-    {ok,{Defs,Decls,Code,Formula}}.
+load_files([],Formula,Defs,Decls,Code,Order,_JoinOp,_Opts) ->
+    {ok,{Defs,Decls,Code,Order,Formula}}.
 
 %% fixme analyze the path to see if there are 
 %% archive tar/tar.gz/tgz/zip compoinents in the path
@@ -251,20 +288,21 @@ fjoin(Fs) -> filename:join(Fs).
 %% load/parse formulas given on command line like -f "A && B"
 load_formulas(Opts, A, JoinOp) ->
     case proplists:get_all_values(formula, Opts) of
-	[] -> {ok,{[],[],[],A}};
-	Fs -> parse_formulas(Fs,A,[],[],[],JoinOp)
+	[] -> {ok,{[],[],[],[],A}};
+	Fs -> parse_formulas(Fs,A,[],[],[],[],JoinOp)
     end.
 
-parse_formulas([F|Fs], Formula,Defs0,Decls0,Code0,JoinOp) ->
+parse_formulas([F|Fs], Formula,Defs0,Decls0,Code0,Order0,JoinOp) ->
     case parse("*command-line*", F) of
-	{ok,{Defs,Decls,Code,Formula1}} ->
+	{ok,{Defs,Decls,Code,Order,Formula1}} ->
 	    parse_formulas(Fs, join_f(JoinOp, Formula, Formula1),
-			   Defs0++Defs,Decls0++Decls,Code0++Code,JoinOp);
+			   Defs0++Defs,Decls0++Decls,Code0++Code,
+			   Order0++Order,JoinOp);
 	Error ->
 	    Error
     end;
-parse_formulas([], Formula, Defs, Decls, Code, _JoinOp) ->
-    {ok,{Defs,Decls,Code,Formula}}.
+parse_formulas([], Formula, Defs, Decls, Code, Order, _JoinOp) ->
+    {ok,{Defs,Decls,Code,Order,Formula}}.
     
 
 join_f(_JoinOp,undefined,B) -> B;
@@ -408,8 +446,8 @@ parse(File, String) ->
 	{ok,Ts} ->
 	    case varp_parse:parse(Ts) of
 		{ok,{Sections,Formula}} ->
-		    {Defs,Decls,Code} = split_sections(Sections),
-		    {ok,{Defs,Decls,Code,Formula}};
+		    {Defs,Decls,Code,Order} = split_sections(Sections),
+		    {ok,{Defs,Decls,Code,Order,Formula}};
 		Error={error,{Ln,Mod,Why}} when 
 		      is_integer(Ln), is_atom(Mod) ->
 		    Reason = Mod:format_error(Why),
@@ -425,18 +463,19 @@ parse(File, String) ->
     end.
 
 split_sections(Sections) ->
-    split_sections(Sections,[],[],[]).
+    split_sections(Sections,[],[],[],[]).
 
-split_sections([{declare,Decls}|Sections], Defs0, Decls0, Code0) ->
-    split_sections(Sections, Defs0, Decls0++Decls, Code0);
-split_sections([{code,Code}|Sections], Defs0, Decls0, Code0) ->
-    split_sections(Sections, Defs0, Decls0, Code0++Code);
-split_sections([Def|Sections], Defs0, Decls0, Code0) ->
-    split_sections(Sections, Defs0++[Def], Decls0, Code0);
-split_sections([], Defs0, Decls0, Code0) ->
-    {Defs0, Decls0, Code0}.
+split_sections([{declare,Decls}|Sections], Defs0, Decls0, Code0, Order0) ->
+    split_sections(Sections, Defs0, Decls0++Decls, Code0, Order0);
+split_sections([{code,Code}|Sections], Defs0, Decls0, Code0, Order0) ->
+    split_sections(Sections, Defs0, Decls0, Code0++Code,Order0);
+split_sections([{order,Order}|Sections], Defs0, Decls0, Code0,Order0) ->
+    split_sections(Sections, Defs0, Decls0, Code0, Order0++Order);
+split_sections([Def|Sections], Defs0, Decls0, Code0, Order0) ->
+    split_sections(Sections, Defs0++[Def], Decls0, Code0, Order0);
+split_sections([], Defs0, Decls0, Code0, Order0) ->
+    {Defs0,Decls0,Code0,Order0}.
     
-
 string(Binary) when is_binary(Binary) ->
     string(binary_to_list(Binary));
 string(String) when is_list(String) ->

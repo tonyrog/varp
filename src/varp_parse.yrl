@@ -4,7 +4,8 @@
 %%
 
 Terminals
-	symbol true false define declare code type
+	symbol true false define declare code type 
+        order depth occur random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
         'SUM' 'PROD'
@@ -53,7 +54,7 @@ Nonterminals
 	file external_definition function_definition
 	function_body
         integer sexpr
-        qtype quantifier psymbol pexpr
+        qtype quantifier psymbol pexpr oexpr odecl odecls
         lexpr_prim
         lexpr0 lexpr1 lexpr2 lexpr3 lexpr4 lexpr40 lexpr43 lexpr45 lexpr47 
         lexpr5 lexpr6 lexpr7 lexpr8 lexpr9
@@ -75,7 +76,8 @@ definitions -> definitions definition : '$1'++['$2'].
 definition -> 'define' pexpr lexpr ';' : {'$2','$3'}.
 definition -> 'declare' pdecls ';'     : {declare,'$2'}.
 definition -> 'code' '{' cfile '}'     : {code, '$3'}.
-
+definition -> 'order' odecls ';'       : {order,'$2'}.
+    
 primary_expr -> cidentifier : '$1'.
 primary_expr -> constant : '$1'.
 primary_expr -> string : str('$1').
@@ -555,12 +557,32 @@ pdecl -> pexpr ':' sexpr                : {'$1',uint,'$3'}.
 pdecls -> pdecl : ['$1'].
 pdecls -> pdecls ',' pdecl : '$1'++['$3'].
 
+odecls -> odecl : ['$1'].
+odecls -> odecls ',' odecl : '$1'++['$3'].
+
+odecl -> depth      : '+depth'.
+odecl -> '+' depth  : '+depth'.
+odecl -> '-' depth  : '-depth'.
+odecl -> occur      : '+occur'.
+odecl -> '+' occur  : '+occur'.
+odecl -> '-' occur  : '-occur'.
+odecl -> random     : '$1'.
+odecl -> identity   : '$1'.
+odecl -> oexpr      : '$1'.
+    
+%% bit collection
+oexpr -> pexpr                          : '$1'.
+oexpr -> pexpr '[' expr ']'             : {bit_index,'$1','$3'}.
+oexpr -> pexpr '[' expr ':' expr ']'    : {bit_range, '$1', '$3', '$5'}.
+oexpr -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
+oexpr -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
+
 %%
 %% Logic expression
 %%
 lexpr_prim -> integer               : constant(value('$1')).
 lexpr_prim -> pexpr                 : '$1'.
-lexpr_prim -> identifier            : name('$1').
+lexpr_prim -> identifier            : name('$1').  %% meta/env variable
 lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
 
 lexpr0 -> lexpr_prim                : '$1'.
@@ -572,13 +594,13 @@ lexpr0 -> '!' lexpr0                : { op('$1'), '$2' }.
 lexpr0 -> '~' lexpr0                : { op('$1'), '$2' }.
 lexpr0 -> '(' lexpr ')'             : '$2'.
 lexpr0 -> '{' lexprs '}'            : {vec,'$2'}.
-lexpr0 -> identifier '(' lexprs ')' : { name('$1'), '$3'}.
+lexpr0 -> identifier '(' lexprs ')' : { name('$1'), '$3'}. %% meta function
 lexpr0 -> quantifier '(' lexprs ')' : {'$1','$3'}.
 lexpr0 -> quantifier lexpr0         : {'$1','$2'}.
 
 lexpr0 -> lexpr_prim ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 lexpr0 -> lexpr_prim ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
-lexpr0 -> lexpr_prim ':' sexpr              : {uint,'$3','$1'}.
+lexpr0 -> lexpr_prim ':' sexpr                : {uint,'$3','$1'}.
 lexpr0 -> lexpr0 '[' expr ']'           : { bit_index, '$1', '$3'}.
 lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bit_range, '$1', '$3', '$5'}.
 
@@ -657,6 +679,7 @@ sexpr -> identifier : name('$1').
 pexpr -> psymbol               : { p, '$1', []}.
 pexpr -> psymbol '(' ')'       : { p, '$1', []}.
 pexpr -> psymbol '(' expr ')'  : { p, '$1', comma_list('$3')}.
+
 
 psymbol -> 'A' : 'A'.
 psymbol -> 'E' : 'E'.

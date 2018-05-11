@@ -36,18 +36,21 @@ apply_opts_(false, Bs) ->
     display_order(Bs),
     false;
 apply_opts_(_, Bs) ->
-    case varp_formula:getopt(Bs,order) of
-	none -> 
-	    display_order(Bs),
-	    Bs;
-	Order -> 
-	    varp_formula:order(Bs,Order),
-	    display_order(Bs),
-	    Bs
-    end.
+    Order = varp_formula:getopt(Bs,order),
+    varp_formula:order(Bs,Order),
+    case varp_formula:getopt(Bs,order_first) of
+	[] -> ok;
+	First -> varp_formula:order_sort_first(Bs,First)
+    end,
+    case varp_formula:getopt(Bs,order_last) of
+	[] -> ok;
+	Last -> varp_formula:order_sort_last(Bs,Last)
+    end,
+    display_order(Bs),
+    Bs.
 
 display_order(Bs) ->
-    case false of %% varp_formula:getopt(Bs,display_order)
+    case true of %% varp_formula:getopt(Bs,display_order)
 	false ->
 	    ok;
 	true ->

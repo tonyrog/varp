@@ -51,7 +51,8 @@
 -export([get_bindings/3]).
 -export([order_init/1]).
 -export([order_first/1, order_next/2, order_next/3]).
--export([order_sort/2, order_sort/3]).
+-export([order_sort/2, order_sort/3, order_sort/4]).
+-export([order_sort_first/2, order_sort_last/2]).
 -export([order_all/1]).
 
 -export([get_info/1]).
@@ -277,15 +278,28 @@ order_next(Vp, Ix) ->
 order_next(_Vp, _Ix, _Skip) ->
     ?nif_stub().
 
--spec order_sort(Vp::varc(), Sort::sort_key()) -> integer().
+-spec order_sort(Vp::varc(), Key1::sort_key()) -> integer().
 			
-order_sort(_Vp, _Sort) ->
+order_sort(Vp, Key1) ->
+    order_sort(Vp, Key1, undefined).
+
+-spec order_sort(Vp::varc(), Key1::sort_key(), Key2::sort_key()) -> integer().
+
+order_sort(Vp, Key1, Key2) ->
+    order_sort(Vp, Key1, Key2, 0).
+
+-spec order_sort(Vp::varc(), Key1::sort_key(), Key2::sort_key(),
+		 Arg::sort_value()) -> 
+			integer().
+order_sort(_Vp, _Key1, _Key2, _Arg) ->
     ?nif_stub().
 
--spec order_sort(Vp::varc(), Sort::sort_key(),Arg::sort_value()) -> 
-			integer().
+-spec order_sort_first(Vp::varc(), [literal()]) -> ok.
+order_sort_first(_Vp, _VarList) ->
+    ?nif_stub().
 
-order_sort(_Vp, _Sort, _Arg) ->
+-spec order_sort_last(Vp::varc(), [literal()]) -> ok.
+order_sort_last(_Vp, _VarList) ->
     ?nif_stub().
 
 %% Get all clauses in queue

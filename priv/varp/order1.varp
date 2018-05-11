@@ -1,0 +1,5 @@
+// test order declaration
+
+order A,B,C,occur,-depth;
+
+A && B && C
