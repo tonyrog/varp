@@ -391,42 +391,37 @@ order() ->
     _C2 = varc:add_clause(V, 'or',  [X6, X2, X3]),
     _C3 = varc:add_clause(V, 'or',  [X7, X6, X2]),
 
-    F1 = varc:order_sort(V, identity),
+    ok = varc:order_sort(V, identity, undefined, 0),
     [X2, X3, X4, X5, X6, X7] = varc:order_all(V),
-    X2 = F1,
 
-    F2 = varc:order_sort(V, identity, -1),
-    [X7, X6, X5, X4, X3, X2] = varc:order_all(V),
-    X2 = F2,
-
-    F3 = varc:order_sort(V, random, 1001),
+    ok = varc:order_sort(V, random, undefined, 1001),
     Sort1 = varc:order_all(V),
-    io:format("random,1001, F3=~w, Vs = ~p\n", [F3,Sort1]),
+    io:format("random,1001, Vs = ~p\n", [Sort1]),
 
-    F4 = varc:order_sort(V, random, 1003),
+    ok = varc:order_sort(V, random, undefined, 1003),
     Sort2 = varc:order_all(V),
-    io:format("random,1003, F4=~w, Vs = ~p\n", [F4,Sort2]),
+    io:format("random,1003, Vs = ~p\n", [Sort2]),
 
-    F5 = varc:order_sort(V, occur, 1),
-    io:format("occur>0, F5=~w, Vs = ~p\n", [F5,varc:order_all(V)]),
+    ok = varc:order_sort(V, occur, undefined, 1),
+    io:format("occur>0, Vs = ~p\n", [varc:order_all(V)]),
     
-    F6 = varc:order_sort(V, occur, -1),
-    io:format("occur<0, F6=~w, Vs = ~p\n", [F6,varc:order_all(V)]),
+    ok = varc:order_sort(V, occur, undefined, -1),
+    io:format("occur<0, Vs = ~p\n", [varc:order_all(V)]),
 
-    F7 = varc:order_sort(V, depth, 1),
-    io:format("depth>0, F7=~w, Vs = ~p\n", [F7,varc:order_all(V)]),
+    ok = varc:order_sort(V, depth, undefined, 1),
+    io:format("depth>0, Vs = ~p\n", [varc:order_all(V)]),
 
-    F8 = varc:order_sort(V, depth, -1),
-    io:format("depth<0, F8=~w, Vs = ~p\n", [F8,varc:order_all(V)]),
+    ok = varc:order_sort(V, depth, undefined, -1),
+    io:format("depth<0, Vs = ~p\n", [varc:order_all(V)]),
 
-    F9 = varc:order_sort(V, occur_depth, 1),
-    io:format("occur,depth>0, F9=~w, Vs = ~p\n", [F9,varc:order_all(V)]),
-    F10 = varc:order_sort(V, occur_depth, -1),
-    io:format("occur,depth<0, F10=~w, Vs = ~p\n", [F10,varc:order_all(V)]),
+    ok = varc:order_sort(V, occur, depth, 1),
+    io:format("occur,depth>0, Vs = ~p\n", [varc:order_all(V)]),
+    ok = varc:order_sort(V, occur, depth, -1),
+    io:format("occur,depth<0, Vs = ~p\n", [varc:order_all(V)]),
 
-    F11 = varc:order_sort(V, depth_occur, 1),
-    io:format("depth,occur>0, F11=~w, Vs = ~p\n", [F11,varc:order_all(V)]),
-    F12 = varc:order_sort(V, depth_occur, -1),
-    io:format("depth,occur<0, F12=~w, Vs = ~p\n", [F12,varc:order_all(V)]),
+    ok = varc:order_sort(V, depth, occur, 1),
+    io:format("depth,occur>0, Vs = ~p\n", [varc:order_all(V)]),
+    ok = varc:order_sort(V, depth, occur, -1),
+    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
 
     ok.

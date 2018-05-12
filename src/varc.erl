@@ -17,8 +17,7 @@
 -export([get/2]).
 -export([put/3]).
 -export([class/2]).
--export([occur/2]).
--export([depth/2]).
+-export([key/3]).
 -export([implication_clause/2]).
 -export([conflicting_clause/1]).
 -export([is_variable/2]).
@@ -128,12 +127,8 @@ put(_Vp, LitA, LitB) when is_integer(LitA),
 class(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
--spec occur(Vp::varc(), Lit::literal()) -> integer().
-occur(_Vp, Lit) when is_integer(Lit) ->
-    ?nif_stub().
-
--spec depth(Vp::varc(), Lit::literal()) -> integer().
-depth(_Vp, Lit) when is_integer(Lit) ->
+-spec key(Vp::varc(), Lit::literal(), K::integer()) -> integer().
+key(_Vp, Lit, _K) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec implication_clause(Vp::varc(), Lit::literal()) ->

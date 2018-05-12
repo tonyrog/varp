@@ -75,10 +75,8 @@ static ERL_NIF_TERM varc_class(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_class_next(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_occur(ErlNifEnv* env, int argc,
-			       const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
-			       const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_key(ErlNifEnv* env, int argc,
+			     const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_implication_clause(ErlNifEnv* env, int argc,
 					    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varc_conflicting_clause(ErlNifEnv* env, int argc,
@@ -274,8 +272,7 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "get",                 2,  varc_get ),
     NIF_FUNC( "put",                 3,  varc_put ),
     NIF_FUNC( "class",               2,  varc_class ),
-    NIF_FUNC( "occur",               2,  varc_occur ),
-    NIF_FUNC( "depth",               2,  varc_depth ),
+    NIF_FUNC( "key",                 3,  varc_key ),
     NIF_FUNC( "implication_clause",  2,  varc_implication_clause ),
     NIF_FUNC( "conflicting_clause",     1,  varc_conflicting_clause ),
     NIF_FUNC( "is_variable",         2,  varc_is_variable ),
@@ -1731,36 +1728,24 @@ static ERL_NIF_TERM varc_class(ErlNifEnv* env, int argc,
     return enif_make_int(env, x);
 }
 
-// varc key[0]!
-static ERL_NIF_TERM varc_occur(ErlNifEnv* env, int argc,
-				const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varc_key(ErlNifEnv* env, int argc,
+			     const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     int ix, lit;
+    int k;
     varc_t* vp;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &lit))
 	return enif_make_badarg(env);
-    ix = (lit < 1) ? -lit : lit;
-    return enif_make_int(env, vp->var_map[ix].key[0]);
-}
-
-// varc key[1]!
-static ERL_NIF_TERM varc_depth(ErlNifEnv* env, int argc,
-			       const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    int ix, lit;
-    varc_t* vp;
-
-    if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
+    if (!enif_get_int(env, argv[2], &k))
 	return enif_make_badarg(env);
-    if (!get_literal(env, vp, argv[1], &lit))
+    if ((k < 0) || (k > 2))
 	return enif_make_badarg(env);
     ix = (lit < 1) ? -lit : lit;
-    return enif_make_int(env, vp->var_map[ix].key[1]);
+    return enif_make_int(env, vp->var_map[ix].key[k]);
 }
 
 // retrieve implication clause
