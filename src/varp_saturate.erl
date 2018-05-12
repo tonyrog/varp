@@ -27,7 +27,7 @@ saturate(Bs, Params) ->
     Time = maps:get(time, Params, infinity),
     Threshold = maps:get(threshold, Params, 0),
     if Order =:= undefined -> ok;
-       true -> varp_formula:order(Bs, Order)
+       true -> varp_formula:order_sort(Bs, Order)
     end,
     TRef = if is_integer(Time) ->
 		   erlang:start_timer(Time, undefined, ok);

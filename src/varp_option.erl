@@ -18,6 +18,9 @@
 
 -include("log.hrl").
 
+%% -define(dbg(F,A), io:format((F),(A))).
+-define(dbg(F,A), ok).
+
 %%
 %% Option format:
 %%  --long 123
@@ -224,7 +227,7 @@ options() ->
 	     default => [],  %% ordset
 	     description => "Internal list of all definitions"},
     V23 = #{ key => decls,
-	     spec => {set,{predpat,atom,{union,[integer,atom]}}},
+	     spec => {set,{predpat,atom,term}},
 	     default => [],  %% ordset
 	     description => "Internal list of all declarations"},
     V24 = #{ key => code,
@@ -541,7 +544,7 @@ set_opts(Opts) when is_list(Opts) ->
     set_opts(Opts, default_opts()).
 
 set_opts([{Opt,Value} | Opts], OptMap) ->
-    io:format("set_opts: ~w ~p\n", [Opt,Value]),
+    ?dbg("set_opts: ~w ~p\n", [Opt,Value]),
     set_opts(Opts, setopt(Opt,Value,OptMap));
 set_opts([], OptMap) ->
     OptMap.
@@ -568,7 +571,7 @@ default_opts_([], OptMap) ->
 setopt(saturate, Level, OptMap) when is_integer(Level), Level > 0 ->
     List = getopt(saturations, OptMap),
     Sat  = get_saturate_opt(OptMap#{ saturate=>Level}),
-    io:format("s = ~p\n", [Sat]),
+    ?dbg("s = ~p\n", [Sat]),
     List1 = List ++ [Sat],
     OptMap#{ saturate => Level, saturations => List1 };
 setopt(Key, Value, OptMap) when is_atom(Key) ->

@@ -21,7 +21,7 @@ backtrack(Bs) ->
     Print = varp_formula:getopt(Bs,print),
     Order = varp_formula:getopt(Bs,order),
     if Order =:= undefined -> ok;
-       true -> varp_formula:order(Bs, Order)
+       true -> varp_formula:order_sort(Bs, Order)
     end,
     case varp_formula:getopt(Bs,method) of
 	collect ->

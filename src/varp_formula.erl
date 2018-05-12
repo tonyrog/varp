@@ -40,7 +40,7 @@
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
 -export([eval_counter/1]).
--export([order/2, order/4]).
+-export([order_sort/2, order_sort/4]).
 -export([order_sort_first/2]).
 -export([order_sort_last/2]).
 -export([model/1, model/2]).
@@ -255,29 +255,40 @@ make_variable(Bs,V) ->
     {N, alias(Bs1,V,N)}.
 
 order_sort_last(Bs, VarList) ->
-    Last = variable_list(Bs,VarList),
-    io:format("last=~w\n",[Last]),
-    varc:order_sort_last(Bs#bs.vp, Last).
+    {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
+    ?dbg("last=~w\n",[lists:reverse(RevLast)]),
+    ok = varc:order_sort_last(Bs#bs.vp, RevLast),
+    Bs1.
 
 order_sort_first(Bs, VarList) ->
-    First = variable_list(Bs,VarList),
-    io:format("first=~w\n",[First]),
-    varc:order_sort_first(Bs#bs.vp, First).
+    {RevFirst,Bs1} = variable_list_(Bs,VarList,[]),
+    First = lists:reverse(RevFirst),
+    ?dbg("first=~w\n",[First]),
+    ok = varc:order_sort_first(Bs#bs.vp, First),
+    Bs1.
 
-variable_list(Bs, [V|Vs]) ->
-    case variable(Bs, V) of
-	{I,_Bs} when is_integer(I) ->
-	    [abs(I)|variable_list(Bs,Vs)];
-	{Is,_Bs} when is_list(Is) ->
-	    Is ++ variable_list(Bs,Vs)
+variable_list_(Bs, [V|Vs], Acc) ->
+    case build_(V, Bs) of
+	{{bool,X}, Bs1} ->
+	    variable_list_(Bs1, Vs, [X|Acc]);
+	{{bit,_N,Xs}, Bs1} ->
+	    variable_list_(Bs1, Vs, cat(Xs,Acc));
+	{{int,_N,Xs}, Bs1} ->
+	    variable_list_(Bs1, Vs, cat(Xs,Acc));
+	{{uint,_N,Xs}, Bs1} ->
+	    variable_list_(Bs1, Vs, cat(Xs,Acc))
     end;
-variable_list(_Bs, []) ->
-    [].
+variable_list_(Bs, [], Acc) ->
+    {Acc,Bs}.
 
-order(Bs,[Key1,Key2]) -> order(Bs,Key1,Key2,-1);
-order(Bs,[Key1]) -> order(Bs,Key1,undefined,-1).
+cat([X|Xs], Ys) -> cat(Xs, [X|Ys]);
+cat([], Ys) -> Ys.
 
-order(Bs,Key1,Key2,Arg) when is_atom(Key1), is_atom(Key2), is_integer(Arg) ->
+order_sort(Bs,[Key1,Key2]) -> order_sort(Bs,Key1,Key2,-1);
+order_sort(Bs,[Key1]) -> order_sort(Bs,Key1,undefined,-1).
+
+order_sort(Bs,Key1,Key2,Arg) 
+  when is_atom(Key1), is_atom(Key2), is_integer(Arg) ->
     Arg1 = if Key1 =:= random,Arg =:= -1;
 	      Key2 =:= random,Arg =:= -1 ->
 		   <<Seed:24>> = crypto:strong_rand_bytes(3),
@@ -285,7 +296,7 @@ order(Bs,Key1,Key2,Arg) when is_atom(Key1), is_atom(Key2), is_integer(Arg) ->
 	      true ->
 		   Arg
 	   end,
-    io:format("order ~w, ~w, ~w\n", [Key1,Key2,Arg1]),
+    ?dbg("order ~w, ~w, ~w\n", [Key1,Key2,Arg1]),
     varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
 
 clear_queue(Bs) ->
@@ -666,6 +677,16 @@ build_(true, Bs) ->
     {{bool,?TRUE}, Bs};
 build_(false, Bs) ->
     {{bool,?FALSE}, Bs};
+build_(V, Bs) when is_atom(V) -> %% meta variable
+    W = eval_meta(V,Bs),
+    if W >=0 ->
+	    N = varp_math:integer_size(W),
+	    const_vector(uint,W,N,Bs);
+       W < 0 ->
+	    N = varp_math:integer_size(W),
+	    const_vector(int,W,N,Bs)
+    end;
+
 build_(V={p,P,Ps}, Bs) ->
     %% match delcs to see if this predicate is declared with
     %% sign and bit size look for {p,P,['_','_',...]}

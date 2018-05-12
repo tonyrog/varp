@@ -1,7 +1,14 @@
 
-[A n=isize(p),k=n-1,l=(n+1)/2]
-( (((A:k * B:l) == E:n) && (A:k > B:l) && (B:l > 1)) &&
-  ((((C:k * C:k) - (D:l * D:l)) == E:n) && (C:k > D:l)) &&
-  (E:n == p:n) )
+declare A:(isize(p)-1);
+declare B:((isize(p)+1)/2);
+declare C:(isize(p)-1);
+declare D:((isize(p)+1)/2);
+declare E:(isize(p));
 
+order C,B,-occur;
+
+((A * B) == E) &&
+((A > B) && (B > 1)) &&
+((((C * C) - (D * D)) == E) && (C > D)) &&
+(E == p)
 

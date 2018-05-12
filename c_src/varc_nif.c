@@ -193,7 +193,8 @@ typedef struct _varref_t  /* : object_t */
     unsigned pos;             // literal position in clause
 } varref_t;
 
-#define VAR_FLAG_INQUEUE 0x0001
+#define VAR_FLAG_INQUEUE 0x1
+#define VAR_FLAG_MARK    0x2
 
 #define VAR_MARK_KEY  0
 // sort keys are number 1 and 2
@@ -201,14 +202,15 @@ typedef struct _varref_t  /* : object_t */
 typedef struct _variable_t
 {
     struct _variable_t* next; // variable list
-    unsigned flags;           // VAR_FLAG_INQUEUE ...
-    int value;         // current value
-    int klass;         // class index
-    unsigned  key[3];  // sort keys
-    varref_t* ref;     // reference list
-    int       cix;     // implication clause, latest put
-    int       li;      // position in implication clause
-    int       mark;    // mark when set
+    unsigned flags;      // VAR_FLAG_INQUEUE ...
+    int value;           // current value
+    int klass;           // class index
+    unsigned  key[3];    // sort keys
+    varref_t* ref;       // reference list
+    int       map_index; // order_map index
+    int       cix;       // implication clause, latest put
+    int       li;        // position in implication clause
+    int       mark;      // mark when set
 } variable_t;
 
 typedef struct arc4_stream_t {
@@ -561,11 +563,6 @@ static void clause_free(varc_t* vp, clause_t* cp)
 	varc_free(&vp->clause_allocator[cp->asize], (object_t*) cp);
 }
 
-static inline int is_variable(int x)
-{
-    return (x > TRUE);
-}
-
 static inline int is_constant(int x)
 {
     return ((x == TRUE) || (x == FALSE));
@@ -580,7 +577,7 @@ static inline int is_literal(int x)
 // return true if variable is constant or bound to other variable
 static int is_bound(varc_t* vp, int x)
 {
-    return (vp->var_map[(x<0)?-x:x].value != UNDEF);
+    return (vp->var_map[ABS(x)].value != UNDEF);
 }
 
 // Save binding on the undo stack
@@ -632,7 +629,7 @@ static clause_t* dequeue_clause(varc_t* vp)
     return cp;
 }
 
-static void init_variable(variable_t* vptr, int value, int klass)
+static void init_variable(variable_t* vptr, int value, int klass, int map_index)
 {
     vptr->value = value;
     vptr->klass = klass;
@@ -640,6 +637,7 @@ static void init_variable(variable_t* vptr, int value, int klass)
     vptr->key[1] = 0;
     vptr->key[2] = 0;
     vptr->ref = NULL;
+    vptr->map_index = map_index;
     vptr->cix = -1;
     vptr->li = -1;
     vptr->mark = 0;
@@ -1304,12 +1302,11 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     vp->klass_stack_size = 0;
     vp->eval_counter = 0;
     vp->clause_eval_counter = 0;
-    
-    init_variable(&vp->var_map[0], UNDEF, UNDEF);
-    init_variable(&vp->var_map[1], 1, 1);
-    
+
     vp->order_map[0] = 0;
+    init_variable(&vp->var_map[0], UNDEF, UNDEF, 0);
     vp->order_map[1] = 1;
+    init_variable(&vp->var_map[1], 1, 1, 1);
 
     arc4_init(&vp->as);
 
@@ -1352,8 +1349,9 @@ static ERL_NIF_TERM varc_add_variable(ErlNifEnv* env, int argc,
 	vp->vsize = new_vsize;
     }
     vp->vnum++;
-    init_variable(&vp->var_map[vix], UNDEF, UNDEF);
     vp->order_map[vix] = vix;
+    init_variable(&vp->var_map[vix], UNDEF, UNDEF, vix);
+    
     return enif_make_int(env, vix);
 }
 
@@ -1413,15 +1411,23 @@ static int order_reset(varc_t* vp)
     int i, u, b;
 
     vp->order_map[0] = 0;
+    vp->var_map[0].map_index = 0;
     vp->order_map[1] = 1;
+    vp->var_map[1].map_index = 1;
     b = 1;
     u = vp->vnext;
 
     for (i = 2; i < (int)vp->vnext; i++) {
-	if (is_bound(vp, i))
-	    vp->order_map[++b] = i;
-	else
-	    vp->order_map[--u] = i;
+	if (is_bound(vp, i)) {
+	    b++;
+	    vp->order_map[b] = i;
+	    vp->var_map[i].map_index = b; 
+	}
+	else {
+	    u--;
+	    vp->order_map[u] = i;
+	    vp->var_map[i].map_index = u;
+	}
     }
     return u;
 }
@@ -1564,6 +1570,7 @@ static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
     variable_t* bp = &vp->var_map[*((int*)b)];
     int r = 0;
 
+    // k1=0 means key[k1] is undefined, k2=0 means key[k2] is undefined
     if (k1 > 0) {
 	r = ap->key[k1] - bp->key[k1];
 	if (r==0) {
@@ -1643,53 +1650,172 @@ static ERL_NIF_TERM varc_order_sort(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	vp->sort_key[i-1] = k;
     }
-    u = order_reset(vp);   // install identity order
+    // install identity order
+    u = order_reset(vp);
+    // sort unbound variables according to sort_keys
     QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int), cmp_keys, vp);
+    // update map_index of sorted variables
+    for (i = u; i < (int)vp->vnext; i++) {
+	int v = vp->order_map[i];
+	vp->var_map[v].map_index = i;
+    }
     return ATOM(ok);
 }
 
+// move the list of variables first among the unbound variables
+// and keep the order of the other variables.
+// this is done through by copy the various part into a new
+// array.
 static ERL_NIF_TERM varc_order_sort_first(ErlNifEnv* env, int argc,
 					  const ERL_NIF_TERM argv[])
 {
     (void) argc;
     varc_t* vp;
-    ERL_NIF_TERM list = argv[1];
+    ERL_NIF_TERM list;
     ERL_NIF_TERM head, tail;
+    int* map;
+    unsigned int i, ui, mi;
     
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
 
+    // validate list
+    list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	int x;
-	if (!get_literal(env, vp, head, &x))
+	if (!get_literal(env, vp, head, &x) || is_constant(x))
 	    return enif_make_badarg(env);
 	list = tail;
     }
-    if (enif_is_empty_list(env, list))
-	return ATOM(ok);
-    return enif_make_badarg(env);
+    if (!enif_is_empty_list(env, list))
+	return enif_make_badarg(env);
+
+    if (!(map = enif_alloc(vp->vsize*sizeof(int))))
+	return enif_make_badarg(env);
+
+    // clear moved mark
+    for (i = 0; i < vp->vnext; i++)
+	vp->var_map[i].flags &= ~VAR_FLAG_MARK;
+
+    map[0] = 0;
+    vp->var_map[0].flags |= VAR_FLAG_MARK;
+    map[1] = 1;
+    vp->var_map[1].flags |= VAR_FLAG_MARK;
+    mi = 2;
+    // copy all bound variables
+    while ((mi < vp->vnext) && is_bound(vp, vp->order_map[mi])) {
+	int x = vp->order_map[mi];
+	vp->var_map[x].flags |= VAR_FLAG_MARK;
+	map[mi++] = x;
+    }
+    ui = mi;  // save the position for the first unbound variabel
+    // copy/move variables in the list (not already copied)
+    list = argv[1];
+    while (enif_get_list_cell(env, list, &head, &tail)) {
+	int x;
+	if (!get_literal(env, vp, head, &x) || is_constant(x))
+	    return enif_make_badarg(env);
+	if (x < 0) x = -x;
+	if (!(vp->var_map[x].flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[x].flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[x].map_index = mi;
+	    map[mi++] = x;
+	}
+	list = tail;
+    }
+    // move rest of the varaibles not already moved
+    while(ui < vp->vnext) {
+	int x = vp->order_map[ui];
+	if (!(vp->var_map[x].flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[x].flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[x].map_index = mi;
+	    map[mi++] = x;
+	}
+	ui++;
+    }
+    enif_free(vp->order_map);
+    vp->order_map = map;
+    return ATOM(ok);
 }
+
+// move the list of variables last (REVERSED) among the unbound variables
+// and keep the order of the other variables.
+// this is done through by copy the various part into a new
+// array.
 
 static ERL_NIF_TERM varc_order_sort_last(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[])
 {
     (void) argc;
     varc_t* vp;
-    ERL_NIF_TERM list = argv[1];
+    ERL_NIF_TERM list;
     ERL_NIF_TERM head, tail;
+    int* map;
+    unsigned int i, ui, mi;
     
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
 
+    // validate list
+    list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	int x;
-	if (!get_literal(env, vp, head, &x))
+	if (!get_literal(env, vp, head, &x) || is_constant(x))
 	    return enif_make_badarg(env);
 	list = tail;
     }
-    if (enif_is_empty_list(env, list))
-	return ATOM(ok);
-    return enif_make_badarg(env);    
+    if (!enif_is_empty_list(env, list))
+	return enif_make_badarg(env);
+
+    if (!(map = enif_alloc(vp->vsize*sizeof(int))))
+	return enif_make_badarg(env);
+
+    // clear moved mark
+    for (i = 0; i < vp->vnext; i++)
+	vp->var_map[i].flags &= ~VAR_FLAG_MARK;
+
+    map[0] = 0;
+    vp->var_map[0].flags |= VAR_FLAG_MARK;
+    map[1] = 1;
+    vp->var_map[1].flags |= VAR_FLAG_MARK;
+    mi = 2;
+    // copy all bound variables
+    while ((mi < vp->vnext) && is_bound(vp, vp->order_map[mi])) {
+	int x = vp->order_map[mi];
+	vp->var_map[x].flags |= VAR_FLAG_MARK;
+	map[mi++] = x;
+    }
+    ui = mi;  // save the position for the first unbound variabel
+    mi = vp->vnext;  // last position(+1)
+    // copy/move variables in the list (not already copied)
+    list = argv[1];
+    while (enif_get_list_cell(env, list, &head, &tail)) {
+	int x;
+	if (!get_literal(env, vp, head, &x) || is_constant(x))
+	    return enif_make_badarg(env);
+	if (x < 0) x = -x;
+	if (!(vp->var_map[x].flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[x].flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[x].map_index = --mi;
+	    map[mi] = x;
+	}
+	list = tail;
+    }
+
+    mi = ui;
+    // move rest of the varaibles not already moved
+    while(ui < vp->vnext) {
+	int x = vp->order_map[ui];
+	if (!(vp->var_map[x].flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[x].flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[x].map_index = mi;
+	    map[mi++] = x;
+	}
+	ui++;
+    }
+    enif_free(vp->order_map);
+    vp->order_map = map;
+    return ATOM(ok);
 }
 
 //
@@ -1817,9 +1943,10 @@ static ERL_NIF_TERM varc_class_next(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &x))
 	return enif_make_badarg(env);
-    if (!is_variable(x))
-	return enif_make_badarg(env);
-    return enif_make_int(env, vp->var_map[x].klass);
+    if (x < 0)
+	return enif_make_int(env, -vp->var_map[-x].klass);
+    else
+	return enif_make_int(env, vp->var_map[x].klass);
 }
 
 

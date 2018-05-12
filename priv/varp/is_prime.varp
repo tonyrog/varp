@@ -1,3 +1,6 @@
 // Check if p (parameter) is prime
-[A n=isize(p),a=n-1,b=(n+1)/2]
-(((A:a * B:b) == p:n) && (A:a > B:b) && (B:b > 1))
+declare A:(isize(p)-1);
+declare B:((isize(p)+1)/2);
+order B, -occur, A;
+
+(((A * B) == p) && (A > B) && (B > 1))

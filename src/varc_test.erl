@@ -394,6 +394,21 @@ order() ->
     ok = varc:order_sort(V, identity, undefined, 0),
     [X2, X3, X4, X5, X6, X7] = varc:order_all(V),
 
+    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort_first(V, [X6, X7]),
+    [X6, X7, X2, X3, X4, X5] = varc:order_all(V),
+
+    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort_last(V, [X3, X2]),  %% reversed
+    [X4, X5, X6, X7, X2, X3] = varc:order_all(V),
+
+
+    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort_first(V, [X6, X7]),
+    ok = varc:order_sort_last(V, [X3, X2]),  %% reversed
+    [X6, X7, X4, X5, X2, X3] = varc:order_all(V),
+
+
     ok = varc:order_sort(V, random, undefined, 1001),
     Sort1 = varc:order_all(V),
     io:format("random,1001, Vs = ~p\n", [Sort1]),
@@ -421,6 +436,7 @@ order() ->
 
     ok = varc:order_sort(V, depth, occur, 1),
     io:format("depth,occur>0, Vs = ~p\n", [varc:order_all(V)]),
+
     ok = varc:order_sort(V, depth, occur, -1),
     io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
 
