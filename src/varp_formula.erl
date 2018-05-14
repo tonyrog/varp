@@ -212,18 +212,18 @@ add_clause(Bs,Op,Ls) ->
     varc:add_clause(Bs#bs.vp,Op,Ls).
 
 build_gate_tree(Bs,Op,X,Ls) ->
-    case lists:split(Ls, length(Ls) div 2) of
-	{[A],[B]} ->
-	    clause(Bs,'or',[X,A,B]);
-	{[A],[B1,B2]} ->
+    case lists:split(length(Ls) div 2,Ls) of
+	{[U],[V]} ->
+	    clause(Bs,'or',[X,U,V]);
+	{[U],[V1,V2]} ->
 	    X1 = varc:add_variable(Bs#bs.vp),
-	    Bs1=clause(Bs,'or',[X1,B1,B2]),
-	    clause(Bs1,'or',[X,A,X1]);
-	{As,Bs} ->
+	    Bs1=clause(Bs,'or',[X1,V1,V2]),
+	    clause(Bs1,'or',[X,U,X1]);
+	{Us,Vs} ->
 	    X1 = varc:add_variable(Bs#bs.vp),
-	    Bs2=build_gate_tree(Bs,Op,X1,As),
+	    Bs2=build_gate_tree(Bs,Op,X1,Us),
 	    X2 = varc:add_variable(Bs#bs.vp),
-	    Bs3=build_gate_tree(Bs2,Op,X2,Bs),
+	    Bs3=build_gate_tree(Bs2,Op,X2,Vs),
 	    clause(Bs3,'or',[X,X1,X2])
     end.
 

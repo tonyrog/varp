@@ -1033,11 +1033,11 @@ static inline void unbound_literals(clause_t* cp, bitset_t* unbound)
 // eval an OR clause using bitmasks mask_F and mask_T
 // clause is x0 = OR(x1,....,xn-1)
 //
-static int eval_or_clause(varc_t* vp, clause_t* cp)
+static int eval_or_gate(varc_t* vp, clause_t* cp)
 {
     int i;
 
-    TRACE("eval_or_clause %d T=%s F=%s\r\n", 
+    TRACE("eval_or_gate %d T=%s F=%s\r\n", 
 	  cp->cix, bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
 
     if (bitset_is_set(&cp->mask_T,0)) {  // x0 == TRUE?
@@ -1100,11 +1100,11 @@ static int eval_or_clause(varc_t* vp, clause_t* cp)
 // 1 = 1,0,1,x1,0,1,x2    => x1=x2  (parity=1) x1=!x2 (parity=0)
 // 0 = 1,0,1,x1,0,1,x2    => x1=!x2 (parity=1) x1=x2  (parity=0)
 // 
-static int eval_xor_clause(varc_t* vp, clause_t* cp)
+static int eval_xor_gate(varc_t* vp, clause_t* cp)
 {
     int i,j;
 
-    TRACE("eval_xor_clause_mask %d T=%s F=%s\r\n", 
+    TRACE("eval_xor_gate %d T=%s F=%s\r\n", 
 	  cp->cix,  bitset_format(&cp->mask_T), bitset_format(&cp->mask_F));
 
     if (bitset_is_set(&cp->mask_T,0)) { // x0 = TRUE
@@ -1182,8 +1182,8 @@ static int eval_clause(varc_t* vp, clause_t* cp)
 {
     vp->clause_eval_counter++;
     switch(cp->op) {
-    case CLAUSE_OP_OR:  return eval_or_clause(vp, cp);
-    case CLAUSE_OP_XOR: return eval_xor_clause(vp, cp);
+    case CLAUSE_OP_OR:  return eval_or_gate(vp, cp);
+    case CLAUSE_OP_XOR: return eval_xor_gate(vp, cp);
     default: return -1;
     }
 }
@@ -2282,10 +2282,9 @@ static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
 }
 
 //
-// add_clause(vp, 'and', x1, ..., xn)
 // add_clause(vp, 'or',  x1, ..., xn)
 // add_clause(vp, 'xor', x1, ..., xn)
-// add_clause(vp, Op, [x1, ..., xn])
+// add_clause(vp, 'or'|'xor', [x1, ..., xn])
 //
 static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
