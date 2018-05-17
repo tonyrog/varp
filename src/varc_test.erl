@@ -256,7 +256,7 @@ xor_eval() ->
     X5 = varc:add_variable(V),
 
     C0 = varc:add_clause(V, 'xor', X2, ?TRUE, ?FALSE, ?TRUE, ?FALSE),
-    {'xor', [X2,?TRUE,?FALSE,?TRUE,?FALSE]} = varc:get_clause(V, C0),
+    {'xor', [X2,?FALSE]} = varc:get_clause(V, C0),
     [inqueue] = varc:get_clause_flags(V, C0),
     true = varc:eval(V),
     C1 = varc:add_clause(V, 'xor', X3, ?TRUE, ?TRUE, ?TRUE, ?TRUE),

@@ -1,0 +1,23 @@
+// attempt to generate midi SAT songs
+//
+// notes are A1(i) B1(i) .. D(i)
+// 
+
+// C major
+
+// one note per beat
+([ALL i=1..n+2][EQ 1](C(i), D(i), E(i), F(i), G(i), A(i), B(i))) &&
+
+// not more than k of the same note
+// ([LT 3,i=1..n+2] C(i)) &&
+// ([LT 3,i=1..n+2] D(i)) &&
+// ([LT 3,i=1..n+2] E(i)) &&
+// ([LT 3,i=1..n+2] F(i)) &&
+// ([LT 3,i=1..n+2] G(i)) &&
+// ([LT 3,i=1..n+2] A(i)) &&
+// ([LT 3,i=1..n+2] B(i)) &&
+
+[ALL i=1..n](
+((C(i) && D(i+1)) -> (E(i+2) || G(i+2) || B(i+2))) &&
+((C(i) && E(i+1)) -> (G(i+2) || B(i+1) || D(i+2)))
+)

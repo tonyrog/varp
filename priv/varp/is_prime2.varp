@@ -1,8 +1,14 @@
 // check if p (parameter) is prime
-// (A*A - B*B = p, A>B)
+// (C*C - D*D = p, C>D)
 
 declare C:(isize(p)-1);
 declare D:((isize(p)+1)/2);
+declare E:(2*isize(p));
+declare F:(isize(p)+1);
 order D, -occur, C;
 
-((((C * C) - (D * D)) == p) && (C > D))
+(((C*C) == E) &&
+ ((D*D) == F) &&
+ ((E - F) == p) &&
+ (C > D) )
+ 

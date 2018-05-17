@@ -1,0 +1,9 @@
+// check if p (parameter) is prime
+// (A*(A+B) = p)
+
+declare A:(isize(p)-1);
+declare B:((isize(p)+1)/2);
+order B,-occur,A;
+
+((A * (A + B)) == p)
+
