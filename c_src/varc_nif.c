@@ -2198,83 +2198,6 @@ static ERL_NIF_TERM varc_eval(ErlNifEnv* env, int argc,
     return ATOM(true);
 }
 
-//
-// add clause (and normalize, remove literals)
-//
-//   X1 = OR(X2,F,X3,F)   =>  X1 = OR(X2,X3)
-//   X1 = OR(X2,T,F,X3)   =>  X1 = OR(T)
-//   X1 = OR(F)           =>  X1 = OR(F)
-//   T  = OR(X2,F)        =>  T  = OR(X2)
-//
-//
-
-static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
-				     const int* literal, size_t size)
-{
-    clause_t* cp;
-    int i, j, cix;
-
-    if ((cp = clause_alloc(vp, op, size)) == NULL)
-	return enif_make_badarg(env);
-    if ((cix = insert_clause(env, vp, cp)) < 0)
-	return enif_make_badarg(env);
-
-    i = 0;
-    for (j = 0; j < (int)size; j++) {
-	if (abs(literal[j]) > 1) {
-	    cp->lit[i] = literal[j];
-	    if (add_varref(vp, literal[j], cp, i) < 0)
-		return enif_make_badarg(env);
-	    i++;
-	}
-	else if (literal[j] == FALSE) {
-	    if (j == 0) {
-		cp->lit[i] = FALSE;
-		bitset_set(&cp->mask_F, &cp->mask_F, i);
-		i++;
-	    }
-	}
-	else if (literal[j] == TRUE) {
-	    if (j == 0) {
-		cp->lit[i] = TRUE;
-		bitset_set(&cp->mask_T, &cp->mask_T, i);
-		i++;
-	    }
-	    else if (op == XOR_GATE) {
-		if (abs(cp->lit[0]) > 1)
-		    cp->lit[0] = -cp->lit[0];
-		else {
-		    cp->lit[i] = TRUE;
-		    bitset_set(&cp->mask_T, &cp->mask_T, i);
-		    i++;		    
-		}
-	    }
-	    else if (op == OR_GATE) {
-		cp->lit[1] = TRUE;
-		i = 2;
-		break;
-	    }
-	}
-    }
-    cp->size = i;
-    if (op == OR_GATE) {
-	if (cp->lit[0] == TRUE)
-	    cp->op = OR_CLAUSE;
-	else if (i == 1) {
-	    cp->lit[1] = FALSE;
-	    bitset_set(&cp->mask_F, &cp->mask_F, 1);
-	    cp->size = 2;
-	}
-    }
-    else if (op == XOR_GATE) {
-	if (i == 1) {
-	    cp->lit[1] = FALSE;
-	    bitset_set(&cp->mask_F, &cp->mask_F, 1);
-	    cp->size = 2;
-	}
-    }
-    return enif_make_int(env, cix);
-}
 
 // get information
 static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
@@ -2328,6 +2251,93 @@ static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
     return enif_make_badarg(env);
 }
 
+
+//
+// add clause (and normalize, remove literals)
+//
+static int cmp_rev_abs_lit QSORT_R_ARGS(const void* a, const void* b,void* arg)
+{
+    (void) arg;
+    return abs(*(int*)b) - abs(*(int*)a);
+}
+
+static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
+				     int* literal, size_t size)
+{
+    clause_t* cp;
+    int i, j, cix;
+    int pcount = 0;
+    
+    // first sort all literals by absolute value
+    QSORT_R(literal+1, size-1, sizeof(int), cmp_rev_abs_lit, vp);
+
+    // remove all FALSE literals:
+    // Y = OP(X4,X3,X2,X1,T,T,T,F,F,F) => Y = OP(X4,X3,X2,X1,T,T,T)
+    // Y = OP(T,T,F,F) => Y = OP(T,T)
+    // Y = OP(F,F) => Y = OP()
+    
+    i = size-1;
+    while((i > 0) && (literal[i] == FALSE)) {
+	i--;
+	size--;
+    }
+    // remove all TRUE literals:
+    // Y = OP(X4,X3,X2,X1,T,T,T)  => Y = OP(X4,X3,X2)  pcount=3
+    // Y = OP(T,T)                => Y = OP()          pcount=2
+    while((i > 0) && (literal[i] == TRUE)) {
+	i--;
+	size--;
+	pcount++;
+    }
+
+    j = 1;
+    for (i = 2; i < (int)size; i++) {
+	if (literal[i-1] != literal[i]) {
+	    if (j < i-1)
+		literal[j++] = literal[i];
+	    else
+		j++;
+	}
+    }
+    size = j+1;
+    
+    if (pcount) {
+	if (op == OR_GATE)
+	    size++;
+	else if (pcount & 1)
+	    literal[0] = -literal[0];
+    }
+
+    if (op == OR_GATE) {
+	if (literal[0] == TRUE) {
+	    op = OR_CLAUSE;
+	}
+    }
+    else {  // XOR
+	if (pcount & 1) // T = XOR(X4,X3,X2) => T = XOR(-X4,X3,X2)
+	    literal[0] = -literal[0];
+    }
+    
+    if ((cp = clause_alloc(vp, op, size)) == NULL)
+	return enif_make_badarg(env);
+    if ((cix = insert_clause(env, vp, cp)) < 0)
+	return enif_make_badarg(env);
+
+    for (i = 0; i < (int)size; i++) {
+	cp->lit[i] = literal[i];
+	if (abs(literal[i]) > 1) {
+	    if (add_varref(vp, literal[i], cp, i) < 0)
+		return enif_make_badarg(env);
+	}
+	else if (literal[i] == FALSE)
+	    bitset_set(&cp->mask_F, &cp->mask_F, i);
+	else if (literal[i] == TRUE)
+	    bitset_set(&cp->mask_T, &cp->mask_T, i);
+    }
+    cp->size = size;
+    return enif_make_int(env, cix);
+}
+
 //
 // add_clause(vp, 'or',  x1, ..., xn)
 // add_clause(vp, 'xor', x1, ..., xn)
@@ -2338,7 +2348,7 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 {
     int op;
     varc_t* vp;
-    int i = 0;
+    int size = 0;
     int literal[MAX_CLAUSE_LENGTH];
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
@@ -2357,9 +2367,9 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	    int x;
 	    if (!get_literal(env, vp, head, &x))
 		return enif_make_badarg(env);
-	    if (i < MAX_CLAUSE_LENGTH)
-		literal[i] = x;
-	    i++;
+	    if (size < MAX_CLAUSE_LENGTH)
+		literal[size] = x;
+	    size++;
 	    list = tail;
 	}
 	if (!enif_is_empty_list(env, list))
@@ -2371,14 +2381,14 @@ static ERL_NIF_TERM varc_add_clause(ErlNifEnv* env, int argc,
 	    int x;
 	    if (!get_literal(env, vp, argv[j], &x))
 		return enif_make_badarg(env);
-	    if (i < MAX_CLAUSE_LENGTH)
-		literal[i] = x;
-	    i++;
+	    if (size < MAX_CLAUSE_LENGTH)
+		literal[size] = x;
+	    size++;
 	}
     }
-    if (i > MAX_CLAUSE_LENGTH)
+    if ((size < 2) || (size > MAX_CLAUSE_LENGTH))
 	return enif_make_badarg(env);
-    return add_clause_array(env, vp, op, literal, i);
+    return add_clause_array(env, vp, op, literal, size);
 }
 
 static ERL_NIF_TERM varc_del_clause(ErlNifEnv* env, int argc,
