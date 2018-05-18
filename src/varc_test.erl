@@ -19,10 +19,12 @@ all() ->
     test2(),
     test3(),
     %% test4(),
+    or_simplify(),
     or_eval(),
     or_clause(true),
     or_clause(false),
     or_conflict(),
+    xor_simplify(),
     xor_eval(),
     xor_clause(true),
     xor_clause(false),
@@ -136,6 +138,33 @@ test4() ->
 
     varc:get_bindings(V, 0).
 
+%% Test all clause simplifications
+or_simplify() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    C0 = varc:add_clause(V, 'or', [X2,X3,X4,X5]),
+    C1 = varc:add_clause(V, 'or', [X5,X4,X3,X2]),
+    C2 = varc:add_clause(V, 'or', [?TRUE,X2,X2,X2,X2,X2]),
+    C23 = varc:add_clause(V, 'or', [?TRUE,X2,X3,X3,X3,X2]),
+    C3 = varc:add_clause(V, 'or', [X2,X3,X2,X3,X4,?FALSE]),
+    C4 = varc:add_clause(V, 'or', [?TRUE,X2,X3,X2,X3,X4]),
+    C5 = varc:add_clause(V, 'or', [X2,?TRUE,X3,?FALSE,X4,?TRUE,X4,?TRUE,
+				   X5,?FALSE]),
+    C6 = varc:add_clause(V, 'or', [X2,?TRUE,X3,?FALSE,-X3,?TRUE,X3,?TRUE,
+				   -X3,?FALSE,X4]),
+
+    {'or', [X2,X5,X4,X3]} = varc:get_clause(V, C0),
+    {'or', [X5,X4,X3,X2]} = varc:get_clause(V, C1),
+    {'or', [?TRUE,X2]} = varc:get_clause(V, C2),
+    {'or', [?TRUE,X3,X2]} = varc:get_clause(V, C23),
+    {'or', [X2,X4,X3,X2]} = varc:get_clause(V, C3),
+    {'or', [?TRUE,X4,X3,X2]} = varc:get_clause(V, C4),
+    {'or', [X2,X5,X4,X3,?TRUE]} = varc:get_clause(V, C5),
+    {'or', [X2,X4,?TRUE]} = varc:get_clause(V, C6),
+    ok.
 
 %% Test eval
 or_eval() ->
@@ -247,6 +276,37 @@ or_conflict() ->
     io:format("implication clause: ~p\n", [Implication]), 
 
     ok.
+
+%% Test all clause simplifications
+xor_simplify() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    C0 = varc:add_clause(V, 'xor', [X2,X3,X4,X5]),
+    C1 = varc:add_clause(V, 'xor', [X5,X4,X3,X2]),
+    C2 = varc:add_clause(V, 'xor', [?TRUE,X2,X2,X2,X2,X2]),
+    C20 = varc:add_clause(V, 'xor', [X3,X2,X2,X2,X2,X2,X2]),
+    C23 = varc:add_clause(V, 'xor', [?TRUE,X2,X3,X3,X3,X2]),
+    C3 = varc:add_clause(V, 'xor', [X2,X3,X2,X3,X4,?FALSE]),
+    C4 = varc:add_clause(V, 'xor', [?TRUE,X2,X3,X2,X3,X4]),
+    C5 = varc:add_clause(V, 'xor', [X2,?TRUE,X3,?FALSE,X4,?TRUE,X4,?TRUE,
+				    X5,?FALSE]),
+    C6 = varc:add_clause(V, 'xor', [X2,X3,-X3,X3,-X3,X3,-X3,-X3,-X3,X4]),
+
+    NegX2 = -X2,
+    {'xor', [X2,X5,X4,X3]} = varc:get_clause(V, C0),
+    {'xor', [X5,X4,X3,X2]} = varc:get_clause(V, C1),
+    {'xor', [?TRUE,X2]} = varc:get_clause(V, C2),
+    {'xor', [X3,?FALSE]} = varc:get_clause(V, C20),
+    {'xor', [?TRUE,X3]} = varc:get_clause(V, C23),
+    {'xor', [X2,X4,X2]} = varc:get_clause(V, C3),
+    {'xor', [?TRUE,X4]} = varc:get_clause(V, C4),
+    {'xor', [NegX2,X5,X3]} = varc:get_clause(V, C5),
+    {'xor', [NegX2,X4]} = varc:get_clause(V, C6),
+    ok.
+
 
 xor_eval() ->
     V = varc:new(),

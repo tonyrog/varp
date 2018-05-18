@@ -2258,18 +2258,41 @@ static ERL_NIF_TERM varc_info(ErlNifEnv* env, int argc,
 static int cmp_rev_abs_lit QSORT_R_ARGS(const void* a, const void* b,void* arg)
 {
     (void) arg;
-    return abs(*(int*)b) - abs(*(int*)a);
+    int r = abs(*(int*)b) - abs(*(int*)a);
+    if (r == 0)
+	r = *(int*)b - *(int*)a;
+    return r;
 }
+
+static void print_lit(char* label, int* literal, size_t size)
+{
+    if (size == 0)
+	printf("%s={}", label);
+    else {
+	unsigned k;
+	printf("%s={%d", label, literal[0]);
+	for (k=1; k<size; k++)
+	    printf(",%d",literal[k]);
+	printf("}\r\n");
+    }
+}
+
+#define PRINT_LIT(msg,lit,size) print_lit((msg),(lit),(size))
+// #define PRINT_LIT(msg,lit,size)
 
 static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
 				     int* literal, size_t size)
 {
     clause_t* cp;
-    int i, j, cix;
+    int i, cix;
     int pcount = 0;
+
+    PRINT_LIT("   src", literal, size);
     
     // first sort all literals by absolute value
     QSORT_R(literal+1, size-1, sizeof(int), cmp_rev_abs_lit, vp);
+
+    PRINT_LIT(" sorted", literal, size);
 
     // remove all FALSE literals:
     // Y = OP(X4,X3,X2,X1,T,T,T,F,F,F) => Y = OP(X4,X3,X2,X1,T,T,T)
@@ -2281,6 +2304,8 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
 	i--;
 	size--;
     }
+    PRINT_LIT("  del-F", literal, size);
+
     // remove all TRUE literals:
     // Y = OP(X4,X3,X2,X1,T,T,T)  => Y = OP(X4,X3,X2)  pcount=3
     // Y = OP(T,T)                => Y = OP()          pcount=2
@@ -2289,34 +2314,61 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
 	size--;
 	pcount++;
     }
+    PRINT_LIT("  del-T", literal, size);
 
-    j = 1;
-    for (i = 2; i < (int)size; i++) {
-	if (literal[i-1] != literal[i]) {
-	    if (j < i-1)
-		literal[j++] = literal[i];
-	    else
-		j++;
-	}
-    }
-    size = j+1;
+    // remove duplicates
+    // for OR A,A => A  A,A,A => A  
+    // for XOR A,A =>   A,A,A => A  (parity)
+    //
     
-    if (pcount) {
-	if (op == OR_GATE)
-	    size++;
-	else if (pcount & 1)
-	    literal[0] = -literal[0];
+    if (op == OR_GATE) {
+	unsigned u=1,v=1,w=1;
+	while(v < size) {
+	    while((w < size) && (literal[v] == literal[w])) w++;
+	    if ((u > 1) && (literal[u-1] == -literal[v])) {
+		// OR A -A => T
+		u--;
+		pcount++;
+	    }
+	    else
+		literal[u++] = literal[v];
+	    v = w;
+	}
+	size = u;
     }
+    else {
+	unsigned u=1,v=1,w=1;
+	while(v < size) {
+	    while((w < size) && (literal[v] == literal[w])) w++;
+	    if ((w-v) & 1) { // odd number of duplicates save one
+		if ((u > 1) && (literal[u-1] == -literal[v])) {
+		    // XOR A -A => T
+		    u--;  
+		    pcount++;
+		}
+		else
+		    literal[u++] = literal[v];
+	    }
+	    v = w;
+	}
+	size = u;
+    }
+    PRINT_LIT("del-dup", literal, size);
 
     if (op == OR_GATE) {
-	if (literal[0] == TRUE) {
-	    op = OR_CLAUSE;
-	}
+	if (pcount) // add the T constant to the gate
+	    literal[size++] = TRUE;
+	if (literal[0] == TRUE) op = OR_CLAUSE;  // it is a clause
     }
     else {  // XOR
 	if (pcount & 1) // T = XOR(X4,X3,X2) => T = XOR(-X4,X3,X2)
 	    literal[0] = -literal[0];
+	if (size == 1) {
+	    literal[1] = FALSE;
+	    size = 2;
+	}
     }
+    PRINT_LIT("   dest", literal, size);
     
     if ((cp = clause_alloc(vp, op, size)) == NULL)
 	return enif_make_badarg(env);
