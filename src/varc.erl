@@ -14,6 +14,8 @@
 -export([new/2]).
 -export([info/2]).
 -export([add_variable/1]).
+-export([set_variable_name/3]).
+-export([get_variable_name/2]).
 -export([get/2]).
 -export([put/3]).
 -export([class/2]).
@@ -106,6 +108,13 @@ info(_Vp, Item) when is_atom(Item) ->
     ?nif_stub().
 
 add_variable(_Vp) ->
+    ?nif_stub().
+
+-spec set_variable_name(Vp::varc(), Lit::literal(), Name::term()) -> ok.
+set_variable_name(_Vp, Lit, _Name)  when is_integer(Lit) ->
+    ?nif_stub().
+    
+get_variable_name(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 %%
