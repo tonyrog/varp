@@ -67,6 +67,23 @@
 -include("log.hrl").
 -include("varp_bic.hrl").
 
+-ifdef(OTP_RELEASE).
+-if(?OTP_RELEASE >= 21).
+%%-warning("otp_release_21").
+-define(TRY_ERROR_CLAUSE(Reason,Trace),
+	error:Reason:Trace ->).
+-else.
+%%-warning("otp_release_20.3 or more?").
+-define(TRY_ERROR_CLAUSE(Reason,Trace), 
+	error:Reason -> Trace = erlang:get_stacktrace(),).
+-endif.
+-else.
+%%-warning("otp_release_20 or less").
+-define(TRY_ERROR_CLAUSE(Reason,Trace), 
+	error:Reason -> Trace = erlang:get_stacktrace(),).
+-endif.
+
+
 -define(TRUE,   1).
 -define(FALSE, -1).
 
@@ -74,7 +91,9 @@
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
 
 
--type pred() :: {p,Name::atom(),[integer()]}.
+-type pred() :: {p,Name::atom(),[index()]}.
+-type index() :: integer() | [integer()] | func().
+-type func() :: {f,Name::atom(),[index()]}.
 
 -type var() :: pred() |
 	       {uint,pred(),Size::integer(),Bit::integer()} |
@@ -489,20 +508,48 @@ fmt_var_(Bs,X,Pfx,Q) when is_integer(X) ->
 	{ok,[{T,P={p,_,_},_N,I}|_Ns]} when ?is_vec_type(T),is_integer(I) ->
 	    [Q,Pfx,fmt_pred_(P),"[",integer_to_list(I),"]",Q];
 
-	{ok,[{A,I}|_Ns]} when is_atom(A),is_integer(I) ->
-	    [Q,Pfx,io_lib:format("~p[~w]", [A,I]),Q];
-	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
-	    [Q,Pfx,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
-	{ok,[N|_Ns]} ->
-	    [Q,Pfx,io_lib:format("~p", [N]),Q];
+%%	{ok,[{A,I}|_Ns]} when is_atom(A),is_integer(I) ->
+%%	    [Q,Pfx,io_lib:format("~p[~w]", [A,I]),Q];
+%%	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
+%%	    [Q,Pfx,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
+%%	{ok,[N|_Ns]} ->
+%%	    [Q,Pfx,io_lib:format("~p", [N]),Q];
 	{ok,?TRUE} -> "true";
 	{ok,?FALSE} -> "false"
     end.
 
 fmt_pred_({p,P,[]}) -> 
     atom_to_list(P);
-fmt_pred_({p,P,As}) -> 
-    [atom_to_list(P),"(",concat([io_lib:format("~w",[Ai])||Ai<-As], ","), ")"].
+fmt_pred_({p,P,As}) ->
+    [atom_to_list(P),"(",fmt_index_list(As),")"].
+%% [atom_to_list(P),"(",concat([io_lib:format("~w",[Ai])||Ai<-As], ","), ")"].
+
+fmt_index_list([I]) ->
+    [fmt_index(I)];
+fmt_index_list([I|Is]) ->
+    [fmt_index(I),","|fmt_index_list(Is)].
+
+fmt_index(I) when is_integer(I) ->
+    integer_to_list(I);
+fmt_index(Set) when is_list(Set) ->
+    ["{",fmt_ordset(Set),"}"];
+fmt_index({f,F,Is}) ->
+    fmt_func(F,Is).
+
+fmt_func(F,Is) when is_atom(F) ->
+    [atom_to_list(F)|fmt_fargs(Is)];
+fmt_func(F,Is) when is_list(F); is_binary(F) ->
+    [F|fmt_fargs(Is)].
+    
+fmt_fargs([]) -> [];
+fmt_fargs(Is) ->
+    ["(",fmt_index_list(Is),")"].
+
+fmt_ordset([]) -> [];
+fmt_ordset([I]) when is_integer(I) ->
+    integer_to_list(I);
+fmt_ordset([I|Is=[J|_]]) when is_integer(I), is_integer(J), I < J ->
+    [integer_to_list(I),","|fmt_ordset(Is)].
     
 fmt_var_list(Bs,Xs) ->
     concat([fmt_var(Bs,X)||X<-Xs],",").
@@ -1087,6 +1134,12 @@ eval_domain(Expr, Bs) ->
 
 eval_meta(V, _Bs) when is_integer(V) -> V;
 eval_meta(#cconst{base=B,value=V}, _Bs) -> list_to_integer(V,B);
+eval_meta(#crange{from=A,to=B}, Bs) ->
+    A1 = eval_meta(A,Bs),
+    B1 = eval_meta(B,Bs),
+    if A1 =< B1 -> lists:seq(A1, B1);
+       true -> lists:reverse(lists:seq(B1,A1))
+    end;
 eval_meta(#cid {name="true"}, _Bs)  -> true;
 eval_meta(#cid {name="false"}, _Bs) -> false;
 eval_meta(#cid {name=Vn}, Bs) ->
@@ -1137,7 +1190,13 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	{#cid{name="min"},[A,B]}   -> min(A,B);
 	{#cid{name="sum"},As}      ->
 	    lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
-	{#cid{name=F},As1} -> {f,F,As1}
+	%% ordsets
+	{#cid{name="union"},[A,B]}   -> ordsets:union(A,B);
+	{#cid{name="subtract"},[A,B]}   -> ordsets:subtract(A,B);
+	{#cid{name="intersect"},[A,B]}   -> ordsets:intersect(A,B);
+	{#cid{name="product"},[A,B]}   -> [ [Ai,Bi] || Ai <- A, Bi <- B ];
+	%% function symbol
+	{#cid{name=Func},As1} -> {f,Func,As1}
     end;
 
 eval_meta(#cbinary{op=Op,arg1=A,arg2=B},Bs) ->
@@ -2337,17 +2396,18 @@ format_binding({Var,Value}) ->
     end.
 
 format_var({p,T,As}) when is_integer(T) ->
-    [$T,integer_to_list(As)|format_param(As)];
+    [$T,integer_to_list(As)|format_params(As)];
 format_var({p,V,As}) when is_atom(V) ->
-    [atom_to_list(V)|format_param(As)];
+    [atom_to_list(V)|format_params(As)];
 format_var({p,Name,As}) when is_list(Name); is_binary(Name) ->
-    [Name|format_param(As)].
+    [Name|format_params(As)].
 
-format_param([]) -> "";
-format_param(As) when is_list(As) ->
-    ["(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"];
-format_param(I) when is_integer(I) ->
-    ["(",integer_to_list(I),")"].
+format_params([]) -> "";
+format_params(As) when is_list(As) ->
+    %% ["(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"];
+    ["(",fmt_index_list(As),")"].
+%% format_param(I) when is_integer(I) ->
+%%    ["(",integer_to_list(I),")"].
 
 
 concat([], _) -> [];
@@ -2374,8 +2434,7 @@ fmt_digraph(File, Bl, Bs) ->
 	    try fmt_digraph_fd(Fd,Bl,Bs) of
 		Result -> Result
 	    catch
-		error:Reason -> 
-		    Trace = erlang:get_stacktrace(),
+               	?TRY_ERROR_CLAUSE(Reason,Trace)
 		    io:format("~w\n", [{crash, error, Reason,Trace}]),
 		    exit(Reason),
 		    {error,Reason}
