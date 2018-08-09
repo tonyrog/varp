@@ -250,9 +250,9 @@ build_branch_list(Bs,Op,Ls,_L,_N) ->
     _Cix = add_clause(Bs,Op,[V|Ls]),
     [V].
 
-make_variable(Bs,V) ->
+make_variable(V, Bs) ->
     {N,Bs1} = fresh_var(Bs),
-    {N, alias(Bs1,V,N)}.
+    {N, alias(V,N,Bs1)}.
 
 order_sort_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
@@ -507,7 +507,7 @@ fmt_pred_({p,P,As}) ->
 fmt_var_list(Bs,Xs) ->
     concat([fmt_var(Bs,X)||X<-Xs],",").
 
-variable(Bs, V) ->
+variable(V, Bs) ->
     W = expand_meta(V, Bs),
     ?dbg("variable expand: ~p -> ~w\n", [V,W]),
     case find_var(W, Bs) of
@@ -517,7 +517,7 @@ variable(Bs, V) ->
 		    %% check for a definition of P(x1,..xn)
 		    case find_def(P, Bs#bs.defs) of
 			false ->
-			    make_variable(Bs,W);
+			    make_variable(W, Bs);
 			{_W1={p,_,Ps},Def} ->
 			    ?dbg("~p = ~p\n", [_W1,Def]),
 			    Names = [Name || #cid{name=Name}<-Ps],
@@ -534,7 +534,7 @@ variable(Bs, V) ->
 			    end
 		    end;
 		_ ->
-		    make_variable(Bs,W)
+		    make_variable(W, Bs)
 	    end;
 	{ok,N} ->
 	    {N,Bs}
@@ -608,15 +608,15 @@ push_meta(V,I,Bs) ->
 pop_meta(Bs = #bs { meta = [_|Meta]}) ->
     Bs#bs { meta = Meta }.
 
--spec alias(Bs::#bs{},V::var(),N::integer()) -> #bs{}.
+-spec alias(V::var(),N::integer(),Bs::#bs{}) -> #bs{}.
 
-alias(Bs,V,N) ->
+alias(V,N,Bs) ->
     %% io:format("alias ~w\n", [V]),
     case find_var(N,Bs) of
 	error ->
-	    set_var(Bs,V,N);
+	    set_var(V,N,Bs);
 	{ok,Vs} ->
-	    add_var(Bs,V,N,Vs)
+	    add_var(V,N,Vs,Bs)
     end.
 
 find_var(V, Bs) ->
@@ -625,12 +625,12 @@ find_var(V, Bs) ->
 get_var(V, Bs) ->
     maps:get(V, Bs#bs.vs).
 
-set_var(Bs, V, N) ->
+set_var(V, N, Bs) ->
     Vs = Bs#bs.vs,
     Vs1 = Vs#{ V => N,  N => [V] },
     Bs#bs { vs = Vs1 }.
 
-add_var(Bs,V,N,Vs) ->
+add_var(V,N,Vs,Bs) ->
     Vs = Bs#bs.vs,
     Vs1 = Vs#{ V => N, N => [V|Vs] },
     Bs#bs { vs = Vs1 }.
@@ -693,7 +693,7 @@ build_(V={p,P,Ps}, Bs) ->
     Px = {p,P,['_' || _ <- Ps]},
     case proplists:lookup(Px, Bs#bs.decls) of
 	none ->
-	    {X,Bs1} = variable(Bs,V),
+	    {X,Bs1} = variable(V, Bs),
 	    {{bool,X},Bs1};
 	{_,Sign,Size} ->
 	    var_vector(Sign,V,Size,Bs)
@@ -1227,7 +1227,7 @@ alias_vector(Bs,T,V,Size,Xs) ->
     alias_vector_(Bs,0,T,N,Xs,V).
 
 alias_vector_(Bs,I,T,N,[X|Xs],V) ->
-    Bs1 = alias(Bs,{T,V,N,I},X),
+    Bs1 = alias({T,V,N,I},X,Bs),
     alias_vector_(Bs1,I+1,T,N,Xs,V);
 alias_vector_(Bs,_I,_T,_N,[],_V) ->
     Bs.
@@ -1241,7 +1241,7 @@ var_vector(Type,V,Size,Bs) ->
 var_vector_(-1,Type,N,Xs,_V,Bs) -> 
     {{Type,N,Xs},Bs};
 var_vector_(I,Type,N,Xs,V,Bs) ->
-    {Xi,Bs1} = variable(Bs,{Type,V,N,I}),
+    {Xi,Bs1} = variable({Type,V,N,I},Bs),
     var_vector_(I-1,Type,N,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector
@@ -1692,7 +1692,7 @@ operation('->', A, B, Bs) ->
 operation('=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
     {X, alias_vector(Bs,T,V,Size,Xs)};
 operation('=',V,X={bool,Xb},Bs) when is_atom(V) ->
-    {X, alias(Bs,V,Xb)};
+    {X, alias(V,Xb,Bs)};
 
 operation('<<',A,B,Bs) ->
     {At,An,Ax} = varg(A),
