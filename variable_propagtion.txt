@@ -5,13 +5,13 @@ each varaiable contains a list of literals
 per clause type that needs to be evaluated
 
 
-variable X
+variable A
 
 CLAUSES:
 	 or_clause_pos	{1,A,B,C}, {1,C,A,B} ...
 	 or_clause_neg  {1,!A,C,B}
 
-	 bitmask in each clause tell what position in
+	 bitmask in each clause tell which position in
 	 the clause that are undefined, cleared if false. 
 
 	 evaluating A=0 using bindings [C=0] will then investigate

@@ -748,7 +748,7 @@ build_({expr,Expr}, Bs) ->
     end;
 build_({vec,Fs}, Bs) ->
     {Xs,Bs1} = build_list(Fs, Bs),
-    {{bit,length(Xs),[X||{bool,X} <- Xs]},Bs1};
+    {{bit,length(Xs),[bit(X)||X <- Xs]},Bs1};
 build_({'=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build__(F, Bs),
     operation_('=', V, Y, Bs1);
@@ -768,16 +768,19 @@ build_({'!',A}, Bs) ->
 
 build_({bit_index,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
-    A1 = case A of
-	     {p,Var,[]} -> {p,Var,[I1]};
-	     _ -> A
-	 end,
-    case build__(A1, Bs) of
-	{{uint,N,Xs}, Bs1} -> {select_bool(I1,N,Xs), Bs1};
-	{{int,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
-	{{bit,N,Xs}, Bs1}  -> {select_bool(I1,N,Xs), Bs1};
-	{{bool,X},Bs1}     -> {{bool,X},Bs1};
-	{X,Bs1} -> {select_bool(I1,1,[X]),Bs1}
+    io:format("A=~w, I1=~w\n", [A,I1]),
+%%    A1 = case A of
+%%	     {p,Var,[]} -> {p,Var,[I1]};
+%%	     _ -> A
+%%	 end,
+    {B,Bs1} = build__(A, Bs),
+    io:format("B = ~w\n", [B]),
+    case B of
+	{uint,N,Xs} -> {select_bool(I1,N,Xs), Bs1};
+	{int,N,Xs}  -> {select_bool(I1,N,Xs), Bs1};
+	{bit,N,Xs}  -> {select_bool(I1,N,Xs), Bs1};
+	{bool,X}    -> {{bool,X},Bs1};
+	X -> {select_bool(I1,1,[X]),Bs1}
     end;
 
 build_({bit_range,A,I,J},Bs) ->
@@ -1108,11 +1111,13 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
 	{#cid{name="binom"},[A,B]} -> varp_math:binom(A,B);
 	{#cid{name="sqrt"},[A]}    -> math:sqrt(A);
+	{#cid{name="isqrt"},[A]}    -> imath:isqrt(A);
 	{#cid{name="nroot"},[A,N]} -> varp_math:nroot(A,N);
 	{#cid{name="ln"},[A]}      -> math:log(A);
 	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
 	{#cid{name="log2"},[A]}    -> math:log(A)/math:log(2);
 	{#cid{name="log10"},[A]}   -> math:log10(A);
+	{#cid{name="ilog2"},[A]}   -> imath:ilog2(A);
 	{#cid{name="isize"},[A]}   -> varp_math:integer_size(A);
 	{#cid{name="usize"},[A]}   -> varp_math:unsigned_size(A);
 	{#cid{name="pi"},[]}       -> math:pi();
@@ -1383,6 +1388,11 @@ vconst({int,_,Xs}) -> vsigned(Xs);
 vconst({bit,_,Xs}) -> vunsigned(Xs);
 vconst({bool,X}) -> vunsigned([X]).
 
+bit({uint,1,[X]}) -> X;
+bit({bit,1,[X]}) -> X;
+bit({bool,X}) -> X.
+    
+
 vsigned(Xs) ->
     N = (1 bsl (length(Xs)-1)),
     R = vunsigned(Xs),
@@ -1421,6 +1431,8 @@ select_bool(I,N,Xs) when I >= 0, I < N ->
     {bool,lists:nth(I+1,Xs)};
 select_bool(_I,_N,_Xs) ->
     {bool,?FALSE}.
+
+
 
 %% FIXME: select bit vector / signed int?
 select_range(J,I,N,Xs) when J >= I, I>=0, J<N ->

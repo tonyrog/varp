@@ -40,11 +40,10 @@ test1() ->
     C0 = varc:add_clause(V, 'or', [X2, X3, X4]),
     C1 = varc:add_clause(V, 'or', [X3, X4, X5]),
 
-    R0 = varc:get_clause(V, C0),
-    R0 = {'or', [X2, X3, X4]},
+    {'or', [X2, X4, X3]} = varc:get_clause(V, C0),
+    {'or', [X3, X5, X4]} = varc:get_clause(V, C1),
 
-    R1 = varc:get_clause(V, C1),
-    R1 = {'or', [X3, X4, X5]}.
+    ok.
 
 
 test2() ->
@@ -57,11 +56,9 @@ test2() ->
     C0 = varc:add_clause(V, 'or', X2, X3, X4),
     C1 = varc:add_clause(V, 'or', X3, X4, X5),
 
-    R0 = varc:get_clause(V, C0),
-    R0 = {'or', [X2, X3, X4]},
-
-    R1 = varc:get_clause(V, C1),
-    R1 = {'or', [X3, X4, X5]}.
+    {'or', [X2, X4, X3]} = varc:get_clause(V, C0),
+    {'or', [X3, X5, X4]} = varc:get_clause(V, C1),
+    ok.
     
 %%
 %% Test clause / queue 
@@ -81,10 +78,10 @@ test3() ->
     C2 = varc:add_clause(V, 'or', X4, X5, X6, X7),
     C3 = varc:add_clause(V, 'or', X6, X7, X8),
 
-    {'or',[X2,X3,X4]} = varc:get_clause(V, C0),
-    {'or',[X3,X4,X5]} = varc:get_clause(V, C1),
-    {'or',[X4,X5,X6,X7]} = varc:get_clause(V, C2),
-    {'or',[X6,X7,X8]} = varc:get_clause(V, C3),
+    {'or',[X2,X4,X3]} = varc:get_clause(V, C0),
+    {'or',[X3,X5,X4]} = varc:get_clause(V, C1),
+    {'or',[X4,X7,X6,X5]} = varc:get_clause(V, C2),
+    {'or',[X6,X8,X7]} = varc:get_clause(V, C3),
 
     true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X2)),
     true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),

@@ -1,0 +1,11 @@
+// number to factor = r
+// k number of bits
+declare A:k;
+declare X:(2*isize(r)+1);
+declare Y:(2*isize(r)+1);
+
+[A n=isqrt(r)+1 ]
+(
+  ( X*X == (n*n + (1 << k) + A) ) &&
+  ( Y*Y == ((n*n - r) + (1 << k) + A) )
+)
