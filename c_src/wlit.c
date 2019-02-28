@@ -9,7 +9,7 @@
 #include <errno.h>
 
 #define UNSAT  -1
-#define CONT   0
+#define OK     0
 #define ERROR  1
 
 #define UNDEF  0
@@ -24,12 +24,18 @@ typedef struct _literal_t
     struct _literal_t* qlink;  // unit propagation queue
 } literal_t;
 
+typedef struct _lqueue_t
+{
+    literal_t* head;
+    literal_t** tail;
+} lqueue_t;
+
 typedef struct _variable_t
 {
     char* name;
     int  value;               // -1=false  0=unassigned  1=true
     struct _variable_t* next; // variable list
-    literal_t lit[2];         // literal containers
+    literal_t lit[2];         // literal containers pos=0 neg=1
 } variable_t;
 
 // p > 0   p increase
@@ -42,8 +48,9 @@ typedef struct _wlink_t
 } wlink_t;
 
 // sizeof wlink should be 8 on 32 bit machine or 16 on 64 bit machine
-// 4*8 = 32, 4*16 = 64
-#define CLAUSE_ALIGNMENT (4*sizeof(wlink_t))
+// 32 bit machine alignement should be 2*8 = 16 bytes
+// 64 bit machine alignement should be 2*16 = 32 bytes
+#define CLAUSE_ALIGNMENT (2*sizeof(wlink_t))
 
 typedef struct _clause_t
 {
@@ -63,10 +70,59 @@ typedef struct _sat_t
     variable_t  cnst;           // true & false
 } sat_t;
 
+
 int literal_value(literal_t* lp)
 {
     if (lp->sign < 0) return -lp->var->value;
     return lp->var->value;
+}
+
+// assume literal is unassigned!
+void set_literal(literal_t* lp, int value)
+{
+    if (lp->sign < 0)
+	lp->var->value = -value;
+    else
+	lp->var->value = value;
+}
+
+int assign_literal(literal_t* lp, int value)
+{
+    if (lp->var->value == UNDEF) 
+	set_literal(lp, value);
+    else if (literal_value(lp) != value)
+	return UNSAT;
+    return OK;
+}
+
+void print_literal(FILE* f, literal_t* lp)
+{
+    if (strcmp(lp->var->name, "true") == 0) {
+	if (lp->sign < 0)
+	    fprintf(f, "false");
+	else
+	    fprintf(f, "true");
+    }
+    else {
+	if (lp->sign < 0)
+	    fprintf(f, "!%s", lp->var->name);
+	else
+	    fprintf(f, "%s", lp->var->name);
+    }
+}
+
+void print_clause(FILE* f, clause_t* cp)
+{
+    fprintf(f, "{%ld: ", cp->id);
+    if (cp->size > 0) {
+	int i;
+	print_literal(f, cp->lit[0]);
+	for (i = 1; i < cp->size; i++) {
+	    fprintf(f, ",");
+	    print_literal(f, cp->lit[i]);
+	}
+    }
+    fprintf(f, "} wp1=%ld, wp2=%ld\n", cp->wl[0].p, cp->wl[1].p);
 }
 
 static void init_var(variable_t* vp)
@@ -80,6 +136,19 @@ static void init_var(variable_t* vp)
     vp->lit[1].sign = -1;
     vp->lit[1].var  = vp;
     vp->lit[1].wlist = NULL;    
+}
+
+void clear_wlink(clause_t* cp, int i)
+{
+    cp->wl[i].p = -1;      // mark dead for debug
+    cp->wl[i].next = NULL;		
+}
+
+void add_wlink(clause_t* cp, int i, long p)
+{
+    cp->wl[i].p = p;                     // new watch point
+    cp->wl[i].next = cp->lit[p]->wlist;  // link literal
+    cp->lit[p]->wlist = &cp->wl[i];
 }
 
 // lookup or create variable
@@ -152,8 +221,8 @@ clause_t* clause(sat_t* sat, size_t size, ...)
     cp->next = sat->clause_list;
     sat->clause_list = cp;
 
-    cp->wl[0].p = 0;
-    cp->wl[1].p = 0;
+    cp->wl[0].p = -1;
+    cp->wl[1].p = -1;
 
     wp1 = 0;
     while(wp1 < size) {
@@ -175,20 +244,12 @@ next_wp:
 	wp2--;
     }
 done_wp:
-    cp->wl[0].p = wp1;
-    cp->wl[1].p = wp2;
     if (wp1+1 == wp2) {
 	// FIXME propagate! put on queue? 
     }
-    // watch literal 0
-    lp = cp->lit[wp1];
-    cp->wl[0].next = lp->wlist;
-    lp->wlist = &cp->wl[0];
-    
-    // watch literal 1
-    lp = cp->lit[wp2];
-    cp->wl[1].next = lp->wlist;
-    lp->wlist = &cp->wl[1];
+    add_wlink(cp, 0, wp1);       // watch literal 1
+    add_wlink(cp, 1, wp2);       // watch literal 2    
+
 dead:
     return cp;
 }
@@ -206,7 +267,6 @@ int wlink_index(wlink_t* wl)
     return (w & (CLAUSE_ALIGNMENT-1)) / sizeof(wlink_t);
 }
 
-
 void init_sat(sat_t* sat)
 {
     memset(sat, 0, sizeof(sat_t));
@@ -219,62 +279,70 @@ void init_sat(sat_t* sat)
     sat->variable_list = &sat->cnst;
 }
 
+void lqueue_init(lqueue_t* q)
+{
+    q->head = NULL;
+    q->tail = &q->head;
+}
+
+void lqueue_enq(lqueue_t* q, literal_t* lp)
+{
+    lp->qlink = NULL;
+    *q->tail = lp;
+    q->tail = &(lp->qlink);
+}
+
+literal_t* lqueue_deq(lqueue_t* q)
+{
+    literal_t* lp;
+    
+    if ((lp = q->head) == NULL)
+	return NULL;
+    if ((q->head = lp->qlink) == NULL)
+	q->tail = &q->head;
+    return lp;
+}
+
 // check watch points and update clauses
 // we clear the literal watch list 
-int update_watch(literal_t* lp, int value)
+int propagate(lqueue_t* qp)
 {
-    literal_t* uq_head;
-    literal_t** uq_tail;
-
-    uq_head = lp;
-    uq_tail = &lp->qlink;
-    lp->qlink = NULL;
-
-    while(uq_head) {
-	wlink_t* wl;
-	
-	lp = uq_head;
-	if (lp->sign < 0)
-	    lp->var->value = -value;
-	else
-	    lp->var->value = value;
-	value = TRUE;  // always for unit propgation
-	
-	wl = lp->wlist;
-	lp->wlist = NULL;
-	
-	uq_head = uq_head->qlink;
-	if (uq_head == NULL) uq_tail = &uq_head;
+    literal_t* lp;
     
+    while((lp = lqueue_deq(qp)) != NULL) {
+	wlink_t* wl = lp->wlist;
+
+	printf("deq: "); print_literal(stdout, lp); printf("\n");
+	
+	lp->wlist = NULL;  // wlist is cleared
+	
 	while(wl) {
 	    wlink_t* wln = wl->next;  // save next before process
 	    clause_t* cp = clause_pointer(wl);
 	    long p;
 	    int lv;
+
+	    printf("eval clause:"); print_clause(stdout, cp);
 	
 	    if (wlink_index(wl)==0) {  // move forward
 		p = cp->wl[0].p+1;
 		while((p <= cp->wl[1].p) &&
 		      ((lv=literal_value(cp->lit[p])) == FALSE))
 		    p++;
-		if (p > cp->wl[1].p) // all false
+		if (p > cp->wl[1].p) // all false (fixme wlist!?)
 		    return UNSAT;
 		if (lv == UNDEF) {
 		    if (p == cp->wl[1].p) { // unit propagation
 			literal_t* lq = cp->lit[p];
-			lq->qlink = NULL;
-			*uq_tail = lq;
-			uq_tail = &lq->qlink;
+			set_literal(cp->lit[p], TRUE);
+			lqueue_enq(qp, lq);
 		    }
 		    else {
-			cp->wl[0].p = p;  // new watch point
-			cp->wl[0].next = cp->lit[p]->wlist;  // link literal
-			cp->lit[p]->wlist = &cp->wl[0];
+			add_wlink(cp, 0, p);
 		    }
 		}
 		else {
-		    cp->wl[0].p = -1;  // mark dead for debug
-		    cp->wl[0].next = NULL;
+		    clear_wlink(cp, 0);
 		}
 	    }
 	    else { // move backward
@@ -287,39 +355,43 @@ int update_watch(literal_t* lp, int value)
 		if (lv == UNDEF) {
 		    if (p == cp->wl[0].p) { // unit propagation
 			literal_t* lq = cp->lit[p];
-			lq->qlink = NULL;
-			*uq_tail = lq;
-			uq_tail = &lq->qlink;		    
+			set_literal(cp->lit[p], TRUE);
+			lqueue_enq(qp, lq);
 		    }
 		    else {
-			cp->wl[1].p = p;  // new watch point
-			cp->wl[1].next = cp->lit[p]->wlist;  // link literal
-			cp->lit[p]->wlist = &cp->wl[1];
+			add_wlink(cp, 1, p);
 		    }
 		}
 		else {  // dead, no need to touch?
-		    cp->wl[1].p = -1;  // mark dead for debug
-		    cp->wl[1].next = NULL;		
+		    clear_wlink(cp, 1);
 		}
 	    }
 	    wl = wln;
 	}
     }
-    return CONT;
+    return OK;
 }
 
 int set_variable(variable_t* xp, int value)
 {
+    lqueue_t q;
+    
     if (xp->value) {
 	if (xp->value != value)
 	    return UNSAT;  // UNSAT
-	return CONT;
+	return OK;
     }
     if (value == FALSE) {
-	return update_watch(&xp->lit[0],value);
+	xp->value = value;
+	lqueue_init(&q);
+	lqueue_enq(&q, &xp->lit[0]);
+	return propagate(&q);
     }
     else if (value == TRUE) {
-	return update_watch(&xp->lit[1],value);
+	xp->value = value;
+	lqueue_init(&q);
+	lqueue_enq(&q, &xp->lit[1]);
+	return propagate(&q);
     }
     return ERROR;  // bad value?
 }
@@ -333,36 +405,6 @@ int set(sat_t* sat, char* name, int value)
 	return set_variable(lp->var, value);
 }
 
-
-void print_literal(FILE* f, literal_t* lp)
-{
-    if (strcmp(lp->var->name, "true") == 0) {
-	if (lp->sign < 0)
-	    fprintf(f, "false");
-	else
-	    fprintf(f, "true");
-    }
-    else {
-	if (lp->sign < 0)
-	    fprintf(f, "!%s", lp->var->name);
-	else
-	    fprintf(f, "%s", lp->var->name);
-    }
-}
-
-void print_clause(FILE* f, clause_t* cp)
-{
-    fprintf(f, "{%ld: ", cp->id);
-    if (cp->size > 0) {
-	int i;
-	print_literal(f, cp->lit[0]);
-	for (i = 1; i < cp->size; i++) {
-	    fprintf(f, ",");
-	    print_literal(f, cp->lit[i]);
-	}
-    }
-    fprintf(f, "} wp1=%ld, wp2=%ld\n", cp->wl[0].p, cp->wl[1].p);
-}
 
 
 int main(int argc, char** argv)
