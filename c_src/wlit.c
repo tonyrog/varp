@@ -39,11 +39,13 @@ typedef struct _lqueue_t
 typedef struct _variable_t
 {
     char* name;
+    int vix;                  // variable index
+    unsigned long cix;        // implication clause index 0=none
+    long cip;                 // position in implication clause
     int  value;               // -1=false  0=unassigned  1=true
     struct _variable_t* next; // variable list
     literal_t lit[2];         // literal containers pos=0 neg=1
 } variable_t;
-
 
 // p > 0   p increase
 // p < 0   p decrease
@@ -63,21 +65,42 @@ typedef struct _clause_t
 {
     wlink_t    wl[2];        // watch point 1&2+links
     struct _clause_t* next;  // clause list
-    unsigned long id;        // clause id
+    unsigned long cix;       // clause id (index) 1..N
     unsigned long size;      // number of literals in lit
     literal_t* lit[];        // literal array
 } clause_t;
 
+#define WLINK_BLOCK_SIZE 256
+
+typedef struct _wlink_block_t
+{
+    struct _wlink_block_t* next;    
+    size_t size;
+    wlink_t wp[WLINK_BLOCK_SIZE];
+} wlink_block_t;
+
+typedef struct _undo_t
+{
+    wlink_block_t* wbp;
+    wlink_t* top;
+    wlink_t* bot;   // outside block
+} undo_t;
+    
+
 typedef struct _sat_t
 {
-    size_t num_variables;
-    size_t num_clauses;
+    unsigned long num_variables;
+    unsigned long num_clauses;
     variable_t* variable_list;  // all variables
     clause_t*   clause_list;    // all clauses
     variable_t  cnst;           // true & false
     lqueue_t    q;              // literal queue for propagation
+    unsigned long conflicting_clause; // conflict clause from last propagation
+    undo_t      undo;           // undo structure
 } sat_t;
 
+static const char* s_true = "TRUE";
+static const char* s_false = "FALSE";
 
 void lqueue_init(lqueue_t* q)
 {
@@ -133,41 +156,41 @@ int assign_literal(literal_t* lp, int value)
     return OK;
 }
 
-
 void print_literal(FILE* f, literal_t* lp)
 {
-    if (strcmp(lp->var->name, "true") == 0) {
-	if (lp->sign < 0)
-	    fprintf(f, "false");
-	else
-	    fprintf(f, "true");
-    }
-    else {
-	if (lp->sign < 0)
-	    fprintf(f, "!%s", lp->var->name);
-	else
-	    fprintf(f, "%s", lp->var->name);
-    }
+    if (lp->var->name == s_true)
+	fprintf(f, (lp->sign<0) ? "false" : "true");
+    else
+	fprintf(f, "%s%s", (lp->sign<0)? "!" : "", lp->var->name);
 }
 
-void print_literal_array(FILE* f, literal_t** lv, size_t size)
+void print_literal_array(FILE* f, char* tag, literal_t** lv, size_t size)
 {
-    fprintf(f, "{");
-    if (size > 0) {
-	int i;
-	print_literal(f, lv[0]);
-	for (i = 1; i < size; i++) {
-	    fprintf(f, ",");
-	    print_literal(f, lv[i]);
-	}
+    int i;
+    fprintf(f, "%s{", tag);
+    for (i = 0; i < size; i++) {
+	if (i > 0) fprintf(f, ",");
+	print_literal(f, lv[i]);
     }
     fprintf(f, "}");
 }
 
+void print_literal_array_ln(FILE* f, char* tag, literal_t** lv, size_t size)
+{
+    print_literal_array(f, tag, lv, size);
+    fprintf(f, "\n");
+}
+
 void print_clause(FILE* f, clause_t* cp)
 {
-    fprintf(f, "%ld:", cp->id);
-    print_literal_array(f, cp->lit, cp->size);
+    fprintf(f, "%ld:", cp->cix);
+    print_literal_array(f, "", cp->lit, cp->size);
+}
+
+void print_clause_ln(FILE* f, clause_t* cp)
+{
+    fprintf(f, "%ld:", cp->cix);
+    print_literal_array_ln(f, "", cp->lit, cp->size);
 }
 
 void print_clause_info(FILE* f, clause_t* cp)
@@ -176,7 +199,7 @@ void print_clause_info(FILE* f, clause_t* cp)
     fprintf(f, " wp0=%ld, wp1=%ld\n", cp->wl[0].p, cp->wl[1].p);
 }
 
-static void init_var(variable_t* vp)
+static void var_init(variable_t* vp)
 {
     vp->value = UNDEF;
 
@@ -208,7 +231,7 @@ variable_t* new_variable(sat_t* sat, char* name)
     
     if ((v = malloc(sizeof(variable_t))) != NULL) {
 	v->name = strdup(name);
-	init_var(v);
+	var_init(v);
 	v->next = sat->variable_list;
 	sat->variable_list = v;
 	sat->num_variables++;
@@ -285,35 +308,31 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
 	return ERROR;
     }
 
-    cp->id   = ++sat->num_clauses;
+    cp->cix  = ++sat->num_clauses;
     cp->next = sat->clause_list;
     sat->clause_list = cp;
 
     memcpy(cp->lit, lit, sizeof(literal_t*)*size);
 
-    printf("INPUT: ");
-    print_literal_array(stdout,cp->lit,size); printf("\n");
+    print_literal_array_ln(stdout,"input: ", cp->lit,size);
     
     // sort literals
     qsort(cp->lit, size, sizeof(literal_t*), cmp_literals);
 
-    printf("QSORT: ");
-    print_literal_array(stdout,cp->lit,size); printf("\n");
-    
+    print_literal_array_ln(stdout,"QSORT: ",cp->lit,size);
+
     i = size-1;
     // remove TRUE literals
     while((i >= 0) && (cp->lit[i] == &sat->cnst.lit[0])) {
 	i--; size--; Tc++;
     }
-    printf("TRUE: ");
-    print_literal_array(stdout,cp->lit,size); printf("\n");
+    print_literal_array_ln(stdout,"TRUE: ",cp->lit,size);
     
     // remove FALSE literals
     while((i >= 0) && (cp->lit[i] == &sat->cnst.lit[1])) {
 	i--; size--; Fc++;
     }
-    printf("FALSE: ");
-    print_literal_array(stdout,cp->lit,size); printf("\n");
+    print_literal_array_ln(stdout,"FALSE: ",cp->lit,size);
 
     { // remove duplicates 
 	unsigned u=0,v=0,w=0;
@@ -330,17 +349,15 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
 	}
 	size = u;
     }
-    printf("DUP: ");
-    print_literal_array(stdout,cp->lit,size); printf("\n");    
-
+    print_literal_array_ln(stdout,"DUP: ",cp->lit,size);
+    
     if (size == 0) {
 	if ((Tc==0) && (Fc>0)) // make sure it's not empty
 	    cp->lit[size++] = &sat->cnst.lit[1];
     }
     if (Tc>0) // add the T constant
 	cp->lit[size++] = &sat->cnst.lit[0];
-    printf("CONST: ");
-    print_literal_array(stdout,cp->lit,size); printf("\n");    
+    print_literal_array_ln(stdout,"CONST: ",cp->lit,size);
 
     cp->size = size;
 
@@ -426,13 +443,28 @@ void sat_init(sat_t* sat)
 {
     memset(sat, 0, sizeof(sat_t));
 
-    sat->cnst.name = "true";
-    init_var(&sat->cnst);
+    sat->cnst.name = (char*) s_true;
+    var_init(&sat->cnst);
     sat->cnst.value = TRUE;
 
     sat->cnst.next = sat->variable_list;
     sat->variable_list = &sat->cnst;
     lqueue_init(&sat->q);
+    sat->conflicting_clause = -1;
+}
+
+static void wlink_push(undo_t* up, wlink_t* wl)
+{
+    if (up->top == up->bot) {
+	wlink_block_t* wbp = malloc(sizeof(wlink_block_t));
+	if (up->wbp != NULL)
+	    up->wbp->size = WLINK_BLOCK_SIZE;
+	wbp->next = up->wbp;
+	up->wbp = wbp;
+	up->top = wbp->wp;
+	up->bot = wbp->wp + WLINK_BLOCK_SIZE;
+    }
+    *up->top++ = *wl;
 }
 
 // check watch points and update clauses
@@ -443,8 +475,10 @@ int propagate(sat_t* sat)
     
     while((lp = lqueue_deq(&sat->q)) != NULL) {
 	wlink_t* wl = lp->wlist;
-
-	DBG("deq: %s=%d\n", lp->var->name, get_literal(lp));
+	variable_t* vq = lp->var;
+	
+	DBG("deq: %s=%d(%d:%d)\n", vq->name, get_literal(lp),
+	    vq->cid, vq->cip);
 	
 	lp->wlist = NULL;  // wlist is cleared
 	
@@ -456,11 +490,9 @@ int propagate(sat_t* sat)
 	    long p;
 	    int lv;
 
-	    
 	    DBG("eval clause:");
 	    #ifdef DEBUG
-	    print_clause(stdout, cp);
-	    printf("\n");
+	    print_clause_ln(stdout, cp);
 	    #endif
 	    if (wlink_index(wl)==0) {  // move forward
 		DBG("  fwd: %s=%d\n",
@@ -468,14 +500,20 @@ int propagate(sat_t* sat)
 		p = wp0;
 		while((p <= wp1) && ((lv=get_literal(cp->lit[p])) == FALSE))
 		    p++;
+		wlink_push(&sat->undo, &cp->wl[0]);
 		cp->wl[0].p = p;
-		if (p > wp1) // all false
+		if (p > wp1) { // all false
+		    sat->conflicting_clause = cp->cix;
 		    return UNSAT;
+		}
 		else if (p == wp1) {
 		    if (lv == UNDEF) {  // unit propagation
+			variable_t* vp = cp->lit[p]->var;
 			set_literal(cp->lit[p], TRUE);
 			lqueue_enq(&sat->q, negate_literal(cp->lit[p]));
-		    }		    
+			vp->cix = cp->cix;   // implication clause
+			vp->cip = p;         // and position
+		    }
 		    else if (lv == TRUE) {
 			clear_wlink(cp, 0);
 		    }
@@ -490,13 +528,19 @@ int propagate(sat_t* sat)
 		p = wp1;
 		while((p >= wp0) && ((lv=get_literal(cp->lit[p])) == FALSE))
 		    p--;
+		wlink_push(&sat->undo, &cp->wl[1]);
 		cp->wl[1].p = p;
-		if (p < wp0) // all false
+		if (p < wp0) { // all false
+		    sat->conflicting_clause = cp->cix;
 		    return UNSAT;
+		}
 		else if (p == wp0) {
 		    if (lv == UNDEF) { // unit propagation
+			variable_t* vp = cp->lit[p]->var;
 			set_literal(cp->lit[p], TRUE);
 			lqueue_enq(&sat->q, negate_literal(cp->lit[p]));
+			vp->cix = cp->cix;  // implication clause
+			vp->cip = p;	    // and position
 		    }
 		    else if (lv == TRUE) {
 			clear_wlink(cp, 1);			
@@ -547,7 +591,8 @@ void dump_literals(FILE* f, sat_t* sat)
 
     for (vp = sat->variable_list; vp != NULL; vp = vp->next) {
 	int i;
-	fprintf(f, "%s = %d, ", vp->name, vp->value);
+	fprintf(f, "%s = %d [%ld:%ld], ", vp->name, vp->value,
+		vp->cix, vp->cip);
 	for (i = 0; i < 2; i++) {
 	    literal_t* lp;
 	    wlink_t* wl;
@@ -557,13 +602,13 @@ void dump_literals(FILE* f, sat_t* sat)
 	    if ((wl = lp->wlist) != NULL) {
 		clause_t* cp = clause_pointer(wl);
 		wi = wlink_index(wl);
-		fprintf(f,"%ld:%ld", cp->id, cp->wl[wi].p);
+		fprintf(f,"%ld:%ld", cp->cix, cp->wl[wi].p);
 		wl = wl->next;
 	    }
 	    while(wl) {
 		clause_t* cp = clause_pointer(wl);
 		wi = wlink_index(wl);
-		fprintf(f,",%ld:%ld", cp->id, cp->wl[wi].p);
+		fprintf(f,",%ld:%ld", cp->cix, cp->wl[wi].p);
 		wl = wl->next;
 	    }
 	    fprintf(f, "}");
@@ -580,8 +625,8 @@ int main(int argc, char** argv)
 
     sat_init(&sat);
 
-    clause(&sat, NULL, 5, "a", "!a", "b", "b", "!a");
-    clause(&sat, NULL, 5, "false", "!b", "!c", "true", "false");
+    clause(&sat, NULL, 2, "b", "a");
+    clause(&sat, NULL, 2, "!b", "!c");
     clause(&sat, NULL, 2, "c", "d");
     clause(&sat, NULL, 4, "!b", "c", "e", "!d");
 
