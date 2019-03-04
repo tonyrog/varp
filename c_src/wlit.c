@@ -70,23 +70,30 @@ typedef struct _clause_t
     literal_t* lit[];        // literal array
 } clause_t;
 
-#define WLINK_BLOCK_SIZE 256
+#define UNDO_BLOCK_SIZE 256
 
-typedef struct _wlink_block_t
+typedef struct _undo_elem_t
 {
-    struct _wlink_block_t* next;    
+    intptr_t* addr;
+    intptr_t  value;
+} undo_elem_t;
+
+typedef struct _undo_block_t
+{
+    struct _undo_block_t* next;
     size_t size;
-    wlink_t wp[WLINK_BLOCK_SIZE];
-} wlink_block_t;
+    undo_elem_t uelem[UNDO_BLOCK_SIZE];
+} undo_block_t;
 
 typedef struct _undo_t
 {
-    wlink_block_t* wbp;
-    wlink_t* top;
-    wlink_t* bot;   // outside block
+    size_t stack_size;  // count of all elements
+    undo_block_t* ubp;  // current block
+    undo_elem_t* top;   // &uelem[0];
+    undo_elem_t* cur;   // current pointer
+    undo_elem_t* bot;   // &uelem[UNDO_BLOCK_SIZE]
 } undo_t;
     
-
 typedef struct _sat_t
 {
     unsigned long num_variables;
@@ -218,11 +225,16 @@ void clear_wlink(clause_t* cp, int i)
     cp->wl[i].next = NULL;		
 }
 
-void add_wlink(clause_t* cp, int i, long p)
+void link_wlink(clause_t* cp, int i, long p)
 {
-    cp->wl[i].p = p;                     // new watch point
     cp->wl[i].next = cp->lit[p]->wlist;  // link literal
     cp->lit[p]->wlist = &cp->wl[i];
+}
+
+void set_wlink(clause_t* cp, int i, long p)
+{
+    cp->wl[i].p = p;                     // new watch point
+    link_wlink(cp, i, p);
 }
 
 variable_t* new_variable(sat_t* sat, char* name)
@@ -314,25 +326,25 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
 
     memcpy(cp->lit, lit, sizeof(literal_t*)*size);
 
-    print_literal_array_ln(stdout,"input: ", cp->lit,size);
+    // print_literal_array_ln(stdout,"input: ", cp->lit,size);
     
     // sort literals
     qsort(cp->lit, size, sizeof(literal_t*), cmp_literals);
 
-    print_literal_array_ln(stdout,"QSORT: ",cp->lit,size);
+    // print_literal_array_ln(stdout,"QSORT: ",cp->lit,size);
 
     i = size-1;
     // remove TRUE literals
     while((i >= 0) && (cp->lit[i] == &sat->cnst.lit[0])) {
 	i--; size--; Tc++;
     }
-    print_literal_array_ln(stdout,"TRUE: ",cp->lit,size);
+    // print_literal_array_ln(stdout,"TRUE: ",cp->lit,size);
     
     // remove FALSE literals
     while((i >= 0) && (cp->lit[i] == &sat->cnst.lit[1])) {
 	i--; size--; Fc++;
     }
-    print_literal_array_ln(stdout,"FALSE: ",cp->lit,size);
+    // print_literal_array_ln(stdout,"FALSE: ",cp->lit,size);
 
     { // remove duplicates 
 	unsigned u=0,v=0,w=0;
@@ -349,7 +361,7 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
 	}
 	size = u;
     }
-    print_literal_array_ln(stdout,"DUP: ",cp->lit,size);
+    // print_literal_array_ln(stdout,"DUP: ",cp->lit,size);
     
     if (size == 0) {
 	if ((Tc==0) && (Fc>0)) // make sure it's not empty
@@ -357,7 +369,7 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
     }
     if (Tc>0) // add the T constant
 	cp->lit[size++] = &sat->cnst.lit[0];
-    print_literal_array_ln(stdout,"CONST: ",cp->lit,size);
+    // print_literal_array_ln(stdout,"CONST: ",cp->lit,size);
 
     cp->size = size;
 
@@ -394,8 +406,8 @@ next_wp:
     if (cpp) *cpp = cp;
     return OK;
 done_wp:
-    add_wlink(cp, 0, wp0);       // watch literal 0
-    add_wlink(cp, 1, wp1);       // watch literal 1
+    set_wlink(cp, 0, wp0);       // watch literal 0
+    set_wlink(cp, 1, wp1);       // watch literal 1
 dead:
     if (cpp) *cpp = cp;
     return OK;
@@ -453,18 +465,99 @@ void sat_init(sat_t* sat)
     sat->conflicting_clause = -1;
 }
 
-static void wlink_push(undo_t* up, wlink_t* wl)
+static int undo_add_block(undo_t* up)
 {
-    if (up->top == up->bot) {
-	wlink_block_t* wbp = malloc(sizeof(wlink_block_t));
-	if (up->wbp != NULL)
-	    up->wbp->size = WLINK_BLOCK_SIZE;
-	wbp->next = up->wbp;
-	up->wbp = wbp;
-	up->top = wbp->wp;
-	up->bot = wbp->wp + WLINK_BLOCK_SIZE;
+    undo_block_t* ubp;
+    if ((ubp = malloc(sizeof(undo_block_t))) == NULL)
+	return -1;
+    if (up->ubp != NULL)
+	up->ubp->size = up->cur - up->top;
+    ubp->next = up->ubp;
+    up->ubp = ubp;
+    up->top = &ubp->uelem[0];
+    up->cur = up->top;
+    up->bot = &ubp->uelem[UNDO_BLOCK_SIZE];
+    return 0;
+}
+
+static void undo_del_block(undo_t* up)
+{
+    undo_block_t* ubp;
+    if ((ubp = up->ubp) != NULL) {
+	undo_block_t* ubp1 = ubp->next;
+	if (ubp1 != NULL) {
+	    up->top = &ubp1->uelem[0];
+	    up->bot = &ubp1->uelem[ubp1->size];
+	    up->cur = up->bot;
+	}
+	free(ubp);
+	up->ubp = ubp1;
     }
-    *up->top++ = *wl;
+}
+
+// push undo mark
+static int push_mark(undo_t* up, int mark)
+{
+    if (mark <= 0)
+	return -1;  // bad argument
+    if (up->cur == up->bot) {
+	if (undo_add_block(up) < 0)
+	    return -1;
+    }
+    up->cur->addr  = NULL;   // undo mark
+    up->cur->value = mark;
+    printf("MARK: value=%ld\n", up->cur->value);
+    up->cur++;
+    up->stack_size++;    
+    return 0;
+}
+
+static int push_value(undo_t* up, void* ptr)
+{
+    if (up->cur == up->bot) {
+	if (undo_add_block(up) < 0)
+	    return -1;
+    }
+    up->cur->addr  = (intptr_t*)ptr;
+    up->cur->value = *((intptr_t*)ptr);
+    printf("PUSH: ptr=%p, value=%ld\n", up->cur->addr, up->cur->value);
+    up->cur++;
+    up->stack_size++;
+    return 0;
+}
+
+// pop single element, return mark > 0 if mark element
+// return 0 if value element return -1 if nothing to pop
+static int pop(undo_t* up)
+{
+    intptr_t* ptr;
+
+    if (up->stack_size > 0) {
+	up->cur--;
+	up->stack_size--;
+	if (up->cur < up->top)
+	    undo_del_block(up);
+	if ((ptr = up->cur->addr) == NULL) {
+	    printf("POP MARK: %ld\n", up->cur->value);
+	    return up->cur->value;  // return mark value
+	}
+	else {
+	    printf("POP: ptr=%p, value=%ld\n", ptr, up->cur->value);
+	    *ptr = up->cur->value;
+	    return 0;
+	}
+    }
+    return -1;
+}
+
+// undo until mark
+static int pop_until_mark(undo_t* up, int mark)
+{
+    int m;
+
+    while(((m = pop(up)) != mark) && (m != -1))
+	;
+    return m;
 }
 
 // check watch points and update clauses
@@ -479,7 +572,8 @@ int propagate(sat_t* sat)
 	
 	DBG("deq: %s=%d(%d:%d)\n", vq->name, get_literal(lp),
 	    vq->cid, vq->cip);
-	
+
+	push_value(&sat->undo, &lp->wlist);
 	lp->wlist = NULL;  // wlist is cleared
 	
 	while(wl) {
@@ -500,7 +594,9 @@ int propagate(sat_t* sat)
 		p = wp0;
 		while((p <= wp1) && ((lv=get_literal(cp->lit[p])) == FALSE))
 		    p++;
-		wlink_push(&sat->undo, &cp->wl[0]);
+		push_value(&sat->undo, &cp->wl[0].next);
+		push_value(&sat->undo, &cp->wl[0].p);
+		push_value(&sat->undo, &cp->lit[p]->wlist);
 		cp->wl[0].p = p;
 		if (p > wp1) { // all false
 		    sat->conflicting_clause = cp->cix;
@@ -509,8 +605,10 @@ int propagate(sat_t* sat)
 		else if (p == wp1) {
 		    if (lv == UNDEF) {  // unit propagation
 			variable_t* vp = cp->lit[p]->var;
+			push_value(&sat->undo, &vp->value);
 			set_literal(cp->lit[p], TRUE);
 			lqueue_enq(&sat->q, negate_literal(cp->lit[p]));
+			// maybe save on undo stack? needed?
 			vp->cix = cp->cix;   // implication clause
 			vp->cip = p;         // and position
 		    }
@@ -519,7 +617,7 @@ int propagate(sat_t* sat)
 		    }
 		}
 		else {
-		    add_wlink(cp, 0, p);
+		    link_wlink(cp, 0, p);
 		}
 	    }
 	    else { // move backward
@@ -528,7 +626,9 @@ int propagate(sat_t* sat)
 		p = wp1;
 		while((p >= wp0) && ((lv=get_literal(cp->lit[p])) == FALSE))
 		    p--;
-		wlink_push(&sat->undo, &cp->wl[1]);
+		push_value(&sat->undo, &cp->wl[1].next);
+		push_value(&sat->undo, &cp->wl[1].p);
+		push_value(&sat->undo, &cp->lit[p]->wlist);
 		cp->wl[1].p = p;
 		if (p < wp0) { // all false
 		    sat->conflicting_clause = cp->cix;
@@ -537,17 +637,19 @@ int propagate(sat_t* sat)
 		else if (p == wp0) {
 		    if (lv == UNDEF) { // unit propagation
 			variable_t* vp = cp->lit[p]->var;
+			push_value(&sat->undo, &vp->value);
 			set_literal(cp->lit[p], TRUE);
 			lqueue_enq(&sat->q, negate_literal(cp->lit[p]));
+			// maybe save on undo stack? needed?
 			vp->cix = cp->cix;  // implication clause
 			vp->cip = p;	    // and position
 		    }
 		    else if (lv == TRUE) {
-			clear_wlink(cp, 1);			
+			clear_wlink(cp, 1);
 		    }
 		}
 		else {
-		    add_wlink(cp, 1, p);
+		    link_wlink(cp, 1, p);
 		}
 	    }
 	    wl = wln;
@@ -564,11 +666,13 @@ int set_variable(sat_t* sat, variable_t* xp, int value)
 	return OK;
     }
     if (value == FALSE) {
+	push_value(&sat->undo, &xp->value);
 	xp->value = value;
 	lqueue_enq(&sat->q, &xp->lit[0]);
 	return OK;
     }
     else if (value == TRUE) {
+	push_value(&sat->undo, &xp->value);
 	xp->value = value;
 	lqueue_enq(&sat->q, &xp->lit[1]);
 	return OK;
@@ -634,20 +738,18 @@ int main(int argc, char** argv)
 	print_clause(stdout, cp);
 	fprintf(stdout, "\n");
     }
-
     dump_literals(stdout, &sat);
 
+    push_mark(&sat.undo, 1);
     if (set(&sat, "a", FALSE) == UNSAT)
 	printf("UNSAT\n");
     else if (propagate(&sat) == UNSAT)
 	printf("UNSAT\n");
-
-    for (cp = sat.clause_list; cp != NULL; cp = cp->next) {
-	print_clause(stdout, cp);
-	fprintf(stdout, "\n");
-    }
-    
     dump_literals(stdout, &sat);
 
+    printf("UNDO\n");
+    pop_until_mark(&sat.undo, 1);
+    dump_literals(stdout, &sat);
+    
     exit(0);
 }
