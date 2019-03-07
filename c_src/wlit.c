@@ -63,7 +63,7 @@ typedef struct _wlink_t
 
 typedef struct _clause_t
 {
-    wlink_t    wl[2];        // watch point 1&2+links
+    wlink_t    wl[2];        // ALIGNED watch point 1&2+links (do not move!)
     struct _clause_t* next;  // clause list
     unsigned long cix;       // clause id (index) 1..N
     unsigned long size;      // number of literals in lit
@@ -72,8 +72,16 @@ typedef struct _clause_t
 
 #define UNDO_BLOCK_SIZE 256
 
+typedef enum {
+    VARIABLE,  // addr=variable, value=variable-value
+    MARK,      // addr=notused,  value=mark-value
+    VALUE,     // addr=address,  value=content of address    
+    CLASS,     // not used
+} undo_type_t;
+
 typedef struct _undo_elem_t
 {
+    undo_type_t type;
     intptr_t* addr;
     intptr_t  value;
 } undo_elem_t;
@@ -504,9 +512,10 @@ static int push_mark(undo_t* up, int mark)
 	if (undo_add_block(up) < 0)
 	    return -1;
     }
-    up->cur->addr  = NULL;   // undo mark
+    up->cur->type  = MARK;
+    up->cur->addr  = NULL;
     up->cur->value = mark;
-    printf("MARK: value=%ld\n", up->cur->value);
+    printf("PUSH MARK: value=%ld\n", up->cur->value);
     up->cur++;
     up->stack_size++;    
     return 0;
@@ -518,17 +527,33 @@ static int push_value(undo_t* up, void* ptr)
 	if (undo_add_block(up) < 0)
 	    return -1;
     }
+    up->cur->type  = VALUE;
     up->cur->addr  = (intptr_t*)ptr;
     up->cur->value = *((intptr_t*)ptr);
-    printf("PUSH: ptr=%p, value=%ld\n", up->cur->addr, up->cur->value);
+    printf("PUSH VALUE: ptr=%p, value=%ld\n", up->cur->addr, up->cur->value);
     up->cur++;
     up->stack_size++;
     return 0;
 }
 
-// pop single element, return mark > 0 if mark element
-// return 0 if value element return -1 if nothing to pop
-static int pop(undo_t* up)
+static int push_variable(undo_t* up, variable_t* var)
+{
+    if (up->cur == up->bot) {
+	if (undo_add_block(up) < 0)
+	    return -1;
+    }
+    up->cur->type  = VARIABLE;
+    up->cur->addr  = (intptr_t*) var;
+    up->cur->value = var->value;
+    printf("PUSH VARIABLE: var=%s, value=%ld\n", var->name, up->cur->value);
+    up->cur++;
+    up->stack_size++;
+    return 0;
+}
+
+// pop single element, return pointer to element
+// return NULL if stack is empty
+static undo_elem_t* pop(undo_t* up)
 {
     intptr_t* ptr;
 
@@ -537,27 +562,39 @@ static int pop(undo_t* up)
 	up->stack_size--;
 	if (up->cur < up->top)
 	    undo_del_block(up);
-	if ((ptr = up->cur->addr) == NULL) {
-	    printf("POP MARK: %ld\n", up->cur->value);
-	    return up->cur->value;  // return mark value
+	switch(up->cur->type) {
+	case MARK:
+	    printf("POP MARK %ld\n", up->cur->value);
+	    break;
+	case VARIABLE:
+	    printf("POP VARIABLE %s value=%ld\n",
+		   ((variable_t*)up->cur->addr)->name, up->cur->value);
+	    ((variable_t*)up->cur->addr)->value = up->cur->value;
+	    break;
+	case VALUE:
+	    printf("POP VALUE addr=%p value=%ld\n",
+		   up->cur->addr, up->cur->value);
+	    *up->cur->addr = up->cur->value;
+	    break;
+	default:
+	    break;
 	}
-	else {
-	    printf("POP: ptr=%p, value=%ld\n", ptr, up->cur->value);
-	    *ptr = up->cur->value;
-	    return 0;
-	}
+	return up->cur;
     }
-    return -1;
+    return NULL;
 }
 
 // undo until mark
 static int pop_until_mark(undo_t* up, int mark)
 {
-    int m;
+    undo_elem_t* p;
 
-    while(((m = pop(up)) != mark) && (m != -1))
+    while(((p = pop(up)) != NULL) &&
+	  !((p->type == MARK) && (p->value == mark)))
 	;
-    return m;
+    if (p == NULL)
+	return -1;
+    return p->value;
 }
 
 // check watch points and update clauses
@@ -605,7 +642,7 @@ int propagate(sat_t* sat)
 		else if (p == wp1) {
 		    if (lv == UNDEF) {  // unit propagation
 			variable_t* vp = cp->lit[p]->var;
-			push_value(&sat->undo, &vp->value);
+			push_variable(&sat->undo, vp);
 			set_literal(cp->lit[p], TRUE);
 			lqueue_enq(&sat->q, negate_literal(cp->lit[p]));
 			// maybe save on undo stack? needed?
@@ -637,7 +674,7 @@ int propagate(sat_t* sat)
 		else if (p == wp0) {
 		    if (lv == UNDEF) { // unit propagation
 			variable_t* vp = cp->lit[p]->var;
-			push_value(&sat->undo, &vp->value);
+			push_variable(&sat->undo, vp);
 			set_literal(cp->lit[p], TRUE);
 			lqueue_enq(&sat->q, negate_literal(cp->lit[p]));
 			// maybe save on undo stack? needed?
@@ -666,13 +703,13 @@ int set_variable(sat_t* sat, variable_t* xp, int value)
 	return OK;
     }
     if (value == FALSE) {
-	push_value(&sat->undo, &xp->value);
+	push_variable(&sat->undo, xp);
 	xp->value = value;
 	lqueue_enq(&sat->q, &xp->lit[0]);
 	return OK;
     }
     else if (value == TRUE) {
-	push_value(&sat->undo, &xp->value);
+	push_variable(&sat->undo, xp);	
 	xp->value = value;
 	lqueue_enq(&sat->q, &xp->lit[1]);
 	return OK;
