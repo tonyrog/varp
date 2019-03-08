@@ -19,10 +19,18 @@
 #define NDEBUG
 #include <assert.h>
 
+// Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
+#ifdef USE_DIRTY_SCHEDULER
+#define NIF_FUNC(name,arity,fptr) {(name),(arity),(fptr),(ERL_NIF_DIRTY_JOB_CPU_BOUND)}
+#define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr),(ERL_NIF_DIRTY_JOB_CPU_BOUND)}
+#else
 #define NIF_FUNC(name,arity,fptr) {(name),(arity),(fptr),(0)}
+#define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr),(ERL_NIF_DIRTY_JOB_CPU_BOUND)}
+#endif
 #else
 #define NIF_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
+#define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
 
 #define UNUSED(x) (void)(x)
@@ -1390,7 +1398,7 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
 		}
 		else if (elem[0] == ATOM(bcp)) {
 		    if (elem[1] == ATOM(default))
-			bcp = 0;
+			bcp = 1;
 		    else if (!get_boolean(env, elem[1], &bcp))
 			return enif_make_badarg(env);
 		}
@@ -2439,7 +2447,8 @@ static int cmp_rev_abs_lit QSORT_R_ARGS(const void* a, const void* b,void* arg)
     return r;
 }
 
-static void print_lit(char* label, int* literal, size_t size)
+
+void print_lit(char* label, int* literal, size_t size)
 {
     if (size == 0)
 	printf("%s={}", label);
@@ -2454,6 +2463,7 @@ static void print_lit(char* label, int* literal, size_t size)
 
 // #define PRINT_LIT(msg,lit,size) print_lit((msg),(lit),(size))
 #define PRINT_LIT(msg,lit,size)
+
 //
 // add a clause to the system and normalise contents
 // first SORT (reversed) the literals according to abs(lit[i]) then lit[i]
