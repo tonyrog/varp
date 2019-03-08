@@ -117,6 +117,9 @@ typedef struct _sat_t
 static const char* s_true = "TRUE";
 static const char* s_false = "FALSE";
 
+#define SAT_TRUE(sat) (&(sat)->cnst.lit[0])
+#define SAT_FALSE(sat) (&(sat)->cnst.lit[1])
+
 void lqueue_init(lqueue_t* q)
 {
     q->head = NULL;
@@ -309,7 +312,7 @@ static int cmp_literals(const void* a, const void* b)
 	if (ap->sign < 0) return -1;
 	else return 1;
     }
-    if (strcmp(ap->var->name, "true") == 0)
+    if (ap->var->name == s_true)
 	return 1;
     return strcmp(ap->var->name, bp->var->name);
 }
@@ -343,13 +346,13 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
 
     i = size-1;
     // remove TRUE literals
-    while((i >= 0) && (cp->lit[i] == &sat->cnst.lit[0])) {
+    while((i >= 0) && (cp->lit[i] == SAT_TRUE(sat))) {
 	i--; size--; Tc++;
     }
     // print_literal_array_ln(stdout,"TRUE: ",cp->lit,size);
     
     // remove FALSE literals
-    while((i >= 0) && (cp->lit[i] == &sat->cnst.lit[1])) {
+    while((i >= 0) && (cp->lit[i] == SAT_FALSE(sat))) {
 	i--; size--; Fc++;
     }
     // print_literal_array_ln(stdout,"FALSE: ",cp->lit,size);
@@ -373,10 +376,10 @@ int new_clause(sat_t* sat, clause_t** cpp, size_t size, literal_t** lit)
     
     if (size == 0) {
 	if ((Tc==0) && (Fc>0)) // make sure it's not empty
-	    cp->lit[size++] = &sat->cnst.lit[1];
+	    cp->lit[size++] = SAT_TRUE(sat);
     }
     if (Tc>0) // add the T constant
-	cp->lit[size++] = &sat->cnst.lit[0];
+	cp->lit[size++] = SAT_FALSE(&sat);
     // print_literal_array_ln(stdout,"CONST: ",cp->lit,size);
 
     cp->size = size;
