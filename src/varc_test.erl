@@ -30,6 +30,21 @@ all() ->
     xor_clause(false),
     order().
 
+test0() ->
+    V = varc:new(),    
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    C0 = varc:add_clause(V, 'or', [1, X2, X3, X4]),
+    R = varc:get_clause(V, C0),
+    io:format("clause = ~p\n", [R]),
+    {'or', [1, X4, X3, X2]} = varc:get_clause(V, C0),
+
+    C1 = varc:add_clause(V, 'or', 1, X2, X3, X4),
+    {'or', [1, X4, X3, X2]} = varc:get_clause(V, C1),
+    ok.
+    
+
 test1() ->
     V = varc:new(),
     X2 = varc:add_variable(V),
@@ -40,8 +55,8 @@ test1() ->
     C0 = varc:add_clause(V, 'or', [X2, X3, X4]),
     C1 = varc:add_clause(V, 'or', [X3, X4, X5]),
 
-    {'or', [X2, X4, X3]} = varc:get_clause(V, C0),
-    {'or', [X3, X5, X4]} = varc:get_clause(V, C1),
+    {'or', [X3, X3, X2]} = varc:get_clause(V, C0),
+    {'or', [X5, X4, X3]} = varc:get_clause(V, C1),
 
     ok.
 
@@ -106,6 +121,7 @@ test3() ->
     true = varc:eval(V),
     true = lists:sort([]) =:= lists:sort(varc:get_queue(V)),
     true = varc:mark(V, 1),
+
     true = varc:put(V, X3, ?TRUE),
     true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
     true = varc:put(V, X4, ?FALSE),

@@ -89,7 +89,7 @@
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
 
 init() ->
-    Nif = filename:join([code:priv_dir(varp), "varc_nif"]),
+    Nif = filename:join([code:priv_dir(varp), "varw_nif"]),
     ?debug("Loading: ~s\n", [Nif]),
     erlang:load_nif(Nif, 0).
 
