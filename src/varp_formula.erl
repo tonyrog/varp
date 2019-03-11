@@ -175,10 +175,18 @@ clause(Bs,'or',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
 	    add_clause(Bs,'or',[1,X,-Z]),
 	    Bs
     end;
-clause(Bs,'xor',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% xor 2-gate
-    case varp_option:getopt(clause,Bs#bs.option) of
-	false -> %% install as gate
+clause(Bs,'xor',Ls=[X,Y,Z]) ->
+    Clause = varp_option:getopt(clause,Bs#bs.option),
+    if not Clause -> %% install as gate
 	    add_clause(Bs,'xor',Ls),
+	    Bs;
+	X =:= 1 ->
+	    add_clause(Bs,'or',[1,-Y,-Z]),
+	    add_clause(Bs,'or',[1,Y,Z]),
+	    Bs;
+	X =:= -1 ->
+	    add_clause(Bs,'or',[1,-Y,Z]),
+	    add_clause(Bs,'or',[1,Y,-Z]),
 	    Bs;
 	true -> %% install as clauses
 	    add_clause(Bs,'or',[1,X,-Y,Z]),
@@ -227,7 +235,7 @@ clause(Bs,Op,Ls) ->
     end.
 
 add_clause(Bs,Op,Ls) ->
-    %% io:format("add_clause: ~w ~w\n", [Op,Ls]),
+    io:format("add_clause: ~w ~w\n", [Op,Ls]),
     varc:add_clause(Bs#bs.vp,Op,Ls).
 
 build_gate_tree(Bs,Op,X,Ls) ->
