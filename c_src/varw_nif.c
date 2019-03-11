@@ -849,8 +849,10 @@ static undo_elem_t* pop(undo_t* up)
     if (up->stack_size > 0) {
 	up->cur--;
 	up->stack_size--;
-	if (up->cur < up->top)
+	if (up->cur < up->top) {
 	    undo_del_block(up);
+	    up->cur--;
+	}
 	switch(up->cur->type) {
 	case NONE:
 	    DBG("POP NONE, stack=%ld\r\n", up->stack_size);
