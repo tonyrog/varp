@@ -18,7 +18,7 @@
 #define NDEBUG
 #include <assert.h>
 
-#define DEBUG
+// #define DEBUG
 
 // Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
@@ -295,7 +295,8 @@ typedef struct _varw_t {
     int bcp;                  // boolean constraint propagation
     int conflicting_clause;   // conflict clause from last eval
     unsigned int grow;        // how much to expand value/class map
-    variable_t*  var_map;     // variable/class map 
+    variable_t** var_map;     // variable map
+    variable_t*  var;         // variables
     int*         order_map;   // variable order table
     int          sort_key[2]; // sort order -1,-2,1,2
     clause_t**   clause_map;   // clause_map[v] = class chain of variable v
@@ -309,9 +310,14 @@ typedef struct _varw_t {
     uint64_t  eval_counter;        // performance counter
 
     variable_t* var_queue_hd;      // var queue head
-    variable_t* var_queue_tl;      // var queue tail    
+    variable_t* var_queue_tl;      // var queue tail
 
-    arc4_stream_t as;              // random stream 
+    variable_t undef;
+    variable_t constant;
+
+    arc4_stream_t as;              // random stream
+
+    allocator_t var_allocator;     // heap storage for variables
 } varw_t;
 
 #define VARW_TRUE(vp)  ((vp)->ltrue)
@@ -467,8 +473,6 @@ static char* format_literal(literal_t* lp)
     return varname;
 }
 
-#if 0
-
 static heap_t* new_heap_block(heap_t* next)
 {
     heap_t* hp;
@@ -539,7 +543,6 @@ static void varw_free(allocator_t* ap, object_t* ptr)
     ptr->next = ap->free_list;
     ap->free_list = ptr;
 }
-#endif
 
 static void arc4_init(arc4_stream_t *as)
 {
@@ -631,6 +634,37 @@ static uint32_t arc4_random_uniform(arc4_stream_t* as, uint32_t upper_bound)
     return r % upper_bound;
 }
 
+static void clear_wlink(clause_t* cp, int i)
+{
+    cp->wl[i].p = -1;      // mark dead for debug
+    cp->wl[i].next = NULL;		
+}
+
+static void link_wlink(clause_t* cp, int i, long p)
+{
+    cp->wl[i].next = cp->lit[p]->wlist;  // link literal
+    cp->lit[p]->wlist = &cp->wl[i];
+}
+
+static void set_wlink(clause_t* cp, int i, long p)
+{
+    cp->wl[i].p = p;                     // new watch point
+    link_wlink(cp, i, p);
+}
+
+static void unwatch(clause_t* cp, literal_t* lp)
+{
+    wlink_t** wlp = &lp->wlist;
+    wlink_t* wl;
+
+    while((wl = *wlp) && (clause_pointer(wl) != cp))
+	wlp = &(wl->next);
+    if (wl != NULL) {
+	*wlp = wl->next;  // unlink
+	wl->p = -1;       // mark as not used
+    }
+}
+
 static clause_t* clause_alloc(varw_t* vp, uint16_t op, int size)
 {
     UNUSED(vp);
@@ -645,9 +679,9 @@ static clause_t* clause_alloc(varw_t* vp, uint16_t op, int size)
 	errno = r;
 	return NULL;
     }
-    cp->wl[0].p = -1;
-    cp->wl[1].p = -1;    
-    cp->next = NULL;    
+    clear_wlink(cp, 0);
+    clear_wlink(cp, 1);
+    cp->next = NULL; 
     cp->size  = size;
     cp->key[0] = 0;
     cp->flags = 0;
@@ -709,17 +743,6 @@ void put_literal(varw_t* vp, literal_t* lp, int value)
     lqueue_enq(&vp->q, (value==TRUE) ? negate(lp) : lp);
 }
 
-#if 0
-static int assign_literal(literal_t* lp, int value)
-{
-    if (lp->var->value == UNDEF) 
-	set_literal(lp, value);
-    else if (literal_value(lp) != value)
-	return UNSAT;
-    return OK;
-}
-#endif
-
 static inline int is_constant(int x)
 {
     return ((x == TRUE) || (x == FALSE));
@@ -734,7 +757,7 @@ static inline int is_literal(int x)
 // return true if variable is constant or bound to other variable
 static int is_bound(varw_t* vp, int x)
 {
-    return (vp->var_map[ABS(x)].value != UNDEF);
+    return (vp->var_map[ABS(x)]->value != UNDEF);
 }
 
 static int undo_add_block(undo_t* up)
@@ -779,7 +802,7 @@ static int push_mark(undo_t* up, int mark, int save_mark)
     up->cur->type  = MARK;
     up->cur->addr  = (intptr_t*) ((intptr_t)save_mark);
     up->cur->value = mark;
-    DBG("PUSH MARK: value=%ld stack_size=%ld\r\n",
+    DBG("PUSH MARK: value=%ld stack=%ld\r\n",
 	   up->cur->value, up->stack_size);
     up->cur++;
     up->stack_size++;
@@ -795,7 +818,7 @@ static int push_value(undo_t* up, void* ptr)
     up->cur->type  = VALUE;
     up->cur->addr  = (intptr_t*)ptr;
     up->cur->value = *((intptr_t*)ptr);
-    DBG("PUSH VALUE: ptr=%p, value=%ld, qsize=%ld\r\n",
+    DBG("PUSH VALUE: ptr=%p, value=%ld, stack=%ld\r\n",
 	up->cur->addr, up->cur->value, up->stack_size);
     up->cur++;
     up->stack_size++;
@@ -924,36 +947,6 @@ static void init_variable(variable_t* vptr, int value, int vix)
     vptr->lit[1].wlist = NULL;
 }
 
-void clear_wlink(clause_t* cp, int i)
-{
-    cp->wl[i].p = -1;      // mark dead for debug
-    cp->wl[i].next = NULL;		
-}
-
-void link_wlink(clause_t* cp, int i, long p)
-{
-    cp->wl[i].next = cp->lit[p]->wlist;  // link literal
-    cp->lit[p]->wlist = &cp->wl[i];
-}
-
-void set_wlink(clause_t* cp, int i, long p)
-{
-    cp->wl[i].p = p;                     // new watch point
-    link_wlink(cp, i, p);
-}
-
-void unwatch(clause_t* cp, literal_t* lp)
-{
-    wlink_t** wlp = &lp->wlist;
-    wlink_t* wl;
-
-    while((wl = *wlp) && (clause_pointer(wl) != cp))
-	wlp = &(wl->next);
-    if (wl != NULL) {
-	*wlp = wl->next;  // unlink
-	wl->p = -1;       // mark as not used
-    }
-}
 
 #if 0
 static void clear_variable_queue(varw_t* vp)
@@ -998,17 +991,6 @@ static variable_t* dequeue_variable(varw_t* vp)
     return vptr;
 }
 
-static int get(varw_t* vp, int x)
-{
-    variable_t* map = vp->var_map;
-
-    if (x == UNDEF)
-	return UNDEF;
-    if (x < 0)
-	return -map[-x].value;
-    else
-	return map[x].value;
-}
 #endif
 
 static int insert_clause(ErlNifEnv* env, varw_t* vp, clause_t* cp)
@@ -1019,13 +1001,12 @@ static int insert_clause(ErlNifEnv* env, varw_t* vp, clause_t* cp)
     cp->cix = cix;
 
     if (vp->cnext == vp->csize) {
-	unsigned int old_csize = vp->csize;
-	unsigned int new_csize = old_csize + vp->grow;
-	void* p;
-	// expand
-	if (!(p = enif_realloc(vp->clause_map, new_csize*sizeof(clause_t**))))
+	unsigned int new_csize = vp->csize + vp->grow;
+	clause_t** cpp;
+
+	if (!(cpp = enif_realloc(vp->clause_map, new_csize*sizeof(clause_t**))))
 	    return -1;
-	vp->clause_map = p;
+	vp->clause_map = cpp;
 	vp->csize = new_csize;
     }
     vp->cnum++;
@@ -1061,14 +1042,20 @@ static int get_literal(ErlNifEnv* env, varw_t* vp, ERL_NIF_TERM arg,
 	return 0;
 
     if (x < 0) {
-	if (-x >= (int)vp->vnext) return 0;
-	lp = &(vp->var_map[-x].lit[1]);
+	if (-x >= (int)vp->vnext) {
+	    DBG("literal %d out of range\r\n", x);
+	    return 0;
+	}
+	lp = &(vp->var_map[-x]->lit[1]);
 	*xp = lp;
 	return 1;
     }
     else if (x > 0) {
-	if (x >= (int)vp->vnext) return 0;
-	lp = &(vp->var_map[x].lit[0]);	
+	if (x >= (int)vp->vnext) {
+	    DBG("literal %d out of range\r\n", x);
+	    return 0;
+	}
+	lp = &(vp->var_map[x]->lit[0]);	
 	*xp = lp;
 	return 1;
     }
@@ -1098,6 +1085,7 @@ static void cleanup(varw_t* vp)
 	enif_free(vp->clause_map);
 	vp->clause_map = NULL;
     }
+    cleanup_allocator(&vp->var_allocator);
 }
 
 static void varw_dtor(ErlNifEnv* env, void* obj)
@@ -1173,7 +1161,7 @@ static ERL_NIF_TERM varw_new(ErlNifEnv* env, int argc,
     vp->vnum  = 0;
 
     vp->grow = grow;
-    if (!(vp->var_map = enif_alloc(vsize*sizeof(variable_t))))
+    if (!(vp->var_map = enif_alloc(vsize*sizeof(variable_t**))))
 	goto error;
     if (!(vp->order_map = enif_alloc(vsize*sizeof(int))))
 	goto error;
@@ -1184,6 +1172,9 @@ static ERL_NIF_TERM varw_new(ErlNifEnv* env, int argc,
 
     if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
 	goto error;
+
+    if (init_allocator(&vp->var_allocator, sizeof(variable_t)) < 0)
+	goto error;    
 
     lqueue_init(&vp->q);
     
@@ -1199,12 +1190,14 @@ static ERL_NIF_TERM varw_new(ErlNifEnv* env, int argc,
     vp->clause_eval_counter = 0;
 
     vp->order_map[0] = 0;
-    init_variable(&vp->var_map[0], UNDEF, 0);
+    init_variable(&vp->undef, UNDEF, 0);
+    vp->var_map[0] = &vp->undef;
     vp->order_map[1] = 1;
-    init_variable(&vp->var_map[1], TRUE, 1);
+    init_variable(&vp->constant, TRUE, 1);
+    vp->var_map[1] = &vp->constant;
 
-    vp->ltrue = &vp->var_map[1].lit[0];
-    vp->lfalse = &vp->var_map[1].lit[1];
+    vp->ltrue = &vp->constant.lit[0];
+    vp->lfalse = &vp->constant.lit[1];
     
     arc4_init(&vp->as);
 
@@ -1227,18 +1220,21 @@ static ERL_NIF_TERM varw_add_variable(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varw_t* vp;
     unsigned int vix;
-
+    variable_t* var;
+    
     if (!enif_get_resource(env, argv[0], varw_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if ((var = varw_alloc(&vp->var_allocator)) == NULL)
 	return enif_make_badarg(env);
 
     vix = vp->vnext++;
     if (vp->vnext == vp->vsize) {
-	unsigned int old_vsize = vp->vsize;
-	unsigned int new_vsize = old_vsize + vp->grow;
-	variable_t* p;
+	unsigned int new_vsize = vp->vsize + vp->grow;
+	variable_t** p;
 	int* ip;
-	// expand
-	if (!(p = enif_realloc(vp->var_map, new_vsize*sizeof(variable_t))))
+
+	if (!(p = enif_realloc(vp->var_map, new_vsize*sizeof(variable_t*))))
 	    return enif_make_badarg(env);
 	if (!(ip = enif_realloc(vp->order_map, new_vsize*sizeof(int))))
 	    return enif_make_badarg(env);
@@ -1248,7 +1244,9 @@ static ERL_NIF_TERM varw_add_variable(ErlNifEnv* env, int argc,
     }
     vp->vnum++;
     vp->order_map[vix] = vix;
-    init_variable(&vp->var_map[vix], UNDEF, vix);
+    init_variable(var, UNDEF, vix);
+    vp->var_map[vix] = var;
+    
     return enif_make_int(env, vix);
 }
 
@@ -1352,9 +1350,9 @@ static int order_reset(varw_t* vp)
     int i, u, b;
 
     vp->order_map[0] = 0;
-    vp->var_map[0].map_index = 0;
+    vp->var_map[0]->map_index = 0;
     vp->order_map[1] = 1;
-    vp->var_map[1].map_index = 1;
+    vp->var_map[1]->map_index = 1;
     b = 1;
     u = vp->vnext;
 
@@ -1362,12 +1360,12 @@ static int order_reset(varw_t* vp)
 	if (is_bound(vp, i)) {
 	    b++;
 	    vp->order_map[b] = i;
-	    vp->var_map[i].map_index = b; 
+	    vp->var_map[i]->map_index = b; 
 	}
 	else {
 	    u--;
 	    vp->order_map[u] = i;
-	    vp->var_map[i].map_index = u;
+	    vp->var_map[i]->map_index = u;
 	}
     }
     return u;
@@ -1378,7 +1376,7 @@ static void order_k_identity(varw_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = i;
+	vp->var_map[i]->key[k] = i;
     }
 }
 
@@ -1386,7 +1384,7 @@ static void order_k_random(varw_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = arc4_random_uniform(&vp->as, 0x7fffffff);
+	vp->var_map[i]->key[k] = arc4_random_uniform(&vp->as, 0x7fffffff);
     }
 }
 
@@ -1394,7 +1392,7 @@ static void order_k_undefined(varw_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = 0;
+	vp->var_map[i]->key[k] = 0;
     }
 }
 
@@ -1404,7 +1402,7 @@ static void order_k_occur(varw_t* vp, int k)
     int i;
     
     for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i].key[k] = 0;
+	vp->var_map[i]->key[k] = 0;
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
@@ -1413,9 +1411,9 @@ static void order_k_occur(varw_t* vp, int k)
 	    for (j = 0; j < (int)cp->size; j++) {
 		int x = literal_index(cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x].key[k]++;
+		    vp->var_map[-x]->key[k]++;
 		else if (x > 1)
-		    vp->var_map[x].key[k]++;
+		    vp->var_map[x]->key[k]++;
 	    }
 	}
     }
@@ -1427,7 +1425,7 @@ static void order_k_depth(varw_t* vp, int k)
     int i;
     
     for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i].key[k] = 0;
+	vp->var_map[i]->key[k] = 0;
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
@@ -1436,9 +1434,9 @@ static void order_k_depth(varw_t* vp, int k)
 	    for (j = 0; j < (int)cp->size; j++) {
 		int x = literal_index(cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x].key[k]++;
+		    vp->var_map[-x]->key[k]++;
 		else if (x > 1)
-		    vp->var_map[x].key[k]++;
+		    vp->var_map[x]->key[k]++;
 	    }
 	}
     }
@@ -1461,8 +1459,8 @@ static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
     varw_t* vp = (varw_t*) arg;
     int k1 = vp->sort_key[0];
     int k2 = vp->sort_key[1];
-    variable_t* ap = &vp->var_map[*((int*)a)];
-    variable_t* bp = &vp->var_map[*((int*)b)];
+    variable_t* ap = vp->var_map[*((int*)a)];
+    variable_t* bp = vp->var_map[*((int*)b)];
     int r = 0;
 
     // k1=0 means key[k1] is undefined, k2=0 means key[k2] is undefined
@@ -1552,7 +1550,7 @@ static ERL_NIF_TERM varw_order_sort(ErlNifEnv* env, int argc,
     // update map_index of sorted variables
     for (i = u; i < (int)vp->vnext; i++) {
 	int v = vp->order_map[i];
-	vp->var_map[v].map_index = i;
+	vp->var_map[v]->map_index = i;
     }
     return ATOM(ok);
 }
@@ -1590,17 +1588,17 @@ static ERL_NIF_TERM varw_order_sort_first(ErlNifEnv* env, int argc,
 
     // clear moved mark
     for (i = 0; i < vp->vnext; i++)
-	vp->var_map[i].flags &= ~VAR_FLAG_MARK;
+	vp->var_map[i]->flags &= ~VAR_FLAG_MARK;
 
     map[0] = 0;
-    vp->var_map[0].flags |= VAR_FLAG_MARK;
+    vp->var_map[0]->flags |= VAR_FLAG_MARK;
     map[1] = 1;
-    vp->var_map[1].flags |= VAR_FLAG_MARK;
+    vp->var_map[1]->flags |= VAR_FLAG_MARK;
     mi = 2;
     // copy all bound variables
     while ((mi < vp->vnext) && is_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
-	vp->var_map[x].flags |= VAR_FLAG_MARK;
+	vp->var_map[x]->flags |= VAR_FLAG_MARK;
 	map[mi++] = x;
     }
     ui = mi;  // save the position for the first unbound variabel
@@ -1620,9 +1618,9 @@ static ERL_NIF_TERM varw_order_sort_first(ErlNifEnv* env, int argc,
     // move rest of the varaibles not already moved
     while(ui < vp->vnext) {
 	int x = vp->order_map[ui];
-	if (!(vp->var_map[x].flags & VAR_FLAG_MARK)) { // not moved
-	    vp->var_map[x].flags |= VAR_FLAG_MARK;     // mark as moved
-	    vp->var_map[x].map_index = mi;
+	if (!(vp->var_map[x]->flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[x]->flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[x]->map_index = mi;
 	    map[mi++] = x;
 	}
 	ui++;
@@ -1666,17 +1664,17 @@ static ERL_NIF_TERM varw_order_sort_last(ErlNifEnv* env, int argc,
 
     // clear moved mark
     for (i = 0; i < vp->vnext; i++)
-	vp->var_map[i].flags &= ~VAR_FLAG_MARK;
+	vp->var_map[i]->flags &= ~VAR_FLAG_MARK;
 
     map[0] = 0;
-    vp->var_map[0].flags |= VAR_FLAG_MARK;
+    vp->var_map[0]->flags |= VAR_FLAG_MARK;
     map[1] = 1;
-    vp->var_map[1].flags |= VAR_FLAG_MARK;
+    vp->var_map[1]->flags |= VAR_FLAG_MARK;
     mi = 2;
     // copy all bound variables
     while ((mi < vp->vnext) && is_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
-	vp->var_map[x].flags |= VAR_FLAG_MARK;
+	vp->var_map[x]->flags |= VAR_FLAG_MARK;
 	map[mi++] = x;
     }
     ui = mi;  // save the position for the first unbound variabel
@@ -1699,9 +1697,9 @@ static ERL_NIF_TERM varw_order_sort_last(ErlNifEnv* env, int argc,
     // move rest of the varaibles not already moved
     while(ui < vp->vnext) {
 	int x = vp->order_map[ui];
-	if (!(vp->var_map[x].flags & VAR_FLAG_MARK)) { // not moved
-	    vp->var_map[x].flags |= VAR_FLAG_MARK;     // mark as moved
-	    vp->var_map[x].map_index = mi;
+	if (!(vp->var_map[x]->flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[x]->flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[x]->map_index = mi;
 	    map[mi++] = x;
 	}
 	ui++;
@@ -2057,72 +2055,82 @@ static ERL_NIF_TERM varw_eval(ErlNifEnv* env, int argc,
 	    int wp0 = cp->wl[0].p;
 	    int wp1 = cp->wl[1].p;
 	    long p;
-	    int lv;
+	    int lv = UNDEF;
 
 	    PRINT_CLAUSE("ev: ", cp);
 
 	    if (wlink_index(wl)==0) {  // move forward
-		DBG("  fwd: %s=%d\n",
-		    format_literal(cp->lit[wp0]),
-		    literal_value(cp->lit[wp0]));
 		p = wp0;
 		while((p <= wp1) && ((lv=literal_value(cp->lit[p])) == FALSE))
 		    p++;
-		push_value(&vp->undo, &cp->wl[0].next);
-		push_value(&vp->undo, &cp->wl[0].p);
-		push_value(&vp->undo, &cp->lit[p]->wlist);
-		cp->wl[0].p = p;
+		DBG("  fwd: %s=%d %d=>%ld\n",
+		    format_literal(cp->lit[wp0]),
+		    literal_value(cp->lit[wp0]),
+		    wp0, p);
 		if (p > wp1) { // all false
 		    vp->conflicting_clause = cp->cix;
 		    return ATOM(false);
 		}
-		else if (p == wp1) {
-		    if (lv == UNDEF) {  // unit propagation
-			variable_t* var = cp->lit[p]->var;
-			push_variable(&vp->undo, var);
-			put_literal(vp, cp->lit[p], TRUE);
-			// maybe save on undo stack? needed?
-			var->cix = cp->cix;   // implication clause
-			var->li  = p;         // and position
-		    }
-		    else if (lv == TRUE) {
-			clear_wlink(cp, 0);
-		    }
-		}
 		else {
-		    link_wlink(cp, 0, p);
+		    push_value(&vp->undo, &cp->wl[0].next);
+		    push_value(&vp->undo, &cp->wl[0].p);
+		    push_value(&vp->undo, &cp->lit[p]->wlist);
+		    cp->wl[0].p = p;
+
+		    if (p == wp1) {
+			if (lv == UNDEF) {  // unit propagation
+			    variable_t* var = cp->lit[p]->var;
+			    push_variable(&vp->undo, var);
+			    put_literal(vp, cp->lit[p], TRUE);
+			    // maybe save on undo stack? needed?
+			    var->cix = cp->cix;   // implication clause
+			    var->li  = p;         // and position
+			}
+			else if (lv == TRUE) {
+			    clear_wlink(cp, 0);
+			}
+		    }
+		    else {
+			link_wlink(cp, 0, p);
+		    }
 		}
 	    }
 	    else { // move backward
-		DBG("  bwd: %s=%d\n",
-		    format_literal(cp->lit[wp1]),
-		    literal_value(cp->lit[wp1]));
+
 		p = wp1;
 		while((p >= wp0) && ((lv=literal_value(cp->lit[p])) == FALSE))
 		    p--;
-		push_value(&vp->undo, &cp->wl[1].next);
-		push_value(&vp->undo, &cp->wl[1].p);
-		push_value(&vp->undo, &cp->lit[p]->wlist);
-		cp->wl[1].p = p;
+		DBG("  bwd: %s=%d %ld<=%d\n",
+		    format_literal(cp->lit[wp1]),
+		    literal_value(cp->lit[wp1]),
+		    p, wp1);
+		
 		if (p < wp0) { // all false
 		    vp->conflicting_clause = cp->cix;
 		    return ATOM(false);
 		}
-		else if (p == wp0) {
-		    if (lv == UNDEF) { // unit propagation
-			variable_t* var = cp->lit[p]->var;
-			push_variable(&vp->undo, var);
-			put_literal(vp, cp->lit[p], TRUE);
-			// maybe save on undo stack? needed?
-			var->cix = cp->cix;  // implication clause
-			var->li  = p;	     // and position
-		    }
-		    else if (lv == TRUE) {
-			clear_wlink(cp, 1);
-		    }
-		}
 		else {
-		    link_wlink(cp, 1, p);
+		    push_value(&vp->undo, &cp->wl[1].next);
+		    push_value(&vp->undo, &cp->wl[1].p);
+		    push_value(&vp->undo, &cp->lit[p]->wlist);
+		    cp->wl[1].p = p;
+
+		    if (p == wp0) {
+			if (lv == UNDEF) { // unit propagation
+			    variable_t* var = cp->lit[p]->var;
+			    push_variable(&vp->undo, var);
+			    put_literal(vp, cp->lit[p], TRUE);
+			    // maybe save on undo stack? needed?
+			    var->cix = cp->cix;  // implication clause
+			    var->li  = p;	     // and position
+			}
+			else if (lv == TRUE) {
+			    clear_wlink(cp, 1);
+			}
+		    }
+		    else {
+			link_wlink(cp, 1, p);
+		    }
 		}
 	    }
 	    wl = wln;
