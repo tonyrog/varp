@@ -235,7 +235,7 @@ clause(Bs,Op,Ls) ->
     end.
 
 add_clause(Bs,Op,Ls) ->
-    io:format("add_clause: ~w ~w\n", [Op,Ls]),
+    %% io:format("add_clause: ~w ~w\n", [Op,Ls]),
     varc:add_clause(Bs#bs.vp,Op,Ls).
 
 build_gate_tree(Bs,Op,X,Ls) ->
