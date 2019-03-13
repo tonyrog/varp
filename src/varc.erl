@@ -14,8 +14,9 @@
 -export([new/2]).
 -export([info/2]).
 -export([add_variable/1]).
--export([set_variable_name/3]).
--export([get_variable_name/2]).
+-export([add_symbol/3]).
+-export([get_symbol/2]).
+-export([find_symbol/2]).
 -export([get/2]).
 -export([put/3]).
 -export([class/2]).
@@ -66,6 +67,8 @@
 -export([get_clause_eval_counter/1]).
 -export([get_eval_counter/1]).
 
+-define(debug, true).
+
 -ifdef(debug).
 -define(debug(F,A), io:format((F),(A))).
 -else.
@@ -89,10 +92,14 @@
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
 
 init() ->
-    Nif = filename:join([code:priv_dir(varp), "varw_nif"]),
+    NifCore = case os:getenv("VARP_CORE") of
+		  "varw" -> "varw_nif";
+		  "varc" -> "varc_nif";
+		  false  -> "varw_nif"
+	      end,
+    Nif = filename:join([code:priv_dir(varp), NifCore]),
     ?debug("Loading: ~s\n", [Nif]),
     erlang:load_nif(Nif, 0).
-
 
 new() ->
     ?nif_stub().
@@ -110,11 +117,17 @@ info(_Vp, Item) when is_atom(Item) ->
 add_variable(_Vp) ->
     ?nif_stub().
 
--spec set_variable_name(Vp::varc(), Lit::literal(), Name::term()) -> ok.
-set_variable_name(_Vp, Lit, _Name)  when is_integer(Lit) ->
+-spec add_symbol(Vp::varc(), Lit::literal(), Name::term()) -> ok.
+add_symbol(_Vp, Lit, _Name)  when is_integer(Lit) ->
     ?nif_stub().
-    
-get_variable_name(_Vp, Lit) when is_integer(Lit) ->
+
+-spec get_symbol(Vp::varc(), Lit::literal()) -> [term()]. %% aliases
+get_symbol(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
+%% find variable index from variable name (term or binary)
+-spec find_symbol(Vp::varc(), Name::term()) -> false | literal().
+find_symbol(_Vp, _Name) ->
     ?nif_stub().
 
 %%

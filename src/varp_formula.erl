@@ -823,13 +823,13 @@ build_({'!',A}, Bs) ->
 
 build_({bit_index,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
-    io:format("A=~w, I1=~w\n", [A,I1]),
+%%    io:format("A=~w, I1=~w\n", [A,I1]),
 %%    A1 = case A of
 %%	     {p,Var,[]} -> {p,Var,[I1]};
 %%	     _ -> A
 %%	 end,
     {B,Bs1} = build__(A, Bs),
-    io:format("B = ~w\n", [B]),
+%%    io:format("B = ~w\n", [B]),
     case B of
 	{uint,N,Xs} -> {select_bool(I1,N,Xs), Bs1};
 	{int,N,Xs}  -> {select_bool(I1,N,Xs), Bs1};
@@ -2408,7 +2408,10 @@ format_var({p,T,As}) when is_integer(T) ->
 format_var({p,V,As}) when is_atom(V) ->
     [atom_to_list(V)|format_params(As)];
 format_var({p,Name,As}) when is_list(Name); is_binary(Name) ->
-    [Name|format_params(As)].
+    [Name|format_params(As)];
+format_var({bit_index,Var,Index}) ->
+    [format_var(Var),"[",integer_to_list(Index), "]"].
+
 
 format_params([]) -> "";
 format_params(As) when is_list(As) ->

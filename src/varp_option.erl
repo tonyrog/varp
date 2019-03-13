@@ -21,6 +21,8 @@
 %% -define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
+%% debug/test
+-export([match_value/3]).
 %%
 %% Option format:
 %%  --long 123
@@ -30,12 +32,21 @@
 %%  -l123
 %%
 
--define(BOOL,{"true",true},{"false",false},{"1",true},{"0",false}).
--define(ORDER,{"undefined",undefined},{"identity",identity},
-	{"random",random},{"depth",'+depth'},
-	{"+depth",'+depth'},{"-depth",'-depth'},
-	{"occur",'+occur'},{"+occur",'+occur'},
-	{"-occur",'-occur'}).
+-define(BOOL,
+	{"true",true},
+	{"false",false},
+	{"1",true},
+	{"0",false}).
+-define(ORDER,
+	{"undefined", undefined},
+	{"identity",  identity},
+	{"random",    random},
+	{"depth",     '+depth'},
+	{"+depth",    '+depth'},
+	{"-depth",    '-depth'},
+	{"occur",     '+occur'},
+	{"+occur",    '+occur'},
+	{"-occur",    '-occur'}).
 
 options() ->
     V1 = #{ long => "value",
@@ -285,6 +296,7 @@ options_list() ->
     [V || {_,V} <- key_options()].
 
 process_args(Args, Mode) ->
+    %% io:format("process_args:~w: ~p\n", [Mode,Args]),
     process_args(Args, Mode, [], []).
 
 %% process long options and values
@@ -294,7 +306,6 @@ process_args(["--"++OptName|As],Mode,Opts,Bound) ->
 	{#{ key:=help },_Val} -> usage();
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=ValSpec },Val} ->
-	    %%io:format("Match value = ~p ~p\n", [ValSpec,Val]),
 	    case match_value(ValSpec,Val,As) of
 		false -> usage();
 		{ok,Value,As1} ->
@@ -309,7 +320,6 @@ process_args(["-"++OptName|As],Mode,Opts,Bound) ->
 		{#{ key:=help },_Val} -> usage();
 		{#{ key:=version },_Val} -> version();
 		{#{ key:=Key,spec:=ValSpec },Val} ->
-		    %%io:format("Match value = ~p ~p\n", [ValSpec,Val]),
 		    case match_value(ValSpec,Val,As) of
 			false -> usage();
 			{ok,Value,As1} ->
@@ -319,7 +329,6 @@ process_args(["-"++OptName|As],Mode,Opts,Bound) ->
 	{#{ key:=help },_Val} -> usage();
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=ValSpec },Val} ->
-	    %%io:format("Match value = ~p ~p\n", [ValSpec,Val]),
 	    case match_value(ValSpec,Val,As) of
 		false -> usage(Key,Val);
 		{ok,Value,As1} ->
@@ -382,28 +391,18 @@ get_option_name([C|Cs],Acc) when
 get_option_name(Cs,Acc) ->
     {lists:reverse(Acc), Cs}.
 
+
+match_value(Spec, [], [Val|As]) ->
+    case match_val(Spec, Val) of
+	{ok,Value} -> {ok,Value,As};
+	false  -> false
+    end;
 match_value(Spec, [$=|Val], As) ->
     match_value(Spec, Val, As);
 match_value({multiple,Spec}, Val, As) ->
     match_value(Spec, Val, As);
-match_value({list,variable},Val,As) ->
-    %% trick
-    {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
-    {ok,{_Decls,{vec,VarList}}} = varp_parse:parse(Ts),
-    {ok, VarList, As};
-match_value({list,Spec}, Val, As) ->
-    Vals = string:tokens(Val, ", "),
-    match_values(Spec, Vals, As);
-match_value(void, "", As) ->
-    {ok,true,As};
-
-match_value(Spec, [], [Val|As]) ->
-    case match_val_(Spec, Val) of
-	{ok,Value} -> {ok,Value,As};
-	false  -> false
-    end;
 match_value(Spec, Val, As) ->
-    case match_val_(Spec, Val) of
+    case match_val(Spec, Val) of
 	{ok,Value} -> {ok,Value,As};
 	false  -> false
     end.
@@ -422,6 +421,9 @@ match_values(Spec,[V|Vs],Acc,As) ->
 match_values(_Spec,[],Acc,As) ->
     {ok,lists:reverse(Acc),As}.
 
+match_val(Spec, Val) ->
+    %% io:format("match_val: ~p val=~p\n", [Spec, Val]),
+    match_val_(Spec, Val).
 
 match_val_(integer, Val) ->
     try list_to_integer(Val) of
@@ -442,7 +444,19 @@ match_val_({enum,List}, Val) when is_list(List) ->
     case proplists:get_value(Val,List) of
 	undefined -> false;
 	Enum -> {ok,Enum}
-    end.
+    end;
+match_val_({list,variable},Val) ->
+    %% trick
+    {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
+    {ok,{_Decls,{vec,VarList}}} = varp_parse:parse(Ts),
+    {ok, VarList};
+match_val_({list,Spec}, Val) ->
+    Vals = string:tokens(Val, ", "),
+    {ok,Vs,_} = match_values(Spec, Vals, [], []),
+    {ok,Vs};
+match_val_(void, "") ->
+    {ok,true}.
+
 
 version() ->
     io:format("version ~s\n", [vsn()]),

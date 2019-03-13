@@ -11,15 +11,16 @@
 -include("varp_bic.hrl").
 
 -define(dbg(F,As), ok).
-%%-define(dbg(F,As), io:format(F,As)).
+%% -define(dbg(F,As), io:format(F,As)).
 
 -define(INITVAL, 1).
 
-%%
-%%  1. select unassigned variable xi
-%%       if not possible the print model, 
-%%
-%%
+%% test
+file(File) ->
+    case varp_dimacs:load(File) of
+	Err = {error, _} -> Err;
+	SNF -> satisfy(SNF)
+    end.
 
 satisfy(SNF) ->
     satisfy(SNF,-1).
@@ -40,7 +41,7 @@ satisfy(CLs, Ls, Decl, _N) ->
 		 [Level,format_marked_bindings(Vp,Vm,Level)]),
 	    0;
 	true ->
-	    varc:order_sort(Vp, occur_descending),
+	    varc:order_sort(Vp, '-occur'),
 	    ClauseCount0 = varc:info(Vp,clause_eval_counter),
 	    EvalCount0   = varc:info(Vp,eval_counter),
 	    NumClauses0  = varc:info(Vp, number_of_clauses),
@@ -154,8 +155,9 @@ backjump(_Vp,_Vm,[],_JMark) ->
     {2,[]}.
 
 add_conflict_clause(Vp,Vm,Clause) ->
+    Max = varc:get_max_clause_length(Vp),
     L = length(Clause),
-    if L >= 64 ->
+    if L >= Max ->
 	    L2 = L div 2,
 	    {CL1,CL2} = lists:split(L2, Clause),
 	    Vi = varc:add_variable(Vp),
@@ -303,8 +305,8 @@ format_all_bindings(Vp,Vm) ->
 	   end, varc:get_bindings(Vp,1)),
     lists:foreach(
       fun(G) ->
-	      [{Lev,_,_,_}|_] = G,
-	      ?dbg("bindings[~w]: ~s\n",[Lev,format_group(Vm,G)])
+	      [{_Lev,_,_,_}|_] = G,
+	      ?dbg("bindings[~w]: ~s\n",[_Lev,format_group(Vm,G)])
       end, key_group_list(1,Bs)).
 
 format_group(Vm,[{_,V,Val,Cix}|G]) ->

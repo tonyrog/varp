@@ -110,10 +110,12 @@ static ERL_NIF_TERM varc_order_sort_first(ErlNifEnv* env, int argc,
 static ERL_NIF_TERM varc_order_sort_last(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[]);
 
-static ERL_NIF_TERM varc_set_variable_name(ErlNifEnv* env, int argc,
-					   const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varc_get_variable_name(ErlNifEnv* env, int argc,
-					   const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_add_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_get_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varc_find_symbol(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[]);
 
 #define MAX_CLAUSE_LENGTH  MAX_BITSET_SIZE
 
@@ -209,7 +211,6 @@ typedef struct _varref_t  /* : object_t */
 
 #define VAR_FLAG_INQUEUE     0x01
 #define VAR_FLAG_MARK        0x02
-#define VAR_FLAG_NAME_IS_SET 0x04
 
 #define VAR_MARK_KEY  0
 // sort keys are number 1 and 2
@@ -228,8 +229,21 @@ typedef struct _variable_t
     int       cix;       // implication clause, latest put
     int       li;        // position in implication clause
     int       mark;      // mark when set
-    ErlNifBinary name;   // Stored name
+    char* strname;            // string formated name or NULL
+    struct _symbol_t* names;  // list of aliases    
 } variable_t;
+
+typedef struct _symbol_t // :object_t
+{
+    struct _symbol_t* next;   // next symbol in hash slot or free list
+    struct _symbol_t* anext;  // alias link
+    uint32_t hash;            // symbol hash
+    int is_term;              // either name is a term or name is binary string
+    ERL_NIF_TERM term;        // binary or term(as binary)
+    uint8_t* data;            // raw data
+    size_t   size;            // raw len
+    variable_t*  var;
+} symbol_t;
 
 typedef struct arc4_stream_t {
     uint8_t i;
@@ -244,12 +258,15 @@ typedef struct _varc_t {
     unsigned int cnext;      // next clause number
     unsigned int csize;      // allocated size of value/class map
     unsigned int cnum;       // number of clauses
+    unsigned int ssize;       // size of symbol hash table
+    unsigned int snum;        // number of symbols in symbol hash table    
     int bcp;                 // boolean constraint propagation
     int qv;                  // enqueue variables (instead of clauses)
     int mark;                // current mark
     int conflicting_clause;     // conflict clause from last eval
     unsigned int grow;        // how much to expand value/class map
-    variable_t*  var_map;     // variable/class map 
+    variable_t*  var_map;     // variable/class map
+    symbol_t**   sym_map;     // symbol hash table    
     int*         order_map;   // variable order table
     int          sort_key[2]; // sort order -1,-2,1,2
     clause_t** clause_map;   // clause_map[v] = class chain of variable v
@@ -268,6 +285,7 @@ typedef struct _varc_t {
 
     allocator_t undo_allocator;
     allocator_t varref_allocator;
+    allocator_t sym_allocator;     // heap storage for symbols
     allocator_t clause_allocator[33];
 } varc_t;
 
@@ -326,8 +344,9 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "order_sort",          4,  varc_order_sort ),
     NIF_FUNC( "order_sort_first",    2,  varc_order_sort_first ),
     NIF_FUNC( "order_sort_last",     2,  varc_order_sort_last ),
-    NIF_FUNC( "set_variable_name",   3,  varc_set_variable_name ),
-    NIF_FUNC( "get_variable_name",   2,  varc_get_variable_name ),
+    NIF_FUNC( "add_symbol",          3,  varc_add_symbol),
+    NIF_FUNC( "get_symbol",          2,  varc_get_symbol ),
+    NIF_FUNC( "find_symbol",         2,  varc_find_symbol ),
 };
 
 // Atom macros
@@ -380,6 +399,14 @@ DECL_ATOM(undo_stack_size);
 DECL_ATOM(value_stack_size);
 DECL_ATOM(class_stack_size);
 DECL_ATOM(mark);
+
+static uint32_t djb_hash(uint8_t* ptr, size_t len)
+{
+    uint32_t h = 5381;
+    while(len--)
+	h = ((h << 5) + h) + (*ptr++);
+    return h;
+}
 
 static heap_t* new_heap_block(heap_t* next)
 {
@@ -667,6 +694,7 @@ static void init_variable(variable_t* vptr, int value, int klass, int vix)
     vptr->mark = 0;
     vptr->next = NULL;
     vptr->flags = 0;
+    vptr->strname = NULL;
 }
 
 static void clear_variable_queue(varc_t* vp)
@@ -1055,6 +1083,15 @@ static int get_literal(ErlNifEnv* env, varc_t* vp, ERL_NIF_TERM arg, int* xp)
     }
 }
 
+static int get_variable(ErlNifEnv* env, varc_t* vp, ERL_NIF_TERM arg,
+			variable_t** vpp)
+{
+    int x;
+    if (!get_literal(env, vp, arg, &x)) return 0;
+    *vpp = &vp->var_map[(x < 0) ? -x : x];
+    return 1;
+}
+
 static ERL_NIF_TERM make_literal(ErlNifEnv* env, int value)
 {
     return enif_make_int(env, value);
@@ -1333,10 +1370,24 @@ static void cleanup(varc_t* vp)
 {
     int i;
 
+    if (vp->sym_map) {
+	int i;
+	for (i = 0; i < (int)vp->ssize; i++) {
+	    symbol_t* sp = vp->sym_map[i];
+	    while(sp) {
+		enif_free(sp->data);
+		sp = sp->next;
+	    }
+	}
+	enif_free(vp->sym_map);
+	vp->sym_map = NULL;		    
+    }
+
     if (vp->var_map) {
 	enif_free(vp->var_map);
 	vp->var_map = NULL;
     }
+    
     if (vp->order_map) {
 	enif_free(vp->order_map);
 	vp->order_map = NULL;
@@ -1345,9 +1396,9 @@ static void cleanup(varc_t* vp)
 	enif_free(vp->clause_map);
 	vp->clause_map = NULL;
     }
-
     cleanup_allocator(&vp->undo_allocator);
     cleanup_allocator(&vp->varref_allocator);
+    cleanup_allocator(&vp->sym_allocator);    
     for(i = 0; i <= 32; i++)
 	cleanup_allocator(&vp->clause_allocator[i]);
 }
@@ -1366,6 +1417,7 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     unsigned int grow   = DEFAULT_MAP_GROW;
     unsigned int vsize  = DEFAULT_MAP_SIZE;
     unsigned int csize  = DEFAULT_MAP_SIZE;
+    unsigned int ssize;    
     int bcp = 0;
     int qv = 0;
     ERL_NIF_TERM t;
@@ -1427,6 +1479,15 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     vp->grow = grow;
     if (!(vp->var_map = enif_alloc(vsize*sizeof(variable_t))))
 	goto error;
+    
+    ssize = 1;
+    while(ssize < vsize) ssize *= 2;
+    if (!(vp->sym_map = enif_alloc(ssize*sizeof(symbol_t**))))
+	goto error;
+    memset(vp->sym_map, 0, ssize*sizeof(symbol_t**));
+    vp->ssize = ssize;
+    vp->snum = 0;
+    
     if (!(vp->order_map = enif_alloc(vsize*sizeof(int))))
 	goto error;
     vp->cnext = 0;
@@ -1440,6 +1501,8 @@ static ERL_NIF_TERM varc_new(ErlNifEnv* env, int argc,
     if (init_allocator(&vp->undo_allocator, sizeof(undo_t)) < 0)
 	goto error;
     if (init_allocator(&vp->varref_allocator, sizeof(varref_t)) < 0)
+	goto error;
+    if (init_allocator(&vp->sym_allocator, sizeof(symbol_t)) < 0)
 	goto error;
     for (i = 0; i <= 32; i++) {
 	if (init_allocator(&vp->clause_allocator[i],
@@ -1503,50 +1566,166 @@ static ERL_NIF_TERM varc_add_variable(ErlNifEnv* env, int argc,
     return enif_make_int(env, vix);
 }
 
-// varc:set_variable_name(Vp:varc(),integer(),term()) -> ok.
-static ERL_NIF_TERM varc_set_variable_name(ErlNifEnv* env, int argc,
-				      const ERL_NIF_TERM argv[])
+
+// varc:add_symbol(Vp:varc(),integer(),term()) -> ok | error
+static ERL_NIF_TERM varc_add_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varc_t* vp;
-    int x;
-
+    variable_t* var;
+    ErlNifBinary bin;
+    uint32_t hash;
+    int hix;
+    int is_term = 0;
+    symbol_t* sp;
+    
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!get_literal(env, vp, argv[1], &x))
+    if (!get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    x = abs(x);
-    if (vp->var_map[x].flags & VAR_FLAG_NAME_IS_SET)
-	enif_release_binary(&vp->var_map[x].name);
-    enif_term_to_binary(env, argv[2], &vp->var_map[x].name);
-    vp->var_map[x].flags |= VAR_FLAG_NAME_IS_SET;
+
+    if (!enif_inspect_iolist_as_binary(env, argv[2], &bin)) {
+	if (!enif_term_to_binary(env, argv[2], &bin))
+	    return enif_make_badarg(env);
+	is_term = 1;
+    }
+
+    hash = djb_hash(bin.data, bin.size);
+    hix  = hash & (vp->ssize - 1);
+    sp = vp->sym_map[hix];
+    while(sp != NULL) {
+	if ((sp->hash == hash) &&
+	    (sp->size == bin.size) &&
+	    (sp->is_term == is_term) &&
+	    (memcmp(sp->data, bin.data, bin.size) == 0)) {
+	    // already defined
+	    if (is_term) enif_release_binary(&bin);
+	    return ATOM(error);
+	}
+	sp = sp->next;
+    }
+    // not found allocate new
+    if ((sp = varc_alloc(&vp->sym_allocator)) == NULL)
+	return enif_make_badarg(env);
+    sp->is_term = is_term;
+    sp->hash = hash;
+    sp->var  = var;    
+    // copy term or binary
+    if (is_term) {
+	sp->data = enif_alloc(bin.size);
+	memcpy(sp->data, bin.data, bin.size);
+	sp->size = bin.size;	
+    }
+    else {
+	sp->data = enif_alloc(bin.size+1);
+	memcpy(sp->data, bin.data, bin.size);
+	sp->data[bin.size] = '\0';
+	sp->size = bin.size;
+	if (var->strname == NULL)
+	    var->strname = (char*) sp->data;
+    }
+    // link alias list
+    sp->anext = var->names;
+    var->names = sp;
+    vp->snum++;
+    
+    if (vp->snum >= vp->ssize) { // rehash	
+	unsigned int ssize1 = vp->ssize*2;
+	int i;
+	symbol_t** sym_map1 = enif_alloc(ssize1*sizeof(symbol_t**));
+
+	memset(sym_map1, 0, ssize1*sizeof(symbol_t**));
+	for (i = 0; i < (int)vp->ssize; i++) {
+	    symbol_t* sp1 = vp->sym_map[i];
+	    while(sp1 != NULL) {
+		symbol_t* spn = sp1->next;		
+		int hjx = sp1->hash & (ssize1 - 1);
+		sp1->next = sym_map1[hjx];
+		sp1 = spn;
+	    }
+	    vp->sym_map[i] = NULL;
+	}
+	enif_free(vp->sym_map);
+	vp->sym_map = sym_map1;
+	vp->ssize = ssize1;
+	hix  = hash & (ssize1-1);  // hash index for new element
+    }
+    // link hash bucket list
+    sp->next = vp->sym_map[hix];
+    vp->sym_map[hix] = sp;
+
     return ATOM(ok);
 }
 
 // varc:get_variable_name(Vp:varc(),integer()) -> term().
-static ERL_NIF_TERM varc_get_variable_name(ErlNifEnv* env, int argc,
-				      const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varc_get_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varc_t* vp;
-    int x;
-
+    variable_t* var;
+    symbol_t* sp;
+    ERL_NIF_TERM list;
+    
     if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!get_literal(env, vp, argv[1], &x))
+    if (!get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    x = abs(x);
-    // return true/false for the constants?
-    if (vp->var_map[x].flags & VAR_FLAG_NAME_IS_SET) {
+
+    list = enif_make_list(env, 0);
+    sp = var->names;
+    while(sp != NULL) {
 	ERL_NIF_TERM term;
-	if (!enif_binary_to_term(env,
-				 vp->var_map[x].name.data,
-				 vp->var_map[x].name.size,
-				 &term, 0))
-	    return enif_make_badarg(env);
-	return term;
+	if (sp->is_term)
+	    enif_binary_to_term(env,sp->data,sp->size,&term,0);
+	else {
+	    uint8_t* data = enif_make_new_binary(env, sp->size, &term);
+	    memcpy(data, sp->data, sp->size);
+	}
+	list = enif_make_list_cell(env, term, list);
+	sp = sp->anext;
     }
-    return ATOM(undefined);
+    return list;
+}
+
+// varc:find_variable(Vp:varc(),term()) -> false | integer().
+static ERL_NIF_TERM varc_find_symbol(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);    
+    varc_t* vp;
+    ErlNifBinary bin;
+    uint32_t hash;    
+    int hix;
+    int is_term = 0;
+    symbol_t* sp;    
+    
+    if (!enif_get_resource(env, argv[0], varc_res, (void**)&vp))
+	return enif_make_badarg(env);
+    
+    if (!enif_inspect_iolist_as_binary(env, argv[1], &bin)) {
+	if (!enif_term_to_binary(env, argv[1], &bin))
+	    return enif_make_badarg(env);
+	is_term = 1;
+    }
+    hash = djb_hash(bin.data, bin.size);
+    hix  = hash & (vp->ssize - 1);
+    sp = vp->sym_map[hix];
+
+    while(sp != NULL) {
+	if ((sp->hash == hash) &&
+	    (sp->size == bin.size) &&
+	    (sp->is_term == is_term) &&
+	    (memcmp(sp->data, bin.data, bin.size) == 0)) {
+	    // found
+	    if (is_term) enif_release_binary(&bin);
+	    return enif_make_int(env, sp->var->vix);
+	}
+	sp = sp->next;
+    } 
+    if (is_term) enif_release_binary(&bin);
+    return ATOM(false);
 }
 
 static ERL_NIF_TERM varc_order_first(ErlNifEnv* env, int argc,
@@ -2551,7 +2730,9 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varc_t* vp, int op,
 	}
 	size = u;
     }
+
     PRINT_LIT("del-dup", literal, size);
+
 
     if (op == OR_GATE) {
 	if (size == 1) {

@@ -117,10 +117,12 @@ static ERL_NIF_TERM varw_order_sort_first(ErlNifEnv* env, int argc,
 static ERL_NIF_TERM varw_order_sort_last(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[]);
 
-static ERL_NIF_TERM varw_set_variable_name(ErlNifEnv* env, int argc,
-					   const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varw_get_variable_name(ErlNifEnv* env, int argc,
-					   const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varw_add_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varw_get_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varw_find_symbol(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[]);
 
 #define UNSAT  -1
 #define OK     0
@@ -189,11 +191,10 @@ typedef struct _lqueue_t
     literal_t** tail;
 } lqueue_t;
 
-#define VAR_FLAG_INQUEUE     0x01
-#define VAR_FLAG_MARK        0x02
-#define VAR_FLAG_NAME_IS_SET 0x04
+#define VAR_FLAG_INQUEUE      0x01
+#define VAR_FLAG_MARK         0x02
 
-typedef struct _variable_t
+typedef struct _variable_t  // :object_t
 {
     struct _variable_t* next; // variable list    
     unsigned flags;           // VAR_FLAG_INQUEUE ...
@@ -204,10 +205,23 @@ typedef struct _variable_t
     unsigned long cix;        // implication clause index 0=none
     long li;                  // position in implication clause
     int  mark;                // mark when set
-    char* name;               // string formated name or NULL
-    ErlNifBinary bname;       // Stored name
+    char* strname;            // string formated name or NULL
+    struct _symbol_t* names;  // list of aliases
     literal_t lit[2];         // literal containers pos=0 neg=1
 } variable_t;
+
+typedef struct _symbol_t // :object_t
+{
+    struct _symbol_t* next;   // next symbol in hash slot or free list
+    struct _symbol_t* anext;  // alias link
+    uint32_t hash;            // symbol hash
+    int is_term;              // either name is a term or name is binary string
+    ERL_NIF_TERM term;        // binary or term(as binary)
+    uint8_t* data;            // raw data
+    size_t   size;            // raw len
+    variable_t*  var;
+} symbol_t;
+
 
 // p > 0   p increase
 // p < 0   p decrease
@@ -298,11 +312,13 @@ typedef struct _varw_t {
     unsigned int cnext;       // next clause number
     unsigned int csize;       // allocated size of value/class map
     unsigned int cnum;        // number of clauses
+    unsigned int ssize;       // size of symbol hash table
+    unsigned int snum;        // number of symbols in symbol hash table
     int bcp;                  // boolean constraint propagation
     int conflicting_clause;   // conflict clause from last eval
     unsigned int grow;        // how much to expand value/class map
     variable_t** var_map;     // variable map
-//  variable_t*  var;         // variables
+    symbol_t**   sym_map;     // symbol hash table
     int*         order_map;   // variable order table
     int          sort_key[2]; // sort order -1,-2,1,2
     clause_t**   clause_map;   // clause_map[v] = class chain of variable v
@@ -324,6 +340,7 @@ typedef struct _varw_t {
     arc4_stream_t as;              // random stream
 
     allocator_t var_allocator;     // heap storage for variables
+    allocator_t sym_allocator;     // heap storage for symbols
 } varw_t;
 
 #define VARW_TRUE(vp)  ((vp)->ltrue)
@@ -373,8 +390,9 @@ ErlNifFunc varw_funcs[] =
     NIF_FUNC( "order_sort",          4,  varw_order_sort ),
     NIF_FUNC( "order_sort_first",    2,  varw_order_sort_first ),
     NIF_FUNC( "order_sort_last",     2,  varw_order_sort_last ),
-    NIF_FUNC( "set_variable_name",   3,  varw_set_variable_name ),
-    NIF_FUNC( "get_variable_name",   2,  varw_get_variable_name ),
+    NIF_FUNC( "add_symbol",          3,  varw_add_symbol),
+    NIF_FUNC( "get_symbol",          2,  varw_get_symbol ),
+    NIF_FUNC( "find_symbol",         2,  varw_find_symbol ),
 };
 
 // Atom macros
@@ -409,11 +427,11 @@ DECL_ATOM(undefined);
 DECL_ATOM(identity);
 DECL_ATOM(random);
 DECL_ATOM(occur);
-DECL_ATOM(occur_ascending);
-DECL_ATOM(occur_descending);
+DECL_ATOM(plus_occur);
+DECL_ATOM(minus_occur);
 DECL_ATOM(depth);
-DECL_ATOM(depth_ascending);
-DECL_ATOM(depth_descending);
+DECL_ATOM(plus_depth);
+DECL_ATOM(minus_depth);
 
 // info
 DECL_ATOM(max_clause_length);
@@ -427,6 +445,14 @@ DECL_ATOM(undo_stack_size);
 DECL_ATOM(value_stack_size);
 DECL_ATOM(class_stack_size);
 DECL_ATOM(mark);
+
+static uint32_t djb_hash(uint8_t* ptr, size_t len)
+{
+    uint32_t h = 5381;
+    while(len--)
+	h = ((h << 5) + h) + (*ptr++);
+    return h;
+}
 
 // Clause point from wlink_t pointer
 static clause_t* clause_pointer(wlink_t* wl)
@@ -496,8 +522,8 @@ static char* format_variable(variable_t* var)
 {
     static char varname[32];
     
-    if (var->name != NULL)
-	return var->name;
+    if (var->strname != NULL)
+	return var->strname;
     else {
 	snprintf(varname, sizeof(varname), "%d", var->vix);
 	return varname;
@@ -510,15 +536,15 @@ static char* lit_format(varw_t* vp, lit_t lp)
 #ifdef LIT_INTEGER
     char* n = (lp < 0) ? "!" : "";
     variable_t* var = (lp < 0) ? vp->var_map[-lp] : vp->var_map[lp];
-    if (var->name != NULL)
-	snprintf(varname, sizeof(varname), "%s%s", n, var->name);
+    if (var->strname != NULL)
+	snprintf(varname, sizeof(varname), "%s%s", n, var->strname);
     else
 	snprintf(varname, sizeof(varname), "%s%d", n, var->vix);
 #else
     UNUSED(vp);
     char* n = (lp->sign < 0) ? "!" : "";
-    if (lp->var->name != NULL)
-	snprintf(varname, sizeof(varname), "%s%s", n, lp->var->name);
+    if (lp->var->strname != NULL)
+	snprintf(varname, sizeof(varname), "%s%s", n, lp->var->strname);
     else
 	snprintf(varname, sizeof(varname), "%s%d", n, lp->var->vix);
 #endif
@@ -530,8 +556,8 @@ static char* literal_format(varw_t* vp, literal_t* lp)
     static char varname[32];    
     UNUSED(vp);
     char* n = (lp->sign < 0) ? "!" : "";
-    if (lp->var->name != NULL)
-	snprintf(varname, sizeof(varname), "%s%s", n, lp->var->name);
+    if (lp->var->strname != NULL)
+	snprintf(varname, sizeof(varname), "%s%s", n, lp->var->strname);
     else
 	snprintf(varname, sizeof(varname), "%s%d", n, lp->var->vix);
     return varname;
@@ -702,23 +728,22 @@ static uint32_t arc4_random_uniform(arc4_stream_t* as, uint32_t upper_bound)
     return r % upper_bound;
 }
 
-static void clear_wlink(clause_t* cp, int i)
+static inline void clear_wlink(wlink_t* wlp)
 {
-    cp->wl[i].p = -1;      // mark dead for debug
-    cp->wl[i].next = NULL;		
+    wlp->p = -1;
+    wlp->next = NULL;   // mark dead for debug
 }
 
-static void link_wlink(varw_t* vp, clause_t* cp, int i, long p)
+static inline void link_wlink(wlink_t* wlp, literal_t* lp)
 {
-    literal_t* lp = lit_literal(vp, cp->lit[p]);
-    cp->wl[i].next = lp->wlist;  // link literal
-    lp->wlist = &cp->wl[i];
+    wlp->next = lp->wlist;  // link literal
+    lp->wlist = wlp;
 }
 
-static void set_wlink(varw_t* vp, clause_t* cp, int i, long p)
+static void set_wlink(wlink_t* wlp, long p, literal_t* lp)
 {
-    cp->wl[i].p = p;                     // new watch point
-    link_wlink(vp, cp, i, p);
+    wlp->p = p;   // new watch point
+    link_wlink(wlp, lp);
 }
 
 static void unwatch(varw_t* vp, clause_t* cp, lit_t lp)
@@ -749,8 +774,8 @@ static clause_t* clause_alloc(varw_t* vp, uint16_t op, int size)
 	errno = r;
 	return NULL;
     }
-    clear_wlink(cp, 0);
-    clear_wlink(cp, 1);
+    clear_wlink(&cp->wl[0]);
+    clear_wlink(&cp->wl[1]);
     cp->next = NULL; 
     cp->size  = size;
     cp->key[0] = 0;
@@ -877,96 +902,114 @@ static void undo_del_block(undo_t* up)
     }
 }
 
+// push empty element on stack and return pointer to element
+static undo_elem_t* push(undo_t* up)
+{
+    undo_elem_t* p;
+    
+    if (up->cur == up->bot) {
+	if (undo_add_block(up) < 0)
+	    return NULL;
+    }
+    p = up->cur++;
+    up->stack_size++;
+    return p;
+}
+
+
 // push undo mark
 static int push_mark(undo_t* up, int mark, int save_mark)
 {
-    if (mark <= 0)
-	return -1;  // bad argument
-    if (up->cur == up->bot) {
-	if (undo_add_block(up) < 0)
-	    return -1;
-    }
-    up->cur->type  = MARK;
-    up->cur->addr  = (intptr_t*) ((intptr_t)save_mark);
-    up->cur->value = mark;
-    DBG("PUSH MARK: value=%ld stack=%ld\r\n",
-	   up->cur->value, up->stack_size);
-    up->cur++;
-    up->stack_size++;
+    undo_elem_t* p;
+    if (mark <= 0) return -1;  // bad argument
+    p = push(up);
+    p->type  = MARK;
+    p->addr  = (intptr_t*) ((intptr_t)save_mark);
+    p->value = mark;
+    DBG("PUSH MARK: value=%ld stack=%ld\r\n", p->value, up->stack_size);
     return 0;
 }
 
 static int push_value(undo_t* up, void* ptr)
 {
-    if (up->cur == up->bot) {
-	if (undo_add_block(up) < 0)
-	    return -1;
-    }
-    up->cur->type  = VALUE;
-    up->cur->addr  = (intptr_t*)ptr;
-    up->cur->value = *((intptr_t*)ptr);
+    undo_elem_t* p = push(up);
+
+    p->type  = VALUE;
+    p->addr  = (intptr_t*)ptr;
+    p->value = *((intptr_t*)ptr);
     DBG("PUSH VALUE: ptr=%p, value=%ld, stack=%ld\r\n",
-	up->cur->addr, up->cur->value, up->stack_size);
-    up->cur++;
-    up->stack_size++;
+	p->addr, p->value, up->stack_size);
     return 0;
 }
 
 static int push_variable(undo_t* up, variable_t* var)
 {
-    if (up->cur == up->bot) {
-	if (undo_add_block(up) < 0)
-	    return -1;
-    }
-    up->cur->type  = VARIABLE;
-    up->cur->addr  = (intptr_t*) var;
-    up->cur->value = var->value;
+    undo_elem_t* p = push(up);
+
+    p->type  = VARIABLE;
+    p->addr  = (intptr_t*) var;
+    p->value = var->value;
     DBG("PUSH VARIABLE: var=%s, value=%ld, stack=%ld\r\n",
-	format_variable(var), up->cur->value, up->stack_size);    
-    up->cur++;
-    up->stack_size++;
+	format_variable(var), p->value, up>stack_size);    
     up->value_stack_size++;
     return 0;
 }
 
-// pop single element, return pointer to element
-// return NULL if stack is empty
+// pop stack unwind undo blocks skip patched entries update
+// stack_size and return the popped element or NULL if empty
+// stack.
 static undo_elem_t* pop(undo_t* up)
 {
-    if (up->stack_size > 0) {
+    while(up->ubp) {
 	up->cur--;
-	up->stack_size--;
 	if (up->cur < up->top) {
 	    undo_del_block(up);
+	    if (!up->ubp)
+		return NULL;
 	    up->cur--;
 	}
-	switch(up->cur->type) {
-	case NONE:
-	    DBG("POP NONE, stack=%ld\r\n", up->stack_size);
-	    break;
-	case MARK:
-	    DBG("POP MARK %ld, stack=%ld\r\n",
-		up->cur->value, up->stack_size);
-	    up->mark = (intptr_t)up->cur->addr;
-	    break;
-	case VARIABLE:
-	    DBG("POP VARIABLE %s value=%ld, stack=%ld\r\n",
-		format_variable((variable_t*)up->cur->addr),
-		up->cur->value, up->stack_size);
-	    ((variable_t*)up->cur->addr)->value = up->cur->value;
-	    up->value_stack_size--;
-	    break;
-	case VALUE:
-	    DBG("POP VALUE addr=%p value=%ld, stack=%ld\r\n",
-		up->cur->addr, up->cur->value, up->stack_size);
-	    *up->cur->addr = up->cur->value;
-	    break;
-	default:
-	    break;
+	if (up->cur->type != NONE) {
+	    up->stack_size--;
+	    return up->cur;
 	}
-	return up->cur;
     }
     return NULL;
+}
+
+// pop & undo single element, return pointer to the element
+// return NULL if stack is empty
+static undo_elem_t* pop_undo(undo_t* up)
+{
+    undo_elem_t* p;
+
+    if ((p = pop(up)) == NULL)
+	return NULL;
+
+    switch(p->type) {
+    case MARK:
+	DBG("POP MARK %ld, stack=%ld\r\n",
+	    p->value, up->stack_size);
+	up->mark = (intptr_t)p->addr;
+	break;
+    case VARIABLE:
+	DBG("POP VARIABLE %s value=%ld, stack=%ld\r\n",
+	    format_variable((variable_t*)p->addr),
+	    p->value, up->stack_size);
+	((variable_t*)p->addr)->value = p->value;
+	up->value_stack_size--;
+	break;
+    case VALUE:
+	DBG("POP VALUE addr=%p value=%ld, stack=%ld\r\n",
+	    p->addr, p->value, up->stack_size);
+	*p->addr = p->value;
+	break;
+    case NONE:
+	fprintf(stderr, "NONE was popped and that is an error\r\n");
+	break;
+    default:
+	return NULL;
+    }
+    return p;
 }
 
 // undo until mark
@@ -974,7 +1017,7 @@ static int pop_until_mark(undo_t* up, int count, int mark)
 {
     undo_elem_t* p;
 
-    while((p = pop(up)) != NULL) {
+    while((p = pop_undo(up)) != NULL) {
 	if (p->type == MARK) {
 	    if (count) count--;
 	    if ((p->value == mark) || ((mark < 0) && (count == 0)))
@@ -1025,8 +1068,8 @@ static void init_variable(variable_t* vptr, int value, int vix)
     vptr->cix  = -1;
     vptr->li   = -1;
     vptr->mark = 0;    
-    vptr->name = NULL;
-    
+    vptr->strname = NULL;
+    vptr->names = NULL;
     vptr->lit[0].sign = 1;
     vptr->lit[0].var  = vptr;
     vptr->lit[0].wlist = NULL;
@@ -1188,19 +1231,41 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
 
 static void cleanup(varw_t* vp)
 {
+    if (vp->sym_map) {
+	int i;
+	for (i = 0; i < (int)vp->ssize; i++) {
+	    symbol_t* sp = vp->sym_map[i];
+	    while(sp) {
+		enif_free(sp->data);
+		sp = sp->next;
+	    }
+	}
+	enif_free(vp->sym_map);
+	vp->sym_map = NULL;		    
+    }
+    
     if (vp->var_map) {
 	enif_free(vp->var_map);
 	vp->var_map = NULL;
     }
+    
     if (vp->order_map) {
 	enif_free(vp->order_map);
 	vp->order_map = NULL;
     }
+    
     if (vp->clause_map) {
+	int i;
+	for (i = 0; i < (int)vp->cnext; i++) {	
+	    clause_t* cp = vp->clause_map[i];
+	    if (cp != NULL)
+		clause_free(vp, cp);		
+	}
 	enif_free(vp->clause_map);
 	vp->clause_map = NULL;
     }
     cleanup_allocator(&vp->var_allocator);
+    cleanup_allocator(&vp->sym_allocator);    
 }
 
 static void varw_dtor(ErlNifEnv* env, void* obj)
@@ -1217,6 +1282,7 @@ static ERL_NIF_TERM varw_new(ErlNifEnv* env, int argc,
     unsigned int grow   = DEFAULT_MAP_GROW;
     unsigned int vsize  = DEFAULT_MAP_SIZE;
     unsigned int csize  = DEFAULT_MAP_SIZE;
+    unsigned int ssize;
     int bcp = 1;
     int qv = 0;
     ERL_NIF_TERM t;
@@ -1278,6 +1344,15 @@ static ERL_NIF_TERM varw_new(ErlNifEnv* env, int argc,
     vp->grow = grow;
     if (!(vp->var_map = enif_alloc(vsize*sizeof(variable_t**))))
 	goto error;
+    
+    ssize = 1;
+    while(ssize < vsize) ssize *= 2;
+    if (!(vp->sym_map = enif_alloc(ssize*sizeof(symbol_t**))))
+	goto error;
+    memset(vp->sym_map, 0, ssize*sizeof(symbol_t**));
+    vp->ssize = ssize;
+    vp->snum = 0;
+    
     if (!(vp->order_map = enif_alloc(vsize*sizeof(int))))
 	goto error;
     vp->cnext = 0;
@@ -1287,9 +1362,10 @@ static ERL_NIF_TERM varw_new(ErlNifEnv* env, int argc,
 
     if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
 	goto error;
-
     if (init_allocator(&vp->var_allocator, sizeof(variable_t)) < 0)
-	goto error;    
+	goto error;
+    if (init_allocator(&vp->sym_allocator, sizeof(symbol_t)) < 0)
+	goto error;
 
     lqueue_init(&vp->q);
     
@@ -1369,48 +1445,165 @@ static ERL_NIF_TERM varw_add_variable(ErlNifEnv* env, int argc,
     return enif_make_int(env, vix);
 }
 
-// varc:set_variable_name(Vp:varc(),integer(),term()) -> ok.
-static ERL_NIF_TERM varw_set_variable_name(ErlNifEnv* env, int argc,
-				      const ERL_NIF_TERM argv[])
+// varc:add_symbol(Vp:varc(),integer(),term()) -> ok | error
+static ERL_NIF_TERM varw_add_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varw_t* vp;
     variable_t* var;
+    ErlNifBinary bin;
+    uint32_t hash;
+    int hix;
+    int is_term = 0;
+    symbol_t* sp;
     
     if (!enif_get_resource(env, argv[0], varw_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (!get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    if (var->flags & VAR_FLAG_NAME_IS_SET)
-	enif_release_binary(&var->bname);
-    enif_term_to_binary(env, argv[2], &var->bname);
-    var->flags |= VAR_FLAG_NAME_IS_SET;
+
+    if (!enif_inspect_iolist_as_binary(env, argv[2], &bin)) {
+	if (!enif_term_to_binary(env, argv[2], &bin))
+	    return enif_make_badarg(env);
+	is_term = 1;
+    }
+
+    hash = djb_hash(bin.data, bin.size);
+    hix  = hash & (vp->ssize - 1);
+    sp = vp->sym_map[hix];
+    while(sp != NULL) {
+	if ((sp->hash == hash) &&
+	    (sp->size == bin.size) &&
+	    (sp->is_term == is_term) &&
+	    (memcmp(sp->data, bin.data, bin.size) == 0)) {
+	    // already defined
+	    if (is_term) enif_release_binary(&bin);
+	    return ATOM(error);
+	}
+	sp = sp->next;
+    }
+    // not found allocate new
+    if ((sp = varw_alloc(&vp->sym_allocator)) == NULL)
+	return enif_make_badarg(env);
+    sp->is_term = is_term;
+    sp->hash = hash;
+    sp->var  = var;    
+    // copy term or binary
+    if (is_term) {
+	sp->data = enif_alloc(bin.size);
+	memcpy(sp->data, bin.data, bin.size);
+	sp->size = bin.size;	
+    }
+    else {
+	sp->data = enif_alloc(bin.size+1);
+	memcpy(sp->data, bin.data, bin.size);
+	sp->data[bin.size] = '\0';
+	sp->size = bin.size;
+	if (var->strname == NULL)
+	    var->strname = (char*) sp->data;
+    }
+    // link alias list
+    sp->anext = var->names;
+    var->names = sp;
+    vp->snum++;
+    
+    if (vp->snum >= vp->ssize) { // rehash	
+	unsigned int ssize1 = vp->ssize*2;
+	int i;
+	symbol_t** sym_map1 = enif_alloc(ssize1*sizeof(symbol_t**));
+
+	memset(sym_map1, 0, ssize1*sizeof(symbol_t**));
+	for (i = 0; i < (int)vp->ssize; i++) {
+	    symbol_t* sp1 = vp->sym_map[i];
+	    while(sp1 != NULL) {
+		symbol_t* spn = sp1->next;		
+		int hjx = sp1->hash & (ssize1 - 1);
+		sp1->next = sym_map1[hjx];
+		sp1 = spn;
+	    }
+	    vp->sym_map[i] = NULL;
+	}
+	enif_free(vp->sym_map);
+	vp->sym_map = sym_map1;
+	vp->ssize = ssize1;
+	hix  = hash & (ssize1-1);  // hash index for new element
+    }
+    // link hash bucket list
+    sp->next = vp->sym_map[hix];
+    vp->sym_map[hix] = sp;
+
     return ATOM(ok);
 }
 
 // varc:get_variable_name(Vp:varc(),integer()) -> term().
-static ERL_NIF_TERM varw_get_variable_name(ErlNifEnv* env, int argc,
-				      const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varw_get_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varw_t* vp;
     variable_t* var;
+    symbol_t* sp;
+    ERL_NIF_TERM list;
     
     if (!enif_get_resource(env, argv[0], varw_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (!get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    // return true/false for the constants?
-    if (var->flags & VAR_FLAG_NAME_IS_SET) {
+
+    list = enif_make_list(env, 0);
+    sp = var->names;
+    while(sp != NULL) {
 	ERL_NIF_TERM term;
-	if (!enif_binary_to_term(env,
-				 var->bname.data,
-				 var->bname.size,
-				 &term, 0))
-	    return enif_make_badarg(env);
-	return term;
+	if (sp->is_term)
+	    enif_binary_to_term(env,sp->data,sp->size,&term,0);
+	else {
+	    uint8_t* data = enif_make_new_binary(env, sp->size, &term);
+	    memcpy(data, sp->data, sp->size);
+	}
+	list = enif_make_list_cell(env, term, list);
+	sp = sp->anext;
     }
-    return ATOM(undefined);
+    return list;
+}
+
+// varc:find_variable(Vp:varc(),term()) -> false | integer().
+static ERL_NIF_TERM varw_find_symbol(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);    
+    varw_t* vp;
+    ErlNifBinary bin;
+    uint32_t hash;    
+    int hix;
+    int is_term = 0;
+    symbol_t* sp;    
+    
+    if (!enif_get_resource(env, argv[0], varw_res, (void**)&vp))
+	return enif_make_badarg(env);
+    
+    if (!enif_inspect_iolist_as_binary(env, argv[1], &bin)) {
+	if (!enif_term_to_binary(env, argv[1], &bin))
+	    return enif_make_badarg(env);
+	is_term = 1;
+    }
+    hash = djb_hash(bin.data, bin.size);
+    hix  = hash & (vp->ssize - 1);
+    sp = vp->sym_map[hix];
+
+    while(sp != NULL) {
+	if ((sp->hash == hash) &&
+	    (sp->size == bin.size) &&
+	    (sp->is_term == is_term) &&
+	    (memcmp(sp->data, bin.data, bin.size) == 0)) {
+	    // found
+	    if (is_term) enif_release_binary(&bin);
+	    return enif_make_int(env, sp->var->vix);
+	}
+	sp = sp->next;
+    } 
+    if (is_term) enif_release_binary(&bin);
+    return ATOM(false);
 }
 
 static ERL_NIF_TERM varw_order_first(ErlNifEnv* env, int argc,
@@ -1642,19 +1835,17 @@ static ERL_NIF_TERM varw_order_sort(ErlNifEnv* env, int argc,
 	    order_k_undefined(vp, k);	
 	else if (argv[i] == ATOM(random))
 	    order_k_random(vp, k);
-	else if ((argv[i] == ATOM(occur)) ||
-		 (argv[i] == ATOM(occur_ascending))) {
+	else if ((argv[i] == ATOM(occur)) || (argv[i] == ATOM(plus_occur))) {
 	    order_k_occur(vp, k);
 	}
-	else if (argv[i] == ATOM(occur_descending)) {
+	else if (argv[i] == ATOM(minus_occur)) {
 	    order_k_occur(vp, k);
 	    k = -k;
 	}
-	else if ((argv[i] == ATOM(depth)) ||
-		 (argv[i] == ATOM(depth_ascending))) {
+	else if ((argv[i] == ATOM(depth)) || (argv[i] == ATOM(plus_depth))) {
 	    order_k_depth(vp, k);
 	}
-	else if (argv[i] == ATOM(depth_descending)) {
+	else if (argv[i] == ATOM(minus_depth)) {
 	    order_k_depth(vp, k);
 	    k = -k;
 	}
@@ -2171,8 +2362,10 @@ static ERL_NIF_TERM varw_eval(ErlNifEnv* env, int argc,
 	while(wl) {
 	    wlink_t* wln = wl->next;  // save next before process
 	    clause_t* cp = clause_pointer(wl);
-	    int wp0 = cp->wl[0].p;
-	    int wp1 = cp->wl[1].p;
+	    wlink_t* wl0 = &cp->wl[0];
+	    wlink_t* wl1 = &cp->wl[1];
+	    int wp0 = wl0->p;
+	    int wp1 = wl1->p;
 	    long p;
 	    int lv = UNDEF;
 
@@ -2193,10 +2386,10 @@ static ERL_NIF_TERM varw_eval(ErlNifEnv* env, int argc,
 		}
 		else {
 		    literal_t* mp = lit_literal(vp, cp->lit[p]);
-		    push_value(&vp->undo, &cp->wl[0].next);
-		    push_value(&vp->undo, &cp->wl[0].p);
+		    push_value(&vp->undo, &wl0->next);
+		    push_value(&vp->undo, &wl0->p);
 		    push_value(&vp->undo, &mp->wlist);
-		    cp->wl[0].p = p;
+		    wl0->p = p;
 
 		    if (p == wp1) {
 			if (lv == UNDEF) {  // unit propagation
@@ -2208,11 +2401,11 @@ static ERL_NIF_TERM varw_eval(ErlNifEnv* env, int argc,
 			    var->li  = p;         // and position
 			}
 			else if (lv == TRUE) {
-			    clear_wlink(cp, 0);
+			    clear_wlink(wl0);
 			}
 		    }
 		    else {
-			link_wlink(vp, cp, 0, p);
+			link_wlink(wl0, mp);
 		    }
 		}
 	    }
@@ -2232,10 +2425,10 @@ static ERL_NIF_TERM varw_eval(ErlNifEnv* env, int argc,
 		}
 		else {
 		    literal_t* mp = lit_literal(vp, cp->lit[p]);
-		    push_value(&vp->undo, &cp->wl[1].next);
-		    push_value(&vp->undo, &cp->wl[1].p);
+		    push_value(&vp->undo, &wl1->next);
+		    push_value(&vp->undo, &wl1->p);
 		    push_value(&vp->undo, &mp->wlist);
-		    cp->wl[1].p = p;
+		    wl1->p = p;
 
 		    if (p == wp0) {
 			if (lv == UNDEF) { // unit propagation
@@ -2247,11 +2440,11 @@ static ERL_NIF_TERM varw_eval(ErlNifEnv* env, int argc,
 			    var->li  = p;	     // and position
 			}
 			else if (lv == TRUE) {
-			    clear_wlink(cp, 1);
+			    clear_wlink(wl1);
 			}
 		    }
 		    else {
-			link_wlink(vp, cp, 1, p);
+			link_wlink(wl1, mp);
 		    }
 		}
 	    }
@@ -2343,6 +2536,17 @@ static int cmp_rev_abs_lit QSORT_R_ARGS(const void* ap,const void* bp,void* arg)
 #endif
 }
 
+typedef struct
+{
+    lit_t lit;
+    int32_t key;
+} shuffle_key_t;
+
+static int cmp_shuffle QSORT_R_ARGS(const void* a, const void* b,void* arg)
+{
+    UNUSED(arg);
+    return ((shuffle_key_t*)a)->key - ((shuffle_key_t*)b)->key;
+}
 
 //
 // add a clause to the system and normalise contents
@@ -2382,7 +2586,7 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varw_t* vp, int op,
     int wp0, wp1;
     unsigned Tc=0, Fc=0;
 
-    // PRINT_LIT("   src", lit, size);
+    PRINT_LIT("   src", lit, size);
     
     // first sort all literals by absolute value
     QSORT_R(lit+1, size-1, sizeof(lit_t), cmp_rev_abs_lit, vp);
@@ -2433,6 +2637,19 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varw_t* vp, int op,
 	size = u;
     }
     // PRINT_LIT("del-dup", lit, size);
+
+    // shuffle literals - possibly make watch literal chains shorter?
+    {
+	shuffle_key_t skey[size];
+	for (i = 1; i < size; i++) {
+	    skey[i].lit = lit[i];
+	    skey[i].key = arc4_random(&vp->as);
+	}
+	QSORT_R(skey+1, size-1, sizeof(shuffle_key_t), cmp_shuffle, 0);
+	for (i = 1; i < size; i++)
+	    lit[i] = skey[i].lit;
+    }
+    PRINT_LIT("shuffle", lit, size);    
 
     if (op == OR_GATE) {
 	if (size == 1) {
@@ -2499,8 +2716,8 @@ next_wp:
     PRINT_CLAUSE("unit clause: ", cp);
     return enif_make_int(env, cix);
 done_wp:
-    set_wlink(vp, cp, 0, wp0);       // watch literal 0
-    set_wlink(vp, cp, 1, wp1);       // watch literal 1
+    set_wlink(&cp->wl[0], wp0, lit_literal(vp,cp->lit[wp0]));
+    set_wlink(&cp->wl[1], wp1, lit_literal(vp,cp->lit[wp1]));
 dead:
     if ((cix = insert_clause(env, vp, cp)) < 0)
 	return enif_make_badarg(env);
@@ -2929,11 +3146,11 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(identity);
     LOAD_ATOM(random);
     LOAD_ATOM(occur);
-    LOAD_ATOM_STRING(occur_ascending, "+occur");
-    LOAD_ATOM_STRING(occur_descending,"-occur");
+    LOAD_ATOM_STRING(plus_occur, "+occur");
+    LOAD_ATOM_STRING(minus_occur,"-occur");
     LOAD_ATOM(depth);
-    LOAD_ATOM_STRING(depth_ascending, "+depth");
-    LOAD_ATOM_STRING(depth_descending, "-depth");
+    LOAD_ATOM_STRING(plus_depth, "+depth");
+    LOAD_ATOM_STRING(minus_depth, "-depth");
     
     // info
     LOAD_ATOM(max_clause_length);
@@ -2948,7 +3165,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(class_stack_size);
     LOAD_ATOM(mark);
 }
-
 
 static int varw_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 {

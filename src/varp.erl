@@ -20,8 +20,18 @@
 
 main(Args) ->
     application:start(varp),
-    {Mode,Bound,Opts0,Files} = process_args0(Args, none),
-    %% io:format("opts0 = ~p\n", [Opts0]),
+    XArgs = case os:getenv("VARP_CORE") of
+		false ->
+		    ["-bcp", "1", "-clause", "1"];
+	       "varw" ->
+		    ["-bcp", "1", "-clause", "1"];
+		"varc" ->
+		   ["-clause", "0"];
+	       _ ->
+		    ["-clause", "0"]
+	    end,
+    {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, none),
+    io:format("opts0 = ~p\n", [Opts0]),
     Opts = [{meta,Bound}|Opts0],
     {ReadIn,{Defs0,Decls0,Code0,Order0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
@@ -310,22 +320,22 @@ join_f(_JoinOp,A,undefined) -> A;
 join_f(JoinOp,A,B) -> {JoinOp,A,B}.
 
 %% check "base" mode satisfy|falsify|prove
-process_args0(["satisfy"|As], _Mode) ->
-    varp_option:process_args(As, satisfy);
-process_args0(["falsify"|As], _Mode) ->
-    varp_option:process_args(As, falsify);
-process_args0(["prove"|As], _Mode) ->
-    varp_option:process_args(As, prove);
-process_args0(["cnf"|As], _Mode) ->
-    varp_option:process_args(As, cnf);
-process_args0(["snf"|As], _Mode) ->
-    varp_option:process_args(As, snf);
-process_args0(["help"|As], _Mode) ->
-    varp_option:process_args(As, help);
-process_args0(["version"|As], _Mode) ->
-    varp_option:process_args(As, version);
-process_args0(As, Mode) ->
-    varp_option:process_args(As, Mode).
+process_args0(["satisfy"|As], Bs, _Mode) ->
+    varp_option:process_args(Bs++As, satisfy);
+process_args0(["falsify"|As], Bs, _Mode) ->
+    varp_option:process_args(Bs++As, falsify);
+process_args0(["prove"|As], Bs, _Mode) ->
+    varp_option:process_args(Bs++As, prove);
+process_args0(["cnf"|As], Bs, _Mode) ->
+    varp_option:process_args(Bs++As, cnf);
+process_args0(["snf"|As], Bs, _Mode) ->
+    varp_option:process_args(Bs++As, snf);
+process_args0(["help"|As],Bs, _Mode) ->
+    varp_option:process_args(Bs++As, help);
+process_args0(["version"|As],Bs,_Mode) ->
+    varp_option:process_args(Bs++As, version);
+process_args0(As, Bs, Mode) ->
+    varp_option:process_args(Bs++As, Mode).
 
 
 read_in() ->
