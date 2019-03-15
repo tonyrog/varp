@@ -30,21 +30,6 @@ all() ->
     xor_clause(false),
     order().
 
-test0() ->
-    V = varc:new(),    
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    C0 = varc:add_clause(V, 'or', [1, X2, X3, X4]),
-    R = varc:get_clause(V, C0),
-    io:format("clause = ~p\n", [R]),
-    {'or', [1, X4, X3, X2]} = varc:get_clause(V, C0),
-
-    C1 = varc:add_clause(V, 'or', 1, X2, X3, X4),
-    {'or', [1, X4, X3, X2]} = varc:get_clause(V, C1),
-    ok.
-    
-
 test1() ->
     V = varc:new(),
     X2 = varc:add_variable(V),

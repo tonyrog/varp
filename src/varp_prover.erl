@@ -176,7 +176,7 @@ backtrack({F,Bs}) ->
 
 %% Basic run
 method(X,Bs) ->
-    passes([apply,eval,saturate,backtrack],X,Bs).
+    passes([apply,eval,saturate,backjump,backtrack],X,Bs).
 
 passes([Pass|Ps],X,Bs) ->
     case pass_enabled(Pass,Bs) of
@@ -246,7 +246,9 @@ pass_enabled(saturate,Bs) ->
 	    {true,[{saturate,Params}||Params<-List]}
     end;
 pass_enabled(backtrack,Bs) ->
-    varp_formula:getopt(Bs,backtrack).
+    varp_formula:getopt(Bs,backtrack);
+pass_enabled(backjump,Bs) ->
+    varp_formula:getopt(Bs,backjump).
 
 %% each pass return
 %%   false             - contradiction ( = 0 ? )
@@ -264,7 +266,9 @@ pass(saturate,_X,Bs) ->
     Params = #{ saturate => varp_formula:getopt(Bs,saturate) },
     varp_saturate:saturate(Bs,Params);
 pass(backtrack,_X,Bs) ->
-    varp_backtrack:backtrack(Bs).
+    varp_backtrack:backtrack(Bs);
+pass(backjump,_X,Bs) ->
+    varp_backjump:backjump(Bs).
 
 %% check if there is already a "unique" model
 one_model(Bs) ->

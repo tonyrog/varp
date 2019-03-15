@@ -53,7 +53,7 @@ backtrack(Bs) ->
 
 %%
 %% Explicit recursion version, allow times backtracking
-%% mix alogorithms etc.
+%% mix algorithms etc.
 %%
 bt(Bs,Func,Acc) ->
     case init(Bs) of
@@ -80,17 +80,9 @@ init(Bs) ->
 	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?START_MARK}]}
     end.
 
-next([{_,Xi,[],_}|Stack1],Bs) ->
-    case varp_formula:getopt(Bs, backjump) of
-	true ->
-	    case backjump(Bs,Xi,?BT_LAST,Stack1) of
-		false -> false;
-		Stack2 -> next(Stack2,Bs)
-	    end;
-	false ->
-	    undo(Bs,Stack1),
-	    next(Stack1,Bs)
-    end;
+next([{_,_Xi,[],_}|Stack1],Bs) ->
+    undo(Bs,Stack1),
+    next(Stack1,Bs);
 next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
     varp_formula:mark(Bs,Mark),
     case eq_eval(Bs,Xi,V,Mark) of
@@ -107,87 +99,6 @@ next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
     end;
 next([],_Bs) ->
     false.
-
-%% Given contradiction in both branches
-%% find the shortest prefix that has no conflict
-%% example:
-%%    [A,B,C,D,E,F]  has a conflict
-%%    [A,B,C,D,E,~F] has a conflict
-%%    [A,B,C,D,~F]   conflict
-%%    [A,B,C,~F]     conflict
-%%    [A,B,~F]       no conflict
-%%
-%%    [A,~F]
-%%    [~F]   (contradiction ?)
-
-backjump(Bs, Xi, Xv, Stack) ->
-    %% io:format("backjump: ~1000p\n", [Stack]),
-    varp_formula:undo(Bs,?START_MARK), %% undo all bindings
-    Stack1 = bj(Bs, {Xi,Xv}, Stack, 0),
-    %% io:format("backjump: stack1=~1000p\n", [Stack1]),
-    %% J = length(Stack)-length(Stack1),
-    %% if J > 0 ->
-    %% io:format("backjump length=~w\n", [J]);
-    %% true -> ok
-    %% end,
-    Stack1.
-
-bj(_Bs, _Bn, [], _N) ->
-    [];
-bj(Bs, Bn, Stack0=[_|Stack], N) ->
-    Ys = [Bn | stack(Stack)],
-    varp_formula:mark(Bs,?START_MARK),
-    case varp_prover:eval_list(Bs,Ys) of
-	false ->
-	    varp_formula:undo(Bs,?START_MARK),
-	    bj(Bs, Bn, Stack, N+1);
-	Bs1 ->
-	    varp_formula:undo(Bs1,?START_MARK),
-	    bj_reinstall(Bs1,lists:reverse(Stack)),
-	    Stack0
-    end.
-
-
-backjump1(Bs, Xi, Xv, Stack) ->
-    io:format("backjump1: ~1000p\n", [Stack]),
-    varp_formula:undo(Bs,?START_MARK), %% undo all bindings
-    varp_formula:mark(Bs,?START_MARK), %% mark point again
-    ?dbg("~w=~w,",[Xi,Xv]),
-    case eqv(Bs,Xi,Xv) of
-	false ->
-	    varp_formula:undo(Bs,?START_MARK),
-	    bj_reinstall(Bs,Stack),
-	    Stack;
-	true ->
-	    Stack1 = bj1(Bs, lists:reverse(Stack), []),
-	    io:format("backjump1: stack1=~1000p\n", [Stack1]),
-	    varp_formula:undo(Bs,?START_MARK),
-	    bj_reinstall(Bs,Stack1),
-	    io:format("backjump length=~w\n", [length(Stack)-length(Stack1)]),
-	    Stack1
-    end.
-
-bj1(Bs, [E={_I,Xi,Vs,_Mark}|Stack], Acc) ->
-    Xv = if Vs =:= [] -> ?BT_LAST; true -> ?BT_FIRST end,
-    case eqv(Bs,Xi,Xv) of
-	true ->
-	    ?dbg("~w=~w,",[Xi,Xv]),
-	    bj1(Bs, Stack, [E|Acc]);
-	false ->
-	    ?dbg("!~w=~w\n",[Xi,Xv]),
-	    [E|Acc]
-    end;
-bj1(_Bs, [], Acc) ->
-    ?dbg("![]\n",[]),
-    Acc.
-
-bj_reinstall(Bs,[{_I,Xi,Vs,Mark}|Stack]) ->
-    Xv = if Vs =:= [] -> ?BT_LAST; true -> ?BT_FIRST end,
-    varp_formula:mark(Bs,Mark),
-    true = eqv(Bs,Xi,Xv),
-    bj_reinstall(Bs, Stack);
-bj_reinstall(_Bs,[]) ->
-    ok.
 
 %% Get a list of bound values on backtrack stack
 %% Value are in order [true,false]

@@ -2260,18 +2260,17 @@ static ERL_NIF_TERM varc_implication_clause(ErlNifEnv* env, int argc,
 					    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
-    int x;
+    variable_t* var;
     varc_t* vp;
 
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!get_literal(env, vp, argv[1], &x))
+    if (!get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    if (x < 0) x = -x;
     return enif_make_tuple3(env,
-			    enif_make_int(env, vp->var_map[x].cix),
-			    enif_make_int(env, vp->var_map[x].li),
-			    enif_make_int(env, vp->var_map[x].mark));
+			    enif_make_int(env, var->cix),
+			    enif_make_int(env, var->li),
+			    enif_make_int(env, var->mark));
 }
 
 static ERL_NIF_TERM varc_is_variable(ErlNifEnv* env, int argc,
@@ -3029,9 +3028,9 @@ static ERL_NIF_TERM varc_enqueue_all(ErlNifEnv* env, int argc,
 
 
 // get_bindings(Vp, Mark, ClauseInfo)
-// Mark >=0 0  collect bindings until Mark = mark (not including)
+// Mark >=   collect bindings until Mark = mark (not including)
 // Mark < 0  collect bindings until number of marks N ( = -Mark )
-//  has been reached. -1 = latest bindings
+// Mark == 0 latest binding
 
 static ERL_NIF_TERM varc_get_bindings(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])

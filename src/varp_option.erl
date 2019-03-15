@@ -399,8 +399,6 @@ match_value(Spec, [], [Val|As]) ->
     end;
 match_value(Spec, [$=|Val], As) ->
     match_value(Spec, Val, As);
-match_value({multiple,Spec}, Val, As) ->
-    match_value(Spec, Val, As);
 match_value(Spec, Val, As) ->
     case match_val(Spec, Val) of
 	{ok,Value} -> {ok,Value,As};
@@ -421,6 +419,8 @@ match_values(Spec,[V|Vs],Acc,As) ->
 match_values(_Spec,[],Acc,As) ->
     {ok,lists:reverse(Acc),As}.
 
+match_val({multiple,Spec}, Val) ->
+    match_val_(Spec, Val);
 match_val(Spec, Val) ->
     %% io:format("match_val: ~p val=~p\n", [Spec, Val]),
     match_val_(Spec, Val).

@@ -10,9 +10,10 @@
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([fresh_var/1]).
+-export([add_variable/1]).
 -export([variable/2, alias/3]).
 -export([value/2, class/2]).
--export([get_info/1]).
+-export([get_info/1, get_info/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
 -export([fmt_var_list/2]).
 -export([fmt_bind/4]).
@@ -61,11 +62,17 @@
 -export([remove_mark/1, remove_mark/2]).
 -export([undo/1, undo/2]).
 -export([vfold_op/4]).
+-export([conflicting_clause/1]).
+-export([implication_clause/2]).
+-export([get_clause/2]).
+-export([add_clause/3]).
+-export([set_var/3, add_var/4]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
 -include("log.hrl").
 -include("varp_bic.hrl").
+-include("varp.hrl").
 
 -ifdef(OTP_RELEASE).
 -if(?OTP_RELEASE >= 21).
@@ -103,17 +110,6 @@
 %% -define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
--record(bs,
-	{
-	  option = #{} :: [#{}],  %% the options
-	  vs,                 %% map() model variables var <=> Vn
-	  vp,                 %% varc instance
-	  meta=[],            %% meta variable bindings during build
-	  defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
-	  decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]
-	  subst=[]            %% var/function substitution(s)
-	}).
-
 new() ->
     new(varp_option:default_option()).
 %%
@@ -137,6 +133,9 @@ new(OptMap) when is_map(OptMap) ->
 fresh_var(Bs) ->
     Var = varc:add_variable(Bs#bs.vp),
     {Var,Bs}.
+
+add_variable(Bs) ->
+    varc:add_variable(Bs#bs.vp).
 
 %% build an OR gate with Y as output and Xs as input
 %% Y = X1 or X2 .. or Xn
@@ -365,6 +364,9 @@ value(Bs,V) ->
 get_info(Bs) ->
     varc:get_info(Bs#bs.vp).
 
+get_info(Bs, Key) ->
+    varc:info(Bs#bs.vp, Key).
+
 class(Bs,V) ->
     case varc:class(Bs#bs.vp, V) of
 	?TRUE  -> ?TRUE;
@@ -438,6 +440,15 @@ debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
 
 get_bindings(Bs,Mark) when is_integer(Mark) -> 
     varc:get_bindings(Bs#bs.vp, Mark).
+
+conflicting_clause(Bs) ->
+    varc:conflicting_clause(Bs#bs.vp).
+
+implication_clause(Bs, V) ->
+    varc:implication_clause(Bs#bs.vp, V).
+
+get_clause(Bs, I) ->
+    varc:get_clause(Bs#bs.vp, I).
 
 %% Bs is under the assumption that Var = TRUE
 intersect(Bs, Var, B0) ->
@@ -670,8 +681,8 @@ alias(V,N,Bs) ->
     case find_var(N,Bs) of
 	error ->
 	    set_var(V,N,Bs);
-	{ok,Vs} ->
-	    add_var(V,N,Vs,Bs)
+	{ok,Alias} ->
+	    add_var(V,N,Alias,Bs)
     end.
 
 find_var(V, Bs) ->
@@ -680,14 +691,14 @@ find_var(V, Bs) ->
 get_var(V, Bs) ->
     maps:get(V, Bs#bs.vs).
 
-set_var(V, N, Bs) ->
+set_var(Var, Vi, Bs) ->
     Vs = Bs#bs.vs,
-    Vs1 = Vs#{ V => N,  N => [V] },
+    Vs1 = Vs#{ Var => Vi,  Vi => [Var] },
     Bs#bs { vs = Vs1 }.
 
-add_var(V,N,Vs,Bs) ->
+add_var(Var, Vi, Alias,Bs) ->
     Vs = Bs#bs.vs,
-    Vs1 = Vs#{ V => N, N => [V|Vs] },
+    Vs1 = Vs#{ Var => Vi, Vi => [Var|Alias] },
     Bs#bs { vs = Vs1 }.
 
 fold_var(Fun, Acc, Bs) ->
@@ -872,7 +883,6 @@ build_({snf,{[],[],_Decls}},Bs) ->
 build_({snf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
     Bs1 = build_cnf(Cs, Bs),
     {{bool,?TRUE}, Bs1};
-%% build__({'and',{'ALL',Ls},snf_to_formula(Cs)},Bs);
 
 
 build_({subst,Rx,Py,F},Bs) ->
@@ -2257,9 +2267,6 @@ minmax2(X1,X2,Bs) ->
     {Min,Max,Bs2}.
 
 cnf_to_formula(Cs) ->
-    {'ALL', [{'ANY', C} || C <- Cs]}.
-
-snf_to_formula(Cs) ->
     {'ALL', [{'ANY', C} || C <- Cs]}.
 
 is_equivalent(Bs, X, Y) ->
