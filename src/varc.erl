@@ -41,6 +41,7 @@
 -export([get_clause_flags/2]).
 -export([del_clause/2]).
 -export([get_clauses/2]).
+-export([get_clauses/3]).
 -export([get_queue/1]).
 -export([get_queue_first/1]).
 -export([get_queue_next/2]).
@@ -49,6 +50,7 @@
 -export([get_latest_binding/1]).
 -export([get_nbindings/2]).
 -export([get_nbindings/3]).
+-export([get_bindings/1]).
 -export([get_bindings/2]).
 -export([get_bindings/3]).
 -export([order_init/1]).
@@ -239,8 +241,12 @@ del_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-get_clauses(_Vp,Var)
-  when is_integer(Var), Var >= 0 ->
+get_clauses(Vp,Var) ->
+    get_clauses(Vp,Var,literal).
+
+get_clauses(_Vp,Var,Type)
+  when (Type =:= variable orelse Type =:= literal orelse Type =:= watch),
+       is_integer(Var), Var >= 0 ->
     ?nif_stub().
 
 get_queue_first(_Vp) ->
@@ -268,6 +274,10 @@ get_nbindings(Vp,N) when is_integer(N), N>= 0 ->
 
 get_nbindings(_Vp,N,_ClauseInfo) when is_integer(N), N>= 0 ->
     ?nif_stub().
+
+%% get all bindings
+get_bindings(Vp) ->
+    get_bindings(Vp, 0, false).
 
 %% get bindings until mark
 get_bindings(Vp, Mark) ->

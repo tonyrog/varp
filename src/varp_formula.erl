@@ -74,20 +74,12 @@
 -include("varp_bic.hrl").
 -include("varp.hrl").
 
--ifdef(OTP_RELEASE).
--if(?OTP_RELEASE >= 21).
-%%-warning("otp_release_21").
--define(TRY_ERROR_CLAUSE(Reason,Trace),
-	error:Reason:Trace ->).
+-ifdef(OTP_RELEASE). %% this implies 21 or higher
+-define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
+-define(GET_STACK(Stacktrace), Stacktrace).
 -else.
-%%-warning("otp_release_20.3 or more?").
--define(TRY_ERROR_CLAUSE(Reason,Trace), 
-	error:Reason -> Trace = erlang:get_stacktrace(),).
--endif.
--else.
-%%-warning("otp_release_20 or less").
--define(TRY_ERROR_CLAUSE(Reason,Trace), 
-	error:Reason -> Trace = erlang:get_stacktrace(),).
+-define(EXCEPTION(Class, Reason, _), Class:Reason).
+-define(GET_STACK(_), erlang:get_stacktrace()).
 -endif.
 
 
@@ -2452,8 +2444,8 @@ fmt_digraph(File, Bl, Bs) ->
 	    try fmt_digraph_fd(Fd,Bl,Bs) of
 		Result -> Result
 	    catch
-               	?TRY_ERROR_CLAUSE(Reason,Trace)
-		    io:format("~w\n", [{crash, error, Reason,Trace}]),
+		?EXCEPTION(error,Reason,Trace) ->
+		    io:format("~w\n",[{crash,error,Reason,?GET_STACK(Trace)}]),
 		    exit(Reason),
 		    {error,Reason}
 	    after

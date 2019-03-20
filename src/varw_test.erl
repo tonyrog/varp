@@ -139,6 +139,8 @@ or_eval() ->
     C2 = add_clause(V, [-X4, ?FALSE, ?FALSE, ?FALSE]),
     C3 = add_clause(V, [X5, ?FALSE, ?TRUE, ?FALSE, ?TRUE]),
     io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
+    print_clauses(V),
+
     io:format("queue=~p\n", [varc:get_queue(V)]),
     true = varc:eval(V),
 
@@ -158,10 +160,75 @@ or_eval() ->
     io:format("X5 = ~w\n", [V5]),
     true = V5 =:= 0,
 
-    io:format("Bindings = ~w\n", [varc:get_nbindings(V,4)]),
+    io:format("Bindings = ~w\n", [varc:get_bindings(V,1)]),
 
     true.
 
+%% 
+%% add clause with bindings
+%%
+or_eval_bindings() ->
+    V = varc:new(),
+    X2 = add_variable(V),
+    X3 = add_variable(V),
+    X4 = add_variable(V),
+    X5 = add_variable(V),
+
+    varc:mark(V, 1),
+    add_clause(V, [-X2, -X3, -X4]),
+    add_clause(V, [-X2, -X3,  X5]),
+    add_clause(V, [-X2,  X3, -X4]),
+    add_clause(V, [-X2,  X3,  X4]),
+    io:format("bindings 0 = ~w\n", [varc:get_bindings(V)]),
+    io:format("watched = ~w\n", [get_watched(V)]),
+    
+    print_clauses(V),
+    io:format("2/1\n", []),
+    varc:put(V, X2, ?TRUE),
+    true = varc:eval(V),
+    io:format("bindings 2/1 = ~w\n", [varc:get_bindings(V)]),
+    io:format("watched = ~w\n", [get_watched(V)]),
+    print_clauses(V),
+
+    varc:mark(V, 2),
+    add_clause(V, [-X2,  X3,  X4, -X5]),
+    io:format("watched = ~w\n", [get_watched(V)]),
+    io:format("3/1\n", []),
+    varc:put(V, X3, ?TRUE),
+    true = varc:eval(V),
+    io:format("bindings 3/1 = ~w\n", [varc:get_bindings(V)]),
+    io:format("watched = ~w\n", [get_watched(V)]),
+    print_clauses(V),
+
+    io:format("undo 2\n", []),
+    varc:undo(V, 2),
+    io:format("bindings = ~w\n", [varc:get_bindings(V)]),
+    io:format("watched = ~w\n", [get_watched(V)]),
+    print_clauses(V),
+
+    io:format("undo 1\n", []),
+    varc:undo(V, 1),
+    io:format("bindings = ~w\n", [varc:get_bindings(V)]),
+    io:format("watched = ~w\n", [get_watched(V)]),
+    print_clauses(V),
+    ok.
+
+get_watched(V) ->
+    get_watched(V, lists:seq(2, varc:info(V, number_of_variables)+1)).
+
+get_watched(V, [Xi|Xs]) ->
+    Wi0 = varc:get_clauses(V, Xi, watch),
+    Wi1 = varc:get_clauses(V, -Xi, watch),
+    [{Xi,Wi0},{-Xi,Wi1}|get_watched(V, Xs)];
+get_watched(_V, []) ->
+    [].
+
+print_clauses(V) ->
+    lists:foreach(fun(I) ->
+			  F = varc:get_clause_flags(V, I),
+			  io:format("~w: ~w ~w\n",
+				    [I, F, varc:get_clause(V, I)])
+		  end, lists:seq(0, varc:info(V, number_of_clauses)-1)).
 
 add_variable(V) ->
     varc:add_variable(V).

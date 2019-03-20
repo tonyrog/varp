@@ -332,7 +332,7 @@ ErlNifFunc varc_funcs[] =
     NIF_FUNC( "get_clause",          2,  varc_get_clause ),
     NIF_FUNC( "get_clause_flags",    2,  varc_get_clause_flags ),
     NIF_FUNC( "del_clause",          2,  varc_del_clause ),
-    NIF_FUNC( "get_clauses",         2,  varc_get_clauses ),
+    NIF_FUNC( "get_clauses",         3,  varc_get_clauses ),
     NIF_FUNC( "get_queue_first",     1,  varc_get_queue_first ),
     NIF_FUNC( "get_queue_next",      2,  varc_get_queue_next ),    
     NIF_FUNC( "clear_queue",         1,  varc_clear_queue ),
@@ -375,6 +375,9 @@ DECL_ATOM(or);
 DECL_ATOM(xor);
 DECL_ATOM(inqueue);
 DECL_ATOM(dead);
+DECL_ATOM(watch);
+DECL_ATOM(literal);
+DECL_ATOM(variable);
 DECL_ATOM(flags);
 DECL_ATOM(mask);
 DECL_ATOM(undefined);
@@ -2883,7 +2886,7 @@ static ERL_NIF_TERM varc_get_clause(ErlNifEnv* env, int argc,
     if (cix >= vp->cnext)
 	return enif_make_badarg(env);
     if ((cp = vp->clause_map[cix]) == NULL)
-	return enif_make_badarg(env);
+	return ATOM(undefined);
 
     list = enif_make_list(env, 0);
     for (i = cp->size-1; i >= 0; i--) {
@@ -2945,16 +2948,27 @@ static ERL_NIF_TERM varc_get_clauses(ErlNifEnv* env, int argc,
     int lit, ix;
     ERL_NIF_TERM list;
     variable_t* vptr;
-
+    
     if (!enif_get_resource(env, argv[0], varc_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!get_literal(env, vp, argv[1], &lit))
 	return enif_make_badarg(env);
     ix = (lit < 0) ? -lit : lit;
-    list = enif_make_list(env, 0);
-    vptr = &vp->var_map[ix];
-    list = build_varref_list(env,vptr->pref,list);
-    list = build_varref_list(env,vptr->nref,list);
+    vptr = &vp->var_map[ix];    
+    list = enif_make_list(env, 0);    
+    
+    if ((argv[2] == ATOM(literal)) || (argv[2] == ATOM(watch))) {
+	if (lit < 0)
+	    list = build_varref_list(env,vptr->nref,list);
+	else
+	    list = build_varref_list(env,vptr->pref,list);
+    }
+    else if (argv[2] == ATOM(variable)) {
+	list = build_varref_list(env,vptr->pref,list);
+	list = build_varref_list(env,vptr->nref,list);
+    }
+    else
+	return enif_make_badarg(env);	
     return list;
 }
 
@@ -3030,7 +3044,7 @@ static ERL_NIF_TERM varc_enqueue_all(ErlNifEnv* env, int argc,
 // get_bindings(Vp, Mark, ClauseInfo)
 // Mark >=   collect bindings until Mark = mark (not including)
 // Mark < 0  collect bindings until number of marks N ( = -Mark )
-// Mark == 0 latest binding
+// Mark == 0 all bindings
 
 static ERL_NIF_TERM varc_get_bindings(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
@@ -3073,8 +3087,6 @@ static ERL_NIF_TERM varc_get_bindings(ErlNifEnv* env, int argc,
 					enif_make_int(env, up->x),
 					make_literal(env, value));
 	    }
-	    if (mark == 0)
-		return elem;
 	    list = enif_make_list_cell(env, elem, list);
 	    break;
 	case CLASS:
@@ -3172,6 +3184,9 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(xor);
     LOAD_ATOM(inqueue);
     LOAD_ATOM(dead);
+    LOAD_ATOM(watch);
+    LOAD_ATOM(literal);
+    LOAD_ATOM(variable);    
     LOAD_ATOM(flags);
     LOAD_ATOM(mask);
     LOAD_ATOM(identity);
