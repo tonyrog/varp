@@ -30,7 +30,7 @@
 -export([operation/4, operation/3]).
 -export([all/2, any/2]).
 -export([eqk/4, gtk/4]).
--export([equal/3]).
+-export([equal/3, equal/4]).
 -export([is_equivalent/3]).
 -export([is_equal/3]).
 -export([is_bound/2]).
@@ -379,6 +379,11 @@ equal(Bs,X,Y) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
     varc:put(Bs#bs.vp, X0, Y0).
+
+equal(Bs,X,Y,Level) ->
+    X0 = literal(X,Bs),
+    Y0 = literal(Y,Bs),
+    varc:put(Bs#bs.vp, X0, Y0, Level).
 
 literal(true,_Bs)  -> ?TRUE;
 literal(false,_Bs) -> ?FALSE;

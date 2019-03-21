@@ -18,7 +18,7 @@
 -export([get_symbol/2]).
 -export([find_symbol/2]).
 -export([get/2]).
--export([put/3]).
+-export([put/3, put/4]).
 -export([class/2]).
 -export([key/3]).
 -export([implication_clause/2]).
@@ -143,9 +143,19 @@ get(_Vp, Lit) when is_integer(Lit) ->
 %% put literal value
 -spec put(Vp::varc(), LitA::literal(), LibB::literal()) -> boolean().
 
-put(_Vp, LitA, LitB) when is_integer(LitA),
-			  is_integer(LitB) ->
+put(_Vp, A, B) when is_integer(A),
+		    is_integer(B) ->
     ?nif_stub().
+
+%% put literal value at level
+-spec put(Vp::varc(), A::literal(), B::literal(), Level::integer()) -> boolean().
+
+put(_Vp, A, B, Level) when is_integer(A),
+				 is_integer(B),
+				 is_integer(Level) ->
+    ?nif_stub().
+
+
 
 -spec class(Vp::varc(), Lit::literal()) -> integer().
 class(_Vp, Lit) when is_integer(Lit) ->

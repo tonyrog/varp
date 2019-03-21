@@ -334,6 +334,7 @@ ErlNifFunc varw_funcs[] =
     NIF_FUNC( "add_variable",        1,  varw_add_variable ),
     NIF_FUNC( "get",                 2,  varw_get ),
     NIF_FUNC( "put",                 3,  varw_put ),
+    NIF_FUNC( "put",                 4,  varw_put ),    
     NIF_FUNC( "class",               2,  varw_class ),
     NIF_FUNC( "key",                 3,  varw_key ),
     NIF_FUNC( "implication_clause",  2,  varw_implication_clause ),
@@ -813,11 +814,12 @@ static literal_t* lqueue_deq(varw_t* vp)
 }
 
 // assume literal is unassigned!
-static inline void set_literal(varw_t* vp,lit_t lp,int value,long li,int cix)
+static inline void set_literal_level(varw_t* vp,lit_t lp,int value,
+				     long li,int cix, int level)
 {
     variable_t* var = lit_variable(vp, lp);
     DBG("SET_LITERAL %d = %d\r\n", lit_index(lp), value);
-    assert(var->value == UNDEF);    
+    assert(var->value == UNDEF);
 #ifdef LIT_INTEGER
     var->value = (lp < 0) ? -value : value;
 #else
@@ -825,8 +827,14 @@ static inline void set_literal(varw_t* vp,lit_t lp,int value,long li,int cix)
 #endif
     var->implication_clause = cix;
     var->literal_pos = li;
-    var->level = vp->level;
+    var->level = level;
 }
+
+static void set_literal(varw_t* vp,lit_t lp,int value,long li,int cix)
+{
+    set_literal_level(vp, lp, value, li, cix, vp->level);
+}
+
 
 // put value set_literal and push the correct literal on queue
 // put (X, TRUE)   => enq(!X)   1  1  negate(X)
@@ -834,11 +842,17 @@ static inline void set_literal(varw_t* vp,lit_t lp,int value,long li,int cix)
 // put (!X, TRUE)  == enq(X)   -1  1  negate(X)
 // put (!X, FALSE) == enq(!X)  -1 -1  X
 //
-static inline void put_literal(varw_t* vp,lit_t lp,int value,long li,int cix)
+static void put_literal_level(varw_t* vp,lit_t lp,int value,
+			      long li,int cix, int level)
 {
     // this order lqueue_enq expect literal value = UNDEF
     lqueue_enq(vp, (value==TRUE) ? lit_negate(lp) : lp);
-    set_literal(vp, lp, value, li, cix);
+    set_literal_level(vp, lp, value, li, cix, level);
+}
+
+static inline void put_literal(varw_t* vp,lit_t lp,int value,long li,int cix)
+{
+    put_literal_level(vp, lp, value, li, cix, vp->level);
 }
 
 static inline int is_constant(int x)
@@ -881,15 +895,19 @@ static int push_level(varw_t* vp, int level)
     return 0;
 }
 
-static inline void push_variable(varw_t* vp, variable_t* var)
+static void push_variable_level(varw_t* vp, variable_t* var, int level)
 {
-    int level = vp->level;
     DBG("PUSH VARIABLE: var=%s, level=%d, value=%d\r\n",
 	format_variable(var), level, var->value);
     var->next = vp->undo[level].bs;
     vp->undo[level].bs = var;
     vp->undo[level].bs_size++;
     vp->stack_size++;
+}
+
+static inline void push_variable(varw_t* vp, variable_t* var)
+{
+    push_variable_level(vp, var, vp->level);
 }
 
 static void undo_level(varw_t* vp, int level)
@@ -2067,6 +2085,7 @@ static ERL_NIF_TERM varw_put(ErlNifEnv* env, int argc,
     lit_t xp, yp;
     int x, y;
     varw_t* vp;
+    int level = -1;
 
     if (!enif_get_resource(env, argv[0], varw_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -2074,14 +2093,25 @@ static ERL_NIF_TERM varw_put(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_lit(env, vp, argv[2], &yp))
 	return enif_make_badarg(env);
+    if (argc == 4) {
+	if (!enif_get_int(env, argv[3], &level) || (level < 0) ||
+	    (level >= (int)vp->unum))
+	    return enif_make_badarg(env);
+    }
     y = lit_value(vp, yp);
     if (!is_constant(y))
 	return enif_make_badarg(env);
     x = lit_value(vp, xp);
     if (x == UNDEF) {
 	variable_t* var = lit_variable(vp, xp);
-	push_variable(vp, var);
-	put_literal(vp, xp, y, -1, -1);
+	if (level < 0) {
+	    push_variable(vp, var);
+	    put_literal(vp, xp, y, -1, -1);
+	}
+	else {
+	    push_variable_level(vp, var, level);
+	    put_literal_level(vp, xp, y, -1, -1, level);
+	}
     }
     else if (x != y)
 	return ATOM(false);
@@ -2601,15 +2631,15 @@ next_wp:
 done_wp:
     set_wlink(&cp->wl[0], wp0, lit_literal(vp, cp->lit[wp0]));
     set_wlink(&cp->wl[1], wp1, lit_literal(vp, cp->lit[wp1]));
-    if (vp->level > 1)
-	print_clause(vp,"done clause: ",cp);
+//    if (vp->level > 1)
+//	print_clause(vp,"done clause: ",cp);
     return enif_make_int(env, cix);    
 
 dead:
     cp->wl[0].p = -1;
     cp->wl[1].p = -1;
-    if (vp->level > 1)
-	print_clause(vp,"dead clause: ", cp); 
+//    if (vp->level > 1)
+//	print_clause(vp,"dead clause: ", cp); 
     return enif_make_int(env, cix);
 }
 

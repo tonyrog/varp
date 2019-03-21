@@ -13,9 +13,9 @@
 -include("varp.hrl").
 
 -define(dbg(F,As), ok).
-%% -define(dbg(F,As), io:format(F,As)).
+%%-define(dbg(F,As), io:format(F,As)).
 
--define(INITVAL, 1).
+-define(INITVAL, -1).
 
 backjump(false) ->
     false;
@@ -36,20 +36,28 @@ next0(Bs,Level,Stack) ->
 	    loop(Bs,I,Xi,Level,?INITVAL,Stack)
     end.
 
+next(Bs,Level,I,Stack) ->
+    case varp_formula:next_unbound(Bs,I) of
+	false ->
+	    model(Bs), 1; %% pop()
+	{J,Xj} ->
+	    loop(Bs,J,Xj,Level,?INITVAL,Stack)
+    end.
+
 loop(Bs,I,Xi,Level,Val,Stack) ->
     varp_formula:mark(Bs,Level),
     ?dbg(" decision[~w]: ~s=~w\n", [Level,format_var(Bs,Xi),(Val+1) div 2]),
     true = varp_formula:equal(Bs,Xi,Val),
     case varp_formula:eval(Bs) of
 	false ->
-	    contradiction(Bs,Level,Xi,Val,Stack);
+	    contradiction(Bs,Level,I,Xi,Val,Stack);
 	true ->
 	    format_all_bindings(Bs),
 	    next(Bs,Level+1,I,[{I,Xi,Val,Level}|Stack])
     end.
 
 %% Xi=Val generated conflict
-contradiction(Bs,Level,_Xi,_Val,Stack) ->
+contradiction(Bs,Level,I,_Xi,_Val,Stack) ->
     ?dbg("contradiction[~w]: xi=~s\n", [Level,format_var(Bs,_Xi)]),
     format_all_bindings(Bs),
     {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
@@ -58,8 +66,8 @@ contradiction(Bs,Level,_Xi,_Val,Stack) ->
 	 [Level,JLevel,format_literal(Bs,_UIP)]),
     ?dbg("stack=~w\n", [Stack]),
     ?dbg("undo: ~w\n", [Level]),
-    %% varp_formula:undo(Bs, Level),
-    varp_formula:undo(Bs, JLevel),
+    varp_formula:undo(Bs, min(JLevel,Level)),
+    %% varp_formula:undo(Bs, JLevel),
     {K,Stack1} = backjump(Bs,Stack,JLevel),
     ?dbg("stack1=~w\n", [Stack1]),
     Bs1 = add_conflict_clause(Bs,Clause),
@@ -72,21 +80,14 @@ contradiction(Bs,Level,_Xi,_Val,Stack) ->
 	    case Stack1 of
 		[] -> 
 		    0;
-		[{_J,Xj,JVal,_}|Stack2] ->
-		    contradiction(Bs1,JLevel,Xj,JVal,Stack2)
+		[{J,Xj,JVal,_}|Stack2] ->
+		    contradiction(Bs1,JLevel,J,Xj,JVal,Stack2)
 	    end;
 	true ->
-	    next0(Bs,JLevel+1,Stack1)
-	    %%next(Bs1,JLevel+1,K,Stack1)
+	    next0(Bs1,JLevel+1,Stack1)
+	    %% next(Bs1,JLevel+1,min(I,K),Stack1)
     end.
 
-next(Bs,Level,I,Stack) ->
-    case varp_formula:next_unbound(Bs,I) of
-	false ->
-	    model(Bs), 1; %% pop()
-	{J,Xj} ->
-	    loop(Bs,J,Xj,Level,?INITVAL,Stack)
-    end.
 
 model(Bs) ->
     M = varp_formula:model(Bs),
@@ -96,13 +97,17 @@ backjump(Bs,[{_,_,_,Level}|Stack],JLevel) when Level > JLevel ->
     ?dbg("undo: ~w\n", [Level]),
     varp_formula:undo(Bs, Level),
     backjump(Bs,Stack,JLevel);
-backjump(_Bs,Stack=[{K,_,_,__Level}|_],_JLevel) ->
+backjump(Bs,Stack=[{K,_,_,Level}|_],JLevel) when Level =:= JLevel ->
+    varp_formula:undo(Bs, Level),
+    varp_formula:mark(Bs, Level),
     {K,Stack};
 backjump(_Bs,[],_JLevel) ->
     {2,[]}.
 
 add_conflict_clause(Bs,[L]) ->
-    true = varp_formula:equal(Bs,L,1),
+    io:format("set literal ~w = 1\n", [L]),
+    TopLevel = 0, %% install at top level (constant)
+    true = varp_formula:equal(Bs,L,1,TopLevel),
     Bs;
 add_conflict_clause(Bs,Clause) ->
     Max = varp_formula:get_info(Bs, max_clause_length),
