@@ -2720,12 +2720,11 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     if (cix >= vp->cnext)
 	return enif_make_badarg(env);
     if ((cp = vp->clause_map[cix]) == NULL)
-	return enif_make_badarg(env);
+	return ATOM(ok);
 
     // remove watched literals
     if ((p = cp->wl[0].p) > 0) unwatch(vp, cp, cp->lit[p]);
     if ((p = cp->wl[1].p) > 0) unwatch(vp, cp, cp->lit[p]);
-    // FIXME: remove push watch points
 	
     clause_free(vp, cp);
     vp->clause_map[cix] = NULL;  // FIXME! reuse this position
@@ -2832,12 +2831,15 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
     else if (argv[2] == ATOM(literal)) {
 	for (i = 0; i < (int)vp->cnext; i++) {
 	    clause_t* cp = vp->clause_map[i];
-	    int j = 0;
-	    while((j < (int)cp->size) && (lit_literal(vp,cp->lit[j]) != lp))
-		j++;
-	    if (j < (int)cp->size) { // found
-		ERL_NIF_TERM elem = enif_make_uint(env, cp->cix);
-		list = enif_make_list_cell(env, elem, list);
+	    if (cp != NULL) {
+		int j = 0;
+		while((j < (int)cp->size) &&
+		      (lit_literal(vp,cp->lit[j]) != lp))
+		    j++;
+		if (j < (int)cp->size) { // found
+		    ERL_NIF_TERM elem = enif_make_uint(env, cp->cix);
+		    list = enif_make_list_cell(env, elem, list);
+		}
 	    }
 	}
     }
@@ -2845,12 +2847,15 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	variable_t* var = lp->var;
 	for (i = 0; i < (int)vp->cnext; i++) {
 	    clause_t* cp = vp->clause_map[i];
-	    int j = 0;
-	    while((j < (int)cp->size) && (lit_variable(vp,cp->lit[j]) != var))
-		j++;
-	    if (j < (int)cp->size) { // found
-		ERL_NIF_TERM elem = enif_make_uint(env, cp->cix);
-		list = enif_make_list_cell(env, elem, list);
+	    if (cp != NULL) {
+		int j = 0;
+		while((j < (int)cp->size) &&
+		      (lit_variable(vp,cp->lit[j]) != var))
+		    j++;
+		if (j < (int)cp->size) { // found
+		    ERL_NIF_TERM elem = enif_make_uint(env, cp->cix);
+		    list = enif_make_list_cell(env, elem, list);
+		}
 	    }
 	}
     }

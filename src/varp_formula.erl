@@ -53,8 +53,6 @@
 -export([get_bindings/2]).
 -export([intersect/3]).
 -export([model_variables/2]).
--export([show_fail/1]).
--export([fmt_digraph/3]).
 -export([clear_queue/1]).
 -export([enqueue_all/1]).
 -export([eval/1]).
@@ -91,7 +89,7 @@
 
 
 -type pred() :: {p,Name::atom(),[index()]}.
--type index() :: integer() | [integer()] | func().
+-type index() :: integer() | atom() | [integer()|atom()] | func().
 -type func() :: {f,Name::atom(),[index()]}.
 
 -type var() :: pred() |
@@ -119,6 +117,7 @@ new(OptMap) when is_map(OptMap) ->
        meta = maps:get(meta,OptMap),
        defs = maps:get(defs,OptMap),
        decls = maps:get(decls,OptMap),
+       literals = maps:get(literals,OptMap),
        vp    = Vp
       }.
 
@@ -523,13 +522,6 @@ fmt_var_(Bs,X,Pfx,Q) when is_integer(X) ->
 	    [Q,Pfx,fmt_pred_(P),Q];
 	{ok,[{T,P={p,_,_},_N,I}|_Ns]} when ?is_vec_type(T),is_integer(I) ->
 	    [Q,Pfx,fmt_pred_(P),"[",integer_to_list(I),"]",Q];
-
-%%	{ok,[{A,I}|_Ns]} when is_atom(A),is_integer(I) ->
-%%	    [Q,Pfx,io_lib:format("~p[~w]", [A,I]),Q];
-%%	{ok,[{A,I,J}|_Ns]} when is_atom(A),is_integer(I),is_integer(J) ->
-%%	    [Q,Pfx,io_lib:format("~p[~w,~w]", [A,I,J]),Q];
-%%	{ok,[N|_Ns]} ->
-%%	    [Q,Pfx,io_lib:format("~p", [N]),Q];
 	{ok,?TRUE} -> "true";
 	{ok,?FALSE} -> "false"
     end.
@@ -538,7 +530,6 @@ fmt_pred_({p,P,[]}) ->
     atom_to_list(P);
 fmt_pred_({p,P,As}) ->
     [atom_to_list(P),"(",fmt_index_list(As),")"].
-%% [atom_to_list(P),"(",concat([io_lib:format("~w",[Ai])||Ai<-As], ","), ")"].
 
 fmt_index_list([I]) ->
     [fmt_index(I)];
@@ -547,6 +538,8 @@ fmt_index_list([I|Is]) ->
 
 fmt_index(I) when is_integer(I) ->
     integer_to_list(I);
+fmt_index(A) when is_atom(A) ->
+    atom_to_list(A);
 fmt_index(Set) when is_list(Set) ->
     ["{",fmt_ordset(Set),"}"];
 fmt_index({f,F,Is}) ->
@@ -1044,6 +1037,11 @@ build_quant(F, Qs, Bs) when is_list(Qs) ->
 build_quant_(F,[#cassign{op='=',lhs=V,rhs=D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_quant_domain(F, V, Ds, Qs, Bs);
+%% predicate expansion
+build_quant_(F, [#ccall{ func=#cid{name=Def},args=Args}|Qs], Bs) ->
+    %% lookup Def
+    {[], Bs};
+
 build_quant_(F, [Expr|Qs], Bs) ->
     case eval_meta(Expr, Bs) of
 	false -> {[],Bs};
@@ -1160,8 +1158,20 @@ eval_meta(#cid {name="false"}, _Bs) -> false;
 eval_meta(#cid {name=Vn}, Bs) ->
     case proplists:lookup(Vn,Bs#bs.meta) of
 	none ->
-	    io:format("variable '~s' is not bound\n", [Vn]),
-	    error({unbound, Vn});
+	    try list_to_existing_atom(Vn) of
+		L ->
+		    case lists:member(L, Bs#bs.literals) of
+			true ->
+			    L;
+			false ->
+			    io:format("variable '~s' is not bound\n", [Vn]),
+			    error({unbound, Vn})
+		    end
+	    catch
+		error:_ ->
+		    io:format("variable '~s' is not bound\n", [Vn]),
+		    error({unbound, Vn})
+	    end;
 	{_,W} -> 
 	    W
     end;
@@ -1173,7 +1183,7 @@ eval_meta(V, Bs) when is_atom(V) -> %% old format still around
 	    error({unbound, Vn});
 	{_,W} -> 
 	    W
-    end;    
+    end;
 eval_meta(#ccall{func=F,args=As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
 	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
@@ -2429,75 +2439,6 @@ concat([], _) -> [];
 concat([H],_) -> [H];
 concat([H|T],S) -> [H,S | concat(T,S)].
 
-show_fail(Bs) ->
-    io:format("FAIL:\n", []),
-    Graph = lists:reverse(get_bindings(Bs,0)),
-    fmt_fail(Graph, Bs),
-    case get(fmt_digraph) of
-	done -> ok;
-	undefined -> put(fmt_digraph, 1);
-	3 ->
-	    fmt_digraph("/tmp/dg.gv", Graph, Bs),
-	    spawn(fun() -> os:cmd("open -a OmniGraffle\\ 5 /tmp/dg.gv") end),
-	    put(fmt_digraph, done);
-	I when is_integer(I) -> put(fmt_digraph, I+1)
-    end.
-
-fmt_digraph(File, Bl, Bs) ->
-    case file:open(File, [write]) of
-	{ok,Fd} ->
-	    try fmt_digraph_fd(Fd,Bl,Bs) of
-		Result -> Result
-	    catch
-		?EXCEPTION(error,Reason,Trace) ->
-		    io:format("~w\n",[{crash,error,Reason,?GET_STACK(Trace)}]),
-		    exit(Reason),
-		    {error,Reason}
-	    after
-		file:close(Fd)
-	    end
-    end.
-
-fmt_digraph_fd(Fd, Bl, Bs) ->
-    io:format(Fd, "digraph G {\n", []),
-    io:format(Fd, "node [color=lightblue,style=filled]\n", []),
-    %% collect nodes and mark them with colors and labels
-    lists:foldl(fun(mark,Set) -> 
-			Set;
-		   ({decision,N},Set) ->
-			fmt_node(Fd,"color=green",N,Bs,Set);
-		   ({true,N},Set) ->
-			fmt_node(Fd,"color=blue",N,Bs,Set);
-		   ({N1,N2},Set) ->
-			Set1 = fmt_node(Fd,"color=lightblue",N1,Bs,Set),
-			fmt_node(Fd,"color=lightblue",N2,Bs,Set1)
-		end, sets:new(), Bl),
-    lists:foreach(
-      fun
-	  (mark) ->
-	      ok;
-	  ({decision,{_X,_D,_Y}}) ->
-	      ok;
-	  ({true,{_X,_D,_Y}}) -> %% FIX
-	      ok;
-	 ({{X1,D1,Y1},{X2,D2,Y2}}) ->
-	      io:format(Fd, "\"~s\" -> \"~s\";\n", 
-				  [fmt_bind(Bs,X1,Y1,D1),
-				   fmt_bind(Bs,X2,Y2,D2)])
-      end, Bl),
-    io:format(Fd, "}\n", []).
-
-fmt_node(Fd,Attr,N={X,D,Y},Bs,Set) ->
-    case sets:is_element(N, Set) of
-	true -> 
-	    Set;
-	false ->
-	    Name = fmt_bind(Bs,X,Y,D),
-	    io:format(Fd, "\"~s\" [xlabel=\"~s\" ~s];\n",
-		      [Name,Name,Attr]),
-	    sets:add_element(N, Set)
-    end.
-
 fmt_bind(Bs,X,Y,D) ->
     io_lib:format("~s/~s(~w)", [fmt_v(Bs,X),fmt_v(Bs,Y),D]).
 
@@ -2506,21 +2447,3 @@ fmt_bind(Bs,X,Y) ->
 
 fmt_bind_list(Bs,Xs) ->
     concat([fmt_bind(Bs,X,Y) || {X,Y} <- Xs],",").
-    
-
-fmt_fail([{decision,{X,D,Y}}|Bl], Bs) ->
-    io:format("\n<<~s/~s(~w)>> ", [fmt_v(Bs,X),fmt_v(Bs,Y),D]),
-    fmt_fail(Bl, Bs);
-fmt_fail([{true,{X,D,Y}}|Bl], Bs) ->
-    io:format("\n*~s/~s(~w)* ", [fmt_v(Bs,X),fmt_v(Bs,Y),D]),
-    fmt_fail(Bl, Bs);
-fmt_fail([{{X1,D1,Y1},{X,D,Y}}|Bl], Bs) ->
-    io:format("[~s/~s(~w) -> ~s/~s(~w)] ", 
-	      [fmt_v(Bs,X1),fmt_v(Bs,Y1),D1,
-	       fmt_v(Bs,X),fmt_v(Bs,Y),D]),
-    fmt_fail(Bl, Bs);
-fmt_fail([mark|Bl], Bs) ->
-    io:format("|", []),
-    fmt_fail(Bl, Bs);
-fmt_fail([], _Bs) ->
-    io:format("\n", []).

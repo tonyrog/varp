@@ -273,7 +273,7 @@ typedef struct _varp_t {
     unsigned int grow;        // how much to expand value/class map
     variable_t*  var_map;     // variable/class map
     symbol_t**   sym_map;     // symbol hash table    
-    int*         order_map;   // variable order table
+    int*         order_map;   // literal order table
     int          sort_key[2]; // sort order -1,-2,1,2
     clause_t** clause_map;    // clause_map[v] = class chain of variable v
     unsigned int unum;        // number of levels allocated
@@ -2165,7 +2165,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 
 // move the list of variables first among the unbound variables
 // and keep the order of the other variables.
-// this is done through by copy the various part into a new
+// this is done by copy the various part into a new
 // array.
 static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
 					  const ERL_NIF_TERM argv[])

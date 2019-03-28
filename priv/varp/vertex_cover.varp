@@ -1,0 +1,15 @@
+// vertex cover of edges E(i,j)
+// must be declared as literals otherwise meta variables!
+//
+literals a, b, c, d, e, f;
+
+// vertices V(a) V(b) V(c) V(d) V(e) V(f)
+// edges E(a,b) E(b,c) E(b,d) E(b,f) E(d,e) E(e,f)
+
+(V(a) | V(b)) &
+(V(b) | V(c)) &
+(V(b) | V(d)) &
+(V(b) | V(f)) &
+(V(d) | V(e)) &
+(V(e) | V(f)) &
+([EQ 2](V(a),V(b),V(c),V(d),V(e),V(f)))

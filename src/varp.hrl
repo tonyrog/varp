@@ -16,7 +16,8 @@
 	 meta=[],            %% meta variable bindings during build
 	 defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
 	 decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]
-	 subst=[]            %% var/function substitution(s)
+	 subst=[],           %% var/function substitution(s)
+	 literals=[]         %% declared literals [atom()]
 	}).
 
 -endif.

@@ -249,6 +249,10 @@ options() ->
 	     spec => {list,term},
 	     default => [],
 	     description => "Internal sequence of saturations"},
+    V26 = #{ key => literals,
+	     spec => {set,atom},
+	     default => [],  %% ordset
+	     description => "Internal list of all literals"},
 
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
@@ -280,6 +284,7 @@ options() ->
        defs => V22,
        decls => V23,
        code => V24,
+       literals => V26,
        saturations => V25
      }.
 
@@ -598,10 +603,10 @@ setopt(Key, Value, OptMap) when is_atom(Key) ->
 		       end,
 	    case validate_value(Key, Spec, Value, OldValue) of
 		{true,Value1} ->
-		    %% io:format("~p => ~p\n", [Key,Value1]),
+		    %%io:format("~p => ~p\n", [Key,Value1]),
 		    OptMap# { Key => Value1 };
 		true ->
-		    %% io:format("~p => ~p\n", [Key,Value]),
+		    %%io:format("~p => ~p\n", [Key,Value]),
 		    OptMap# { Key => Value };
 		false ->
 		    erlang:error(badarg)

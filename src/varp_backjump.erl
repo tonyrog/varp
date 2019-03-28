@@ -33,6 +33,7 @@ next0(Bs,Level,Stack) ->
 	false ->
 	    model(Bs), 1;
 	{I,Xi} ->
+	    %% io:format("next0: i=~w, xi=~w\n", [I,Xi]),
 	    loop(Bs,I,Xi,Level,?INITVAL,Stack)
     end.
 
@@ -57,17 +58,16 @@ loop(Bs,I,Xi,Level,Val,Stack) ->
     end.
 
 %% Xi=Val generated conflict
-contradiction(Bs,Level,I,_Xi,_Val,Stack) ->
+contradiction(Bs,Level,_I,_Xi,_Val,Stack) ->
     ?dbg("contradiction[~w]: xi=~s\n", [Level,format_var(Bs,_Xi)]),
     format_all_bindings(Bs),
     {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
-    ?dbg("conflict clause=~s\n", [format_clause(Bs,Clause)]),
+    %%io:format("conflict clause s\n", [format_clause(Bs,Clause,true)]),
     ?dbg(" level=~w, jlevel=~w, uip=~s\n",
 	 [Level,JLevel,format_literal(Bs,_UIP)]),
     ?dbg("stack=~w\n", [Stack]),
     ?dbg("undo: ~w\n", [Level]),
-    varp_formula:undo(Bs, min(JLevel,Level)),
-    %% varp_formula:undo(Bs, JLevel),
+    varp_formula:undo(Bs, JLevel),
     {K,Stack1} = backjump(Bs,Stack,JLevel),
     ?dbg("stack1=~w\n", [Stack1]),
     Bs1 = add_conflict_clause(Bs,Clause),
@@ -84,8 +84,9 @@ contradiction(Bs,Level,I,_Xi,_Val,Stack) ->
 		    contradiction(Bs1,JLevel,J,Xj,JVal,Stack2)
 	    end;
 	true ->
-	    next0(Bs1,JLevel+1,Stack1)
-	    %% next(Bs1,JLevel+1,min(I,K),Stack1)
+	    %% io:format("backjump: i=~w, k=~w\n", [I,K]),
+	    %% next0(Bs1,JLevel+1,Stack1)
+	    next(Bs1,JLevel+1,K-1,Stack1)
     end.
 
 
@@ -94,18 +95,14 @@ model(Bs) ->
     varp_formula:print(model,1,M).
 
 backjump(Bs,[{_,_,_,Level}|Stack],JLevel) when Level > JLevel ->
-    ?dbg("undo: ~w\n", [Level]),
-    varp_formula:undo(Bs, Level),
     backjump(Bs,Stack,JLevel);
-backjump(Bs,Stack=[{K,_,_,Level}|_],JLevel) when Level =:= JLevel ->
-    varp_formula:undo(Bs, Level),
-    varp_formula:mark(Bs, Level),
+backjump(_Bs,Stack=[{K,_,_,Level}|_],JLevel) when Level =:= JLevel ->
+    %%varp_formula:mark(Bs, Level),
     {K,Stack};
 backjump(_Bs,[],_JLevel) ->
     {2,[]}.
 
 add_conflict_clause(Bs,[L]) ->
-    io:format("set literal ~w = 1\n", [L]),
     TopLevel = 0, %% install at top level (constant)
     true = varp_formula:equal(Bs,L,1,TopLevel),
     Bs;
@@ -121,7 +118,6 @@ add_conflict_clause(Bs,Clause) ->
 	    add_conflict_clause(Bs2,[-Vi|CL2]);
        true ->
 	    _Cix = varp_formula:add_clause(Bs, 'or', [1|Clause]),
-	    ?dbg("add_clause: ~w, ~s\n", [_Cix,format_clause(Bs,Clause,true)]),
 	    if _Cix =:= false -> error(conflict_clause_error);
 	       _Cix =:= error -> error(clause_error);
 	       true -> ok

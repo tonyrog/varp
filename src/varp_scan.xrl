@@ -53,6 +53,7 @@ while		: {token,{while,TokenLine}}.
 %% varp keywords
 code                : {token,{'code',TokenLine}}.
 declare             : {token,{'declare',TokenLine}}.
+literals            : {token,{'literals',TokenLine}}.
 define              : {token,{'define',TokenLine}}.
 order               : {token,{'order',TokenLine}}.
 depth               : {token,{'depth',TokenLine}}.

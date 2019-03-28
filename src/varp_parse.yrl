@@ -4,7 +4,7 @@
 %%
 
 Terminals
-	symbol true false define declare code type 
+	symbol true false define declare literals code type 
         order depth occur random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
@@ -54,7 +54,7 @@ Nonterminals
 	file external_definition function_definition
 	function_body
         integer sexpr
-        qtype quantifier psymbol pexpr oexpr odecl odecls
+        qtype quantifier psymbol pexpr oexpr odecl odecls ldecl ldecls
         lexpr_prim
         lexpr0 lexpr1 lexpr2 lexpr3 lexpr4 lexpr40 lexpr43 lexpr45 lexpr47 
         lexpr5 lexpr6 lexpr7 lexpr8 lexpr9
@@ -73,8 +73,9 @@ file  -> lexpr : {[], '$1'}.
 definitions -> definition : ['$1'].
 definitions -> definitions definition : '$1'++['$2'].
 
-definition -> 'define' pexpr lexpr ';' : {'$2','$3'}.
+definition -> 'define' pexpr lexpr ';' : {define,'$2','$3'}.
 definition -> 'declare' pdecls ';'     : {declare,'$2'}.
+definition -> 'literals' ldecls ';'    : {literals,'$2'}.
 definition -> 'code' '{' cfile '}'     : {code, '$3'}.
 definition -> 'order' odecls ';'       : {order,'$2'}.
     
@@ -82,7 +83,7 @@ primary_expr -> cidentifier : '$1'.
 primary_expr -> constant : '$1'.
 primary_expr -> string : str('$1').
 primary_expr -> '(' expr ')' : '$2'.
-
+     
 postfix_expr -> primary_expr : '$1'.
 postfix_expr -> postfix_expr '[' expr ']' : 
 		    #cbinary {line=line('$1'),op='[]',arg1='$1',arg2='$3'}.
@@ -113,6 +114,7 @@ unary_expr -> 'sizeof' unary_expr :
 		  #cunary {line=line('$1'),op='sizeof',arg='$2'}.
 unary_expr -> 'sizeof' '(' type_name ')' : 
 		  #cunary {line=line('$1'),op='sizeof',arg='$3'}.
+
 
 unary_operator -> '&' : '$1'.
 unary_operator -> '*' : '$1'.
@@ -189,7 +191,7 @@ assignment_expr -> conditional_expr : '$1'.
 assignment_expr -> conditional_expr '..' conditional_expr :
 		       #crange { line=line('$2'), from='$1', to='$3' }.
 assignment_expr -> unary_expr assignment_operator assignment_expr :
-	          #cassign {line=line('$2'),op=op('$2'),lhs='$1',rhs='$3'}.
+		       #cassign {line=line('$2'),op=op('$2'),lhs='$1',rhs='$3'}.
 
 assignment_operator -> '=' : '$1'.
 assignment_operator -> '*=' : '$1'.
@@ -220,9 +222,12 @@ cidentifier -> identifier : id('$1').
 cidentifier -> symbol     : id('$1').
 cidentifier -> true       : id('$1').
 cidentifier -> false      : id('$1').
+cidentifier -> 'E'        : id('$1').
+cidentifier -> 'A'        : id('$1').
+%%  'A' 'E' 
 %% FIXME symbols below as cidentifiers!
 %% 'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
-%% 'and' 'or' 'xor' 'not' imp equ 'A' 'E' 'ALL' 'ANY' 'true' 'false'
+%% 'and' 'or' 'xor' 'not' imp equ 'ALL' 'ANY' 'true' 'false'
 
 declaration -> declaration_specifiers ';' : 
 		 [#cdecl { type='$1'}].
@@ -535,7 +540,6 @@ qtype -> 'LTE'   : op('$1').
 qtype -> 'SUM'   : op('$1').
 qtype -> 'PROD'  : op('$1').
     
-
 quantifier -> '[' 'ALL' ']'   : op('$2').
 quantifier -> '[' 'ANY' ']'   : op('$2').
 quantifier -> '[' 'NONE' ']'  : op('$2').
@@ -556,6 +560,11 @@ pdecl -> pexpr ':' sexpr                : {'$1',uint,'$3'}.
 
 pdecls -> pdecl : ['$1'].
 pdecls -> pdecls ',' pdecl : '$1'++['$3'].
+
+ldecls -> ldecl : ['$1'].
+ldecls -> ldecls ',' ldecl : '$1'++['$3'].
+
+ldecl -> identifier : name('$1').
 
 odecls -> odecl : ['$1'].
 odecls -> odecls ',' odecl : '$1'++['$3'].
@@ -711,8 +720,9 @@ add_decl([{pointer,Ptr,Spec}], Decl) ->
 id({identifier,Line,Name}) -> #cid { line=Line, name=Name};
 id({symbol,Line,Name})     -> #cid { line=Line, name=Name};
 id({true,Line})            -> #cid { line=Line, name="true"};
-id({false,Line})           -> #cid { line=Line, name="false"}.
-
+id({false,Line})           -> #cid { line=Line, name="false"};
+id({'E',Line})             -> #cid { line=Line, name="E"};
+id({'A',Line})             -> #cid { line=Line, name="A"}.
 
 typeid({type,Line,Name}) ->
     #ctypeid { line=Line, name=Name}.
