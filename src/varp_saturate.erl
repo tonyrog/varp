@@ -183,7 +183,9 @@ loop_1_next(Bs,I,_X,N,Mark,TRef,Threshold) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
 	    case read_timer(TRef) of
-		0 -> Bs;
+		0 -> 
+		    ?dbg("timer terminated\n", []),
+		    Bs;
 		_ ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold -> Bs;

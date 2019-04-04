@@ -1,4 +1,13 @@
 // Check if p (parameter) is prime
+//
+// example:
+// 8 bit:
+//   241 * 211 = 50851
+// 16 bit:
+//    41269 * 53927 = 2225513363
+// 20 bit
+//    674717 * 611147 = 412351270399
+//
 declare A:(isize(p)-1);
 declare B:((isize(p)+1)/2);
 order B, -occur, A;

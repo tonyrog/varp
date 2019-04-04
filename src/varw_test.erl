@@ -213,6 +213,73 @@ or_eval_bindings() ->
     print_clauses(V),
     ok.
 
+
+order() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
+    
+    _C0 = add_clause(V, [-X2, -X3, -X4]),
+    _C1 = add_clause(V, [-X3, -X4, -X5]),
+    _C2 = add_clause(V, [X6, X2, X3]),
+    _C3 = add_clause(V, [X7, X6, X2]),
+
+    ok = varc:order_sort(V, identity, undefined, 0),
+    [X2, X3, X4, X5, X6, X7] = varc:order_all(V),
+
+    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort_first(V, [X6, X7]),
+    [X6, X7, X2, X3, X4, X5] = varc:order_all(V),
+
+    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort_last(V, [X3, X2]),  %% reversed
+    [X4, X5, X6, X7, X2, X3] = varc:order_all(V),
+
+    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort_first(V, [X6, X7]),
+    ok = varc:order_sort_last(V, [X3, X2]),  %% reversed
+    [X6, X7, X4, X5, X2, X3] = varc:order_all(V),
+
+    ok = varc:order_sort(V, random, undefined, 1001),
+    Sort1 = varc:order_all(V),
+    io:format("random,1001, Vs = ~p\n", [Sort1]),
+
+    ok = varc:order_sort(V, random, undefined, 1003),
+    Sort2 = varc:order_all(V),
+    io:format("random,1003, Vs = ~p\n", [Sort2]),
+
+    ok = varc:order_sort(V, '+occur', undefined, 0),
+    io:format("+occur, Vs = ~p\n", [varc:order_all(V)]),
+    
+    ok = varc:order_sort(V, '-occur', undefined, 0),
+    io:format("-occur, Vs = ~p\n", [varc:order_all(V)]),
+
+%%    ok = varc:order_sort(V, '+depth', undefined, 0),
+%%    io:format("depth>0, Vs = ~p\n", [varc:order_all(V)]),
+
+%%    ok = varc:order_sort(V, '-depth', undefined, 0),
+%%    io:format("depth<0, Vs = ~p\n", [varc:order_all(V)]),
+
+%%    ok = varc:order_sort(V, '+occur', '+depth', 0),
+%%    io:format("occur,depth>0, Vs = ~p\n", [varc:order_all(V)]),
+%%    ok = varc:order_sort(V, '-occur', '-depth, 0),
+%%    io:format("occur,depth<0, Vs = ~p\n", [varc:order_all(V)]),
+
+%%    ok = varc:order_sort(V, '+depth', '+occur', 0),
+%%    io:format("depth,occur>0, Vs = ~p\n", [varc:order_all(V)]),
+
+%%    ok = varc:order_sort(V, '-depth', '-occur', 0),
+%%    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
+    ok.
+ 
+
+
+%% Utils
+
 get_watched(V) ->
     get_watched(V, lists:seq(2, varc:info(V, number_of_variables)+1)).
 

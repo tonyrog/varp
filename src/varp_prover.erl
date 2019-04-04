@@ -50,7 +50,7 @@ apply_opts_(_, Bs) ->
     Bs2.
 
 display_order(Bs) ->
-    case false of %% varp_formula:getopt(Bs,display_order)
+    case true of %% varp_formula:getopt(Bs,display_order)
 	false ->
 	    ok;
 	true ->

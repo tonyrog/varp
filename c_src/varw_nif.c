@@ -202,7 +202,8 @@ typedef struct _variable_t  // :object_t
     unsigned flags;           // VAR_FLAG_INQUEUE ...
     int  value;               // -1=false  0=unassigned  1=true
     int vix;                  // variable index
-    unsigned  key[3];         // sort keys
+    int pkey[3];              // sort keys for positive literals
+    int nkey[3];              // sort keys for negative literals    
     int  map_index;           // order_map index        
     int implication_clause;   // implication clause index -1 = none
     int literal_pos;          // position in implication clause
@@ -257,8 +258,8 @@ typedef struct _clause_t
     wlink_t    wl[2];        // ALIGNED watch point 1&2+links (DO NOT MOVE!)
     struct _clause_t* next;  // clause list
     int cix;                 // clause id (index) 1..N
-    unsigned long size;      // number of literals in lit
-    unsigned  key[1];        // sort values
+    size_t size;             // number of literals in lit
+    int key[1];              // sort values
     uint16_t flags;          // INQUEUE ...    
     uint16_t op;             // OR|XOR    
     lit_t lit[];             // literal array
@@ -292,7 +293,7 @@ typedef struct _varp_t {
     unsigned int grow;        // how much to expand value/class map
     variable_t** var_map;     // variable map
     symbol_t**   sym_map;     // symbol hash table
-    int*         order_map;   // variable order table
+    int*         order_map;   // literal order table
     int          sort_key[2]; // sort order -1,-2,1,2
     clause_t**   clause_map;  // clause_map[v] = class chain of variable v
 
@@ -976,9 +977,8 @@ static void init_variable(variable_t* var, int value, int vix)
     var->value = value;
     var->vix   = vix;
     
-    var->key[0] = 0;
-    var->key[1] = 0;
-    var->key[2] = 0;
+    var->pkey[0] = var->pkey[1] = var->pkey[2] = 0;
+    var->nkey[0] = var->nkey[1] = var->nkey[2] = 0;    
 
     var->map_index = vix;
     var->implication_clause  = -1;
@@ -1584,7 +1584,7 @@ static int order_reset(varp_t* vp)
 	if (is_bound(vp, i)) {
 	    b++;
 	    vp->order_map[b] = i;
-	    vp->var_map[i]->map_index = b; 
+	    vp->var_map[i]->map_index = b;
 	}
 	else {
 	    u--;
@@ -1600,7 +1600,8 @@ static void order_k_identity(varp_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i]->key[k] = i;
+	vp->var_map[i]->pkey[k] = i;
+	vp->var_map[i]->nkey[k] = i;	
     }
 }
 
@@ -1608,7 +1609,10 @@ static void order_k_random(varp_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i]->key[k] = arc4_random_uniform(&vp->as, 0x7fffffff);
+	int v1 = arc4_random_uniform(&vp->as, 0x7fffffff);
+	int v2 = arc4_random_uniform(&vp->as, 0x7fffffff);	
+	vp->var_map[i]->pkey[k] = v1;
+	vp->var_map[i]->nkey[k] = v2;
     }
 }
 
@@ -1616,17 +1620,20 @@ static void order_k_undefined(varp_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i]->key[k] = 0;
+	vp->var_map[i]->pkey[k] = 0;
+	vp->var_map[i]->nkey[k] = 0;
     }
 }
 
-// scan through all variables and calculate the occur count, key[k]
+// scan through all variables and calculate the occur count, pkey[k]/nkey[k]
 static void order_k_occur(varp_t* vp, int k)
 {
     int i;
     
-    for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i]->key[k] = 0;
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i]->pkey[k] = 0;
+	vp->var_map[i]->nkey[k] = 0;
+    }
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
@@ -1635,9 +1642,9 @@ static void order_k_occur(varp_t* vp, int k)
 	    for (j = 0; j < (int)cp->size; j++) {
 		int x = lit_index(cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x]->key[k]++;
+		    vp->var_map[-x]->nkey[k]++;
 		else if (x > 1)
-		    vp->var_map[x]->key[k]++;
+		    vp->var_map[x]->pkey[k]++;
 	    }
 	}
     }
@@ -1648,8 +1655,10 @@ static void order_k_depth(varp_t* vp, int k)
 {
     int i;
     
-    for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i]->key[k] = 0;
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i]->pkey[k] = 0;
+	vp->var_map[i]->nkey[k] = 0;
+    }
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
@@ -1658,9 +1667,9 @@ static void order_k_depth(varp_t* vp, int k)
 	    for (j = 0; j < (int)cp->size; j++) {
 		int x = lit_index(cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x]->key[k]++;
+		    vp->var_map[-x]->nkey[k]++;
 		else if (x > 1)
-		    vp->var_map[x]->key[k]++;
+		    vp->var_map[x]->pkey[k]++;
 	    }
 	}
     }
@@ -1678,6 +1687,13 @@ static void order_k_depth(varp_t* vp, int k)
 #define QSORT_R_ARGS(a,b,arg) (arg, a, b)
 #endif
 
+static int cmpk(variable_t* ap, variable_t* bp, int k)
+{
+    int a = (ap->pkey[k] >= ap->nkey[k]) ? ap->pkey[k] : ap->nkey[k];
+    int b = (bp->pkey[k] >= bp->nkey[k]) ? bp->pkey[k] : bp->nkey[k];
+    return a - b;
+}
+
 static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
 {
     varp_t* vp = (varp_t*) arg;
@@ -1689,29 +1705,17 @@ static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
 
     // k1=0 means key[k1] is undefined, k2=0 means key[k2] is undefined
     if (k1 > 0) {
-	r = ap->key[k1] - bp->key[k1];
-	if (r==0) {
-	    if (k2 > 0)
-		r = ap->key[k2] - bp->key[k2];
-	    else if (k2 < 0)
-		r = bp->key[-k2] - ap->key[-k2];
-	}
+	if ((r = cmpk(ap, bp, k1)) != 0)
+	    return r;
     }
     else if (k1 < 0) {
-	r = bp->key[-k1] - ap->key[-k1];
-	if (r==0) {
-	    if (k2 > 0)
-		r = ap->key[k2] - bp->key[k2];
-	    else if (k2 < 0)
-		r = bp->key[-k2] - ap->key[-k2];
-	}
+	if ((r = cmpk(bp, ap, -k1)) != 0)
+	    return r;
     }
-    else { // k1 == 0
-	if (k2 > 0)
-	    r = ap->key[k2] - bp->key[k2];
-	else if (k2 < 0)
-	    r = bp->key[-k2] - ap->key[-k2];
-    }
+    if (k2 > 0)
+	r = cmpk(ap, bp, k2);
+    else if (k2 < 0)
+	r = cmpk(bp, ap, -k2);
     return r;
 }
 
@@ -1723,6 +1727,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     int arg = 0;
     int u;
     int i;
+    int k1, k2;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -1769,10 +1774,20 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     u = order_reset(vp);
     // sort unbound variables according to sort_keys
     QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int), cmp_keys, vp);
-    // update map_index of sorted variables
+
+    k1 = ABS(vp->sort_key[0]);
+    k2 = ABS(vp->sort_key[1]);
+    // update map_index of sorted variables also update the sign
     for (i = u; i < (int)vp->vnext; i++) {
 	int v = vp->order_map[i];
-	vp->var_map[v]->map_index = i;
+	variable_t* var = vp->var_map[v];
+	int r;
+
+	var->map_index = i;
+	if ((r = (var->pkey[k1] - var->nkey[k1])) == 0)
+	    r = (var->pkey[k2] - var->nkey[k2]);
+	if (r < 0)
+	    vp->order_map[i] = -v;
     }
     return ATOM(ok);
 }
@@ -1820,7 +1835,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     // copy all bound variables
     while ((mi < vp->vnext) && is_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
-	vp->var_map[x]->flags |= VAR_FLAG_MARK;
+	vp->var_map[ABS(x)]->flags |= VAR_FLAG_MARK;
 	map[mi++] = x;
     }
     ui = mi;  // save the position for the first unbound variabel
@@ -1833,16 +1848,17 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
 	if (!(lp->var->flags & VAR_FLAG_MARK)) { // not moved
 	    lp->var->flags |= VAR_FLAG_MARK;     // mark as moved
 	    lp->var->map_index = mi;
-	    map[mi++] = lp->var->vix;
+	    map[mi++] = (lp->sign < 0) ? -lp->var->vix : lp->var->vix;
 	}
 	list = tail;
     }
     // move rest of the varaibles not already moved
     while(ui < vp->vnext) {
 	int x = vp->order_map[ui];
-	if (!(vp->var_map[x]->flags & VAR_FLAG_MARK)) { // not moved
-	    vp->var_map[x]->flags |= VAR_FLAG_MARK;     // mark as moved
-	    vp->var_map[x]->map_index = mi;
+	int xi = ABS(x);
+	if (!(vp->var_map[xi]->flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[xi]->flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[xi]->map_index = mi;
 	    map[mi++] = x;
 	}
 	ui++;
@@ -1896,7 +1912,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     // copy all bound variables
     while ((mi < vp->vnext) && is_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
-	vp->var_map[x]->flags |= VAR_FLAG_MARK;
+	vp->var_map[ABS(x)]->flags |= VAR_FLAG_MARK;
 	map[mi++] = x;
     }
     ui = mi;  // save the position for the first unbound variabel
@@ -1910,7 +1926,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
 	if (!(lp->var->flags & VAR_FLAG_MARK)) { // not moved
 	    lp->var->flags |= VAR_FLAG_MARK;     // mark as moved
 	    lp->var->map_index = --mi;
-	    map[mi] = lp->var->vix;
+	    map[mi] = (lp->sign<0) ? -lp->var->vix : lp->var->vix;
 	}
 	list = tail;
     }
@@ -1919,9 +1935,10 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     // move rest of the varaibles not already moved
     while(ui < vp->vnext) {
 	int x = vp->order_map[ui];
-	if (!(vp->var_map[x]->flags & VAR_FLAG_MARK)) { // not moved
-	    vp->var_map[x]->flags |= VAR_FLAG_MARK;     // mark as moved
-	    vp->var_map[x]->map_index = mi;
+	int xi = ABS(x);
+	if (!(vp->var_map[xi]->flags & VAR_FLAG_MARK)) { // not moved
+	    vp->var_map[xi]->flags |= VAR_FLAG_MARK;     // mark as moved
+	    vp->var_map[xi]->map_index = mi;
 	    map[mi++] = x;
 	}
 	ui++;
@@ -1970,19 +1987,26 @@ static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
-    literal_t* lp;
+    int lit;
     int k;
     varp_t* vp;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!get_literal(env, vp, argv[1], &lp))
+    if (!enif_get_int(env, argv[1], &lit))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[2], &k))
 	return enif_make_badarg(env);
     if ((k < 0) || (k > 2))
 	return enif_make_badarg(env);
-    return enif_make_int(env, lp->var->key[k]);
+    if ((lit == 0) ||
+	((lit < 0) && (-lit >= (int)vp->vnext)) ||
+	((lit > 0) && (lit >=  (int)vp->vnext)))
+	return enif_make_badarg(env);
+    if (lit < 1)
+	return enif_make_int(env, vp->var_map[-lit]->nkey[k]);
+    else
+	return enif_make_int(env, vp->var_map[lit]->pkey[k]);    
 }
 
 // retrieve implication clause

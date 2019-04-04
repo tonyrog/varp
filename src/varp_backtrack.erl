@@ -20,9 +20,10 @@ backtrack(Bs) ->
     N     = varp_formula:getopt(Bs,max),
     Print = varp_formula:getopt(Bs,print),
     Order = varp_formula:getopt(Bs,order),
-    if Order =:= undefined -> ok;
-       true -> varp_formula:order_sort(Bs, Order)
-    end,
+    io:format("options ~p\n", [[{order,Order},{print,Print},{max,N}]]),
+%%    if Order =:= undefined -> ok;
+%%       true -> varp_formula:order_sort(Bs, Order)
+%%    end,
     case varp_formula:getopt(Bs,method) of
 	collect ->
 	    bt(Bs, fun({Count0,Acc},Bs1) ->
@@ -68,8 +69,6 @@ bt(Bs,Func,Acc) ->
     end.
 
 -define(BT_ORDER, [true,false]).
--define(BT_FIRST, hd(?BT_ORDER)).
--define(BT_LAST,  hd(tl(?BT_ORDER))).
 
 %% initalise backtrack stack
 init(Bs) ->
@@ -99,14 +98,6 @@ next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
     end;
 next([],_Bs) ->
     false.
-
-%% Get a list of bound values on backtrack stack
-%% Value are in order [true,false]
-stack([{_,Xi,[],_}|Stack]) ->
-    [{Xi,?BT_LAST}|stack(Stack)];
-stack([{_,Xi,[_],_}|Stack]) ->
-    [{Xi,?BT_FIRST}|stack(Stack)];
-stack([]) -> [].
 
 loop(Stack,Func,Acc,Bs) ->
     case next(Stack,Bs) of

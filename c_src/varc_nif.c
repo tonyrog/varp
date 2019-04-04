@@ -196,10 +196,10 @@ typedef struct _undo_t
 typedef struct _clause_t  /* : object_t */
 {
     struct _clause_t* next;      // MUST BE FIRST
-    unsigned asize;              // allocated size
-    unsigned size;               // number of literals
+    size_t   asize;              // allocated size
+    size_t   size;               // number of literals
     int      cix;                // clause index
-    unsigned  key[1];            // sort values
+    int      key[1];             // sort values
     bitset_t mask_F;             // bit mask positions = FALSE
     bitset_t mask_T;             // bit mask positions = TRUE
     uint16_t flags;              // INQUEUE ...
@@ -228,7 +228,8 @@ typedef struct _variable_t
     int value;                    // current value
     int klass;                    // class index
     int vix;                      // variable index
-    unsigned  key[3];             // sort keys
+    int       pkey[3];            // sort keys for positive literals
+    int       nkey[3];            // sort keys for negative literals
     varref_t* pref;               // reference list
     varref_t* nref;               // reference list
     int       map_index;          // order_map index
@@ -821,9 +822,8 @@ static void init_variable(variable_t* vptr, int value, int klass, int vix)
     vptr->value = value;
     vptr->klass = klass;
     vptr->vix   = vix;
-    vptr->key[0] = 0;
-    vptr->key[1] = 0;
-    vptr->key[2] = 0;
+    vptr->pkey[0] = vptr->pkey[1] = vptr->pkey[2] = 0;
+    vptr->nkey[0] = vptr->nkey[1] = vptr->nkey[2] = 0;    
     vptr->pref = NULL;
     vptr->nref = NULL;
     vptr->map_index = vix;
@@ -1931,7 +1931,8 @@ static void order_k_identity(varp_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = i;
+	vp->var_map[i].pkey[k] = i;
+	vp->var_map[i].nkey[k] = i;
     }
 }
 
@@ -1939,7 +1940,10 @@ static void order_k_random(varp_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = arc4_random_uniform(&vp->as, 0x7fffffff);
+	int v1 = (int) arc4_random_uniform(&vp->as, 0x7fffffff);
+	int v2 = (int) arc4_random_uniform(&vp->as, 0x7fffffff);
+	vp->var_map[i].pkey[k] = v1;
+	vp->var_map[i].nkey[k] = v2;
     }
 }
 
@@ -1947,17 +1951,20 @@ static void order_k_undefined(varp_t* vp, int k)
 {
     int i;
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = 0;
+	vp->var_map[i].pkey[k] = 0;
+	vp->var_map[i].nkey[k] = 0;
     }
 }
 
-// scan through all variables and calculate the occur count, key[k]
+// scan through all variables and calculate the occur count, pkey[k]/nkey[k]
 static void order_k_occur(varp_t* vp, int k)
 {
     int i;
     
-    for (i = 2; i < (int)vp->vnext; i++)
-	vp->var_map[i].key[k] = 0;
+    for (i = 2; i < (int)vp->vnext; i++) {
+	vp->var_map[i].pkey[k] = 0;
+	vp->var_map[i].nkey[k] = 0;
+    }
 
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
@@ -1966,9 +1973,9 @@ static void order_k_occur(varp_t* vp, int k)
 	    for (j = 0; j < (int)cp->size; j++) {
 		int x = get(vp, cp->lit[j]);
 		if (x < 1)
-		    vp->var_map[-x].key[k]++;
+		    vp->var_map[-x].nkey[k]++;
 		else if (x > 1)
-		    vp->var_map[x].key[k]++;
+		    vp->var_map[x].pkey[k]++;
 	    }
 	}
     }
@@ -1980,7 +1987,7 @@ static void depth_varref(varp_t* vp, varref_t* rp, int k)
 	if (rp->pos > 0) {
 	    clause_t* cp = vp->clause_map[rp->cix];
 	    cp->key[0]++;
-	    if (cp->key[0]+1 == cp->size) {
+	    if (cp->key[0]+1 == (int)cp->size) {
 		int y = ABS(cp->lit[0]);  // output
 		if (y > 1) {
 		    int depth = 0;
@@ -1988,12 +1995,13 @@ static void depth_varref(varp_t* vp, varref_t* rp, int k)
 		    for (i = 1; i < (int)cp->size; i++) {
 			int x = ABS(cp->lit[i]);
 			if (x > 1) {
-			    int d = vp->var_map[x].key[k];
+			    int d = vp->var_map[x].pkey[k];
 			    if (d > depth)
 				depth = d;
 			}
 		    }
-		    vp->var_map[y].key[k] = depth+1;
+		    vp->var_map[y].pkey[k] = depth+1;
+		    vp->var_map[y].nkey[k] = depth+1;
 		    // printf("var %d depth=%d\r\n", y,
 		    //  vp->var_map[y].key[VAR_DEPTH_KEY]);
 		    enqueue_variable(vp, &vp->var_map[y]);
@@ -2013,8 +2021,10 @@ static void order_k_depth(varp_t* vp, int k)
     clear_variable_queue(vp);  // maybe warn if not empty?
     
     for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i].key[k] = 0;
-	vp->var_map[i].key[VAR_MARK_KEY] = 0;
+	vp->var_map[i].pkey[k] = 0;
+	vp->var_map[i].nkey[k] = 0;	
+	vp->var_map[i].pkey[VAR_MARK_KEY] = 0;
+	vp->var_map[i].nkey[VAR_MARK_KEY] = 0;
     }
 
     // mark all output variables & clear clause key
@@ -2024,8 +2034,10 @@ static void order_k_depth(varp_t* vp, int k)
 	    int j;
 	    int x = ABS(cp->lit[0]);
 	    cp->key[0] = 0;  // input edge counter
-	    if (x > 1)
-		vp->var_map[x].key[VAR_MARK_KEY] = 1;
+	    if (x > 1) {
+		vp->var_map[x].pkey[VAR_MARK_KEY] = 1;
+		vp->var_map[x].nkey[VAR_MARK_KEY] = 1;
+	    }
 	    for (j = 1; j < (int)cp->size; j++) {
 		if (ABS(cp->lit[j]) == 1)  // calculate constants here!
 		    cp->key[0]++;
@@ -2035,8 +2047,8 @@ static void order_k_depth(varp_t* vp, int k)
 
     // set all unmarked variables to depth=1 and enqueue them
     for (i = 2; i < (int)vp->vnext; i++) {
-	if (vp->var_map[i].key[VAR_MARK_KEY] == 0) {
-	    vp->var_map[i].key[k] = 1;
+	if (vp->var_map[i].pkey[VAR_MARK_KEY] == 0) {
+	    vp->var_map[i].pkey[k] = 1;
 	    // printf("var %d depth=%d\r\n", i, vp->var_map[i].key[VAR_DEPTH_KEY]);
 	    enqueue_variable(vp, &vp->var_map[i]);
 	}
@@ -2062,6 +2074,13 @@ static void order_k_depth(varp_t* vp, int k)
 #define QSORT_R_ARGS(a,b,arg) (arg, a, b)
 #endif
 
+static int cmpk(variable_t* ap, variable_t* bp, int k)
+{
+    int a = (ap->pkey[k] >= ap->nkey[k]) ? ap->pkey[k] : ap->nkey[k];
+    int b = (bp->pkey[k] >= bp->nkey[k]) ? bp->pkey[k] : bp->nkey[k];
+    return a - b;
+}
+
 static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
 {
     varp_t* vp = (varp_t*) arg;
@@ -2073,30 +2092,18 @@ static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
 
     // k1=0 means key[k1] is undefined, k2=0 means key[k2] is undefined
     if (k1 > 0) {
-	r = ap->key[k1] - bp->key[k1];
-	if (r==0) {
-	    if (k2 > 0)
-		r = ap->key[k2] - bp->key[k2];
-	    else if (k2 < 0)
-		r = bp->key[-k2] - ap->key[-k2];
-	}
+	if ((r = cmpk(ap, bp, k1)) != 0)
+	    return r;
     }
     else if (k1 < 0) {
-	r = bp->key[-k1] - ap->key[-k1];
-	if (r==0) {
-	    if (k2 > 0)
-		r = ap->key[k2] - bp->key[k2];
-	    else if (k2 < 0)
-		r = bp->key[-k2] - ap->key[-k2];
-	}
+	if ((r = cmpk(bp, ap, -k1)) != 0)
+	    return r;
     }
-    else { // k1 == 0
-	if (k2 > 0)
-	    r = ap->key[k2] - bp->key[k2];
-	else if (k2 < 0)
-	    r = bp->key[-k2] - ap->key[-k2];
-    }
-    return r;
+    if (k2 > 0)
+	r = cmpk(ap, bp, k2);
+    else if (k2 < 0)
+	r = cmpk(bp, ap, -k2);
+    return r;    
 }
 
 static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
@@ -2107,6 +2114,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     int arg = 0;
     int u;
     int i;
+    int k1, k2;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -2156,9 +2164,18 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     // sort unbound variables according to sort_keys
     QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int), cmp_keys, vp);
     // update map_index of sorted variables
+    k1 = ABS(vp->sort_key[0]);
+    k2 = ABS(vp->sort_key[1]);
     for (i = u; i < (int)vp->vnext; i++) {
 	int v = vp->order_map[i];
-	vp->var_map[v].map_index = i;
+	variable_t* var = &vp->var_map[v];
+	int r;
+	
+	var->map_index = i;
+	if ((r = var->pkey[k1] - var->nkey[k1]) == 0)
+	    r = var->pkey[k2] - var->nkey[k2];
+	if (r < 0)
+	    vp->order_map[i] = -v;
     }
     return ATOM(ok);
 }
@@ -2359,7 +2376,7 @@ static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
-    int ix, lit;
+    int lit;
     int k;
     varp_t* vp;
 
@@ -2371,8 +2388,10 @@ static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if ((k < 0) || (k > 2))
 	return enif_make_badarg(env);
-    ix = (lit < 1) ? -lit : lit;
-    return enif_make_int(env, vp->var_map[ix].key[k]);
+    if (lit < 1)
+	return enif_make_int(env, vp->var_map[-lit].nkey[k]);
+    else
+	return enif_make_int(env, vp->var_map[lit].pkey[k]);
 }
 
 // retrieve implication clause

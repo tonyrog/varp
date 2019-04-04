@@ -15,8 +15,6 @@
 -define(dbg(F,As), ok).
 %%-define(dbg(F,As), io:format(F,As)).
 
--define(INITVAL, -1).
-
 backjump(false) ->
     false;
 backjump(Bs) ->
@@ -34,7 +32,7 @@ next0(Bs,Level,Stack) ->
 	    model(Bs), 1;
 	{I,Xi} ->
 	    %% io:format("next0: i=~w, xi=~w\n", [I,Xi]),
-	    loop(Bs,I,Xi,Level,?INITVAL,Stack)
+	    loop(Bs,I,Xi,Level,?FALSE,Stack)
     end.
 
 next(Bs,Level,I,Stack) ->
@@ -42,12 +40,12 @@ next(Bs,Level,I,Stack) ->
 	false ->
 	    model(Bs), 1; %% pop()
 	{J,Xj} ->
-	    loop(Bs,J,Xj,Level,?INITVAL,Stack)
+	    loop(Bs,J,Xj,Level,?FALSE,Stack)
     end.
 
 loop(Bs,I,Xi,Level,Val,Stack) ->
     varp_formula:mark(Bs,Level),
-    ?dbg(" decision[~w]: ~s=~w\n", [Level,format_var(Bs,Xi),(Val+1) div 2]),
+    ?dbg(" decision[~w]: ~s=~w\n", [Level,format_literal(Bs,Xi),(Val+1) div 2]),
     true = varp_formula:equal(Bs,Xi,Val),
     case varp_formula:eval(Bs) of
 	false ->
@@ -59,7 +57,7 @@ loop(Bs,I,Xi,Level,Val,Stack) ->
 
 %% Xi=Val generated conflict
 contradiction(Bs,Level,_I,_Xi,_Val,Stack) ->
-    ?dbg("contradiction[~w]: xi=~s\n", [Level,format_var(Bs,_Xi)]),
+    ?dbg("contradiction[~w]: xi=~s\n", [Level,format_literal(Bs,_Xi)]),
     format_all_bindings(Bs),
     {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
     %%io:format("conflict clause s\n", [format_clause(Bs,Clause,true)]),
@@ -253,7 +251,7 @@ format_literal(Bs,X) ->
     format_literal(Bs,X, false).
 
 format_literal(Bs,X,Bound) when X<0 ->
-    ["-",format_var(Bs,-X,Bound)];
+    ["!",format_var(Bs,-X,Bound)];
 format_literal(Bs,X,Bound) ->
     format_var(Bs,X,Bound).
 

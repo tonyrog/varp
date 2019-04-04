@@ -72,21 +72,8 @@
 -include("varp_bic.hrl").
 -include("varp.hrl").
 
--ifdef(OTP_RELEASE). %% this implies 21 or higher
--define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
--define(GET_STACK(Stacktrace), Stacktrace).
--else.
--define(EXCEPTION(Class, Reason, _), Class:Reason).
--define(GET_STACK(_), erlang:get_stacktrace()).
--endif.
-
-
--define(TRUE,   1).
--define(FALSE, -1).
-
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
-
 
 -type pred() :: {p,Name::atom(),[index()]}.
 -type index() :: integer() | atom() | [integer()|atom()] | func().
@@ -509,7 +496,7 @@ fmt_var(_Bs,true,_Q)   -> "true";
 fmt_var(_Bs,false,_Q)  -> "false";
 fmt_var(Bs,X,Q) ->
     if X < 0 ->
-	    fmt_var_(Bs,-X, "~", Q);
+	    fmt_var_(Bs,-X, "!", Q);
        true ->
 	    fmt_var_(Bs,X, "", Q)
     end.
@@ -1518,7 +1505,7 @@ select_bool(_I,_N,_Xs) ->
 
 
 
-%% FIXME: select bit vector / signed int?
+%% FIXME: Extend Xs with ?FALSE as needed
 select_range(J,I,N,Xs) when J >= I, I>=0, J<N ->
     N1 = (J-I)+1,
     {uint,N1,lists:sublist(Xs,I+1,N1)};
@@ -2413,7 +2400,7 @@ filter_bindings([]) ->
 format_binding({Var,Value}) ->
     VarFmt = format_var(Var),
     if Value =:= true -> VarFmt;
-       Value =:= false -> [$~|VarFmt];
+       Value =:= false -> [$!|VarFmt];
        is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
     end.
 
