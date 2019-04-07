@@ -15,7 +15,7 @@
 
 -define(l2a(X), list_to_atom((X))).
 
--include("varp_bic.hrl").
+-include("varp.hrl").
 
 load(File) ->
     case file:read_file(File) of

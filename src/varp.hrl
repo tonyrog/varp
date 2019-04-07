@@ -12,6 +12,67 @@
 -define(TRUE,   1).
 -define(FALSE, -1).
 
+-record(cid,
+	{ 
+	  line,
+	  name
+	 }).
+
+-record(cconst,
+	{
+	  line :: integer(),
+	  base :: 2 | 8 | 10 | 16 | char | float | string,
+	  value :: string()
+	}).
+	  
+-record(cunary,
+	{
+	  line :: integer(),
+	  op   :: atom(),
+	  arg
+	 }).
+
+-record(cbinary,
+	{
+	  line :: integer(),
+	  op   :: atom(),
+	  arg1,
+	  arg2
+	 }).
+
+-record(ccall,
+	{
+	  line :: integer(),
+	  func,
+	  args
+	 }).
+
+%%  cond ? then : else FIXME? GNU:  cond ? then
+-record(cifexpr,
+	{
+	  line :: integer(),
+	  test,
+	  then,
+	  else
+	 }).
+
+-record(cassign,
+	{
+	  line :: integer(),
+	  op,
+	  lhs,
+	  rhs
+	 }).
+
+%% special  a..b  range
+-record(crange,
+	{
+	  line :: integer(),
+	  from,
+	  to
+	}).
+
+
 -record(bs,
 	{
 	 option = #{} :: [#{}],  %% the options

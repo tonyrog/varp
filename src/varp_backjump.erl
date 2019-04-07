@@ -9,11 +9,11 @@
 
 -export([backjump/1]).
 
--include("varp_bic.hrl").
 -include("varp.hrl").
 
 -define(dbg(F,As), ok).
 %%-define(dbg(F,As), io:format(F,As)).
+-compile(export_all).
 
 backjump(false) ->
     false;
@@ -68,7 +68,8 @@ contradiction(Bs,Level,_I,_Xi,_Val,Stack) ->
     varp_formula:undo(Bs, JLevel),
     {K,Stack1} = backjump(Bs,Stack,JLevel),
     ?dbg("stack1=~w\n", [Stack1]),
-    Bs1 = add_conflict_clause(Bs,Clause),
+    Clause1 = minimize(Bs, sort_abs_clause(Clause)),
+    Bs1 = add_conflict_clause(Bs,Clause1),
     ?dbg(" neg decision: ~s=~w\n", [format_var(Bs1,_Xi),(-_Val+1) div 2]),
     %% true = varp_formula:equal(Bs,_Xi,-_Val),
     case varp_formula:eval(Bs1) of
@@ -115,13 +116,68 @@ add_conflict_clause(Bs,Clause) ->
 	    Bs2 = add_conflict_clause(Bs1,[Vi|CL1]),
 	    add_conflict_clause(Bs2,[-Vi|CL2]);
        true ->
-	    _Cix = varp_formula:add_clause(Bs, 'or', [1|Clause]),
-	    if _Cix =:= false -> error(conflict_clause_error);
-	       _Cix =:= error -> error(clause_error);
-	       true -> ok
-	    end,
+	    varp_formula:add_clause(Bs, 'or', [?TRUE|Clause]),
 	    Bs
     end.
+
+minimize(Bs,Clause) ->
+    %% io:format("minimize: ~p\n", [Clause]),
+    case minimize_(Bs, Clause, Clause) of
+	Clause -> 
+	    %% io:format("  no change\n", []),
+	    Clause;
+	Clause1 ->
+	    io:format("minimize: ~w => ~w\n", [length(Clause),length(Clause1)]),
+	    Clause1
+    end.
+
+minimize_(Bs, [Li|Ls], Clause) ->
+    case implication_clause(Bs, -Li) of
+	-1 ->
+	    minimize_(Bs, Ls, Clause);
+	I ->
+	    varp_formula:use_clause(Bs, I, 1),
+	    {'or',[?TRUE|A]} = varp_formula:get_clause(Bs,I),
+	    %% io:format("implication clause of ~w = ~w\n", [-Li, A]),
+	    %% if A-{Li} is a subset of Clause then remove Li from clause
+	    case is_subclause(A--[-Li], Clause) of
+		true ->
+		    minimize_(Bs, Ls, Clause--[Li]);
+		false ->
+		    minimize_(Bs, Ls, Clause)
+	    end
+    end;
+minimize_(_Bs, [], Clause) ->
+    Clause.
+
+%% check if As is a subset of Bs
+is_subclause(As, Bs) ->
+    case As -- Bs of
+	[] -> true;
+	_ -> false
+    end.
+
+sort_abs_clause(Clause) ->
+    lists:sort(
+      fun(A,A) -> false;
+	 (A,B) -> 
+	      case abs(A) - abs(B) of
+		  0 -> A < 0;
+		  R -> R > 0
+	      end
+      end, Clause).
+
+%% assume clauses are abs sorted in reversed order
+is_subclause_abs([X|As], [X|Bs]) ->
+    is_subclause_abs(As, Bs);
+is_subclause_abs(As=[A|_As0], [B|Bs]) ->
+    if abs(A) > abs(B) ->
+	    is_subclause_abs(As, Bs);
+       true ->
+	    false
+    end;
+is_subclause_abs([], _Bs) ->
+    true.
 
 conflict_analysis(Bs,Level) ->
     Trail= [P|_] = lists:reverse(get_literal_bindings(Bs,Level)),

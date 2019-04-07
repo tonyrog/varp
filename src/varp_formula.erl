@@ -63,13 +63,14 @@
 -export([conflicting_clause/1]).
 -export([implication_clause/2]).
 -export([get_clause/2]).
+-export([get_clause_flags/2]).
 -export([add_clause/3]).
+-export([use_clause/3]).
 -export([set_var/3, add_var/4]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
 -include("log.hrl").
--include("varp_bic.hrl").
 -include("varp.hrl").
 
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
@@ -134,12 +135,12 @@ xor_gate(Bs,Y,Xs) ->
 %% build an OR clause with Xs as input
 %% 1 = X1 or X2 .. or Xn
 or_clause(Bs,Xs) ->
-    clause(Bs, 'or', [1|Xs]).
+    clause(Bs, 'or', [?TRUE|Xs]).
 
 %% build an AND clause with Xs as input
 %% 0 = X1 and X2 .. and Xn => 1 = !X1 or !X2 .. or !Xn
 and_clause(Bs,Xs) ->
-    clause(Bs, 'or', [1|[-L||L<-Xs]]).
+    clause(Bs, 'or', [?TRUE|[-L||L<-Xs]]).
 
 clause(Bs,'or',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
     case varp_option:getopt(clause,Bs#bs.option) of
@@ -212,8 +213,20 @@ clause(Bs,Op,Ls) ->
     end.
 
 add_clause(Bs,Op,Ls) ->
-    %% io:format("add_clause: ~w ~w\n", [Op,Ls]),
-    varc:add_clause(Bs#bs.vp,Op,Ls).
+    case varc:add_clause(Bs#bs.vp,Op,Ls) of
+	false -> error(conflict_clause_error);
+	error -> error(clause_error);
+	{unit,Lit} ->
+	    io:format("unit clause: ~w = ~w/true\n", [Ls, Lit]),
+	    {unit,Lit};
+	true ->
+	    io:format("dead clause: ~w ~w\n", [Op, Ls]),
+	    true; %% was unit, now pushed
+	I -> 
+	    {_,Ls1} = varc:get_clause(Bs#bs.vp, I),
+	    io:format("~w ~w\n", [Op, Ls1]),
+	    I
+    end.
 
 build_gate_tree(Bs,Op,X,Ls) ->
     case lists:split(length(Ls) div 2,Ls) of
@@ -432,6 +445,12 @@ implication_clause(Bs, V) ->
 
 get_clause(Bs, I) ->
     varc:get_clause(Bs#bs.vp, I).
+
+get_clause_flags(Bs, I) ->
+    varc:get_clause_flags(Bs#bs.vp, I).
+
+use_clause(Bs, I, How) ->
+    varc:use_clause(Bs#bs.vp, I, How).
 
 %% Bs is under the assumption that Var = TRUE
 intersect(Bs, Var, B0) ->
@@ -853,7 +872,9 @@ build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
 build_({cnf,{[],[],_Decls}},Bs) ->
     build__(false, Bs);
 build_({cnf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
-    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
+    Bs1 = build_cnf(Cs, Bs),
+    {{bool,?TRUE}, Bs1};
+%%    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
 
 build_({snf,{[],[],_Decls}},Bs) ->
     build__(false, Bs);
@@ -975,7 +996,6 @@ build_({{'SUM',Qs}, F}, Bs) ->
 build_({{'PROD',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
     prod(Xs,Bs1).
-
 
 %%
 %% Special build of cnf/snf

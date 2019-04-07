@@ -114,7 +114,7 @@ psymbol -> symbol : name('$1').
 
 Erlang code.
 
--include("varp_bic.hrl").
+-include("varp.hrl").
 
 op({Op,_Ln}) -> Op.
 

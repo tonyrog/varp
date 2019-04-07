@@ -13,7 +13,7 @@
 -export([format/1]).
 -compile(export_all).
 
--include("varp_bic.hrl").
+-include("varp.hrl").
 
 %% -define(dbg(F,As), ok).
 -define(dbg(F,As), io:format(F,As)).

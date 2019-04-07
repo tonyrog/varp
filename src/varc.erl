@@ -42,6 +42,7 @@
 -export([del_clause/2]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
+-export([use_clause/2, use_clause/3]).
 -export([get_queue/1]).
 -export([get_queue_first/1]).
 -export([get_queue_next/2]).
@@ -217,7 +218,9 @@ undo(_Vp,_Mark) ->
 eval(_Vp) ->
     ?nif_stub().
 
--spec add_clause(Vp::varc(),Op::clause_type(),Ls::[literal()]) -> ok.
+-spec add_clause(Vp::varc(),Op::clause_type(),Ls::[literal()]) ->
+			false | error | integer().
+			    
 
 add_clause(_Vp,Op,Ls) when ?is_op(Op), is_list(Ls) ->
     ?nif_stub().
@@ -241,6 +244,15 @@ add_clause(_Vp,_Op,_X1,_X2,_X3,_X4,_X5,_X6) ->
 
 get_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+%% same as use_clause(Vp,Index,1)
+use_clause(Vp,Index) ->
+    use_clause(Vp,Index,1).
+
+use_clause(_Vp,Index,How)
+  when is_integer(Index), Index >= 0,
+       (How =:= reset orelse is_integer(How)) ->
     ?nif_stub().
 
 get_clause_flags(_Vp,Index)

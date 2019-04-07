@@ -18,7 +18,7 @@
 -export([count_counter_models/2, count_models/2]).
 
 
--include("varp_bic.hrl").
+-include("varp.hrl").
 
 %% expand formula F expanding all use of meta variables, instanciate predicates
 formula(F) ->

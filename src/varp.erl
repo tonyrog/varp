@@ -23,7 +23,7 @@ main(Args) ->
     XArgs = case os:getenv("VARP_CORE") of
 		false ->
 		    ["-bcp", "1", "-clause", "1"];
-	       "varw" ->
+		"varw" ->
 		    ["-bcp", "1", "-clause", "1"];
 		"varc" ->
 		   ["-clause", "0"];
@@ -32,6 +32,7 @@ main(Args) ->
 	    end,
     {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, satisfy),
     Opts = [{meta,Bound}|Opts0],
+    io:format("Opts = ~p\n", [Opts]),
     {ReadIn,{Sections0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};

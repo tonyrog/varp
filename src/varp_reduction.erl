@@ -9,7 +9,7 @@
 -module(varp_reduction).
 -compile(export_all).
 
--include("varp_bic.hrl").
+-include("varp.hrl").
 
 
 file(Input,Output) ->

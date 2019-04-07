@@ -123,6 +123,8 @@ static ERL_NIF_TERM varp_get_symbol(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
 
 #define UNSAT  -1
 #define OK     0
@@ -132,6 +134,7 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 #define FALSE -1
 #define TRUE  1
 
+#define MAX_UINT32 0xffffffff
 #define MAX_CLAUSE_LENGTH  0xffffff
 
 #define DEFAULT_MAP_SIZE  1024
@@ -260,6 +263,7 @@ typedef struct _clause_t
     int cix;                 // clause id (index) 1..N
     size_t size;             // number of literals in lit
     int key[1];              // sort values
+    uint32_t use_counter;    // count activity of clause
     uint16_t flags;          // INQUEUE ...    
     uint16_t op;             // OR|XOR    
     lit_t lit[];             // literal array
@@ -373,6 +377,7 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "add_symbol",          3,  varp_add_symbol),
     NIF_FUNC( "get_symbol",          2,  varp_get_symbol ),
     NIF_FUNC( "find_symbol",         2,  varp_find_symbol ),
+    NIF_FUNC( "use_clause",          3,  varp_use_clause ),
 };
 
 // Atom macros
@@ -428,6 +433,9 @@ DECL_ATOM(undo_stack_size);
 DECL_ATOM(value_stack_size);
 DECL_ATOM(class_stack_size);
 DECL_ATOM(mark);
+DECL_ATOM(unit);
+DECL_ATOM(use);
+DECL_ATOM(reset);
 
 static uint32_t djb_hash(uint8_t* ptr, size_t len)
 {
@@ -763,6 +771,7 @@ static clause_t* clause_alloc(varp_t* vp, uint16_t op, int size)
     cp->next = NULL; 
     cp->size  = size;
     cp->key[0] = 0;
+    cp->use_counter = 0;
     cp->flags = 0;
     cp->op = op;
     return cp;
@@ -799,6 +808,20 @@ static void lqueue_enq(varp_t* vp, lit_t lp)
     q->size++;
 }
 
+static void lqueue_push(varp_t* vp, lit_t lp)
+{
+    lqueue_t* q = &vp->q;
+    literal_t* mp;
+    DBG("PUSH %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
+    assert(lit_value(vp, lp) == UNDEF);
+    mp = lit_literal(vp, lp);
+    mp->qlink = q->head;
+    q->head = mp;
+    if (mp->qlink == NULL)
+	q->tail = &(mp->qlink);
+    q->size++;
+}
+
 static literal_t* lqueue_deq(varp_t* vp)
 {
     lqueue_t* q = &vp->q;
@@ -809,8 +832,8 @@ static literal_t* lqueue_deq(varp_t* vp)
     if ((q->head = lp->qlink) == NULL)
 	q->tail = &q->head;
     q->size--;
-    DBG("DEQ %s(%d,%ld) qsize=%ld\r\n", literal_format(vp,lp),
-	lp->var->vix, lp->var->li,  q->size);
+    DBG("DEQ %s(%d,%d) qsize=%ld\r\n", literal_format(vp,lp),
+	lp->var->vix, lp->var->literal_pos,  q->size);
     return lp;
 }
 
@@ -847,7 +870,8 @@ static void put_literal_level(varp_t* vp,lit_t lp,int value,
 			      long li,int cix, int level)
 {
     // this order lqueue_enq expect literal value = UNDEF
-    lqueue_enq(vp, (value==TRUE) ? lit_negate(lp) : lp);
+    // lqueue push / enq ?
+    lqueue_push(vp, (value==TRUE) ? lit_negate(lp) : lp);
     set_literal_level(vp, lp, value, li, cix, level);
 }
 
@@ -917,7 +941,7 @@ static void undo_level(varp_t* vp, int level)
     vp->stack_size -= vp->undo[level].bs_size;
     while(bp != NULL) {
 	DBG("POP VARIABLE %s value=%d\r\n",
-	    format_variable(bp->var), bp->value);
+	    format_variable(bp), bp->value);
 	bp->value = UNDEF;
 	bp = bp->next;
     }
@@ -2522,7 +2546,7 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     // first sort all literals by absolute value
     QSORT_R(lit+1, size-1, sizeof(lit_t), cmp_rev_abs_lit, vp);
 
-    // PRINT_LIT(" sorted", lit, size);
+    PRINT_LIT(" sorted", lit, size);
 
     // remove TRUE literals
     i = size-1;
@@ -2609,26 +2633,14 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     if (op != OR_CLAUSE) // !!! 
 	return enif_make_badarg(env);
     
-    if ((cp = clause_alloc(vp, op, size)) == NULL) {
-	DBG("unable to alloc clause\r\n");
-	return enif_make_badarg(env);
-    }
-
-    memcpy(cp->lit, lit, sizeof(lit_t)*size);
-
-    if ((cix = clause_insert(env, vp, cp)) < 0) {
-	DBG("unable to clause_insert\r\n");
-	return enif_make_badarg(env);
-    }
-
     // set watch points
 
-    if (cp->lit[size-1] == VARP_TRUE(vp))
+    if (lit[size-1] == VARP_TRUE(vp))
 	goto dead;
 
     p = 1;
-    while(p < (int)cp->size) {
-	switch(lit_value(vp,cp->lit[p])) {
+    while(p < (int)size) {
+	switch(lit_value(vp,lit[p])) {
 	case FALSE: break;
 	case TRUE: goto dead;
 	case UNDEF:
@@ -2641,8 +2653,8 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
 
 next_wp:
     p = wp0+1;
-    while(p < (int)cp->size) {
-	switch(lit_value(vp,cp->lit[p])) {
+    while(p < (int)size) {
+	switch(lit_value(vp,lit[p])) {
 	case FALSE: break;
 	case TRUE: goto dead;
 	case UNDEF:
@@ -2650,9 +2662,22 @@ next_wp:
 	}
 	p++;
     }
-    return ATOM(error);
+    // only one watch point found => unit !
+    // assign and put on queue/stack
+    // push_variable_level(vp, var, 0);
+    put_literal_level(vp, lit[wp0], TRUE, -1, -1, 0);
+    return enif_make_tuple2(env, ATOM(unit), make_lit(env, lit[wp0]));
     
 done_wp:
+    if ((cp = clause_alloc(vp, op, size)) == NULL) {
+	return enif_make_badarg(env);
+    }
+    if ((cix = clause_insert(env, vp, cp)) < 0) {
+	clause_free(vp, cp);
+	return enif_make_badarg(env);
+    }
+    memcpy(cp->lit, lit, sizeof(lit_t)*size);
+    
     set_wlink(&cp->wl[0], wp0, lit_literal(vp, cp->lit[wp0]));
     set_wlink(&cp->wl[1], wp1, lit_literal(vp, cp->lit[wp1]));
 //    if (vp->level > 1)
@@ -2660,11 +2685,12 @@ done_wp:
     return enif_make_int(env, cix);    
 
 dead:
-    cp->wl[0].p = -1;
-    cp->wl[1].p = -1;
+//    cp->wl[0].p = -1;
+//    cp->wl[1].p = -1;
 //    if (vp->level > 1)
-//	print_clause(vp,"dead clause: ", cp); 
-    return enif_make_int(env, cix);
+//	print_clause(vp,"dead clause: ", cp);
+    return ATOM(true);    
+    // return enif_make_int(env, cix);
 }
 
 //
@@ -2809,6 +2835,11 @@ static ERL_NIF_TERM varp_get_clause_flags(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     list = enif_make_list(env, 0);
+    list = enif_make_list_cell(env,
+			       enif_make_tuple2(env,
+						ATOM(use),
+						cp->use_counter),
+			       list);
     if (cp->flags & CLAUSE_FLAG_INQUEUE)
 	list = enif_make_list_cell(env, ATOM(inqueue), list);
     if ((cp->flags & CLAUSE_FLAG_DEAD) ||
@@ -2826,6 +2857,52 @@ static ERL_NIF_TERM varp_get_clause_flags(ErlNifEnv* env, int argc,
     }
     return list;
 }
+
+static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    clause_t* cp;
+    varp_t* vp;
+    unsigned int cix;
+    uint32_t value;
+    int count;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);    
+    if (!enif_get_uint(env, argv[1], &cix))
+	return enif_make_badarg(env);
+    if (cix >= vp->cnext)
+	return enif_make_badarg(env);
+    if ((cp = vp->clause_map[cix]) == NULL)
+	return enif_make_badarg(env);
+    
+    value = cp->use_counter;
+    
+    if (argv[2] == ATOM(reset)) {
+	cp->use_counter = 0;
+	return enif_make_uint(env, value);
+    }
+
+    if (!enif_get_int(env, argv[1], &count))
+	return enif_make_badarg(env);
+
+    if (count < 0) {
+	count = -count;
+	if (cp->use_counter <= count)
+	    cp->use_counter = 0;
+	else
+	    cp->use_counter -= count;
+    }
+    else {
+	if (cp->use_counter >= MAX_UINT32-count)
+	    cp->use_counter = MAX_UINT32;
+	else
+	    cp->use_counter += count;
+    }
+    return enif_make_uint(env, value);
+}
+
 
 static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
@@ -3099,6 +3176,9 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(value_stack_size);
     LOAD_ATOM(class_stack_size);
     LOAD_ATOM(mark);
+    LOAD_ATOM(unit);
+    LOAD_ATOM(use);
+    LOAD_ATOM(reset);    
 }
 
 static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
