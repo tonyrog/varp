@@ -217,14 +217,14 @@ add_clause(Bs,Op,Ls) ->
 	false -> error(conflict_clause_error);
 	error -> error(clause_error);
 	{unit,Lit} ->
-	    io:format("unit clause: ~w = ~w/true\n", [Ls, Lit]),
+	    %% io:format("unit clause: ~w = ~w/true\n", [Ls, Lit]),
 	    {unit,Lit};
 	true ->
-	    io:format("dead clause: ~w ~w\n", [Op, Ls]),
+	    %% io:format("dead clause: ~w ~w\n", [Op, Ls]),
 	    true; %% was unit, now pushed
 	I -> 
-	    {_,Ls1} = varc:get_clause(Bs#bs.vp, I),
-	    io:format("~w ~w\n", [Op, Ls1]),
+	    %% {_,Ls1} = varc:get_clause(Bs#bs.vp, I),
+	    %% io:format("~w ~w\n", [Op, Ls1]),
 	    I
     end.
 
@@ -2280,8 +2280,8 @@ minmax2(X1,X2,Bs) ->
     {Min,Bs2} = operation('and',X1,X2,Bs1),
     {Min,Max,Bs2}.
 
-cnf_to_formula(Cs) ->
-    {'ALL', [{'ANY', C} || C <- Cs]}.
+%% cnf_to_formula(Cs) ->
+%%    {'ALL', [{'ANY', C} || C <- Cs]}.
 
 is_equivalent(Bs, X, Y) ->
     class(Bs,X) =:= class(Bs,Y).

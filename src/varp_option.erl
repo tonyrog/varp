@@ -140,6 +140,13 @@ options() ->
 	     default => false,
 	     description => "Use backjumping during backtrack."
 	  },
+    V92 = #{ long => "minimize",
+	     short => "z",
+	     key => minimize,
+	     spec => {enum,[?BOOL]},
+	     default => true,
+	     description => "Use conflict clause minimization."
+	   },
     V10 = #{ long => "pair",
 	     key => pair,
 	     spec => {enum,[?BOOL]},
@@ -241,10 +248,6 @@ options() ->
 	     spec => {set,{predpat,atom,term}},
 	     default => [],  %% ordset
 	     description => "Internal list of all declarations"},
-    V24 = #{ key => code,
-	     spec => {append,list},
-	     default => [],
-	     description => "Internal list of all code"},
     V25 = #{ key => saturations,
 	     spec => {list,term},
 	     default => [],
@@ -268,6 +271,7 @@ options() ->
        saturate => V8, "saturate" => V8, "s" => V8,
        backtrack => V9, "backtrack" => V9, "b" => V9,
        backjump => V91, "backjump" => V91, "j" => V91,
+       minimize => V92, "minimize" => V92, "z" => V92,
        pair => V10, "pair" => V10,
        assoc => V11, "assoc" => V11,
        threshold => V12, "threshold" => V12,
@@ -283,7 +287,6 @@ options() ->
        meta => V21,
        defs => V22,
        decls => V23,
-       code => V24,
        literals => V26,
        saturations => V25
      }.

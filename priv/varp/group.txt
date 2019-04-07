@@ -6,3 +6,9 @@ varp satisfy -print=model n=4 group.varp
 
 varp satisfy -print=model n=5 group.varp
 6 models
+
+varp satisfy -print=model n=6 group.varp
+80 models
+
+varp satisfy -print=model n=7 group.varp
+120 models

@@ -57,7 +57,6 @@ main(Args) ->
 			    Sections = append_sections(Sections0,Sections1),
 			    #{order:=Order,
 			      decls:=Decls,
-			      code:=Code,
 			      literals:=Literals,
 			      defs:=Defs} = Sections,
 			    OrderOpts = order_decl(Order),
@@ -65,7 +64,6 @@ main(Args) ->
 				OrderOpts++
 				    [{defs,Defs},
 				     {decls,Decls},
-				     {code,Code},
 				     {literals,Literals}|Opts]);
 			_Error ->
 			    halt(1)
@@ -81,7 +79,6 @@ main(Args) ->
 			    Sections = append_sections(Sections0,Sections1),
 			    #{order:=Order,
 			      decls:=Decls,
-			      code:=Code,
 			      literals:=Literals,
 			      defs:=Defs} = Sections,
 			    OrderOpts = order_decl(Order),
@@ -89,7 +86,6 @@ main(Args) ->
 				OrderOpts++
 				    [{defs,Defs},
 				     {decls,Decls},
-				     {code,Code},
 				     {literals,Literals}|Opts]);
 			_Error ->
 			    halt(1)
@@ -103,7 +99,6 @@ main(Args) ->
 		    Sections = append_sections(Sections0,Sections1),
 		    #{order:=Order,
 		      decls:=Decls,
-		      code:=Code,
 		      literals:=Literals,
 		      defs:=Defs} = Sections,
 		    OrderOpts = order_decl(Order),
@@ -111,7 +106,6 @@ main(Args) ->
 			OrderOpts++
 			    [{defs,Defs},
 			     {decls,Decls},
-			     {code,Code},
 			     {literals,Literals}|Opts]);
 		_Error ->
 		    halt(1)
@@ -129,7 +123,6 @@ run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
 		  {ok,{Sections,Formula}} ->
 		      #{order:=Order,
 			decls:=Decls,
-			code:=Code,
 			literals:=Literals,
 			defs:=Defs} = Sections,
 		      OrderOpts = order_decl(Order),
@@ -137,7 +130,6 @@ run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
 			  OrderOpts++
 			      [{defs,Defs},
 			       {decls,Decls},
-			       {code,Code},
 			       {literals,Literals}|Opts]);
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
@@ -344,12 +336,11 @@ parse_formulas([], Formula, Sections, _JoinOp) ->
     {ok,{Sections,Formula}}.
 
 empty_sections() ->
-    #{ decls=>[], code=>[], order=>[], literals=>[], defs=>[]}.    
+    #{ decls=>[], order=>[], literals=>[], defs=>[]}.    
 
-append_sections(#{ decls:=D0, code:=C0, order:=O0, literals:=Ls0, defs:=Ds0},
-		#{ decls:=D1, code:=C1, order:=O1, literals:=Ls1, defs:=Ds1}) ->
+append_sections(#{ decls:=D0, order:=O0, literals:=Ls0, defs:=Ds0},
+		#{ decls:=D1, order:=O1, literals:=Ls1, defs:=Ds1}) ->
     #{ decls=>D0++D1, 
-       code=>C0++C1, 
        order=>O0++O1, 
        literals=>Ls0++Ls1,
        defs=>Ds0++Ds1}.
@@ -518,8 +509,6 @@ split_sections(Sections) ->
 
 split_sections([{declare,Decl}|Sections], Map=#{ decls:=Decl0 }) ->
     split_sections(Sections, Map#{ decls => Decl0++Decl });
-split_sections([{code,Code}|Sections],Map=#{ code:=Code0 }) ->
-    split_sections(Sections, Map#{ code => Code0++Code });
 split_sections([{order,Order}|Sections],Map=#{ order:=Order0 }) ->
     split_sections(Sections, Map#{ order => Order0++Order });
 split_sections([{literals,Ls}|Sections],Map=#{ literals:=Ls0 }) ->

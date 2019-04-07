@@ -75,7 +75,7 @@
 
 -record(bs,
 	{
-	 option = #{} :: [#{}],  %% the options
+	 option = #{} :: map(), %% the options
 	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
 	 meta=[],            %% meta variable bindings during build

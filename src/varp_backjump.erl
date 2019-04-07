@@ -68,7 +68,7 @@ contradiction(Bs,Level,_I,_Xi,_Val,Stack) ->
     varp_formula:undo(Bs, JLevel),
     {K,Stack1} = backjump(Bs,Stack,JLevel),
     ?dbg("stack1=~w\n", [Stack1]),
-    Clause1 = minimize(Bs, sort_abs_clause(Clause)),
+    Clause1 = minimize(Bs, Clause),
     Bs1 = add_conflict_clause(Bs,Clause1),
     ?dbg(" neg decision: ~s=~w\n", [format_var(Bs1,_Xi),(-_Val+1) div 2]),
     %% true = varp_formula:equal(Bs,_Xi,-_Val),
@@ -120,15 +120,21 @@ add_conflict_clause(Bs,Clause) ->
 	    Bs
     end.
 
-minimize(Bs,Clause) ->
-    %% io:format("minimize: ~p\n", [Clause]),
-    case minimize_(Bs, Clause, Clause) of
-	Clause -> 
-	    %% io:format("  no change\n", []),
-	    Clause;
-	Clause1 ->
-	    io:format("minimize: ~w => ~w\n", [length(Clause),length(Clause1)]),
-	    Clause1
+minimize(Bs,Clause0) ->
+    case varp_formula:getopt(Bs,minimize) of
+	true ->
+	    Clause = sort_abs_clause(Clause0),
+	    %% io:format("minimize: ~p\n", [Clause]),
+	    case minimize_(Bs, Clause, Clause) of
+		Clause -> 
+		    %% io:format("  no change\n", []),
+		    Clause;
+		Clause1 ->
+		    %% io:format("minimize: ~w => ~w\n", [length(Clause),length(Clause1)]),
+		    Clause1
+	    end;
+	false ->
+	    Clause0
     end.
 
 minimize_(Bs, [Li|Ls], Clause) ->

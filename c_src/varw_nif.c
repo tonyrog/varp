@@ -2886,10 +2886,10 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
 
     if (!enif_get_int(env, argv[1], &count))
 	return enif_make_badarg(env);
-
+    // fixme check count
     if (count < 0) {
 	count = -count;
-	if (cp->use_counter <= count)
+	if ((int)cp->use_counter <= count)
 	    cp->use_counter = 0;
 	else
 	    cp->use_counter -= count;
