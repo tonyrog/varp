@@ -8,9 +8,13 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
-
 -define(TRUE,   1).
 -define(FALSE, -1).
+
+-define(NUM_COUNTERS, 3).
+-define(COUNTER_CONFLICT_CLAUSES, 1).
+-define(COUNTER_MINIMIZE_COUNT, 2).
+-define(COUNTER_COMPRESS_CLAUSES, 3).
 
 -record(cid,
 	{ 
@@ -76,6 +80,7 @@
 -record(bs,
 	{
 	 option = #{} :: map(), %% the options
+	 counters :: reference(), %% couters(?NUM_COUNTERS)
 	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
 	 meta=[],            %% meta variable bindings during build

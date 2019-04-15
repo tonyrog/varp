@@ -1,7 +1,4 @@
 %% -*- erlang -*-
-%%
-%%
-%%
 
 Terminals
 	symbol true false define declare literals
@@ -12,15 +9,12 @@ Terminals
         '<->' '>>>' '<<<' '$' '..'
         hexnum octnum binnum decnum flonum chrnum identifier
 	'->' '<<' '>>' '<' '>' '>=' '<=' '==' '!='
-	'&&' '||' '*=' '/=' '%=' '+='
-	'-=' '<<=' '>>=' '&=' '^=' '|=' 
+	'&&' '||'
 	'(' ')' '[' ']' '{' '}' ',' '.' '&' '*' '+' '-' '~' '!'
 	'/' '%' '^' '|' ':' '?' '=' ';'
 	'char' 'short' 'int' 'long' 'signed' 'unsigned' 
 %%      'float' 'double'
 	.
-
-%% '.'
 
 Nonterminals
         cidentifier
@@ -56,9 +50,11 @@ definition -> 'declare' pdecls ';'     : {declare,'$2'}.
 definition -> 'literals' ldecls ';'    : {literals,'$2'}.
 definition -> 'order' odecls ';'       : {order,'$2'}.
     
-primary_expr -> cidentifier : '$1'.
-primary_expr -> constant : '$1'.
+primary_expr -> cidentifier  : '$1'.
+primary_expr -> constant     : '$1'.
 primary_expr -> '(' expr ')' : '$2'.
+primary_expr -> '{' expr '}' : {vec,comma_list('$2')}.
+    
      
 postfix_expr -> primary_expr : '$1'.
 postfix_expr -> postfix_expr '[' expr ']' : 
@@ -151,16 +147,6 @@ assignment_expr -> unary_expr assignment_operator assignment_expr :
 		       #cassign {line=line('$2'),op=op('$2'),lhs='$1',rhs='$3'}.
 
 assignment_operator -> '=' : '$1'.
-assignment_operator -> '*=' : '$1'.
-assignment_operator -> '/=' : '$1'.
-assignment_operator -> '%=' : '$1'.
-assignment_operator -> '+=' : '$1'.
-assignment_operator -> '-=' : '$1'.
-assignment_operator -> '<<=' : '$1'.
-assignment_operator -> '>>=' : '$1'.
-assignment_operator -> '&=' : '$1'.
-assignment_operator -> '^=' : '$1'.
-assignment_operator -> '|=' : '$1'.
 
 expr -> assignment_expr : '$1'.
 expr -> expr ',' assignment_expr : 
@@ -257,6 +243,7 @@ oexpr -> pexpr '[' expr ']'             : {bit_index,'$1','$3'}.
 oexpr -> pexpr '[' expr ':' expr ']'    : {bit_range, '$1', '$3', '$5'}.
 oexpr -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 oexpr -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
+oexpr -> '!' pexpr                      : {'!', '$2'}.
 
 %%
 %% Logic expression
@@ -365,11 +352,9 @@ pexpr -> psymbol               : { p, '$1', []}.
 pexpr -> psymbol '(' ')'       : { p, '$1', []}.
 pexpr -> psymbol '(' expr ')'  : { p, '$1', comma_list('$3')}.
 
-
 psymbol -> 'A' : 'A'.
 psymbol -> 'E' : 'E'.
 psymbol -> symbol : name('$1').
-    
 
 Erlang code.
 

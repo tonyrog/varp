@@ -11,8 +11,11 @@
 
 -include("varp.hrl").
 
+-define(TOP_LEVEL, 0).    %% constants
+%% -define(INIT_LEVEL, 1).
+
 -define(dbg(F,As), ok).
-%%-define(dbg(F,As), io:format(F,As)).
+%% -define(dbg(F,As), io:format(F,As)).
 -compile(export_all).
 
 backjump(false) ->
@@ -21,89 +24,78 @@ backjump(Bs) ->
     init(Bs).
 
 init(Bs) ->
-    case varp_formula:eval(Bs) of
-	false ->  0;
-	true -> next0(Bs,2,[])
+    loop(Bs,?TOP_LEVEL,varp_formula:first_init(Bs),[]).
+
+loop(Bs,Level,I,Stack) ->
+    Eval = varp_formula:eval(Bs),
+    ?dbg("loop bindings[~w]\n",[Level]),
+    %% format_all_bindings(Bs),
+    case Eval of
+	false ->
+	    if Level =:= 0 ->
+		    0;
+	       true ->
+		    contradiction(Bs,Level,I,Stack)
+	    end;
+	true ->
+	    next(Bs,Level,I,Stack)
     end.
 
-next0(Bs,Level,Stack) ->
-    case varp_formula:first_unbound(Bs) of
-	false ->
-	    model(Bs), 1;
-	{I,Xi} ->
-	    %% io:format("next0: i=~w, xi=~w\n", [I,Xi]),
-	    loop(Bs,I,Xi,Level,?FALSE,Stack)
-    end.
+%% Xi=Val generated conflict
+contradiction(Bs,Level,_I,Stack) ->
+    {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
+    ?dbg(" level=~w, jlevel=~w, uip=~s\n",
+	 [Level,JLevel,format_literal(Bs,_UIP)]),
+    ?dbg("stack[~w]: ~w\n", [Level, Stack]),
+    ?dbg("undo[~w]: ~w\n", [Level, JLevel]),
+    varp_formula:undo(Bs, JLevel),
+    varp_formula:mark(Bs, JLevel-1),
+    {K,Stack1} = backjump(Bs,Stack,JLevel),
+    ?dbg("stack[~w]: ~w\n", [JLevel-1, Stack1]),
+    ?dbg("conflict clause ~s\n", [format_clause(Bs,Clause,true)]),
+    Clause1 = minimize(Bs, Clause),
+    ?dbg("minimized conflict clause ~s\n", [format_clause(Bs,Clause1,true)]),
+    Clause2 = compress(Bs, Clause1),
+    Bs1 = add_conflict_clause(Bs,Clause2),
+    loop(Bs1,JLevel-1,K,Stack1).
 
 next(Bs,Level,I,Stack) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
-	    model(Bs), 1; %% pop()
+	    model(Bs),
+	    display_stat(Bs),
+	    1;
 	{J,Xj} ->
-	    loop(Bs,J,Xj,Level,?FALSE,Stack)
+	    NextLevel = Level+1,
+	    varp_formula:mark(Bs,NextLevel),
+	    true = varp_formula:equal(Bs,Xj,?TRUE),
+	    ?dbg("decision[~w] = ~s\n", [NextLevel,format_literal(Bs,Xj)]),
+	    loop(Bs,NextLevel,J,[{I,NextLevel}|Stack])
     end.
 
-loop(Bs,I,Xi,Level,Val,Stack) ->
-    varp_formula:mark(Bs,Level),
-    ?dbg(" decision[~w]: ~s=~w\n", [Level,format_literal(Bs,Xi),(Val+1) div 2]),
-    true = varp_formula:equal(Bs,Xi,Val),
-    case varp_formula:eval(Bs) of
-	false ->
-	    contradiction(Bs,Level,I,Xi,Val,Stack);
-	true ->
-	    format_all_bindings(Bs),
-	    next(Bs,Level+1,I,[{I,Xi,Val,Level}|Stack])
-    end.
 
-%% Xi=Val generated conflict
-contradiction(Bs,Level,_I,_Xi,_Val,Stack) ->
-    ?dbg("contradiction[~w]: xi=~s\n", [Level,format_literal(Bs,_Xi)]),
-    format_all_bindings(Bs),
-    {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
-    %%io:format("conflict clause s\n", [format_clause(Bs,Clause,true)]),
-    ?dbg(" level=~w, jlevel=~w, uip=~s\n",
-	 [Level,JLevel,format_literal(Bs,_UIP)]),
-    ?dbg("stack=~w\n", [Stack]),
-    ?dbg("undo: ~w\n", [Level]),
-    varp_formula:undo(Bs, JLevel),
-    {K,Stack1} = backjump(Bs,Stack,JLevel),
-    ?dbg("stack1=~w\n", [Stack1]),
-    Clause1 = minimize(Bs, Clause),
-    Bs1 = add_conflict_clause(Bs,Clause1),
-    ?dbg(" neg decision: ~s=~w\n", [format_var(Bs1,_Xi),(-_Val+1) div 2]),
-    %% true = varp_formula:equal(Bs,_Xi,-_Val),
-    case varp_formula:eval(Bs1) of
-	false ->
-	    ?dbg("decision contradiction\n", []),
-	    format_all_bindings(Bs1),
-	    case Stack1 of
-		[] -> 
-		    0;
-		[{J,Xj,JVal,_}|Stack2] ->
-		    contradiction(Bs1,JLevel,J,Xj,JVal,Stack2)
-	    end;
-	true ->
-	    %% io:format("backjump: i=~w, k=~w\n", [I,K]),
-	    %% next0(Bs1,JLevel+1,Stack1)
-	    next(Bs1,JLevel+1,K-1,Stack1)
-    end.
-
+display_stat(Bs) ->
+    io:format("num conflict clauses added: ~w\n", 
+	      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
+    io:format("num ilterals removed: ~w\n",
+	      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
+    io:format("compression saved bits: ~w\n",
+	      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
+    ok.
 
 model(Bs) ->
     M = varp_formula:model(Bs),
     varp_formula:print(model,1,M).
 
-backjump(Bs,[{_,_,_,Level}|Stack],JLevel) when Level > JLevel ->
+backjump(Bs,[{_,Level}|Stack],JLevel) when Level > JLevel ->
     backjump(Bs,Stack,JLevel);
-backjump(_Bs,Stack=[{K,_,_,Level}|_],JLevel) when Level =:= JLevel ->
-    %%varp_formula:mark(Bs, Level),
-    {K,Stack};
-backjump(_Bs,[],_JLevel) ->
-    {2,[]}.
+backjump(_Bs,[{K,Level}|Stack],JLevel) when Level =:= JLevel ->
+    {K,Stack}.
 
+add_conflict_clause(Bs,[]) ->
+    Bs;
 add_conflict_clause(Bs,[L]) ->
-    TopLevel = 0, %% install at top level (constant)
-    true = varp_formula:equal(Bs,L,1,TopLevel),
+    true = varp_formula:equal(Bs,L,?TRUE,?TOP_LEVEL),
     Bs;
 add_conflict_clause(Bs,Clause) ->
     Max = varp_formula:get_info(Bs, max_clause_length),
@@ -117,76 +109,80 @@ add_conflict_clause(Bs,Clause) ->
 	    add_conflict_clause(Bs2,[-Vi|CL2]);
        true ->
 	    varp_formula:add_clause(Bs, 'or', [?TRUE|Clause]),
+	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
 	    Bs
     end.
 
+compress(Bs,Clause) ->
+    case varp_formula:getopt(Bs,compress) of
+	true ->
+	    Len = length(Clause),
+	    if Len > 2 ->
+		    NBits = length(Clause)*32,  %% initial number of bits
+		    DeltaCode = compress_(Clause),  %% abs deltas
+		    NCompressed = 32 + 
+			lists:sum([bit:size(Code)+1||Code<-DeltaCode]),
+		    N = NBits - NCompressed,
+		    io:format("compress, Clause=~w,delta=~w,NBits=~w,NCompressed=~w,N=~w\n", [Clause, DeltaCode, NBits, NCompressed, N]),
+		    if N =< 0 ->
+			    ok;
+		       true ->
+			    counters:add(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES,N)
+		    end,
+		    Clause;
+	       true ->
+		    Clause
+	    end;
+	false ->
+	    Clause
+    end.
+
+compress_([L1|Ls=[L2|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
+compress_([_Ln]) -> [].
+
+minimize(_Bs,[]) -> [];
+minimize(_Bs,Clause=[_]) -> Clause;
 minimize(Bs,Clause0) ->
     case varp_formula:getopt(Bs,minimize) of
 	true ->
 	    Clause = sort_abs_clause(Clause0),
 	    %% io:format("minimize: ~p\n", [Clause]),
-	    case minimize_(Bs, Clause, Clause) of
-		Clause -> 
+	    case minimize_(Bs, Clause, Clause, [], 0, 0) of
+		{0,_,_} -> 
 		    %% io:format("  no change\n", []),
 		    Clause;
-		Clause1 ->
-		    %% io:format("minimize: ~w => ~w\n", [length(Clause),length(Clause1)]),
+		{NumRemoved,InputClauseLength,Clause1} ->
+		    Saved = NumRemoved / InputClauseLength,
+		    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
+				 NumRemoved),
+		    io:format("minimize: saved ~.2f%\n", [Saved*100]),
 		    Clause1
 	    end;
 	false ->
 	    Clause0
     end.
 
-minimize_(Bs, [Li|Ls], Clause) ->
+minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
     case implication_clause(Bs, -Li) of
 	-1 ->
-	    minimize_(Bs, Ls, Clause);
+	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
 	    varp_formula:use_clause(Bs, I, 1),
-	    {'or',[?TRUE|A]} = varp_formula:get_clause(Bs,I),
+	    A = get_clause(Bs,I),
 	    %% io:format("implication clause of ~w = ~w\n", [-Li, A]),
 	    %% if A-{Li} is a subset of Clause then remove Li from clause
-	    case is_subclause(A--[-Li], Clause) of
+	    case is_subclause_abs(A, -Li, Clause) of
 		true ->
-		    minimize_(Bs, Ls, Clause--[Li]);
+		    minimize_(Bs, Ls, Clause, NewClause, Removed+1, Length+1);
 		false ->
-		    minimize_(Bs, Ls, Clause)
+		    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1)
 	    end
     end;
-minimize_(_Bs, [], Clause) ->
-    Clause.
-
-%% check if As is a subset of Bs
-is_subclause(As, Bs) ->
-    case As -- Bs of
-	[] -> true;
-	_ -> false
-    end.
-
-sort_abs_clause(Clause) ->
-    lists:sort(
-      fun(A,A) -> false;
-	 (A,B) -> 
-	      case abs(A) - abs(B) of
-		  0 -> A < 0;
-		  R -> R > 0
-	      end
-      end, Clause).
-
-%% assume clauses are abs sorted in reversed order
-is_subclause_abs([X|As], [X|Bs]) ->
-    is_subclause_abs(As, Bs);
-is_subclause_abs(As=[A|_As0], [B|Bs]) ->
-    if abs(A) > abs(B) ->
-	    is_subclause_abs(As, Bs);
-       true ->
-	    false
-    end;
-is_subclause_abs([], _Bs) ->
-    true.
+minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
+    {Removed,Length,NewClause}.
 
 conflict_analysis(Bs,Level) ->
-    Trail= [P|_] = lists:reverse(get_literal_bindings(Bs,Level)),
+    Trail= [P|_] = get_literal_bindings(Bs,Level),
     ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
     conflict_trail(Bs,-P,varp_formula:conflicting_clause(Bs),
 		   conflict_reason(Bs,-P),
@@ -204,7 +200,7 @@ conflict_reason(Bs,Trail,[Q|Qs],Level,Seen,C,CL) ->
 	    QLevel = implication_level(Bs,Q),
 	    if QLevel =:= Level ->
 		    conflict_reason(Bs,Trail,Qs,Level,Seen1,C+1,CL);
-	       QLevel =< 1 -> %% filter constants
+	       QLevel =< ?TOP_LEVEL -> %% filter constants
 		    conflict_reason(Bs,Trail,Qs,Level,Seen1,C,CL);
 	       true ->
 		    conflict_reason(Bs,Trail,Qs,Level,Seen1,C,[Q|CL])
@@ -221,7 +217,8 @@ conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
 	    conflict_seen(Bs,Trail,Level,Seen,C,CL);
 	true ->
 	    if  C =< 1, CL =:= [] ->
-		    {1,[-P],P};
+		    %% implication_level = decision_level ...
+		    {implication_level(Bs,P),[-P],P};
 		C =< 1 ->
 		    CM = [-P|CL],
 		    ?dbg("level = ~w\n",[[{I,implication_level(Bs,I)}||I<-CM]]),
@@ -237,25 +234,73 @@ conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
 reason(Bs,P) ->
     case implication_clause(Bs,P) of
 	-1 -> [];
-	I -> 
-	    {'or',[1|Ls]} = varp_formula:get_clause(Bs,I),
-	    Ls -- [P]
+	I -> get_clause(Bs,I) -- [P]
     end.
 
 conflict_reason(Bs,P) ->
     case varp_formula:conflicting_clause(Bs) of
 	-1 -> [];
-	I ->
-	    {'or',[1|Ls]} = varp_formula:get_clause(Bs,I),
-	    Ls -- [P]
+	I -> get_clause(Bs,I) -- [P]
     end.
+
+
+%% check if As is a subset of Bs
+is_subclause(As, Li, Bs) ->
+    case (As--[Li])-- Bs of
+	[] -> true;
+	_ -> false
+    end.
+
+sort_abs_clause(Clause) ->
+    lists:sort(
+      fun(A,A) -> false;
+	 (A,B) -> 
+	      case abs(A) - abs(B) of
+		  0 -> A < 0;
+		  R -> R > 0
+	      end
+      end, Clause).
+
+%% assume clauses are abs sorted in reversed order
+is_subclause_abs([Li|As],Li,Bs) ->
+    is_subclause_abs(As,Li,Bs);
+is_subclause_abs([X|As],Li,[X|Bs]) ->
+    is_subclause_abs(As,Li,Bs);
+is_subclause_abs(As=[A|_As0],Li,[B|Bs]) ->
+    if abs(A) < abs(B) ->
+	    is_subclause_abs(As,Li,Bs);
+       true ->
+	    false
+    end;
+is_subclause_abs([],_Li,_Bs) ->
+    true;
+is_subclause_abs(_As,_Li,[]) ->
+    false.
+
+implication_clause(Bs,Imp) ->
+    {Cix,_,_} = varp_formula:implication_clause(Bs,Imp),
+    Cix.
+
+implication_level(Bs,Imp) ->
+    {_,_,ImpLev} = varp_formula:implication_clause(Bs,Imp),
+    ImpLev.
+
+get_clause(Bs, I) ->
+    {'or',[?TRUE|Ls]} = varp_formula:get_clause(Bs,I),
+    Ls.
+
+%% -1 - 1 => 0 1
+neg01(Val) -> (Val+1) div 2. 
+    
+val(Xi) when Xi < 0 -> 0;
+val(Xi) when Xi > 0 -> 1.
 
 format_all_bindings(Bs) ->
     Bnd = lists:map(
 	    fun({V,Val}) ->
 		    {Cix,_,ImpLev} = varp_formula:implication_clause(Bs,V),
 		    {ImpLev,V,Val,Cix}
-	    end, varp_formula:get_bindings(Bs,1)),
+	    end, varp_formula:get_bindings(Bs,0)),
     lists:foreach(
       fun(G) ->
 	      [{_Lev,_,_,_}|_] = G,
@@ -320,6 +365,8 @@ format_literal(Bs,X,Bound) ->
 format_var(Bs,X) ->
     format_var(Bs,X,false).
 
+format_var(_Bs,?TRUE,_Bound) -> "TRUE";
+format_var(_Bs,?FALSE,_Bound) -> "FALSE";
 format_var(Bs,X,Bound) ->    
     case varp_formula:find_var(X,Bs) of
 	error ->
@@ -340,17 +387,18 @@ format_binding(Bs, X, Var, _Bound) ->
     format_symbol(Var) ++ Value.
 
 %% get binding list as literal list
-get_literal_bindings(Bs,Level) ->
+get_bindings(Bs, Level) ->
     [if Val < 0 -> -Var; true -> Var end || 
 	{Var,Val} <- varp_formula:get_bindings(Bs,Level)].
 
-implication_clause(Bs,Imp) ->
-    {Cix,_,_} = varp_formula:implication_clause(Bs,Imp),
-    Cix.
+get_literal_bindings(Bs,Level) ->
+    lists:reverse(get_bindings(Bs,Level)).
 
-implication_level(Bs,Imp) ->
-    {_,_,ImpLev} = varp_formula:implication_clause(Bs,Imp),
-    ImpLev.
+get_literal_implications(Bs, Level) ->
+    case get_bindings(Bs, Level) of
+	[] -> [];
+	[_|L] -> L
+    end.
 
 format_symbol(true) -> "true";
 format_symbol(false) -> "false";

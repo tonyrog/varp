@@ -96,6 +96,7 @@ new() ->
 %%
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{bcp,maps:get(bcp,OptMap)}]),
+    Counters = counters:new(?NUM_COUNTERS, []),
     #bs {
        option = OptMap,
        vs = #{ true => ?TRUE,
@@ -106,6 +107,7 @@ new(OptMap) when is_map(OptMap) ->
        defs = maps:get(defs,OptMap),
        decls = maps:get(decls,OptMap),
        literals = maps:get(literals,OptMap),
+       counters = Counters,
        vp    = Vp
       }.
 
@@ -707,6 +709,7 @@ build(F) ->
     build(F,[]).
 
 build(F,Opts) when is_list(Opts) ->
+    %% io:format("Opts = ~p\n", [Opts]),
     build(F, varp_option:set_opts(Opts));
 build(F,Opts) when is_map(Opts) ->
     ?dbg("Formula: ~p\n", [F]),
@@ -869,16 +872,19 @@ build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
     {Y,Bs1} = build__(A,Bs),
     operation_('>>>',Y,K,Bs1);
 
-build_({cnf,{[],[],_Decls}},Bs) ->
+build_({cnf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
-build_({cnf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
+build_({cnf,{_Vars,_Clauses,_Sections,Units,Cs}},Bs) 
+  when is_list(Cs), is_list(Units) ->
+    %% fixme bind all literals in Ls = TRUE
     Bs1 = build_cnf(Cs, Bs),
     {{bool,?TRUE}, Bs1};
 %%    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
 
-build_({snf,{[],[],_Decls}},Bs) ->
+build_({snf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
-build_({snf,{_Vars,_Clauses,_Decls,Ls,Cs}},Bs) when is_list(Cs), is_list(Ls) ->
+build_({snf,{_Vars,_Clauses,_Sections,Units,Cs}},Bs) 
+  when is_list(Cs), is_list(Units) ->
     Bs1 = build_cnf(Cs, Bs),
     {{bool,?TRUE}, Bs1};
 
@@ -924,7 +930,6 @@ build_({'ONE',Fs}, Bs) ->
     one(Xs, Bs1);
 build_({'SUM',Ys}, Bs) ->
     {Xs,Bs1} = args(Ys,Bs),
-    %% io:format("SUM Xs  = ~p\n", [Xs]),
     sum(Xs, Bs1);
 build_({'PROD',Ys}, Bs) ->
     {Xs,Bs1} = args(Ys,Bs),
@@ -991,7 +996,6 @@ build_({{'LTE',[X1|Qs]},F}, Bs) ->
     end;
 build_({{'SUM',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
-    %% io:format("SUM ~p Xs  = ~p\n", [Qs,Xs]),
     sum(Xs,Bs1);
 build_({{'PROD',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
@@ -1068,6 +1072,17 @@ build_quant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
     Bs3 = pop_meta(Bs2),
     {Zs2,Bs4} = build_quant_domain(F, V, Ys, Xs, Bs3),
     {Zs1++Zs2,Bs4};
+%% fixme handle arbitrary vector!
+build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
+		   [{vec,[Y1,Y2]}|Ys], Xs, Bs) ->
+    ?dbg("Bind ~s=~w, ~s=~w\n", [Vn1,Y1,Vn2,Y2]),
+    Bs1 = push_meta(Vn1, Y1, Bs),
+    Bs2 = push_meta(Vn2, Y2, Bs1),
+    {Zs1,Bs3} = build_quant_(F, Xs, Bs2),
+    Bs4 = pop_meta(Bs3),
+    Bs5 = pop_meta(Bs4),
+    {Zs2,Bs6} = build_quant_domain(F, V, Ys, Xs, Bs5),
+    {Zs1++Zs2,Bs6};
 build_quant_domain(_F, _V, [], _Xs, Bs) ->
     {[], Bs}.
 
@@ -1077,7 +1092,6 @@ build_quant_list([F|Fs], Xs, Bs) ->
     {Xs0++Xs1,Bs2};
 build_quant_list([], _Xs, Bs) ->
     {[],Bs}.
-
 
 %% integer/vector version
 
@@ -1148,8 +1162,10 @@ eval_domain(#ccall{func=#cid{name="subsets"},args=[K,A]}, Bs) ->
     subsets(K1,A1);
 eval_domain(Expr, Bs) ->
     D = eval_meta(Expr,Bs),
-    if is_list(D) -> D;
-       true -> [D]
+    case D of
+	{vec,Elems} -> Elems;   %% assume set notation
+	Elems when is_list(Elems) -> Elems;
+	_ -> [D]
     end.
 
 eval_meta(V, _Bs) when is_integer(V) -> V;
@@ -1171,8 +1187,14 @@ eval_meta(#cid {name=Vn}, Bs) ->
 			true ->
 			    L;
 			false ->
-			    io:format("variable '~s' is not bound\n", [Vn]),
-			    error({unbound, Vn})
+			    case find_def(L, Bs#bs.defs) of
+				false ->
+				    io:format("variable '~s' is not bound\n", [Vn]),
+				    error({unbound, Vn});
+				{{p,L,[]},Def} ->
+				    %% io:format("Def = ~p\n", [Def]),
+				    Def
+			    end
 		    end
 	    catch
 		error:_ ->

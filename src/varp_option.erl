@@ -96,15 +96,22 @@ options() ->
 	  },
     V61 = #{ long => "order_first",
 	     key => order_first,
-	     spec => {list,variable},
+	     spec => {list,literal},
 	     default => [],
-	     description => "Sort variables first."
+	     description => "Sort literals first."
 	   },
     V62 = #{ long => "order_last",
 	     key => order_last,
-	     spec => {list,variable},
+	     spec => {list,literal},
 	     default => [],
-	     description => "Sort variables last."
+	     description => "Sort literals last."
+	   },
+    V63 = #{ long => "display_order",
+	     short => "d",
+	     key => display_order,
+	     spec => {enum,[?BOOL]},
+	     default => false,
+	     description => "Display declared variable order."
 	   },
     V7 = #{ long => "bcp",
 	    key => bcp,
@@ -146,6 +153,13 @@ options() ->
 	     spec => {enum,[?BOOL]},
 	     default => true,
 	     description => "Use conflict clause minimization."
+	   },
+    V93 = #{ long => "compress",
+	     short => "g",
+	     key => compress,
+	     spec => {enum,[?BOOL]},
+	     default => false,
+	     description => "Compress clauses."
 	   },
     V10 = #{ long => "pair",
 	     key => pair,
@@ -266,12 +280,14 @@ options() ->
        order => V6, "order" => V6,
        order_first => V61, "order_first" => V61,
        order_last => V62, "order_last" => V62,
+       display_order => V63, "display_order" => V63, "d" => V63,
        bcp => V7, "bcp" => V7,
        clause => V71, "clause" => V71, "c" => V71,
        saturate => V8, "saturate" => V8, "s" => V8,
        backtrack => V9, "backtrack" => V9, "b" => V9,
        backjump => V91, "backjump" => V91, "j" => V91,
        minimize => V92, "minimize" => V92, "z" => V92,
+       compress => V93, "compress" => V93, "g" => V93,
        pair => V10, "pair" => V10,
        assoc => V11, "assoc" => V11,
        threshold => V12, "threshold" => V12,
@@ -458,6 +474,11 @@ match_val_({list,variable},Val) ->
     {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
     {ok,{_Decls,{vec,VarList}}} = varp_parse:parse(Ts),
     {ok, VarList};
+match_val_({list,literal},Val) ->
+    %% trick
+    {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
+    {ok,{_Decls,{vec,LiteralList}}} = varp_parse:parse(Ts),
+    {ok, LiteralList};
 match_val_({list,Spec}, Val) ->
     Vals = string:tokens(Val, ", "),
     {ok,Vs,_} = match_values(Spec, Vals, [], []),
@@ -533,6 +554,7 @@ format_spec(unsigned) -> "unsigned integer";
 format_spec(integer)  -> "integer";
 format_spec(string)   -> "string";
 format_spec(variable) -> "variable";
+format_spec(literal)  -> "literal";
 format_spec(atom)     -> "atom";
 format_spec(void)     -> "void";
 format_spec({enum,Vs}) when is_list(Vs) ->
@@ -675,6 +697,16 @@ validate_value(_Key,pred, Value,_Old) ->  %% predicate
 validate_value(_Key, predpat, Value,_Old) ->  %% predicate pattern
     case Value of
 	{p,Name,Args} -> {true,{p,Name,['_' || _ <- Args]}};
+	_ -> false
+    end;
+validate_value(_Key,literal, Value,_Old) ->  %% variable / pred / vector
+    case Value of
+	{'!', {p,_Name,_Args}} when is_list(_Args) -> true;
+	{p,_Name,_Args} when is_list(_Args) -> true;
+	{bit_index,_,_} -> true;
+	{bit_range,_,_,_} -> true;
+	{int,_,_} -> true;
+	{uint,_,_} -> true;
 	_ -> false
     end;
 validate_value(_Key,variable, Value,_Old) ->  %% variable / pred / vector

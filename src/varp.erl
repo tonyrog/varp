@@ -32,7 +32,7 @@ main(Args) ->
 	    end,
     {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, satisfy),
     Opts = [{meta,Bound}|Opts0],
-    io:format("Opts = ~p\n", [Opts]),
+    %% io:format("Opts = ~p\n", [Opts]),
     {ReadIn,{Sections0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
@@ -225,20 +225,16 @@ load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
 		Error={error,Ln,Reason} ->
 		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
 		    Error;
-		Cnf = {cnf,{_NVars,_NClauses,Decls1,_Ls,_CLs}} ->
+		Cnf = {cnf,{_NVars,_NClauses,Sections0,_Ls,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Cnf]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
-		    Decls = maps:get(decls,Sections) ++ Decls1,
-		    load_files(Fs,Formula1,
-			       Sections#{ decls=>Decls },
-			       JoinOp,Opts);
-		Snf = {snf,{_NVars,_NClauses,Decls1,_Ls,_CLs}} ->
+		    Sections1 = append_sections(Sections, Sections0),
+		    load_files(Fs,Formula1,Sections1,JoinOp,Opts);
+		Snf = {snf,{_NVars,_NClauses,Sections0,_Ls,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Snf]),
 		    Formula1 = join_f(JoinOp,Snf,Formula0),
-		    Decls = maps:get(decls,Sections) ++ Decls1,
-		    load_files(Fs,Formula1,
-			       Sections#{ decls=>Decls },
-			       JoinOp,Opts)
+		    Sections1 = append_sections(Sections, Sections0),
+		    load_files(Fs,Formula1,Sections1,JoinOp,Opts)
 	    end;
        true ->
 	    case parse(F, Data) of
@@ -336,7 +332,7 @@ parse_formulas([], Formula, Sections, _JoinOp) ->
     {ok,{Sections,Formula}}.
 
 empty_sections() ->
-    #{ decls=>[], order=>[], literals=>[], defs=>[]}.    
+    #{ decls=>[], order=>[], literals=>[], defs=>[]}.
 
 append_sections(#{ decls:=D0, order:=O0, literals:=Ls0, defs:=Ds0},
 		#{ decls:=D1, order:=O1, literals:=Ls1, defs:=Ds1}) ->

@@ -1,0 +1,11 @@
+p snf 52 124
+c order !X1, X3, !X2, X7
+
+X1 X4 .
+X1 !X3 !X8 .
+X1 X8 X12 .
+X2 X11 .
+!X7 !X3 X9 .
+!X7 X8 !X9 .
+X7 X8 !X10 .
+X7 X10 !X12 .

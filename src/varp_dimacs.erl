@@ -40,89 +40,91 @@ load(File) ->
 %% c <chars> 'is' <integer>
 %% 
 parse(Bin) ->
-    preamble(Bin,[],1).
+    preamble(Bin,
+	     #{ decls=>[], order=>[], literals=>[], defs=>[]}, 1).
 
-preamble(Bin,Vs,L) ->
+preamble(Bin,Sect,L) ->
     case binary_line(Bin) of
-	eof -> [];
+	eof -> 
+	    [];
 	{ok,[$c|Comment],Bin1} ->
-	    Vs1 = scan_var(Comment,Vs),
-	    preamble(Bin1,Vs1,L+1);
+	    Sect1 = scan_section(Comment,Sect),
+	    preamble(Bin1,Sect1,L+1);
 	{ok,[$p|Line],Bin1} ->
 	    %% io:format("~s", [Line]),
 	    case string:tokens(Line, " \r") of
 		["snf", Variables, Clauses] ->
-		    to_snf(Bin1,Vs,L,list_to_integer(Variables),
+		    to_snf(Bin1,Sect,L,list_to_integer(Variables),
 			   list_to_integer(Clauses));
 		["cnf", Variables, Clauses] ->
-		    to_cnf(Bin1,Vs,L,list_to_integer(Variables),
+		    to_cnf(Bin1,Sect,L,list_to_integer(Variables),
 			   list_to_integer(Clauses));
 		["sat", Variables] ->
-		    sat(Bin1,Vs,L,list_to_integer(Variables));
+		    sat(Bin1,Sect,L,list_to_integer(Variables));
 		_ ->
 		    {error,{L,unknown_format}}
 	    end
     end.
 
 %% CNF format
-to_cnf(Bin,Vs,L,Vars,Clauses) ->
-    case to_cnf_(Bin,Vs,L,[],[]) of
-	{ok,Vs1,Cs} ->
-	    {cnf,{Vars,Clauses,Vs1,[],Cs}};
+to_cnf(Bin,Sect,L,Vars,Clauses) ->
+    case to_cnf_(Bin,Sect,L,[],[]) of
+	{ok,Sect1,Cs} ->
+	    {cnf,{Vars,Clauses,Sect1,[],Cs}};
 	Error ->
 	    Error
     end.
 
-to_cnf_(Bin,Vs,L,Acc,Cs) ->
+to_cnf_(Bin,Sect,L,Acc,Cs) ->
     case binary_line(Bin) of
 	eof ->
-	    {ok,Vs,reverse(Cs)};
+	    {ok,Sect,reverse(Cs)};
 	{ok,[$%|_],_Bin1} ->  %% ????
-	    {ok,Vs,reverse(Cs)};
+	    {ok,Sect,reverse(Cs)};
 	{ok,[$c|Comment],Bin1} -> 
-	    Vs1 = scan_var(Comment,Vs),
-	    to_cnf_(Bin1,Vs1,L+1,Acc,Cs);
+	    Sect1 = scan_section(Comment,Sect),
+	    to_cnf_(Bin1,Sect1,L+1,Acc,Cs);
 	{ok,Line,Bin1} ->
 	    case add_literals(string:tokens(Line, " \n"),Acc) of
 		{false,Acc1} ->
-		    to_cnf_(Bin1,Vs,L+1,Acc1,Cs);
+		    to_cnf_(Bin1,Sect,L+1,Acc1,Cs);
 		{true,Acc1} ->
-		    to_cnf_(Bin1,Vs,L+1,[],[reverse(Acc1) | Cs])
+		    to_cnf_(Bin1,Sect,L+1,[],[reverse(Acc1) | Cs])
 	    end
     end.
 
-add_literals([Var|Vs], Acc) ->
-    case list_to_integer(Var) of
+add_literals([L|Ls], Acc) ->
+    case list_to_integer(L) of
 	0 -> {true,Acc};
-	I when I < 0 -> add_literals(Vs, [{'not',{p,x,[-I]}}|Acc]);
-	I -> add_literals(Vs, [{p,x,[I]}|Acc])
+	I when I < 0 -> add_literals(Ls, [{'not',{p,x,[-I]}}|Acc]);
+	I -> add_literals(Ls, [{p,x,[I]}|Acc])
     end;
 add_literals([], Acc) ->
     {false, Acc}.
 
 %% SAT format
-sat(_Bin,_Vs,_L, _Vars) ->
+sat(_Bin,_Sect,_L, _Vars) ->
     {error, not_implemented}.
 
 %% SNF (Symbolc CNF format)
-to_snf(Bin,Vs,L,Vars,Clauses) ->
-    case to_snf_(Bin,Vs,L,[],[]) of
-	{ok,Vs1,Cs} ->
-	    {snf,{Vars,Clauses,Vs1,[],Cs}};
+to_snf(Bin,Sect,L,Vars,Clauses) ->
+    case to_snf_(Bin,Sect,L,[],[]) of
+	{ok,Sect1,Cs} ->
+	    {snf,{Vars,Clauses,Sect1,[],Cs}};
 	Error ->
 	    Error
     end.
 
 %% collect tokens until . is found then call varp_snf parse
-to_snf_(Bin,Vs,Ln,Ts0,CLs) ->
+to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
     case binary_line(Bin) of
 	eof ->
-	    {ok,Vs,reverse(CLs)};
+	    {ok,Sect,reverse(CLs)};
 	{ok,[$%|_],_Bin1} ->  %% ????
-	    {ok,Vs,reverse(CLs)};
+	    {ok,Sect,reverse(CLs)};
 	{ok,[$c|Comment],Bin1} -> 
-	    Vs1 = scan_var(Comment,Vs),
-	    to_snf_(Bin1,Vs1,Ln+1,Ts0,CLs);
+	    Sect1 = scan_section(Comment,Sect),
+	    to_snf_(Bin1,Sect1,Ln+1,Ts0,CLs);
 	{ok,Line,Bin1} ->
 	    case varp_scan:string(Line) of
 		{ok,Ts1,Ln1} ->
@@ -133,12 +135,12 @@ to_snf_(Bin,Vs,Ln,Ts0,CLs) ->
 			    case varp_snf:parse(Ts2) of
 				{ok,CL} ->
 				    %% CL1 = rewrite_snf_claus(CL,Vs),
-				    to_snf_(Bin1,Vs,Ln1,[],[CL|CLs]);
+				    to_snf_(Bin1,Sect,Ln1,[],[CL|CLs]);
 				Error ->
 				    {error,Ln,Error}
 			    end;
 		       true ->
-			    to_snf_(Bin1,Vs,Ln1,Ts2,CLs)
+			    to_snf_(Bin1,Sect,Ln1,Ts2,CLs)
 		    end;
 		Error ->
 		    {error,Ln,Error}
@@ -241,33 +243,28 @@ binary_line(Bin) ->
 %%    <name> "is" <integer>
 %%    declare <name> ":" <size>/signed
 %%    declare <name> ":" <size>/unsigned
+%%    order <li> ... .
 %% 
-scan_var(Line,Vs) ->
+scan_section(Line,Sect=#{ decls := Decls, order := Order }) ->
     case varp_scan:string(Line) of
 	{ok,[{symbol,_,V},{identifier,_,"is"},{decnum,_,N}],_} ->
 	    X = list_to_atom(V),
 	    Y = list_to_integer(N),
-	    [{{p,X,[]},Y}|Vs];
+	    Sect#{ declare => Decls++[{{p,X,[]},Y}]};
 	{ok,[{declare,_},{symbol,_,V},{':',_},
 	     {decnum,_,Size},{'/',_},{signed,_}],_} ->
 	    X = list_to_atom(V),
 	    Sz = list_to_integer(Size),
-	    [{{p,X,[]},int,Sz}|Vs];
+	    Sect#{ declare => Decls++[{{p,X,[]},int,Sz}]};
 	{ok,[{declare,_},{symbol,_,V},{':',_},
 	     {decnum,_,Size},{'/',_},{unsigned,_}],_} ->
 	    X = list_to_atom(V),
 	    Sz = list_to_integer(Size),
-	    [{{p,X,[]},uint,Sz}|Vs];
-	_ ->
-	    Vs
+	    Sect#{ declare => Decls ++ [{{p,X,[]},uint,Sz}]};
+	{ok,Ts=[{order,_Ln}|_],Ln1} ->
+	    {ok,{[{order,Order1}],_}} = varp_parse:parse(Ts ++ [{';',Ln1}]),
+	    Sect# { order => Order ++ Order1 };
+	_Str ->
+	    %% io:format("scan = ~p\n", [_Str]),
+	    Sect
     end.
-
-%% scan_is(Type,Size,[{decnum,_,N}|Is]) ->
-%%     [list_to_integer(N)|scan_is(Type,Size,Is)];
-%% scan_is(Type,Size,[{symbol,_,Var},{'[',_},{decnum,_,I},{']',_}|Is]) ->
-%%     [{Type,list_to_atom(Var),Size,list_to_integer(I)}|scan_is(Type,Size,Is)];
-%% scan_is(_Type,_Size,[]) ->
-%%     [].
-
-
-
