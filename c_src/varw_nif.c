@@ -2175,7 +2175,7 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_uint(env, argv[1], &level) || (level == 0))
+    if (!enif_get_uint(env, argv[1], &level))
 	return enif_make_badarg(env);
     push_level(vp, level);
     return ATOM(true);
@@ -3069,7 +3069,7 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     list = enif_make_list(env, 0);
 
     level = vp->level;
-    while(level > 0) {
+    while(level >= 0) {
 	variable_t* bp = vp->undo[level].bs;
 
 	while(bp != NULL) {
@@ -3081,7 +3081,6 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 	    list = enif_make_list_cell(env, elem, list);
 	    bp = bp->next;
 	}
-	    
 	if (count) count--;
 	if ((level == mark) || ((mark<0) && (count == 0)))
 	    return list;
@@ -3115,7 +3114,7 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
     
     list = enif_make_list(env, 0);
     level = vp->level;
-    while((level > 0) && count) {
+    while((level >= 0) && count) {
 	variable_t* bp = vp->undo[level].bs;
 
 	while((bp != NULL) && count) {
