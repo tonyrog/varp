@@ -22,9 +22,14 @@
 -export([print/3]).
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
--export([format_var/1]).
+-export([format_p/1]).
 -export([or_gate/3, and_gate/3, xor_gate/3]).
 -export([or_clause/2, and_clause/2]).
+-export([format_literal/2, format_literal/3]).
+-export([format_literals/2, format_literals/3]).
+-export([format_var/2]).
+-export([format_clause/2, format_clause/3]).
+
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -85,8 +90,11 @@
 	       {int,pred(),Size::integer(),Bit::integer()} |
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
-%% -define(dbg(F,A), io:format((F),(A))).
+-define(dbg0(F,As), ok).
+%%-define(dbg(F,A), io:format((F),(A))).
+%%-define(dcall(Fun), Fun()).
 -define(dbg(F,A), ok).
+-define(dcall(Fun), ok).
 
 new() ->
     new(varp_option:default_option()).
@@ -216,19 +224,25 @@ clause(Bs,Op,Ls) ->
 
 add_clause(Bs,Op,Ls) ->
     case varc:add_clause(Bs#bs.vp,Op,Ls) of
-	false -> error(conflict_clause_error);
-	error -> error(clause_error);
-	{unit,Lit} ->
-	    %% io:format("unit clause: ~w = ~w/true\n", [Ls, Lit]),
-	    {unit,Lit};
+	{false,_I} ->
+	    error(conflict_clause_error);
+	{true,I} -> %% non conflict
+	    ?dcall(fun() ->
+			   {_,[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
+			   Flags = varc:get_clause_flags(Bs#bs.vp, I),
+			   {W0,W1} = proplists:get_value(watch, Flags, {-1,-1}),
+			   io:format("~w:(~w,~w) ~s\n", 
+				     [I,W0,W1,format_clause(Bs,CL)])
+		   end),
+	    I;
 	true ->
-	    %% io:format("dead clause: ~w ~w\n", [Op, Ls]),
-	    true; %% was unit, now pushed
-	I -> 
-	    %% {_,Ls1} = varc:get_clause(Bs#bs.vp, I),
-	    %% io:format("~w ~w\n", [Op, Ls1]),
-	    I
+	    ?dcall(fun() ->
+			   io:format("dead clause: ~s\n", 
+				     [format_clause(Bs,Ls)])
+		   end),
+	    true
     end.
+		
 
 build_gate_tree(Bs,Op,X,Ls) ->
     case lists:split(length(Ls) div 2,Ls) of
@@ -2440,29 +2454,88 @@ filter_bindings([]) ->
     [].
 
 format_binding({Var,Value}) ->
-    VarFmt = format_var(Var),
+    VarFmt = format_p(Var),
     if Value =:= true -> VarFmt;
        Value =:= false -> [$!|VarFmt];
        is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
     end.
 
-format_var({p,T,As}) when is_integer(T) ->
+format_p({p,T,As}) when is_integer(T) ->
     [$T,integer_to_list(As)|format_params(As)];
-format_var({p,V,As}) when is_atom(V) ->
+format_p({p,V,As}) when is_atom(V) ->
     [atom_to_list(V)|format_params(As)];
-format_var({p,Name,As}) when is_list(Name); is_binary(Name) ->
+format_p({p,Name,As}) when is_list(Name); is_binary(Name) ->
     [Name|format_params(As)];
-format_var({bit_index,Var,Index}) ->
-    [format_var(Var),"[",integer_to_list(Index), "]"].
-
+format_p({bit_index,Var,Index}) ->
+    [format_p(Var),"[",integer_to_list(Index), "]"].
 
 format_params([]) -> "";
 format_params(As) when is_list(As) ->
-    %% ["(", concat([io_lib:format("~w",[X])||X<-As], ","), ")"];
     ["(",fmt_index_list(As),")"].
-%% format_param(I) when is_integer(I) ->
-%%    ["(",integer_to_list(I),")"].
 
+format_clause(Bs,CL) ->
+    format_clause(Bs,CL,false).
+
+format_clause(Bs,CL,Bound) ->
+    List = format_literals(Bs,CL,Bound),
+    ["{",List,"}"].
+
+format_literals(Bs,Ls) ->
+    format_literals(Bs,Ls,false).
+
+format_literals(Bs,Ls,Bound) ->
+    concat([format_literal(Bs,L,Bound)||L<-Ls],",").
+
+format_literal(Bs,X) when is_integer(X) ->
+    format_literal(Bs,X,false).
+
+format_literal(Bs,X,Bound) when is_integer(X), X<0 ->
+    ["!",format_var(Bs,-X,Bound)];
+format_literal(Bs,X,Bound) when is_integer(X) ->
+    format_var(Bs,X,Bound).
+
+format_var(Bs,X) ->
+    format_var(Bs,X,false).
+
+format_var(_Bs,?TRUE,_Bound) -> "TRUE";
+format_var(_Bs,?FALSE,_Bound) -> "FALSE";
+format_var(Bs,X,Bound) ->    
+    case find_var(X,Bs) of
+	error ->
+	    format_bnd(Bs, X, X, Bound);
+	{ok,[Var]} ->
+	    format_bnd(Bs, X, Var, Bound)
+    end.
+
+format_bnd(_Bs, _X, Var, false) ->
+    format_symbol(Var);
+format_bnd(Bs, X, Var, _Bound) ->
+    L = implication_level(Bs, X), 
+    Value = case value(Bs, X) of
+		true -> "=1@"++integer_to_list(L);
+		false -> "=0@"++integer_to_list(L);
+		_ -> ""
+	    end,
+    format_symbol(Var) ++ Value.
+
+implication_level(Bs,Imp) ->
+    {_,_,ImpLev} = implication_clause(Bs,Imp),
+    ImpLev.
+
+format_symbol(true) -> "true";
+format_symbol(false) -> "false";
+format_symbol(V) when is_atom(V) -> atom_to_list(V);
+format_symbol(I) when is_integer(I) -> [$$|integer_to_list(I)];
+format_symbol({bit,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({uint,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({int,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({bit_index,V,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol(Var={p,_,_}) ->
+    format_p(Var).
 
 concat([], _) -> [];
 concat([H],_) -> [H];

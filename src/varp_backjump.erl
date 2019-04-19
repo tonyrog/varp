@@ -14,9 +14,17 @@
 -define(TOP_LEVEL, 0).    %% constants
 %% -define(INIT_LEVEL, 1).
 
+-define(dbg0(F,As), ok).
 -define(dbg(F,As), ok).
-%% -define(dbg(F,As), io:format(F,As)).
+-define(dcall(Fun), ok).
+%%-define(dbg(F,As), io:format(F,As)).
+%%-define(dcall(Fun), Fun()).
+
 -compile(export_all).
+-import(varp_formula, [format_literal/2, format_literal/3]).
+-import(varp_formula, [format_var/2]).
+-import(varp_formula, [format_clause/2, format_clause/3]).
+-import(varp_formula, [format_literals/2]).
 
 backjump(false) ->
     false;
@@ -29,9 +37,18 @@ init(Bs) ->
 loop(Bs,Level,I,Stack) ->
     Eval = varp_formula:eval(Bs),
     ?dbg("loop bindings[~w]\n",[Level]),
-    %% format_all_bindings(Bs),
+    format_bindings(Bs,Level),
     case Eval of
 	false ->
+	    ?dcall(fun() ->
+			   io:format("conflicting clause[~w]: ", [Level]),
+			   Cix = varp_formula:conflicting_clause(Bs),
+			   get_clause(Bs, Cix),
+			   io:format("~s\n",
+				     [
+				      format_clause(Bs,get_clause(Bs,Cix),
+						    true)])
+		   end),
 	    if Level =:= 0 ->
 		    0;
 	       true ->
@@ -41,23 +58,36 @@ loop(Bs,Level,I,Stack) ->
 	    next(Bs,Level,I,Stack)
     end.
 
-%% Xi=Val generated conflict
 contradiction(Bs,Level,_I,Stack) ->
     {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
     ?dbg(" level=~w, jlevel=~w, uip=~s\n",
 	 [Level,JLevel,format_literal(Bs,_UIP)]),
-    ?dbg("stack[~w]: ~w\n", [Level, Stack]),
-    ?dbg("undo[~w]: ~w\n", [Level, JLevel]),
-    varp_formula:undo(Bs, JLevel),
-    varp_formula:mark(Bs, JLevel-1),
+    ?dcall(fun() -> io:format("stack[~w]: ", [Level]),
+		    display_stack_ln(Bs, Stack),
+		    io:format("\n", [])
+	   end),
+    ?dbg("undo[~w]: ~w\n", [Level, JLevel+1]),
+    varp_formula:undo(Bs, JLevel+1),
+    varp_formula:mark(Bs, JLevel),
     {K,Stack1} = backjump(Bs,Stack,JLevel),
-    ?dbg("stack[~w]: ~w\n", [JLevel-1, Stack1]),
+    ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
+		    display_stack_ln(Bs, Stack1),
+		    io:format("\n", [])
+	   end),
     ?dbg("conflict clause ~s\n", [format_clause(Bs,Clause,true)]),
     Clause1 = minimize(Bs, Clause),
     ?dbg("minimized conflict clause ~s\n", [format_clause(Bs,Clause1,true)]),
     Clause2 = compress(Bs, Clause1),
     Bs1 = add_conflict_clause(Bs,Clause2),
-    loop(Bs1,JLevel-1,K,Stack1).
+    loop(Bs1,JLevel,K,Stack1).
+
+backjump(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
+    backjump(Bs,Stack,JLevel);
+backjump(Bs,Stack=[{K,Xk,Level}|_],JLevel) when Level =:= JLevel ->
+    ?dbg("backjump[~w]: ~s\n", [JLevel, format_literal(Bs,Xk)]),
+    {K,Stack};
+backjump(Bs,[],_JLevel) ->
+    {varp_formula:first_init(Bs), []}.
 
 next(Bs,Level,I,Stack) ->
     case varp_formula:next_unbound(Bs,I) of
@@ -70,7 +100,7 @@ next(Bs,Level,I,Stack) ->
 	    varp_formula:mark(Bs,NextLevel),
 	    true = varp_formula:equal(Bs,Xj,?TRUE),
 	    ?dbg("decision[~w] = ~s\n", [NextLevel,format_literal(Bs,Xj)]),
-	    loop(Bs,NextLevel,J,[{I,NextLevel}|Stack])
+	    loop(Bs,NextLevel,J,[{J,Xj,NextLevel}|Stack])
     end.
 
 
@@ -87,14 +117,11 @@ model(Bs) ->
     M = varp_formula:model(Bs),
     varp_formula:print(model,1,M).
 
-backjump(Bs,[{_,Level}|Stack],JLevel) when Level > JLevel ->
-    backjump(Bs,Stack,JLevel);
-backjump(_Bs,[{K,Level}|Stack],JLevel) when Level =:= JLevel ->
-    {K,Stack}.
-
 add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,[L]) ->
+    Value = varp_formula:value(Bs,L),
+    ?dbg("~s=1@0(~w)\n", [format_literal(Bs,L),Value]),
     true = varp_formula:equal(Bs,L,?TRUE,?TOP_LEVEL),
     Bs;
 add_conflict_clause(Bs,Clause) ->
@@ -155,7 +182,7 @@ minimize(Bs,Clause0) ->
 		    Saved = NumRemoved / InputClauseLength,
 		    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
 				 NumRemoved),
-		    io:format("minimize: saved ~.2f%\n", [Saved*100]),
+		    %% io:format("minimize: saved ~.2f%\n", [Saved*100]),
 		    Clause1
 	    end;
 	false ->
@@ -189,8 +216,8 @@ conflict_analysis(Bs,Level) ->
 		   Trail,Level,sets:from_list([abs(P)]),1,[]).
 
 conflict_trail(Bs,_P,_Ci,Reason,Trail,Level,Seen,C,CL) ->
-    ?dbg("reason ~s:~w = ~s\n", 
-	 [format_literal(Bs,_P),_Ci,format_literals(Bs,Reason)]),
+    ?dbg0("reason ~s:~w = ~s\n", 
+	  [format_literal(Bs,_P),_Ci,format_literals(Bs,Reason)]),
     conflict_reason(Bs,Trail,Reason,Level,Seen,C,CL).
 
 conflict_reason(Bs,Trail,[Q|Qs],Level,Seen,C,CL) ->
@@ -218,10 +245,23 @@ conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
 	true ->
 	    if  C =< 1, CL =:= [] ->
 		    %% implication_level = decision_level ...
-		    {implication_level(Bs,P),[-P],P};
+		    ?dcall(fun() ->
+				   io:format("level: ~s@~w\n",
+					     [format_literal(Bs,P),
+					      implication_level(Bs,P)])
+			   end),
+		    {implication_level(Bs,P)-1,[-P],P};
 		C =< 1 ->
 		    CM = [-P|CL],
-		    ?dbg("level = ~w\n",[[{I,implication_level(Bs,I)}||I<-CM]]),
+		    ?dcall(fun() ->
+				   io:format("level: "),
+				   [begin
+					io:format("~s@~w ",
+						  [format_literal(Bs,I),
+						   implication_level(Bs,I)])
+				    end || I<-CM],
+				   io:format("\n")
+			   end),
 		    JLevel = lists:max([implication_level(Bs,I)||I<-CL]),
 		    {JLevel,CM,P};
 	       true ->
@@ -295,7 +335,10 @@ neg01(Val) -> (Val+1) div 2.
 val(Xi) when Xi < 0 -> 0;
 val(Xi) when Xi > 0 -> 1.
 
-format_all_bindings(Bs) ->
+format_bindings(Bs) ->
+    format_bindings(Bs,all).
+
+format_bindings(Bs,Level) ->
     Bnd = lists:map(
 	    fun({V,Val}) ->
 		    {Cix,_,ImpLev} = varp_formula:implication_clause(Bs,V),
@@ -304,7 +347,11 @@ format_all_bindings(Bs) ->
     lists:foreach(
       fun(G) ->
 	      [{_Lev,_,_,_}|_] = G,
-	      ?dbg("bindings[~w]: ~s\n",[_Lev,format_group(Bs,G)])
+	      if Level =:= all; Level =:= _Lev ->
+		      ?dbg("bindings[~w]: ~s\n",[_Lev,format_group(Bs,G)]);
+		 true ->
+		      ok
+	      end
       end, key_group_list(1,Bnd)).
 
 format_group(Bs,[{_,V,Val,Cix}|G]) ->
@@ -341,50 +388,6 @@ format_binding(Bs,V,Val) ->
 	 W -> integer_to_list(W)
      end].
 
-format_clause(Bs,CL) ->
-    format_clause(Bs,CL,false).
-
-format_clause(Bs,CL,Bound) ->
-    List = format_literals(Bs,CL,Bound),
-    ["{",List,"}"].
-
-format_literals(Bs,Ls) ->
-    format_literals(Bs,Ls,false).
-
-format_literals(Bs,Ls,Bound) ->
-    concat([format_literal(Bs,L,Bound)||L<-Ls],",").
-
-format_literal(Bs,X) ->
-    format_literal(Bs,X, false).
-
-format_literal(Bs,X,Bound) when X<0 ->
-    ["!",format_var(Bs,-X,Bound)];
-format_literal(Bs,X,Bound) ->
-    format_var(Bs,X,Bound).
-
-format_var(Bs,X) ->
-    format_var(Bs,X,false).
-
-format_var(_Bs,?TRUE,_Bound) -> "TRUE";
-format_var(_Bs,?FALSE,_Bound) -> "FALSE";
-format_var(Bs,X,Bound) ->    
-    case varp_formula:find_var(X,Bs) of
-	error ->
-	    format_binding(Bs, X, X, Bound);
-	{ok,[Var]} ->
-	    format_binding(Bs, X, Var, Bound)
-    end.
-
-format_binding(_Bs, _X, Var, false) ->
-    format_symbol(Var);
-format_binding(Bs, X, Var, _Bound) ->
-    L = implication_level(Bs, X), 
-    Value = case varp_formula:value(Bs, X) of
-		true -> "=1:"++integer_to_list(L);
-		false -> "=0:"++integer_to_list(L);
-		_ -> ""
-	    end,
-    format_symbol(Var) ++ Value.
 
 %% get binding list as literal list
 get_bindings(Bs, Level) ->
@@ -400,21 +403,8 @@ get_literal_implications(Bs, Level) ->
 	[_|L] -> L
     end.
 
-format_symbol(true) -> "true";
-format_symbol(false) -> "false";
-format_symbol(V) when is_atom(V) -> atom_to_list(V);
-format_symbol(I) when is_integer(I) -> [$$|integer_to_list(I)];
-format_symbol({bit,V,_N,I}) ->
-    format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol({uint,V,_N,I}) ->
-    format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol({int,V,_N,I}) ->
-    format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol({bit_index,V,I}) ->
-    format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol(Var={p,_,_}) ->
-    varp_formula:format_var(Var).
-
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].
+display_stack_ln(Bs,[{K,Xk,Level}|Stack]) ->
+    io:format("~s@~w/~w ", [format_literal(Bs,Xk), Level, K]),
+    display_stack_ln(Bs, Stack);
+display_stack_ln(_Bs,[]) ->
+    ok.

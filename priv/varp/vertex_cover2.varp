@@ -3,8 +3,8 @@
 //
 literals a, b, c, d, e, f;
 
-define V   {a,b,c,d,e,f};
-define E   {{a,b},{b,c},{b,d},{b,f},{d,e},{e,f}};
+define Vs   {a,b,c,d,e,f};
+define Es   {{a,b},{b,c},{b,d},{b,f},{d,e},{e,f}};
 
-([A {u,v}=E](V(u) | V(v))) &
-([EQ 2,i=V]V(i))
+([A {u,v}=Es](V(u) | V(v))) & ([EQ 2,i=Vs]V(i))
+

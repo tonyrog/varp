@@ -18,7 +18,7 @@
 //#define NDEBUG
 #include <assert.h>
 
-// #define DEBUG
+//#define DEBUG
 
 // Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
@@ -328,6 +328,10 @@ typedef struct _varp_t {
 
 #define VARP_TRUE(vp)  ((vp)->ltrue)
 #define VARP_FALSE(vp) ((vp)->lfalse)
+#define MAX(a,b) (((a)>(b)) ? (a) : (b))
+#define SWAP_INT(a,b) do { \
+	int _t = (a); a=(b); b=(_t);		\
+    } while(0)
 
 ErlNifResourceType* varp_res;
 
@@ -906,8 +910,8 @@ static void undo_init(varp_t* vp)
     vp->level = 0;
 }
 
-// push undo mark
-static int push_level(varp_t* vp, int level)
+// set current bindings level
+static int set_level(varp_t* vp, int level)
 {
     if (level >= (int)vp->unum) {
 	unsigned int n = vp->unum;
@@ -916,7 +920,7 @@ static int push_level(varp_t* vp, int level)
 	memset(vp->undo+n, 0, n*sizeof(undo_t));
     }
     vp->level = level;
-    DBG("PUSH MARK: level=%d\r\n", level);
+    DBG("SET MARK: level=%d\r\n", level);
     return 0;
 }
 
@@ -2177,7 +2181,7 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_uint(env, argv[1], &level))
 	return enif_make_badarg(env);
-    push_level(vp, level);
+    set_level(vp, level);
     return ATOM(true);
 }
 
@@ -2326,9 +2330,6 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	    literal_t* mp = lit_literal(vp, cp->lit[p]);
 	    *wlp = wl0->next;
 	    set_wlink(wl0, p, mp);
-//	    wl0->p = p;
-//	    wl0->next = mp->wlist;
-//	    mp->wlist = wl0;	    
 	}
     }
     else { // watch point 1
@@ -2360,9 +2361,6 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	    literal_t* mp = lit_literal(vp, cp->lit[p]);
 	    *wlp = wl1->next;
 	    set_wlink(wl1, p, mp);
-//	    wl1->p = p;
-//	    wl1->next = mp->wlist;
-//	    mp->wlist = wl1;
 	}
     }
     return 0;
@@ -2538,8 +2536,10 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     clause_t* cp;
     int cix;
     unsigned i;
-    long p, wp0, wp1;
+    long p, wp0, wp1, up0, up1, lp0, lp1;
+    int lev, level0, level1, dead, nfalse;
     unsigned Tc=0, Fc=0;
+
 
     PRINT_LIT("   src", lit, size);
     
@@ -2636,61 +2636,108 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     // set watch points
 
     if (lit[size-1] == VARP_TRUE(vp))
-	goto dead;
+	return ATOM(true);
 
-    p = 1;
-    while(p < (int)size) {
-	switch(lit_value(vp,lit[p])) {
-	case FALSE: break;
-	case TRUE: goto dead;
-	case UNDEF:
-	default: wp0 = p; goto next_wp;
-	}
-	p++;
-    }
-    // all false    
-    return ATOM(false);
+    if ((cp = clause_alloc(vp, op, size)) == NULL)
+	goto error;
+    if ((cix = clause_insert(env, vp, cp)) < 0)
+	goto error;
 
-next_wp:
-    p = wp0+1;
-    while(p < (int)size) {
-	switch(lit_value(vp,lit[p])) {
-	case FALSE: break;
-	case TRUE: goto dead;
-	case UNDEF:
-	default: wp1 = p; goto done_wp;
-	}
-	p++;
-    }
-    // only one watch point found => unit !
-    // assign and put on queue/stack
-    // push_variable_level(vp, var, 0);
-    put_literal_level(vp, lit[wp0], TRUE, -1, -1, 0);
-    return enif_make_tuple2(env, ATOM(unit), make_lit(env, lit[wp0]));
-    
-done_wp:
-    if ((cp = clause_alloc(vp, op, size)) == NULL) {
-	return enif_make_badarg(env);
-    }
-    if ((cix = clause_insert(env, vp, cp)) < 0) {
-	clause_free(vp, cp);
-	return enif_make_badarg(env);
-    }
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
-    
-    set_wlink(&cp->wl[0], wp0, lit_literal(vp, cp->lit[wp0]));
-    set_wlink(&cp->wl[1], wp1, lit_literal(vp, cp->lit[wp1]));
-//    if (vp->level > 1)
-//	print_clause(vp,"done clause: ",cp);
-    return enif_make_int(env, cix);    
 
-dead:
-//    cp->wl[0].p = -1;
-//    cp->wl[1].p = -1;
-//    if (vp->level > 1)
-//	print_clause(vp,"dead clause: ", cp);
-    return ATOM(true);    
-    // return enif_make_int(env, cix);
+    level0 = 0;
+    level1 = 0;
+    dead = 0;
+    nfalse = 0;
+    up0 = wp0 = lp0 = -1;
+    up1 = wp1 = lp1 = -1;
+    p = 1;
+    while((p < (int)size) && (wp0 < 0)) {
+	switch(lit_value(vp,lit[p])) {
+	case TRUE:
+	    dead = 1;
+	    if ((lev = lit_variable(vp, lit[p])->level) > level0) {
+		level1 = level0; lp1 = lp0;
+		level0 = lev; lp0 = p;
+	    }
+	    else if (lev > level1) {
+		level1 = lev; lp1 = p;
+	    }
+	    break;
+	case FALSE:
+	    nfalse++;
+	    if ((lev = lit_variable(vp, lit[p])->level) > level0) {
+		level1 = level0; lp1 = lp0;
+		level0 = lev; lp0 = p;
+	    }
+	    else if (lev > level1) {
+		level1 = lev; lp1 = p;
+	    }
+	    break;
+	case UNDEF:
+	default: wp0=up0=p; break;
+	}
+	p++;
+    }
+    
+    while((p < (int)size) && (wp1 < 0)) {
+	switch(lit_value(vp,lit[p])) {
+	case TRUE:
+	    dead = 1;
+	    if ((lev = lit_variable(vp, lit[p])->level) > level0) {
+		level1 = level0; lp1 = lp0;
+		level0 = lev; lp0 = p;
+	    }
+	    else if (lev > level1) {
+		level1 = lev; lp1 = p;
+	    }
+	    break;
+	case FALSE:
+	    nfalse++;
+	    if ((lev = lit_variable(vp, lit[p])->level) > level0) {
+		level1 = level0; lp1 = lp0;
+		level0 = lev; lp0 = p;
+	    }
+	    else if (lev > level1) {
+		level1 = lev; lp1 = p;
+	    }
+	    break;
+	case UNDEF:
+	default: wp1=up1=p; break;
+	}
+	p++;
+    }
+    DBG("up0=%ld,up1=%ld,wp0=%ld,wp1=%ld,lp0=%ld,lp1=%ld\r\n",
+	up0, up1, wp0, wp1, lp0, lp1);
+
+    if (wp0 < 0) {
+	wp0 = lp0;
+	if (wp1 < 0) wp1 = lp1;
+    }
+    else if (wp1 < 0) {
+	wp1 = lp0;
+    }
+    if ((wp0 < 0) || (wp1 < 0))
+	goto error;
+    if (wp0 > wp1)
+	SWAP_INT(wp0, wp1);
+    set_wlink(&cp->wl[0], wp0, lit_literal(vp, lit[wp0]));
+    set_wlink(&cp->wl[1], wp1, lit_literal(vp, lit[wp1]));
+    if ((up0 > 0) && (up1 < 0)) {
+	if (!dead) {
+	    variable_t* var = lit_variable(vp, lit[up0]);
+	    push_variable(vp, var);
+	    put_literal(vp, lit[up0], TRUE, up0, cix);
+	}
+	return enif_make_tuple2(env, ATOM(true), enif_make_int(env, cix));
+    }
+    if (nfalse == (int)(size-1)) // currently in conflict!
+	return enif_make_tuple2(env, ATOM(false), enif_make_int(env, cix));
+    return enif_make_tuple2(env, ATOM(true), enif_make_int(env, cix));    
+
+error:
+    if (cp != NULL) clause_free(vp, cp);
+    return enif_make_badarg(env);
 }
 
 //
@@ -3092,8 +3139,8 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 // get_nbindings(Vp, Count, ClauseInfo)
 // Count >= 0 get at most Count bindings
 //
-// returned list [{Var,Value}|{mark,Mark}]
-// or            [{Var,Value,LiteralPos,ClauseIndex}|{mark,Mark}]
+// returned list [{Var,Value}]
+// or            [{Var,Value,LiteralPos,ClauseIndex}]
 //
 static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
 				       const ERL_NIF_TERM argv[])
