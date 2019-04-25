@@ -13,6 +13,7 @@
 -export([new/1]).
 -export([new/2]).
 -export([info/2]).
+-export([config/3]).
 -export([add_variable/1]).
 -export([add_symbol/3]).
 -export([get_symbol/2]).
@@ -40,9 +41,10 @@
 -export([get_clause/2]).
 -export([get_clause_flags/2]).
 -export([del_clause/2]).
+-export([del_unused_clauses/1]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
--export([use_clause/2, use_clause/3]).
+-export([use_clause/2]).
 -export([get_queue/1]).
 -export([get_queue_first/1]).
 -export([get_queue_next/2]).
@@ -115,6 +117,13 @@ new(Size,Expand) when is_integer(Size), Size >= 0,
     ?nif_stub().
 
 info(_Vp, Item) when is_atom(Item) ->
+    ?nif_stub().
+
+%% set config
+%%    permanent  -- number of clauses that are permanent
+%%    lru_size   -- size of lru cache for garbage collect conflict clauses
+%% 
+config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
 
 add_variable(_Vp) ->
@@ -246,13 +255,7 @@ get_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-%% same as use_clause(Vp,Index,1)
-use_clause(Vp,Index) ->
-    use_clause(Vp,Index,1).
-
-use_clause(_Vp,Index,How)
-  when is_integer(Index), Index >= 0,
-       (How =:= reset orelse is_integer(How)) ->
+use_clause(_Vp,_Index) ->
     ?nif_stub().
 
 get_clause_flags(_Vp,Index)
@@ -261,6 +264,9 @@ get_clause_flags(_Vp,Index)
 
 del_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+del_unused_clauses(_Vp) ->
     ?nif_stub().
 
 get_clauses(Vp,Var) ->
@@ -395,7 +401,9 @@ info_keys() ->
      class_stack_size,
      bcp,
      grow,
-     size
+     size,
+     permanent,
+     lru_size
     ].
 
 get_number_of_variables(Vp) ->

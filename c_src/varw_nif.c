@@ -76,8 +76,14 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
 static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 
+static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
+					    const ERL_NIF_TERM argv[]);
+
 static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
+				const ERL_NIF_TERM argv[]);
+
 static ERL_NIF_TERM varp_get(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_put(ErlNifEnv* env, int argc,
@@ -262,9 +268,10 @@ typedef struct _clause_t
     struct _clause_t* next;  // clause list
     int cix;                 // clause id (index) 1..N
     size_t size;             // number of literals in lit
-    int key[1];              // sort values
+//    int key[1];              // sort values
     uint32_t use_counter;    // count activity of clause
-    uint16_t flags;          // INQUEUE ...    
+    uint8_t  flags;          // INQUEUE ...
+    uint8_t  mark;           // LRU MARK
     uint16_t op;             // OR|XOR    
     lit_t lit[];             // literal array
 } clause_t;
@@ -284,32 +291,35 @@ typedef struct arc4_stream_t {
 typedef struct _varp_t {
     lit_t ltrue;
     lit_t lfalse;
-    unsigned int vnext;       // next free variable number
-    unsigned int vsize;       // allocated size of value/class map
-    unsigned int vnum;        // number of variables
-    unsigned int cnext;       // next clause number
-    unsigned int csize;       // allocated size of value/class map
-    unsigned int cnum;        // number of clauses
-    unsigned int ssize;       // size of symbol hash table
-    unsigned int snum;        // number of symbols in symbol hash table
+    size_t vnext;       // next free variable number
+    size_t vsize;       // allocated size of value/class map
+    size_t vnum;        // number of variables
+    size_t cnext;       // next clause number
+    size_t csize;       // allocated size of clause map
+    size_t cnum;        // number of clauses
+    size_t cpermanent;  // number of permanent clauses
+    
+    size_t ssize;             // size of symbol hash table
+    size_t snum;              // number of symbols in symbol hash table
     int bcp;                  // boolean constraint propagation
     int conflicting_clause;   // conflict clause from last eval
-    unsigned int grow;        // how much to expand value/class map
+    size_t grow;              // how much to expand value/class map
     variable_t** var_map;     // variable map
     symbol_t**   sym_map;     // symbol hash table
     int*         order_map;   // literal order table
     int          sort_key[2]; // sort order -1,-2,1,2
-    clause_t**   clause_map;  // clause_map[v] = class chain of variable v
+    clause_t**   clause_map;  // array of clauses, entries may be null
+    int*         lru_map;      // lru hash array (H(cix) -> cix)
+    size_t       lru_map_size; // size of used part of lru_map
+    size_t       lru_tot_size; // total size of lru_map
+    uint8_t      lru_mark;     // wrap counter mark 0..255
 
-    unsigned int unum;        // number of levels allocated
+    size_t       unum;        // number of levels allocated
     undo_t*      undo;        // array of undo block, one for each level
     size_t stack_size;        // number of element in undo stack
     int level;                // current undo level (mark)
     
     lqueue_t     q;            // literal queue for propagation
-
-    unsigned long num_variables;
-    unsigned long num_clauses;    
 
     uint64_t  clause_eval_counter; // performance counter
     uint64_t  eval_counter;        // performance counter
@@ -340,6 +350,7 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "new",                 0,  varp_new ),
     NIF_FUNC( "new",                 1,  varp_new ),
     NIF_FUNC( "info",                2,  varp_info ),
+    NIF_FUNC( "config",              3,  varp_config ),    
     NIF_FUNC( "add_variable",        1,  varp_add_variable ),
     NIF_FUNC( "get",                 2,  varp_get ),
     NIF_FUNC( "put",                 3,  varp_put ),
@@ -366,6 +377,7 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "get_clause",          2,  varp_get_clause ),
     NIF_FUNC( "get_clause_flags",    2,  varp_get_clause_flags ),
     NIF_FUNC( "del_clause",          2,  varp_del_clause ),
+    NIF_FUNC( "del_unused_clauses",  1,  varp_del_unused_clauses ),
     NIF_FUNC( "get_clauses",         3,  varp_get_clauses ),
     NIF_FUNC( "get_queue_first",     1,  varp_get_queue_first ),
     NIF_FUNC( "get_queue_next",      2,  varp_get_queue_next ),    
@@ -381,7 +393,7 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "add_symbol",          3,  varp_add_symbol),
     NIF_FUNC( "get_symbol",          2,  varp_get_symbol ),
     NIF_FUNC( "find_symbol",         2,  varp_find_symbol ),
-    NIF_FUNC( "use_clause",          3,  varp_use_clause ),
+    NIF_FUNC( "use_clause",          2,  varp_use_clause ),
 };
 
 // Atom macros
@@ -440,6 +452,8 @@ DECL_ATOM(mark);
 DECL_ATOM(unit);
 DECL_ATOM(use);
 DECL_ATOM(reset);
+DECL_ATOM(permanent);
+DECL_ATOM(lru_size);
 
 static uint32_t djb_hash(uint8_t* ptr, size_t len)
 {
@@ -774,7 +788,7 @@ static clause_t* clause_alloc(varp_t* vp, uint16_t op, int size)
     clear_wlink(&cp->wl[1]);
     cp->next = NULL; 
     cp->size  = size;
-    cp->key[0] = 0;
+//    cp->key[0] = 0;
     cp->use_counter = 0;
     cp->flags = 0;
     cp->op = op;
@@ -1068,23 +1082,41 @@ static variable_t* dequeue_variable(varp_t* vp)
 static int clause_insert(ErlNifEnv* env, varp_t* vp, clause_t* cp)
 {
     (void) env;
-    int cix = vp->cnext++;
+    int i = vp->cnext++;
 
-    cp->cix = cix;
+    cp->cix = i;
 
     if (vp->cnext == vp->csize) {
 	unsigned int new_csize = vp->csize + vp->grow;
 	clause_t** cpp;
-
+	
 	if (!(cpp = enif_realloc(vp->clause_map, new_csize*sizeof(clause_t**))))
 	    return -1;
 	vp->clause_map = cpp;
 	vp->csize = new_csize;
     }
     vp->cnum++;
-    vp->clause_map[cix] = cp;
-    return cix;
+    vp->clause_map[i] = cp;
+    return i;
 }
+
+static int set_lru_hash_table(varp_t* vp, size_t size)
+{
+    size_t prev_size = vp->lru_tot_size;
+    
+    if (size >= prev_size) {
+	int* map = enif_realloc(vp->lru_map, size*sizeof(int));
+	if (map == NULL)
+	    return -1;
+	vp->lru_map = map;
+	vp->lru_tot_size = size;
+    }
+    // clear all entries to -1 (unused)
+    memset(vp->lru_map, -1, size*sizeof(int));
+    vp->lru_map_size = size;
+    return 0;
+}
+
 
 static int get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, int* bool)
 {
@@ -1205,6 +1237,13 @@ static void cleanup(varp_t* vp)
 	vp->clause_map = NULL;
     }
 
+    if (vp->lru_map) {
+	enif_free(vp->lru_map);
+	vp->lru_map = NULL;
+	vp->lru_map_size = 0;
+	vp->lru_tot_size = 0;
+    }
+
     if (vp->undo) {
 	enif_free(vp->undo);
 	vp->undo = NULL;
@@ -1304,10 +1343,16 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     vp->cnext = 0;
     vp->csize = csize;
     vp->cnum = 0;
+    vp->cpermanent = 0;
     vp->bcp  = bcp;
-
+    vp->lru_map = NULL;
+    vp->lru_map_size = 0;
+    vp->lru_tot_size = 0;
+    vp->lru_mark = 1;
+    
     if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
 	goto error;
+
     if (init_allocator(&vp->var_allocator, sizeof(variable_t)) < 0)
 	goto error;
     if (init_allocator(&vp->sym_allocator, sizeof(symbol_t)) < 0)
@@ -2457,9 +2502,45 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     else if (argv[1] == ATOM(size)) {
 	return enif_make_uint(env, vp->vsize);
     }
+    else if (argv[1] == ATOM(permanent)) {
+	return enif_make_uint(env, vp->cpermanent);
+    }
+    else if (argv[1] == ATOM(lru_size)) {
+	return enif_make_uint(env, vp->lru_map_size);
+    }    
     return enif_make_badarg(env);
 }
 
+
+// set config
+// set permanent - number of permanent clauses
+//   conflict clauses use the rest
+//
+static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if (argv[1] == ATOM(permanent)) {
+	unsigned int value;
+	if (!enif_get_uint(env, argv[2], &value))
+	    return enif_make_badarg(env);
+	vp->cpermanent = value;
+	return ATOM(ok);
+    }
+    if (argv[1] == ATOM(lru_size)) {
+	unsigned int value;
+	if (!enif_get_uint(env, argv[2], &value))
+	    return enif_make_badarg(env);
+	set_lru_hash_table(vp, value);
+	return ATOM(ok);
+    }    
+    return enif_make_badarg(env);    
+}
 
 //
 // add clause (and normalize, remove literals)
@@ -2645,6 +2726,9 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
 
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
 
+    // (lp0,level0) track the literal with that is bounded
+    // on the latest level, (lp1,level1) the next highest after
+    // (lp0,level0) 
     level0 = 0;
     level1 = 0;
     dead = 0;
@@ -2801,33 +2885,100 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
     return enif_make_badarg(env);    
 }
 
+// may only delete clauses on level 0!
 static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
-    unsigned int cix;
+    int i;
     clause_t* cp;
     long p;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_uint(env, argv[1], &cix))
+    if (!enif_get_int(env, argv[1], &i) || (i < 0) || (i >= (int)vp->cnext))
 	return enif_make_badarg(env);
-    if (cix >= vp->cnext)
-	return enif_make_badarg(env);
-    if ((cp = vp->clause_map[cix]) == NULL)
+    if (vp->level != 0)
+	return enif_make_badarg(env);    
+    if ((cp = vp->clause_map[i]) == NULL)
 	return ATOM(ok);
-
+    
     // remove watched literals
     if ((p = cp->wl[0].p) > 0) unwatch(vp, cp, cp->lit[p]);
     if ((p = cp->wl[1].p) > 0) unwatch(vp, cp, cp->lit[p]);
 	
     clause_free(vp, cp);
-    vp->clause_map[cix] = NULL;  // FIXME! reuse this position
+    vp->clause_map[i] = NULL;  // FIXME! reuse this position (compact?)
     vp->cnum--;
     return ATOM(ok);
 }
+
+// del unused clauses is used for garbage collection and may
+// only be called during a restart. i.e no bindings may be present
+// so level must be = 0
+//
+static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
+					    const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;    
+    uint8_t lru_mark;
+    int i, j;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (vp->level != 0)
+	return enif_make_badarg(env);
+    if ((vp->lru_map == NULL) || (vp->lru_map_size == 0) ||
+	(vp->cpermanent == 0))
+	return ATOM(ok);
+
+    lru_mark = vp->lru_mark;
+
+    // 1. mark all clauses that are present in lru cache
+    // FIXME: add elements if cache is not full!
+    for (i = 0; i < (int)vp->lru_map_size; i++) {
+	int cix = vp->lru_map[i];
+	vp->lru_map[i] = -1;
+	if ((cix >= (int)vp->cpermanent) && (cix < (int)vp->cnext)) {
+	    clause_t* cp = vp->clause_map[cix];
+	    if (cp != NULL)
+		cp->mark = lru_mark;
+	}
+    }
+
+    // now remove clauses where lru_mark is not set and compact
+    j = -1;
+    for (i = (int)vp->cpermanent; i < (int)vp->cnext; i++) {
+	clause_t* cp = vp->clause_map[i];
+	if ((cp != NULL) && (cp->mark != lru_mark)) {
+	    long p;
+	    if ((p = cp->wl[0].p) > 0) unwatch(vp, cp, cp->lit[p]);
+	    if ((p = cp->wl[1].p) > 0) unwatch(vp, cp, cp->lit[p]);	    
+	    clause_free(vp, cp);
+	    vp->clause_map[i] = NULL;
+	    vp->cnum--;	    
+	    if (j < 0) j = i;
+	}
+	else if (j > 0) {
+	    // move cp to avail position j
+	    vp->clause_map[j] = cp;
+	    cp->cix = j;
+	    vp->clause_map[i] = NULL;
+	    if (((j+1) < (int)vp->csize) && (vp->clause_map[j+1] == NULL))
+		j++;
+	}
+    }
+    if (j >= 0) vp->cnext = j;
+    vp->lru_mark++;
+    return ATOM(ok);
+}
+//                    i
+//               
+//   2 3 4 7 . . . . .
+//           j
+//
 
 static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
@@ -2911,45 +3062,23 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
     UNUSED(argc);
     clause_t* cp;
     varp_t* vp;
-    unsigned int cix;
-    uint32_t value;
-    int count;
+    int i;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);    
-    if (!enif_get_uint(env, argv[1], &cix))
 	return enif_make_badarg(env);
-    if (cix >= vp->cnext)
+    if (!enif_get_int(env, argv[1], &i) || (i < 0) || (i >= (int)vp->cnext))
 	return enif_make_badarg(env);
-    if ((cp = vp->clause_map[cix]) == NULL)
+    if ((cp = vp->clause_map[i]) == NULL)
 	return enif_make_badarg(env);
     
-    value = cp->use_counter;
-    
-    if (argv[2] == ATOM(reset)) {
-	cp->use_counter = 0;
-	return enif_make_uint(env, value);
+    if (cp->cix >= (int)vp->cpermanent) {
+	if (vp->lru_map != NULL) {
+	    uint32_t h = (cp->cix * 0x9e3779b9) % vp->lru_map_size;
+	    vp->lru_map[h] = cp->cix;
+	}
     }
-
-    if (!enif_get_int(env, argv[1], &count))
-	return enif_make_badarg(env);
-    // fixme check count
-    if (count < 0) {
-	count = -count;
-	if ((int)cp->use_counter <= count)
-	    cp->use_counter = 0;
-	else
-	    cp->use_counter -= count;
-    }
-    else {
-	if (cp->use_counter >= MAX_UINT32-count)
-	    cp->use_counter = MAX_UINT32;
-	else
-	    cp->use_counter += count;
-    }
-    return enif_make_uint(env, value);
+    return ATOM(ok);
 }
-
 
 static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
@@ -3224,7 +3353,9 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(mark);
     LOAD_ATOM(unit);
     LOAD_ATOM(use);
-    LOAD_ATOM(reset);    
+    LOAD_ATOM(reset);
+    LOAD_ATOM(permanent);
+    LOAD_ATOM(lru_size);
 }
 
 static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)

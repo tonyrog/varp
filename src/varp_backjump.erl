@@ -83,8 +83,8 @@ contradiction(Bs,Level,_I,Stack) ->
 
 backjump(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
     backjump(Bs,Stack,JLevel);
-backjump(Bs,Stack=[{K,Xk,Level}|_],JLevel) when Level =:= JLevel ->
-    ?dbg("backjump[~w]: ~s\n", [JLevel, format_literal(Bs,Xk)]),
+backjump(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
+    ?dbg("backjump[~w]: ~s\n", [JLevel, format_literal(_Bs,_Xk)]),
     {K,Stack};
 backjump(Bs,[],_JLevel) ->
     {varp_formula:first_init(Bs), []}.
@@ -120,8 +120,7 @@ model(Bs) ->
 add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,[L]) ->
-    Value = varp_formula:value(Bs,L),
-    ?dbg("~s=1@0(~w)\n", [format_literal(Bs,L),Value]),
+    ?dbg("~s=1@0(~w)\n", [format_literal(Bs,L),varp_formula:value(Bs,L)]),
     true = varp_formula:equal(Bs,L,?TRUE,?TOP_LEVEL),
     Bs;
 add_conflict_clause(Bs,Clause) ->
@@ -178,11 +177,10 @@ minimize(Bs,Clause0) ->
 		{0,_,_} -> 
 		    %% io:format("  no change\n", []),
 		    Clause;
-		{NumRemoved,InputClauseLength,Clause1} ->
-		    Saved = NumRemoved / InputClauseLength,
+		{NumRemoved,_InputClauseLength,Clause1} ->
 		    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
 				 NumRemoved),
-		    %% io:format("minimize: saved ~.2f%\n", [Saved*100]),
+		    %% io:format("minimize: saved ~.2f%\n", [(NumRemoved / _InputClauseLength)*100]),
 		    Clause1
 	    end;
 	false ->
@@ -194,7 +192,7 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 	-1 ->
 	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
-	    varp_formula:use_clause(Bs, I, 1),
+	    varp_formula:use_clause(Bs, I),
 	    A = get_clause(Bs,I),
 	    %% io:format("implication clause of ~w = ~w\n", [-Li, A]),
 	    %% if A-{Li} is a subset of Clause then remove Li from clause
@@ -237,7 +235,7 @@ conflict_reason(Bs,Trail,[Q|Qs],Level,Seen,C,CL) ->
     end;
 conflict_reason(Bs,Trail,[],Level,Seen,C,CL) ->
     conflict_seen(Bs,Trail,Level,Seen,C,CL).
-    
+
 conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
     case sets:is_element(abs(P),Seen) of
 	false ->

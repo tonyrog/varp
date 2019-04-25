@@ -41,6 +41,7 @@ Bind pairwise
       {int,X,n,i}
       {bit,X,n,i}
 
+
 4. Introduce CODE block, reason about sequential code
 
 code {

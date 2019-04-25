@@ -70,7 +70,7 @@
 -export([get_clause/2]).
 -export([get_clause_flags/2]).
 -export([add_clause/3]).
--export([use_clause/3]).
+-export([use_clause/2]).
 -export([set_var/3, add_var/4]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
@@ -465,8 +465,8 @@ get_clause(Bs, I) ->
 get_clause_flags(Bs, I) ->
     varc:get_clause_flags(Bs#bs.vp, I).
 
-use_clause(Bs, I, How) ->
-    varc:use_clause(Bs#bs.vp, I, How).
+use_clause(Bs, I) ->
+    varc:use_clause(Bs#bs.vp, I).
 
 %% Bs is under the assumption that Var = TRUE
 intersect(Bs, Var, B0) ->
