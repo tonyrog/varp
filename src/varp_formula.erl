@@ -7,6 +7,8 @@
 
 -module(varp_formula).
 
+%% -define(DEBUG, true).
+
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([fresh_var/1]).
@@ -91,10 +93,13 @@
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
 -define(dbg0(F,As), ok).
-%%-define(dbg(F,A), io:format((F),(A))).
-%%-define(dcall(Fun), Fun()).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
 -define(dbg(F,A), ok).
 -define(dcall(Fun), ok).
+-endif.
 
 new() ->
     new(varp_option:default_option()).
@@ -225,6 +230,8 @@ clause(Bs,Op,Ls) ->
 add_clause(Bs,Op,Ls) ->
     case varc:add_clause(Bs#bs.vp,Op,Ls) of
 	{false,_I} ->
+	    error(conflict_clause_error);
+	false ->
 	    error(conflict_clause_error);
 	{true,I} -> %% non conflict
 	    ?dcall(fun() ->

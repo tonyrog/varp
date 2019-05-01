@@ -210,16 +210,16 @@ options() ->
     V16 = #{ long => "log",
 	     key => log,
 	     spec => {enum,
-		      [{"debug",?DEBUG},
-		       {"info",?INFO},
-		       {"notice",?NOTICE},
-		       {"warning",?WARNING},
-		       {"error",?ERROR},
-		       {"critical",?CRITICAL},
-		       {"alert",?ALERT},
-		       {"emergency",?EMERGENCY},
-		       {"none",?LOG_NONE}]},
-	     default => ?LOG_NONE,
+		      [{"debug",?LOG_LEVEL_DEBUG},
+		       {"info",?LOG_LEVEL_INFO},
+		       {"notice",?LOG_LEVEL_NOTICE},
+		       {"warning",?LOG_LEVEL_WARNING},
+		       {"error",?LOG_LEVEL_ERROR},
+		       {"critical",?LOG_LEVEL_CRITICAL},
+		       {"alert",?LOG_LEVEL_ALERT},
+		       {"emergency",?LOG_LEVEL_EMERGENCY},
+		       {"none",?LOG_LEVEL_NONE}]},
+	     default => ?LOG_LEVEL_NONE,
 	     description => "Output log level."
 	   },
     V17 = #{ long => "output",
@@ -654,22 +654,22 @@ get_saturate_opt(OptMap) ->
 %%
 validate_value(log,{enum,_Enums},Level,_Old) when is_atom(Level) ->
     %% special? fixme!
-    Map = #{  debug => ?DEBUG,
-	      info  => ?INFO,
-	      notice => ?NOTICE,
-	      warning => ?WARNING,
-	      error => ?ERROR,
-	      critical => ?CRITICAL,
-	      alert => ?ALERT,
-	      emergency => ?EMERGENCY,
-	      none => ?LOG_NONE },
+    Map = #{  debug => ?LOG_LEVEL_DEBUG,
+	      info  => ?LOG_LEVEL_INFO,
+	      notice => ?LOG_LEVEL_NOTICE,
+	      warning => ?LOG_LEVEL_WARNING,
+	      error => ?LOG_LEVEL_ERROR,
+	      critical => ?LOG_LEVEL_CRITICAL,
+	      alert => ?LOG_LEVEL_ALERT,
+	      emergency => ?LOG_LEVEL_EMERGENCY,
+	      none => ?LOG_LEVEL_NONE },
     case maps:find(Level, Map) of
 	error -> false;
 	{ok,Value} -> {true,Value}
     end;
 validate_value(log,{enum,_Enums},Level,_Old) when is_integer(Level) ->
     %% special? fixme!
-    if Level >= ?LOG_NONE, Level =< ?DEBUG -> {true,Level};
+    if Level >= ?LOG_LEVEL_NONE, Level =< ?LOG_LEVEL_DEBUG -> {true,Level};
        true -> false
     end;
 validate_value(_Key,{enum,Enums},Value,_Old) ->

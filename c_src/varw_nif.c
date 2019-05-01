@@ -18,7 +18,7 @@
 //#define NDEBUG
 #include <assert.h>
 
-//#define DEBUG
+// #define DEBUG
 
 // Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
@@ -485,13 +485,18 @@ static inline int lit_index(lit_t lp)
 #endif
 }
 
+static inline int literal_value(literal_t* lp)
+{
+    return (lp->sign < 0) ? -lp->var->value : lp->var->value;
+}
+
 static inline int lit_value(varp_t* vp, lit_t lp)
 {
 #ifdef LIT_INTEGER
     return (lp < 0) ? -vp->var_map[-lp]->value : vp->var_map[lp]->value;
 #else
     UNUSED(vp);
-    return (lp->sign < 0) ? -lp->var->value : lp->var->value;
+    return literal_value(lp);
 #endif
 }
 
@@ -1231,7 +1236,7 @@ static void cleanup(varp_t* vp)
 	for (i = 0; i < (int)vp->cnext; i++) {	
 	    clause_t* cp = vp->clause_map[i];
 	    if (cp != NULL)
-		clause_free(vp, cp);		
+		clause_free(vp, cp);
 	}
 	enif_free(vp->clause_map);
 	vp->clause_map = NULL;
@@ -2621,10 +2626,26 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     int lev, level0, level1, dead, nfalse;
     unsigned Tc=0, Fc=0;
 
-
     PRINT_LIT("   src", lit, size);
+
+    // replace level 0 variables with constants
+    for (i = 1; i < size; i++) {
+	if ((lit[i] == VARP_TRUE(vp)) || (lit[i] == VARP_FALSE(vp)))
+	    ;
+	else {
+	    literal_t* lp = lit_literal(vp, lit[i]);
+	    if (lp->var->level == 0) {
+		switch(literal_value(lp)) {
+		case TRUE: lit[i] = VARP_TRUE(vp); break;
+		case FALSE: lit[i] = VARP_FALSE(vp); break;
+		default: break;
+		}
+	    }
+	}
+    }
+    PRINT_LIT("   filt0", lit, size);
     
-    // first sort all literals by absolute value
+    // sort all literals by absolute value
     QSORT_R(lit+1, size-1, sizeof(lit_t), cmp_rev_abs_lit, vp);
 
     PRINT_LIT(" sorted", lit, size);
@@ -2713,11 +2734,19 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
 
     if (op != OR_CLAUSE) // !!! 
 	return enif_make_badarg(env);
-    
+
     // set watch points
 
     if (lit[size-1] == VARP_TRUE(vp))
 	return ATOM(true);
+
+    if (size == 2) {  // unit
+	if (lit[1] == VARP_FALSE(vp))
+	    return ATOM(false);
+	put_literal_level(vp, lit[1], VARP_TRUE(vp), -1, -1, 0);
+	// report as unit clause!?
+	return ATOM(true);
+    }
 
     if ((cp = clause_alloc(vp, op, size)) == NULL)
 	goto error;
