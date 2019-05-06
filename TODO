@@ -1,4 +1,24 @@
 
+
++ Add max conflict clause length i-order learning.
+
++ Add relevance bounded learning, example lru learning.
+
++ Back stumble j diff between last levels
+
+- Prove F => x1=x2= .. =xn
+ use models ex x1=x3=x7=1 x2=x4=x8=0 to construct
+ F => x1=x3=x7
+ etc
+
+- Strategy olle/stumble messure conflict clauses distances... something
+  to tune olle and stumble jump lengths.
+
++ add --seed to random generator
+
++ stumble_olle  stumbel AND olle (now it is OR)
+
+
 1. Test backtrack over multi value variables.
 
 Example x1...x8

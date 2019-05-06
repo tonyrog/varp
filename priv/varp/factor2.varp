@@ -1,0 +1,18 @@
+declare F1:(isize(n)-1);
+declare F2:((isize(n)+1)/2);
+declare X:(isize(n)-2);
+declare Y:(isize(n)-2);
+declare A:(2*(isize(n)-2));
+declare B:(isize(n)+1);
+
+order Y,X,A,B, -occur;
+
+(
+(n + B == A) &&
+(X*X == A) && (X > 0) &&
+(Y*Y == B) && (Y > 0) &&
+(X > Y) && 
+(F1 == (X+Y)) &&
+(F2 == (X-Y)) &&
+(F1 > 1) && (F2 > 1)
+)

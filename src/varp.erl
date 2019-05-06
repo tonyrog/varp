@@ -138,7 +138,6 @@ run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
       end, Fs).
 
 run(satisfy, Formula, Opts) ->
-    io:format("Opts = ~p\n", [Opts]),
     R = run_formula(Formula,Opts++[{value,true}]),
     result(R, satisfy);
 run(falsify, Formula, Opts) ->

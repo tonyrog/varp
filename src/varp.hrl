@@ -11,10 +11,15 @@
 -define(TRUE,   1).
 -define(FALSE, -1).
 
--define(NUM_COUNTERS, 3).
--define(COUNTER_CONFLICT_CLAUSES, 1).
--define(COUNTER_MINIMIZE_COUNT, 2).
--define(COUNTER_COMPRESS_CLAUSES, 3).
+-define(NUM_COUNTERS, 8).
+-define(COUNTER_CONFLICT_CLAUSES,   1).
+-define(COUNTER_MINIMIZE_COUNT,     2).
+-define(COUNTER_COMPRESS_CLAUSES,   3).
+-define(COUNTER_CONFLICT_LITERALS,  4).
+-define(COUNTER_STUMBLE_COUNT,      5).
+-define(COUNTER_OLLE_COUNT,         6).
+-define(COUNTER_STUMBLE_OLLE_COUNT, 7).
+-define(COUNTER_EVAL_COUNTER,       8).
 
 -record(cid,
 	{ 
@@ -80,7 +85,9 @@
 -record(bs,
 	{
 	 option = #{} :: map(), %% the options
-	 counters :: reference(), %% couters(?NUM_COUNTERS)
+	 counters :: reference(), %% counters(?NUM_COUNTERS)
+	 d1 :: reference(), %% counters(1024)
+	 d2 :: reference(), %% counters(1042)
 	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
 	 meta=[],            %% meta variable bindings during build

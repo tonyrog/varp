@@ -1,0 +1,15 @@
+// vertex color G
+//
+declare C(i):(isize(n));
+literals a, b, c, d, e, f;
+
+define Vs   {a,b,c,d,e,f};
+define Es   {{a,b},{a,c},{b,c},{b,d},{b,f},{d,e},{e,f}};
+
+([A {u,v}=Es](C(u) != C(v))) &&
+[A v=Vs](C(v) < n)
+
+
+
+
+

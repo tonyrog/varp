@@ -24,6 +24,7 @@
 -export([key/3]).
 -export([implication_clause/2]).
 -export([conflicting_clause/1]).
+-export([conflicting_clause/2]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([class_next/2]).
@@ -67,6 +68,7 @@
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
+-export([get_number_of_conflicting_clauses/1]).
 -export([get_number_of_bound_variables/1]).
 -export([get_number_of_unbound_variables/1]).
 -export([get_clause_eval_counter/1]).
@@ -120,8 +122,9 @@ info(_Vp, Item) when is_atom(Item) ->
     ?nif_stub().
 
 %% set config
-%%    permanent  -- number of clauses that are permanent
-%%    lru_size   -- size of lru cache for garbage collect conflict clauses
+%%    permanent       -- number of clauses that are permanent
+%%    lru_size        -- size of lru cache for garbage collect conflict clauses
+%%    max_conflicting -- max number of conflicting <= MAX_CONFLICTING
 %% 
 config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
@@ -181,7 +184,11 @@ implication_clause(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec conflicting_clause(Vp::varc()) -> Cix::integer().
-conflicting_clause(_Vp) ->
+conflicting_clause(Vp) ->
+    conflicting_clause(Vp, 0).
+
+-spec conflicting_clause(Vp::varc(), Index::integer()) -> Cix::integer().
+conflicting_clause(_Vp, _Index) ->
     ?nif_stub().
 
 -spec is_variable(Vp::varc(), Lit::literal()) -> boolean().
@@ -391,6 +398,7 @@ info_keys() ->
     [
      max_clause_length,
      number_of_clauses,
+     number_of_conflicting_clauses,
      number_of_variables,
      number_of_bound_variables,
      number_of_unbound_variables,
@@ -417,6 +425,9 @@ get_number_of_unbound_variables(Vp) ->
 
 get_number_of_clauses(Vp) ->
     info(Vp, number_of_clauses).
+
+get_number_of_conflicting_clauses(Vp) ->
+    info(Vp, number_of_conflicting_clauses).
 
 get_max_clause_length(Vp) ->
     info(Vp, max_clause_length).

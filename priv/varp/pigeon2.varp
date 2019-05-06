@@ -1,0 +1,8 @@
+//
+// integer / binary Pigeon hole formula input n
+// where P(p)=h where h=0..n-2, Pigeon p is in hole h
+//
+declare P(i):(isize(n));
+
+([A p=1..n] ((P(p)>0) && (P(p)<n)) ) &&
+([A p=1..n,q=1..n,p<q] (P(p) < P(q)) )

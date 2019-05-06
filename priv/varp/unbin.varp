@@ -1,0 +1,10 @@
+//
+// binary unuary coding
+//
+
+declare X(i):(isize(n));
+
+[A i=1..n] ((X(i) >= 0) && (X(i) < n)) &&
+[A i=1..n,j=1..n,i<j] (X(i) < X(j)) &&
+
+([A i=1..n,j=0..n-1] (Y(i,j) == (X(i)==j)))

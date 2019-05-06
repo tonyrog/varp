@@ -1,0 +1,20 @@
+//
+// integer / binary Pigeon hole formula input n
+// where P(p)=h where h=1..n-1, Pigeon p is in hole h
+//
+declare P(i):(isize(n));
+
+([A p=1..n] ((P(p)>0) && (P(p)<n))) &&
+([A p=1..n,q=1..n,p<q] (P(p) != P(q)))
+
+&&
+
+// Unary version
+( ([A p=1..n] [E h=1..(n-1)] P(p,h)) and
+  ([A h=1..(n-1)] [A p=1..n] [A q=1..n,p<q] not (P(p,h) and P(q,h))) )
+
+&&
+
+// connect the versions
+
+([A p=1..n,h=1..(n-1)] (P(p,h) == (P(p)==h)))

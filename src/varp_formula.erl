@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%% -define(DEBUG, true).
+%%-define(DEBUG, true).
 
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -44,6 +44,7 @@
 -export([is_unbound/2]).
 -export([getopt/2, setopt/3]).
 -export([number_of_variables/1]).
+-export([number_of_clauses/1]).
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
@@ -68,12 +69,16 @@
 -export([undo/1, undo/2]).
 -export([vfold_op/4]).
 -export([conflicting_clause/1]).
+-export([conflicting_clause/2]).
 -export([implication_clause/2]).
 -export([get_clause/2]).
 -export([get_clause_flags/2]).
 -export([add_clause/3]).
 -export([use_clause/2]).
+-export([del_clause/2]).
+-export([del_unused_clauses/1]).
 -export([set_var/3, add_var/4]).
+-export([config/3]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
@@ -110,6 +115,8 @@ new() ->
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{bcp,maps:get(bcp,OptMap)}]),
     Counters = counters:new(?NUM_COUNTERS, []),
+    Delta1   = counters:new(1024, []),
+    Delta2   = counters:new(1024, []),
     #bs {
        option = OptMap,
        vs = #{ true => ?TRUE,
@@ -121,6 +128,8 @@ new(OptMap) when is_map(OptMap) ->
        decls = maps:get(decls,OptMap),
        literals = maps:get(literals,OptMap),
        counters = Counters,
+       d1       = Delta1,
+       d2       = Delta2,
        vp    = Vp
       }.
 
@@ -243,6 +252,7 @@ add_clause(Bs,Op,Ls) ->
 		   end),
 	    I;
 	true ->
+	    %% io:format("clause : DEAD {~w,~w}\n", [Op,Ls]),
 	    ?dcall(fun() ->
 			   io:format("dead clause: ~s\n", 
 				     [format_clause(Bs,Ls)])
@@ -250,6 +260,11 @@ add_clause(Bs,Op,Ls) ->
 	    true
     end.
 		
+del_clause(Bs, Cix) ->
+    varc:del_clause(Bs#bs.vp, Cix).
+
+del_unused_clauses(Bs) ->
+    varc:del_unused_clauses(Bs#bs.vp).
 
 build_gate_tree(Bs,Op,X,Ls) ->
     case lists:split(length(Ls) div 2,Ls) of
@@ -375,6 +390,9 @@ value(Bs,V) ->
 	W -> W
     end.
 
+config(Bs, Item, Value) ->
+    varc:config(Bs#bs.vp, Item, Value).
+
 get_info(Bs) ->
     varc:get_info(Bs#bs.vp).
 
@@ -424,6 +442,9 @@ setopt(Bs,Key,Value) ->
 
 number_of_variables(Bs) ->
     varc:get_number_of_variables(Bs#bs.vp).
+
+number_of_clauses(Bs) ->
+    varc:get_number_of_clauses(Bs#bs.vp).
     
 number_of_bound(Bs) ->
     varc:get_number_of_bound_variables(Bs#bs.vp).
@@ -457,11 +478,14 @@ info(Bs,Fmt,As) -> ?info(Bs#bs.option, Fmt, As).
 
 debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
 
-get_bindings(Bs,Mark) when is_integer(Mark) -> 
-    varc:get_bindings(Bs#bs.vp, Mark).
+get_bindings(Bs,Level) when is_integer(Level) -> 
+    varc:get_bindings(Bs#bs.vp, Level).
 
 conflicting_clause(Bs) ->
-    varc:conflicting_clause(Bs#bs.vp).
+    conflicting_clause(Bs,0).
+
+conflicting_clause(Bs,I) ->
+    varc:conflicting_clause(Bs#bs.vp,I).
 
 implication_clause(Bs, V) ->
     varc:implication_clause(Bs#bs.vp, V).
@@ -834,7 +858,9 @@ build_({expr,Expr}, Bs) ->
     end;
 build_({vec,Fs}, Bs) ->
     {Xs,Bs1} = build_list(Fs, Bs),
-    {{bit,length(Xs),[bit(X)||X <- Xs]},Bs1};
+    Xs1 = join_vector(Xs),
+    %% io:format("vec=~p, join=~p\n", [Xs, Xs1]),
+    {{bit,length(Xs1),[bit(X)||X <- Xs1]},Bs1};
 build_({'=', V, F}, Bs) when is_atom(V) ->
     {Y,Bs1} = build__(F, Bs),
     operation_('=', V, Y, Bs1);
@@ -869,14 +895,15 @@ build_({bit_index,A,I},Bs) ->
 	X -> {select_bool(I1,1,[X]),Bs1}
     end;
 
-build_({bit_range,A,I,J},Bs) ->
+build_({bit_range,A,I,J,S},Bs) ->
     I1 = eval_meta(I,Bs),
     J1 = eval_meta(J,Bs),
+    S1 = eval_meta(S,Bs),
     case build__(A, Bs) of
-	{{uint,N,Xs}, Bs1} -> {select_range(I1,J1,N,Xs), Bs1};
-	{{int,N,Xs}, Bs1}  -> {select_range(I1,J1,N,Xs), Bs1};
-	{{bit,N,Xs}, Bs1}  -> {select_range(I1,J1,N,Xs), Bs1};
-	{X,Bs1} -> {select_range(I1,J1,1,[X]),Bs1}
+	{{uint,N,Xs}, Bs1} -> {select_range(I1,J1,S1,N,Xs), Bs1};
+	{{int,N,Xs}, Bs1}  -> {select_range(I1,J1,S1,N,Xs), Bs1};
+	{{bit,N,Xs}, Bs1}  -> {select_range(I1,J1,S1,N,Xs), Bs1};
+	{{bool,X}, Bs1}    -> {select_range(I1,J1,S1,1,[X]), Bs1}
     end;
 
 %% Fixme: implement shift for variable argument
@@ -1229,8 +1256,13 @@ eval_meta(V, Bs) when is_atom(V) -> %% old format still around
     Vn = atom_to_list(V),
     case proplists:lookup(Vn,Bs#bs.meta) of
 	none ->
-	    io:format("variable '~s' is not bound\n", [Vn]),
-	    error({unbound, Vn});
+	    case lists:member(V, Bs#bs.literals) of
+		true ->
+		    V;
+		false ->
+		    io:format("variable '~s' is not bound\n", [Vn]),
+		    error({unbound, Vn})
+	    end;
 	{_,W} -> 
 	    W
     end;
@@ -1566,19 +1598,33 @@ select_bool(I,N,Xs) when I >= 0, I < N ->
 select_bool(_I,_N,_Xs) ->
     {bool,?FALSE}.
 
+%% X[0:4] = {X[0],X[1],X[2],X[3],X[4]}
+%% X[4:0] = {X[4],X[3],X[2],X[1],X[0]}
+%% X[5:5] = {X[5]}
+%% X[0:-1] = {}
+ 
+select_range(I,J,Step,N,Xs) ->
+    M = max(max(I,J)+1,N),
+    Xs1 = list_to_tuple(vset_size(Xs, M)),
+    Range = lists:seq(I,J,Step),
+    {uint,length(Range), select_range_(Range,Xs1)}.
 
+select_range_([I|Is],Xs) ->
+    [element(I+1,Xs) | select_range_(Is, Xs)];
+select_range_([],_Xs) ->
+    [].
 
-%% FIXME: Extend Xs with ?FALSE as needed
-select_range(J,I,N,Xs) when J >= I, I>=0, J<N ->
-    N1 = (J-I)+1,
-    {uint,N1,lists:sublist(Xs,I+1,N1)};
-select_range(I,J,N,Xs) when J >= I, I>=0, J<N ->
-    N1 = (J-I)+1,
-    {uint,N1,lists:reverse(lists:sublist(Xs,I+1,N1))};
-select_range(I,J,_N,_Xs) ->
-    N1 = abs(I-J)+1,
-    {uint,N1,lists:duplicate(N1,?FALSE)}.
-
+%% given a list of mixed boolean and vector expression
+%% return a list of just booleans (expand vectors)
+join_vector([X|Xs]) ->
+    case X of
+	{bool,_} -> [X | join_vector(Xs)];
+	{bit,_N,Ys} -> [{bool,Y}||Y<-Ys] ++ join_vector(Xs);
+	{int,_N,Ys} -> [{bool,Y}||Y<-Ys] ++ join_vector(Xs);
+	{uint,_N,Ys} -> [{bool,Y}||Y<-Ys] ++ join_vector(Xs)
+    end;
+join_vector([]) ->
+    [].
 
 build_list(Fs, Bs) ->
     build_list_(Fs, [], Bs).
@@ -1588,6 +1634,7 @@ build_list_([F|Fs],Acc,Bs) ->
     build_list_(Fs,[X|Acc],Bs1);
 build_list_([],Acc,Bs) ->
     {reverse(Acc),Bs}.
+
 
 %%
 %% 

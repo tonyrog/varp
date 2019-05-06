@@ -240,7 +240,9 @@ odecl -> oexpr      : '$1'.
 %% bit collection
 oexpr -> pexpr                          : '$1'.
 oexpr -> pexpr '[' expr ']'             : {bit_index,'$1','$3'}.
-oexpr -> pexpr '[' expr ':' expr ']'    : {bit_range, '$1', '$3', '$5'}.
+oexpr -> pexpr '[' expr ':' expr ']'    : {bit_range, '$1', '$3', '$5', 1}.
+oexpr -> pexpr '[' expr ':' expr ':' expr ']'  : 
+	     { bit_range, '$1', '$3', '$5', '$7'}.
 oexpr -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 oexpr -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
 oexpr -> '!' pexpr                      : {'!', '$2'}.
@@ -270,7 +272,9 @@ lexpr0 -> lexpr_prim ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 lexpr0 -> lexpr_prim ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
 lexpr0 -> lexpr_prim ':' sexpr                : {uint,'$3','$1'}.
 lexpr0 -> lexpr0 '[' expr ']'           : { bit_index, '$1', '$3'}.
-lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bit_range, '$1', '$3', '$5'}.
+lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bit_range,'$1','$3','$5', 1}.
+lexpr0 -> lexpr0 '[' expr ':' expr ':' expr ']' :
+	      { bit_range,'$1','$3','$5','$7'}.
 
 lexpr1 -> lexpr0                  : '$1'.
 lexpr1 -> lexpr1 '*' lexpr0       : { op('$2'), '$1', '$3'}.

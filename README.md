@@ -61,3 +61,23 @@ Command line tool
         alert |
         emergency |
         none
+
+Backjump parameters
+
+    max_learned_clauses L
+	max_learned_factor  F
+	keep_factor         P
+    min_keep_clauses    K
+
+    MaxLearned = 
+		min(L, F*|Clauses|)      if L and F are both defined (> 0) then
+        F*|Clauses|              if F is defined
+        L                        if L is defined
+		inf                      otherwise
+
+    KeepSize = 
+		 inf                     if MaxLearned = inf
+		 max(K, P*MaxLearned)    if K and P are both defined
+         P*MaxLearned            if P is defined
+		 K                       if K is defined
+		 inf                     otherwise

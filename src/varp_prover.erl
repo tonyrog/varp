@@ -36,8 +36,13 @@ apply_opts_(false, Bs) ->
     display_order(Bs),
     false;
 apply_opts_(_, Bs) ->
-    Order = varp_formula:getopt(Bs,order),
-    varp_formula:order_sort(Bs,Order),
+    Seed = varp_formula:getopt(Bs,seed),
+    case varp_formula:getopt(Bs,order) of
+	[Key1,Key2] -> 
+	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
+	[Key1] -> 
+	    varp_formula:order_sort(Bs,Key1,undefined,Seed)
+    end,
     Bs1 = case varp_formula:getopt(Bs,order_first) of
 	      [] -> Bs;
 	      First -> varp_formula:order_sort_first(Bs,First)
@@ -204,9 +209,11 @@ pass_(Pass,Ps,X,Bs) ->
 	    Ts = Time/1000000,
 	    ClauseCount1 = varp_formula:clause_eval_counter(Bs),
 	    EvalCount1   = varp_formula:eval_counter(Bs),
-	    varp_formula:info(Bs, "    | eval: ~w, clause = ~w, time=~.2fs\n",
+	    Clauses1     = varp_formula:number_of_clauses(Bs),
+	    varp_formula:info(Bs, "    | eval: ~w, clause = ~w, #clauses = ~w, time=~.2fs\n",
 			      [EvalCount1-EvalCount0,
-			       ClauseCount1-ClauseCount0, Ts]),
+			       ClauseCount1-ClauseCount0,
+			       Clauses1,Ts]),
 	    case R of
 		false ->
 		    varp_formula:info(Bs,"    | contradiction\n", []),

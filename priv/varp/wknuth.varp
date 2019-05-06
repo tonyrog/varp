@@ -1,0 +1,16 @@
+//
+// Knuth variant of warden(j, k, n)
+//
+
+[A m=n/(j-1),d=1..m,i=1..n-(j-1)*d] [E u=0..(j-1)] X(i+u*d) &&
+[A m=n/(k-1),d=1..m,i=1..n-(k-1)*d] [E v=0..(k-1)] !X(i+v*d)
+
+
+// backjump:          EVAL
+// warden(4, 5, 54)   2007   warden(4, 5, 55)   5695
+// warden(4, 6, 72)   9772   warden(4, 6, 73)   ?
+//
+// warden(5, 3, 22)   747    warden(5, 3, 23)   964
+// warden(5, 4, 54)   1265   warden(5, 4, 55)   5899
+// warden(5, 5, 177)  14978  warden(5, 5, 178)  
+// 

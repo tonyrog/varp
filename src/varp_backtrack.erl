@@ -19,6 +19,7 @@ backtrack(false) ->
 backtrack(Bs) ->
     N     = varp_formula:getopt(Bs,max),
     Print = varp_formula:getopt(Bs,print),
+    varp_formula:config(Bs, max_conflicting, 1),
     case varp_formula:getopt(Bs,method) of
 	collect ->
 	    bt(Bs, fun({Count0,Acc},Bs1) ->

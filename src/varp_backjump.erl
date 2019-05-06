@@ -9,16 +9,21 @@
 
 -export([backjump/1]).
 
+%% -define(DEBUG, true).
+
 -include("varp.hrl").
 
 -define(TOP_LEVEL, 0).    %% constants
 %% -define(INIT_LEVEL, 1).
 
 -define(dbg0(F,As), ok).
--define(dbg(F,As), ok).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
+-define(dbg(F,A), ok).
 -define(dcall(Fun), ok).
-%%-define(dbg(F,As), io:format(F,As)).
-%%-define(dcall(Fun), Fun()).
+-endif.
 
 -compile(export_all).
 -import(varp_formula, [format_literal/2, format_literal/3]).
@@ -26,60 +31,265 @@
 -import(varp_formula, [format_clause/2, format_clause/3]).
 -import(varp_formula, [format_literals/2]).
 
+max_learned(Bs) ->
+    Permanent = varp_formula:get_info(Bs, permanent),
+    MaxLearnedClauses = varp_formula:getopt(Bs, max_learned_clauses),
+    MaxLearnedFactor = varp_formula:getopt(Bs, max_learned_factor),
+    io:format("Permanent=~w, MaxLearnedClause=~w, MaxLearnedFactor=~w\n",
+	      [Permanent, MaxLearnedClauses, MaxLearnedFactor]),
+    if MaxLearnedFactor > 0, MaxLearnedClauses > 0 ->
+	    min(MaxLearnedClauses,trunc(MaxLearnedFactor*Permanent));
+       MaxLearnedFactor > 0 ->
+	    trunc(MaxLearnedFactor*Permanent);
+       MaxLearnedClauses > 0 ->
+	    MaxLearnedClauses;
+       true ->
+	    0
+    end.
+
 backjump(false) ->
     false;
 backjump(Bs) ->
-    init(Bs).
+    varp_formula:config(Bs, max_conflicting, 0),
+    varp_formula:config(Bs, permanent, 0),
+    MaxLearned = max_learned(Bs),
+    %% Calculate size of lru cache
+    KeepFactor = varp_formula:getopt(Bs, keep_factor),
+    MinKeep    = varp_formula:getopt(Bs, min_keep_clauses),
+    KeepSize   = if MaxLearned =:= 0 ->
+			 0;
+		    KeepFactor > 0, MinKeep > 0 ->
+			 max(MinKeep, trunc(KeepFactor*MaxLearned));
+		    KeepFactor > 0 ->
+			 trunc(KeepFactor*MaxLearned);
+		    MinKeep > 0 ->
+			 MinKeep;
+		    true ->
+			 0
+		 end,
+    Permanent = varp_formula:get_info(Bs, permanent),
+    varp_formula:config(Bs, lru_size, KeepSize),
+    io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
+	      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]),
+    case varp_formula:getopt(Bs, restart_counter) of
+	0 -> ok;
+	_ ->
+	    EvalCounter = varp_formula:get_info(Bs, eval_counter),
+	    counters:put(Bs#bs.counters,?COUNTER_EVAL_COUNTER, EvalCounter)
+    end,
+    case varp_formula:getopt(Bs, restart_interval) of
+	0 -> ok;
+	RestartInterval ->
+	    erlang:start_timer(RestartInterval, self(), restart)
+    end,
+    init(Bs, MaxLearned).
 
-init(Bs) ->
-    loop(Bs,?TOP_LEVEL,varp_formula:first_init(Bs),[]).
+init(Bs, MaxLearned) ->
+    loop(Bs,?TOP_LEVEL,MaxLearned,varp_formula:first_init(Bs),[]).
 
-loop(Bs,Level,I,Stack) ->
+loop(Bs,Level,MaxLearned,I,Stack) ->
     Eval = varp_formula:eval(Bs),
-    ?dbg("loop bindings[~w]\n",[Level]),
-    format_bindings(Bs,Level),
     case Eval of
 	false ->
-	    ?dcall(fun() ->
-			   io:format("conflicting clause[~w]: ", [Level]),
-			   Cix = varp_formula:conflicting_clause(Bs),
-			   get_clause(Bs, Cix),
-			   io:format("~s\n",
-				     [
-				      format_clause(Bs,get_clause(Bs,Cix),
-						    true)])
-		   end),
 	    if Level =:= 0 ->
+		    display_stat(Bs),
 		    0;
 	       true ->
-		    contradiction(Bs,Level,I,Stack)
+		    contradiction(Bs,Level,MaxLearned,I,Stack)
 	    end;
 	true ->
-	    next(Bs,Level,I,Stack)
+	    next(Bs,Level,MaxLearned,I,Stack)
     end.
 
-contradiction(Bs,Level,_I,Stack) ->
-    {JLevel,Clause,_UIP} = conflict_analysis(Bs,Level),
-    ?dbg(" level=~w, jlevel=~w, uip=~s\n",
-	 [Level,JLevel,format_literal(Bs,_UIP)]),
+contradiction(Bs,Level,MaxLearned,_I,Stack) ->
+    ClauseList0 = conflict_analysis(Bs,Level),
+    ClauseList1 = 
+	lists:usort([ minimize(Bs, Clause) || Clause <- ClauseList0]),
+
+    LClauseList1 = [{length(Clause),Clause} || Clause <- ClauseList1],
+
+    LClauseList2 = lists:keysort(1, LClauseList1),
+    
+    %% 
+    {LUnitClauseList, LClauseList3} =
+	lists:splitwith(fun({L,_}) -> L =:= 1 end, LClauseList2),
+
+    %% UnitClauses
+    UnitClauses = lists:usort([Clause || {_,Clause} <- LUnitClauseList]),
+
+    JClauseList1 =
+	lists:map(
+	  fun({L,Clause}) ->
+		  case lists:sort(fun(A,B) -> A > B end,
+				  [implication_level(Bs,Q)||Q <- Clause]) of
+		      [J1,J2,J3|_] ->
+			  D1 = J1 - J2,
+			  D2 = J2 - J3,
+			  {L,D1,D2,J2,J3,Clause};
+		      [J1,J2] ->
+			  J3 = ?TOP_LEVEL,
+			  D1 = J1 - J2,
+			  D2 = J2 - J3,
+			  {L,D1,D2,J2,J3,Clause}
+		  end
+	  end, LClauseList3),
+
+    JClauseList2 =
+	lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Clausea},
+		       {Lb,D1b,_D2b,_J2b,_J3b,_Clauseb}) ->
+			   if D1a =:= D1b -> La < Lb;
+			      true -> D1a > D1b
+			   end
+		   end, JClauseList1),
+
+    {JClause,LClauseList4} =
+	if UnitClauses =:= [] ->
+		[JC | JCList3] = JClauseList2,
+		{JC,[{L,Clause} || {L,_D1,_D2,_J2,_J3,Clause} <- JCList3]};
+	   true ->
+		{undefined,
+		 [{L,Clause} || {L,_D1,_D2,_J2,_J3,Clause} <- JClauseList2]}
+	end,
+
+    LClauseList5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
+			      LClauseList4),
+
+    LClauseList6 = 
+	case varp_formula:getopt(Bs, iorder) of
+	    0 -> 
+		LClauseList5;
+	    IOrder ->
+		lists:takewhile(fun({La,_}) -> La =< IOrder end, 
+				LClauseList5)
+	end,
+
+    LClauseList7 = case varp_formula:getopt(Bs, max_conflicts) of
+		       0 -> 
+			   LClauseList6;
+		       1 ->
+			   [];
+		       MaxC ->
+			   lists:sublist(LClauseList6, MaxC-1)
+		   end,
+
+    L = varp_formula:getopt(Bs,stumble),
+    K = varp_formula:getopt(Bs,olle),
+    M = varp_formula:getopt(Bs,stumble_olle),
+
+    JLevel =
+	case JClause of
+	    undefined -> ?TOP_LEVEL;
+	    {_L,D1,D2,J2,J3,_} -> do_jump(Bs,L,K,M,D1,D2,J2,J3)
+	end,
+
+    ?dbg(" level=~w, jlevel=~w\n",
+	 [Level,JLevel]),
+
     ?dcall(fun() -> io:format("stack[~w]: ", [Level]),
 		    display_stack_ln(Bs, Stack),
 		    io:format("\n", [])
 	   end),
     ?dbg("undo[~w]: ~w\n", [Level, JLevel+1]),
+
     varp_formula:undo(Bs, JLevel+1),
     varp_formula:mark(Bs, JLevel),
-    {K,Stack1} = backjump(Bs,Stack,JLevel),
+    {INext,Stack1} = backjump(Bs,Stack,JLevel),
     ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
 		    display_stack_ln(Bs, Stack1),
 		    io:format("\n", [])
 	   end),
-    ?dbg("conflict clause ~s\n", [format_clause(Bs,Clause,true)]),
-    Clause1 = minimize(Bs, Clause),
-    ?dbg("minimized conflict clause ~s\n", [format_clause(Bs,Clause1,true)]),
-    Clause2 = compress(Bs, Clause1),
-    Bs1 = add_conflict_clause(Bs,Clause2),
-    loop(Bs1,JLevel,K,Stack1).
+
+    %% install unit clauses
+    Bs0 = lists:foldl(
+	    fun(Clause,Bsi) ->
+		    add_conflict_clause(Bsi,Clause)
+	    end, Bs, UnitClauses),
+
+    %% install length clauses
+    Bs1 = lists:foldl(
+	    fun({_,Clause},Bsi) ->
+		    add_conflict_clause(Bsi,Clause)
+	    end, Bs0, LClauseList7),
+    
+    Bs2 = case JClause of
+	      undefined ->
+		  Bs1;
+	      {_Len,_D1,_D2,_J2,_J3,Clause} ->
+		  add_conflict_clause(Bs1,Clause)
+	  end,
+
+    Learned0 = varp_formula:get_info(Bs2, number_of_learned_clauses),
+    NewLearnedClauses = length(LClauseList7) +
+	if JClause =:= undefined -> 0; true -> 1 end,
+    Learned = Learned0 + NewLearnedClauses,
+    DoPurge = varp_formula:get_info(Bs2, lru_size) > 0,
+
+    DoRestartCount =
+	case varp_formula:getopt(Bs, restart_counter) of
+	    0 -> false;
+	    RestartCounter ->
+		EvalCounter = varp_formula:get_info(Bs, eval_counter),
+		PrevCounter = counters:get(Bs#bs.counters,
+					   ?COUNTER_EVAL_COUNTER),
+		if (EvalCounter - PrevCounter) >= RestartCounter ->
+			counters:put(Bs#bs.counters,?COUNTER_EVAL_COUNTER,
+				     EvalCounter),
+			true;
+		   true ->
+			false
+		end
+	end,
+    DoRestartTime = 
+	receive 
+	    {timeout,_Timer,restart} ->
+		RestartInterval = varp_formula:getopt(Bs, restart_interval),
+		erlang:start_timer(RestartInterval, self(), restart),
+		true
+	after 0 ->
+		false
+	end,
+
+    DoRestart = DoRestartCount orelse DoRestartTime,
+
+    if DoPurge, JLevel =:= ?TOP_LEVEL ->
+	    if Learned >= MaxLearned ->
+		    varp_formula:del_unused_clauses(Bs),
+		    %% Re-order literals
+		    Seed = varp_formula:getopt(Bs,seed),
+		    varp_formula:order_sort(Bs,'-occur',undefined,Seed);
+	       true ->
+		    %% but we can re-order literals?
+		    ok
+	    end,
+	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
+	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w!\n", 
+		      [Learned, MaxLearned,Learned1]),
+	    %%
+	    init(Bs, MaxLearned);
+       DoPurge, Learned >= MaxLearned ->
+	    %% restart and purge!
+	    varp_formula:undo(Bs, ?TOP_LEVEL+1),
+	    varp_formula:mark(Bs, ?TOP_LEVEL),
+	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
+	    varp_formula:del_unused_clauses(Bs),
+	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
+	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
+		      [Learned, MaxLearned,Learned1]),
+	    Seed = varp_formula:getopt(Bs,seed),
+	    varp_formula:order_sort(Bs,'-occur',undefined,Seed),
+
+	    init(Bs, MaxLearned);
+       DoRestart ->
+	    io:format("RESTART Count=~w, Time=~w\n", 
+		      [DoRestartCount, DoREstartTime]),
+	    varp_formula:undo(Bs, ?TOP_LEVEL+1),
+	    varp_formula:mark(Bs, ?TOP_LEVEL),
+	    Seed = varp_formula:getopt(Bs,seed),
+	    varp_formula:order_sort(Bs,'-occur',undefined,Seed),
+	    init(Bs, MaxLearned);
+       true ->
+	    loop(Bs2,JLevel,MaxLearned,INext,Stack1)
+    end.
 
 backjump(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
     backjump(Bs,Stack,JLevel);
@@ -89,7 +299,7 @@ backjump(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
 backjump(Bs,[],_JLevel) ->
     {varp_formula:first_init(Bs), []}.
 
-next(Bs,Level,I,Stack) ->
+next(Bs,Level,MaxLearned,I,Stack) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
 	    model(Bs),
@@ -100,17 +310,65 @@ next(Bs,Level,I,Stack) ->
 	    varp_formula:mark(Bs,NextLevel),
 	    true = varp_formula:equal(Bs,Xj,?TRUE),
 	    ?dbg("decision[~w] = ~s\n", [NextLevel,format_literal(Bs,Xj)]),
-	    loop(Bs,NextLevel,J,[{J,Xj,NextLevel}|Stack])
+	    loop(Bs,NextLevel,MaxLearned,J,[{J,Xj,NextLevel}|Stack])
+    end.
+
+%% J2 is backjump level, J3 is backstumble level
+%% D2 is level to backjump delta, D3 is backjump to two free literal level
+%% L min stumble limit, K is factor bwteen D1 and D2
+do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
+    if  M, L > 0, D2 >= L, K > 0, D2 > 0, D1 >= K*D2 ->
+	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_OLLE_COUNT, 1),
+	    J3;
+	L > 0, D2 >= L -> 
+	    counters:add(Bs#bs.counters, 
+			 ?COUNTER_STUMBLE_COUNT, 1),
+	    J3;
+	K > 0, D2 > 0, D1 >= K*D2 ->
+	    counters:add(Bs#bs.counters,
+			 ?COUNTER_OLLE_COUNT, 1),
+	    J3;
+	true -> 
+	    J2
+    end.
+    
+
+do_stat(Bs, D1, D2) ->
+    if D1 >= 1023 ->
+	    counters:add(Bs#bs.d1, 1024, 1);
+       true ->
+	    counters:add(Bs#bs.d1, D1+1, 1)
+    end,
+    if D2 >= 1023 ->
+	    counters:add(Bs#bs.d2, 1024, 1);
+       true ->
+	    counters:add(Bs#bs.d2, D2+1, 1)
     end.
 
 
 display_stat(Bs) ->
     io:format("num conflict clauses added: ~w\n", 
 	      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
+    io:format("num conflict ilterals: ~w\n",
+	      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS)]),
     io:format("num ilterals removed: ~w\n",
 	      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
     io:format("compression saved bits: ~w\n",
 	      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
+    io:format("usage stumble counter: ~w\n",
+	      [counters:get(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT)]),
+    io:format("usage olle counter: ~w\n",
+	      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
+    %% delta usage histograms
+    %% back jump distances
+    lists:foreach(fun(D) ->
+			  case {counters:get(Bs#bs.d1, D+1),
+				counters:get(Bs#bs.d2, D+1)} of
+			      {0,0} -> ok;
+			      {N,M} -> 
+				  io:format("~w: d1=~w, d2=~w\n", [D,N,M])
+			  end
+		  end, lists:seq(0,1023)),
     ok.
 
 model(Bs) ->
@@ -136,6 +394,8 @@ add_conflict_clause(Bs,Clause) ->
        true ->
 	    varp_formula:add_clause(Bs, 'or', [?TRUE|Clause]),
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
+	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,
+			 length(Clause)),
 	    Bs
     end.
 
@@ -163,7 +423,7 @@ compress(Bs,Clause) ->
 	    Clause
     end.
 
-compress_([L1|Ls=[L2|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
+compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
 compress_([_Ln]) -> [].
 
 minimize(_Bs,[]) -> [];
@@ -184,7 +444,7 @@ minimize(Bs,Clause0) ->
 		    Clause1
 	    end;
 	false ->
-	    Clause0
+	    sort_abs_clause(Clause0)
     end.
 
 minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
@@ -192,7 +452,6 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 	-1 ->
 	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
-	    varp_formula:use_clause(Bs, I),
 	    A = get_clause(Bs,I),
 	    %% io:format("implication clause of ~w = ~w\n", [-Li, A]),
 	    %% if A-{Li} is a subset of Clause then remove Li from clause
@@ -204,69 +463,61 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 	    end
     end;
 minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
-    {Removed,Length,NewClause}.
+    {Removed,Length,lists:reverse(NewClause)}.
 
 conflict_analysis(Bs,Level) ->
     Trail= [P|_] = get_literal_bindings(Bs,Level),
-    ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
-    conflict_trail(Bs,-P,varp_formula:conflicting_clause(Bs),
-		   conflict_reason(Bs,-P),
-		   Trail,Level,sets:from_list([abs(P)]),1,[]).
+    %% ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
+    Seen0 = #{ abs(P) => true }, %% a set of traversed literals
+    N = varp_formula:get_info(Bs,num_conflicting),
+    CList = [ {I,varp_formula:conflicting_clause(Bs,I)} || 
+		I <- lists:seq(0, N-1)],
+    M = varp_formula:getopt(Bs, num_conflicts),
+    L = if M =:= 0 -> N;
+	   true -> min(M, N)
+	end,
+    [ begin
+	  Ri = conflicting_reason(Bs,-P,I),
+	  varp_formula:use_clause(Bs, I),
+	  ?dbg("reason[~w] cix=~w: ~s,~s\n", 
+	       [I,_Cix,format_literal(Bs,-P),
+		format_literals(Bs,Ri)]),
+	  conflict_reason(Bs,Ri,Trail,Level,Seen0,1,[])
+      end || {I,_Cix} <- lists:sublist(CList, L)].
 
-conflict_trail(Bs,_P,_Ci,Reason,Trail,Level,Seen,C,CL) ->
-    ?dbg0("reason ~s:~w = ~s\n", 
-	  [format_literal(Bs,_P),_Ci,format_literals(Bs,Reason)]),
-    conflict_reason(Bs,Trail,Reason,Level,Seen,C,CL).
-
-conflict_reason(Bs,Trail,[Q|Qs],Level,Seen,C,CL) ->
-    case sets:is_element(abs(Q),Seen) of
-	false ->
-	    Seen1 = sets:add_element(abs(Q),Seen),
+	  
+conflict_reason(Bs,[Q|Qs],Trail,Level,Seen,C,CL) ->
+    AbsQ = abs(Q),
+    case Seen of
+	#{ AbsQ := true } ->
+	    conflict_reason(Bs,Qs,Trail,Level,Seen,C,CL);
+	_ ->
+	    Seen1 = Seen# { AbsQ => true },
 	    QLevel = implication_level(Bs,Q),
 	    if QLevel =:= Level ->
-		    conflict_reason(Bs,Trail,Qs,Level,Seen1,C+1,CL);
+		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C+1,CL);
 	       QLevel =< ?TOP_LEVEL -> %% filter constants
-		    conflict_reason(Bs,Trail,Qs,Level,Seen1,C,CL);
+		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C,CL);
 	       true ->
-		    conflict_reason(Bs,Trail,Qs,Level,Seen1,C,[Q|CL])
-	    end;
-	true ->
-	    conflict_reason(Bs,Trail,Qs,Level,Seen,C,CL)
+		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C,[Q|CL])
+	    end
     end;
-conflict_reason(Bs,Trail,[],Level,Seen,C,CL) ->
+conflict_reason(Bs,[],Trail,Level,Seen,C,CL) ->
     conflict_seen(Bs,Trail,Level,Seen,C,CL).
 
 conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
-    case sets:is_element(abs(P),Seen) of
-	false ->
-	    conflict_seen(Bs,Trail,Level,Seen,C,CL);
-	true ->
+    AbsP = abs(P),
+    case Seen of
+	#{ AbsP := true } ->
 	    if  C =< 1, CL =:= [] ->
-		    %% implication_level = decision_level ...
-		    ?dcall(fun() ->
-				   io:format("level: ~s@~w\n",
-					     [format_literal(Bs,P),
-					      implication_level(Bs,P)])
-			   end),
-		    {implication_level(Bs,P)-1,[-P],P};
+		    [-P];
 		C =< 1 ->
-		    CM = [-P|CL],
-		    ?dcall(fun() ->
-				   io:format("level: "),
-				   [begin
-					io:format("~s@~w ",
-						  [format_literal(Bs,I),
-						   implication_level(Bs,I)])
-				    end || I<-CM],
-				   io:format("\n")
-			   end),
-		    JLevel = lists:max([implication_level(Bs,I)||I<-CL]),
-		    {JLevel,CM,P};
-	       true ->
-		    conflict_trail(Bs,P,implication_clause(Bs,P),
-				   reason(Bs,P),
-				   Trail,Level,Seen,C-1,CL)
-	    end
+		    [-P|CL];
+		true ->
+		    conflict_reason(Bs,reason(Bs,P),Trail,Level,Seen,C-1,CL)
+	    end;
+	_ ->
+	    conflict_seen(Bs,Trail,Level,Seen,C,CL)
     end.
 
 reason(Bs,P) ->
@@ -275,12 +526,11 @@ reason(Bs,P) ->
 	I -> get_clause(Bs,I) -- [P]
     end.
 
-conflict_reason(Bs,P) ->
-    case varp_formula:conflicting_clause(Bs) of
+conflicting_reason(Bs,P,I) ->
+    case varp_formula:conflicting_clause(Bs,I) of
 	-1 -> [];
-	I -> get_clause(Bs,I) -- [P]
+	Ci -> get_clause(Bs,Ci) -- [P]
     end.
-
 
 %% check if As is a subset of Bs
 is_subclause(As, Li, Bs) ->

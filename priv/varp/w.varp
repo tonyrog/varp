@@ -3,8 +3,6 @@
 //  input is r = numer of colors  k = length of sequnce n = number of
 //  buckets
 //
-([A i=1..n]
-     [EQ 1, c=0..(r-1)] S(i,c)) ->
-([E c=0..(r-1)]
-      [E g=0..((n-k)/(k-1)),i=0..(n-(g*k+k-g))]
-      	   [A j=0..(k-1)] S(i+(g+1)*j+1,c))
+([A i=1..n][EQ 1, c=0..(r-1)] S(i,c)) ->
+    ([E c=0..(r-1)] [E g=0..((n-k)/(k-1)),i=0..(n-(g*k+k-g))]
+    	[A j=0..(k-1)] S(i+(g+1)*j+1,c))

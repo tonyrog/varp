@@ -37,6 +37,7 @@
 	{"false",false},
 	{"1",true},
 	{"0",false}).
+
 -define(ORDER,
 	{"undefined", undefined},
 	{"identity",  identity},
@@ -271,6 +272,84 @@ options() ->
 	     default => [],  %% ordset
 	     description => "Internal list of all literals"},
 
+    V27 = #{ long => "iorder",
+	     key => iorder,
+	     spec => unsigned,
+	     default => 0,
+	     description => "max conflict clause length"},
+
+    V28 = #{ long => "stumble",
+	     key => stumble,
+	     spec => unsigned,
+	     default => 0,
+	     description => "extra backjump level"},
+
+    V29 = #{ long => "olle",
+	     key => olle,
+	     spec => float,
+	     default => 0,
+	     description => "extra backjump factor"},
+
+    V30 = #{ long => "stumble_olle",
+	     key => stumble_olle,
+	     spec =>  {enum,[?BOOL]},
+	     default => false,
+	     description => "both backjump and factor"},
+
+    V31 = #{ long => "seed",
+	     key => seed,
+	     spec => integer,
+	     default => -1,
+	     description => "random seed"},
+
+    V33 = #{ long => "max_conflicts",
+	     key => max_conflicts,
+	     spec =>  unsigned,
+	     default => 0,
+	     description => "max number of conflicts to generate per conflict"},
+
+    V34 = #{ long => "num_conflicts",
+	     key => num_conflicts,
+	     spec =>  unsigned,
+	     default => 1,
+	     description => "number of conflicts to analyse"},
+
+    V35 = #{ long => "max_learned_clauses",
+	     key => max_learned_clauses,
+	     spec =>  unsigned,
+	     default => 0,
+	     description => "Max number of clauses to generate in learning"},
+
+    V36 = #{ long => "max_learned_factor",
+	     key => max_learned_factor,
+	     spec =>  float,
+	     default => 0,
+	     description => "Factor to calculate number of learned clauses"},
+
+    V37 = #{ long => "keep_factor",
+	     key => keep_factor,
+	     spec =>  float01,
+	     default => 0.5,
+	     description => "Number of clauses to keep"},
+
+    V38 = #{ long => "min_keep_clauses",
+	     key => min_keep_clauses,
+	     spec =>  unsigned,
+	     default => 0,
+	     description => "Min number of clauses to keep"},
+
+    V39 = #{ long => "restart_counter",
+	     key => restart_counter,
+	     spec =>  unsigned,
+	     default => 0,
+	     description => "Number of counts/eval until restart"},
+
+    V40 = #{ long => "restart_interval",
+	     key => restart_interval,
+	     spec =>  unsigned,
+	     default => 0,
+	     description => "Restart interval in milliseconds"},
+
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
        print => V2, "print" => V2, "p" => V2,
@@ -304,7 +383,21 @@ options() ->
        defs => V22,
        decls => V23,
        literals => V26,
-       saturations => V25
+       saturations => V25,
+       %% Backjump options
+       iorder => V27, "iorder" => V27, "i" => V27,
+       stumble => V28, "stumble" => V28, 
+       olle => V29, "olle" => V29,
+       stumble_olle => V30, "stumble_olle" => V30,
+       seed => V31, "seed" => V31,
+       max_conflicts => V33, "max_conflicts" => V33,
+       num_conflicts => V34, "num_conflicts" => V34,
+       max_learned_clauses => V35, "max_learned_clauses" => V35,
+       max_learned_factor => V36, "max_learned_factor" => V36,
+       keep_factor => V37, "keep_factor" => V37,
+       min_keep_clauses => V38, "min_keep_clauses" => V38,
+       restart_counter=>V39, "restart_counter"=>V39,
+       restart_interval=>V40, "restart_interval"=>V40
      }.
 
 %% list of options with unique key
@@ -462,6 +555,28 @@ match_val_(unsigned, Val) ->
     catch
 	error:badarg -> false
     end;
+match_val_(float, Val) ->
+    try list_to_float(Val) of
+	F -> {ok,F}
+    catch
+	error:badarg ->
+	    try list_to_integer(Val) of
+		I -> {ok,float(I)}
+	    catch
+		error:badarg -> false
+	    end
+    end;
+match_val_(float01, Val) ->
+    try list_to_float(Val) of
+	F -> {ok,F}
+    catch
+	error:badarg ->
+	    try list_to_integer(Val) of
+		I -> {ok,float(I)}
+	    catch
+		error:badarg -> false
+	    end
+    end;
 match_val_(string, Val) ->
     {ok,Val};
 match_val_({enum,List}, Val) when is_list(List) ->
@@ -552,6 +667,8 @@ format_spec({multiple,T}) -> "{"++format_spec(T)++"}*";
 format_spec({list,T}) -> "["++format_spec(T)++"]";
 format_spec(unsigned) -> "unsigned integer";
 format_spec(integer)  -> "integer";
+format_spec(float)    -> "float";
+format_spec(float01)  -> "float01";
 format_spec(string)   -> "string";
 format_spec(variable) -> "variable";
 format_spec(literal)  -> "literal";
@@ -681,6 +798,10 @@ validate_value(_Key,unsigned,Value,_Old) ->
     is_integer(Value) andalso Value >= 0;
 validate_value(_Key,integer,Value,_Old) ->
     is_integer(Value);
+validate_value(_Key,float,Value,_Old) ->
+    is_number(Value);
+validate_value(_Key,float01,Value,_Old) ->
+    is_float(Value) andalso (Value > 0.0) andalso (Value < 1.0);
 validate_value(_Key,string,Value,_Old) ->
     is_string(Value);
 validate_value(_Key,atom,Value,_Old) ->
