@@ -1,4 +1,19 @@
 
+- simulator gui backjump
+
+  Design GUI to track simple examples ~30-40 clauses
+  and conflict clauses and assignments levels
+
+- Statistcs
+
+  histogram over conflict clause lengths added
+
+  histogram over number conflicts analysed generated per conflict
+
+  histogram over eval implication chain lengths?
+
+  historgram over backjump/backstumble distance.
+  
 
 + Add max conflict clause length i-order learning.
 

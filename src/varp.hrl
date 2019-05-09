@@ -86,8 +86,9 @@
 	{
 	 option = #{} :: map(), %% the options
 	 counters :: reference(), %% counters(?NUM_COUNTERS)
-	 d1 :: reference(), %% counters(1024)
-	 d2 :: reference(), %% counters(1042)
+	 d1 :: reference(),   %% histogram delta1 counters(1024)
+	 d2 :: reference(),   %% histogram delta2 counters(1024)
+	 clen :: reference(), %% histogram clause len counters(1024)
 	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
 	 meta=[],            %% meta variable bindings during build

@@ -179,7 +179,9 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
     JLevel =
 	case JClause of
 	    undefined -> ?TOP_LEVEL;
-	    {_L,D1,D2,J2,J3,_} -> do_jump(Bs,L,K,M,D1,D2,J2,J3)
+	    {_L,D1,D2,J2,J3,_} -> 
+		do_stat(Bs,D1,D2),
+		do_jump(Bs,L,K,M,D1,D2,J2,J3)
 	end,
 
     ?dbg(" level=~w, jlevel=~w\n",
@@ -202,12 +204,14 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
     %% install unit clauses
     Bs0 = lists:foldl(
 	    fun(Clause,Bsi) ->
+		    do_clause_stat(Bsi, 1),
 		    add_conflict_clause(Bsi,Clause)
 	    end, Bs, UnitClauses),
 
     %% install length clauses
     Bs1 = lists:foldl(
-	    fun({_,Clause},Bsi) ->
+	    fun({Len,Clause},Bsi) ->
+		    do_clause_stat(Bsi, Len),
 		    add_conflict_clause(Bsi,Clause)
 	    end, Bs0, LClauseList7),
     
@@ -215,6 +219,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	      undefined ->
 		  Bs1;
 	      {_Len,_D1,_D2,_J2,_J3,Clause} ->
+		  do_clause_stat(Bs1, length(Clause)),
 		  add_conflict_clause(Bs1,Clause)
 	  end,
 
@@ -281,7 +286,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	    init(Bs, MaxLearned);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
-		      [DoRestartCount, DoREstartTime]),
+		      [DoRestartCount, DoRestartTime]),
 	    varp_formula:undo(Bs, ?TOP_LEVEL+1),
 	    varp_formula:mark(Bs, ?TOP_LEVEL),
 	    Seed = varp_formula:getopt(Bs,seed),
@@ -331,7 +336,13 @@ do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
 	true -> 
 	    J2
     end.
-    
+
+do_clause_stat(Bs, Len) ->
+    if Len >= 1023 ->
+	    counters:add(Bs#bs.clen, 1024, 1);
+       true ->
+	    counters:add(Bs#bs.clen, Len, 1)
+    end.
 
 do_stat(Bs, D1, D2) ->
     if D1 >= 1023 ->
@@ -361,6 +372,7 @@ display_stat(Bs) ->
 	      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
     %% delta usage histograms
     %% back jump distances
+    io:format("Backjump deltas used\n", []),
     lists:foreach(fun(D) ->
 			  case {counters:get(Bs#bs.d1, D+1),
 				counters:get(Bs#bs.d2, D+1)} of
@@ -369,6 +381,18 @@ display_stat(Bs) ->
 				  io:format("~w: d1=~w, d2=~w\n", [D,N,M])
 			  end
 		  end, lists:seq(0,1023)),
+    io:format("Conflict clauses installed\n", []),
+    lists:foreach(fun(L) ->
+			  case counters:get(Bs#bs.clen, L) of
+			      0 -> ok;
+			      N ->
+				  if L =:= 1024 ->
+					  io:format(">1024: ~w\n", [N]);
+				     true ->
+					  io:format("~w: ~w\n", [L,N])
+				  end
+			  end
+		  end, lists:seq(1,1024)),
     ok.
 
 model(Bs) ->

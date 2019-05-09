@@ -117,6 +117,7 @@ new(OptMap) when is_map(OptMap) ->
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
+    CLen     = counters:new(1024, []),
     #bs {
        option = OptMap,
        vs = #{ true => ?TRUE,
@@ -130,6 +131,7 @@ new(OptMap) when is_map(OptMap) ->
        counters = Counters,
        d1       = Delta1,
        d2       = Delta2,
+       clen     = CLen,
        vp    = Vp
       }.
 
