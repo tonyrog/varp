@@ -467,6 +467,64 @@ DECL_ATOM(reset);
 DECL_ATOM(permanent);
 DECL_ATOM(lru_size);
 
+
+#define EXT  0x80
+#define SIGN 0x40
+#define MASK0 0x3f
+#define MASK  0x7f
+
+// NB  MAXLEN
+// 1   6  |0|s| b6..b0|
+// 2   13 |1|s| b6..b0||0|b7..b0|
+// 3   20 |1|s| b6..b0||1|b7..b0||0|b7..b0|
+// 4   27 |1|s| b6..b0||1|b7..b0||1|b7..b0||0|b7..b0|
+// 5   34 |1|s| b6..b0||1|b7..b0||1|b7..b0||1|b7..b0||0|b7..b0|
+#ifdef NOT_USED
+static int compress_int(int li, uint8_t* ptr)
+{
+    uint8_t sign = 0;
+    uint8_t ext  = 0;
+    int len, nb;
+    
+    if (li < 0) {
+	sign = SIGN;
+	li = -li;
+    }
+    
+    if (li <= MASK0) {
+	len = 6;
+	nb  = 1;
+    }
+    else {
+	len = sizeof(int)*8 - __builtin_clz(li);
+	nb = 1 + (((len - 6) + 6) / 7);
+    }
+    ptr = ptr + nb;
+    while(len > 6) {
+	*--ptr = (li & MASK) | ext;
+	ext = EXT;
+	li >>= 7;
+	len -= 7;
+    }
+    *--ptr = (li & MASK0) | ext | sign;
+    return nb;
+}
+
+static int decompress_int(uint8_t* ptr)
+{
+    uint8_t code = *ptr++;
+    int li = code & MASK0;
+    int sign = code & SIGN;
+
+    while(code & EXT) {
+	code = *ptr++;
+	li = (li << 7) | (code & MASK);
+    }
+    if (sign)
+	li = -li;
+    return li;
+}
+#endif
 static uint32_t djb_hash(uint8_t* ptr, size_t len)
 {
     uint32_t h = 5381;
