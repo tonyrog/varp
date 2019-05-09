@@ -1099,7 +1099,7 @@ build_quant_(F,[#cassign{op='=',lhs=V,rhs=D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_quant_domain(F, V, Ds, Qs, Bs);
 %% predicate expansion
-build_quant_(F, [#ccall{ func=#cid{name=Def},args=Args}|Qs], Bs) ->
+build_quant_(_F, [#ccall{ func=#cid{name=_Def},args=_Args}|_Qs], Bs) ->
     %% lookup Def
     {[], Bs};
 

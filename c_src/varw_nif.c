@@ -21,6 +21,8 @@
 
 //#define DEBUG
 //#define PACKED_VALUE     // values are packed (now in 8 bit values)
+#define LIFO_LITERAL       // push literals on stack
+// #define FIFO_LITERAL       // put literals on queue
 
 // Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
@@ -693,12 +695,13 @@ static void* varp_alloc(allocator_t* ap)
     return ptr;
 }
 
+#ifdef NOT_USED
 static void varp_free(allocator_t* ap, void* ptr)
 {
     ((object_t*)ptr)->next = ap->free_list;
     ap->free_list = (object_t*)ptr;
 }
-
+#endif
 
 static void arc4_init(arc4_stream_t *as)
 {
@@ -869,6 +872,7 @@ static void lqueue_clear(lqueue_t* q)
     lqueue_init(q);
 }
 
+#ifdef FIFO_LITERAL
 static void lqueue_enq(varp_t* vp, lit_t lp)
 {
     lqueue_t* q = &vp->q;
@@ -881,7 +885,9 @@ static void lqueue_enq(varp_t* vp, lit_t lp)
     q->tail = &(mp->qlink);
     q->size++;
 }
+#endif
 
+#ifdef LIFO_LITERAL
 static void lqueue_push(varp_t* vp, lit_t lp)
 {
     lqueue_t* q = &vp->q;
@@ -895,6 +901,7 @@ static void lqueue_push(varp_t* vp, lit_t lp)
 	q->tail = &(mp->qlink);
     q->size++;
 }
+#endif
 
 static literal_t* lqueue_deq(varp_t* vp)
 {
@@ -924,11 +931,12 @@ static inline void set_literal_level(varp_t* vp,lit_t lp,int value,
     var->level = level;
 }
 
+#ifdef NOT_USED
 static void set_literal(varp_t* vp,lit_t lp,int value,long li,int cix)
 {
     set_literal_level(vp, lp, value, li, cix, vp->level);
 }
-
+#endif
 
 // put value set_literal and push the correct literal on queue
 // put (X, TRUE)   => enq(!X)   1  1  negate(X)
@@ -2354,6 +2362,7 @@ found:
 #define PRINT_CLAUSE(vp,msg,cp)
 #endif
 
+#ifdef DEBUG
 static void print_lit(char* label, lit_t* lit, size_t size)
 {
     if (size == 0)
@@ -2377,6 +2386,7 @@ static void print_clause(varp_t* vp, char* label, clause_t* cp)
 	printf(",%d/%d",lit_index(cp->lit[k]),lit_value(vp,cp->lit[k]));
     printf("}\r\n");
 }
+#endif
 
 // eval clause
 // return 0 non conclusive
