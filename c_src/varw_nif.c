@@ -206,14 +206,12 @@ typedef struct _lqueue_t
     literal_t** tail;
 } lqueue_t;
 
-#define VAR_FLAG_INQUEUE      0x01
-#define VAR_FLAG_MARK         0x02
+#define VAR_FLAG_MARK         0x01
 
 typedef struct _variable_t  // :object_t
 {
-    struct _variable_t* next; // free list/undo list
-    struct _variable_t* qnext; // free list/undo list
-    unsigned flags;           // VAR_FLAG_INQUEUE ...
+    struct _variable_t* next;  // free list/undo list
+    unsigned flags;            //
 #ifndef PACKED_VALUE
     int  value;               // -1=false  0=unassigned  1=true
 #endif
@@ -240,7 +238,6 @@ typedef struct _symbol_t // :object_t
     size_t   size;            // raw len
     variable_t*  var;
 } symbol_t;
-
 
 // p > 0   p increase
 // p < 0   p decrease
@@ -277,9 +274,8 @@ typedef struct _clause_t
     uint64_t stamp;          // last used time (eval_counter clock)
     int cix;                 // clause id (index) 1..N
     size_t size;             // number of literals in lit
-//    int key[1];              // sort values
     uint8_t  flags;          // INQUEUE ...
-    uint16_t op;             // OR|XOR    
+    uint16_t op;             // OR|XOR
     lit_t lit[];             // literal array
 } clause_t;
 
@@ -931,11 +927,11 @@ static void lqueue_clear(lqueue_t* q)
 }
 
 #ifdef FIFO_LITERAL
-static void lqueue_enq(varp_t* vp, lit_t lp)
+static void lqueue_put(varp_t* vp, lit_t lp)
 {
     lqueue_t* q = &vp->q;
     literal_t* mp;
-    DBG("ENQ %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
+    DBG("PUT/ENQ %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
     assert(lit_value(vp, lp) == UNDEF);
     mp = lit_literal(vp, lp);
     mp->qlink = NULL;
@@ -946,11 +942,11 @@ static void lqueue_enq(varp_t* vp, lit_t lp)
 #endif
 
 #ifdef LIFO_LITERAL
-static void lqueue_push(varp_t* vp, lit_t lp)
+static void lqueue_put(varp_t* vp, lit_t lp)
 {
     lqueue_t* q = &vp->q;
     literal_t* mp;
-    DBG("PUSH %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
+    DBG("PUT/PUSH %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
     assert(lit_value(vp, lp) == UNDEF);
     mp = lit_literal(vp, lp);
     mp->qlink = q->head;
@@ -961,7 +957,7 @@ static void lqueue_push(varp_t* vp, lit_t lp)
 }
 #endif
 
-static literal_t* lqueue_deq(varp_t* vp)
+static literal_t* lqueue_get(varp_t* vp)
 {
     lqueue_t* q = &vp->q;
     literal_t* lp;
@@ -1005,9 +1001,7 @@ static void set_literal(varp_t* vp,lit_t lp,int value,long li,int cix)
 static void put_literal_level(varp_t* vp,lit_t lp,int value,
 			      long li,int cix, int level)
 {
-    // this order lqueue_enq expect literal value = UNDEF
-    // lqueue push / enq ?
-    lqueue_push(vp, (value==TRUE) ? lit_negate(lp) : lp);
+    lqueue_put(vp, (value==TRUE) ? lit_negate(lp) : lp);
     set_literal_level(vp, lp, value, li, cix, level);
 }
 
@@ -1158,52 +1152,6 @@ static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
     init_literal(&var->lit[0], var, 1);
     init_literal(&var->lit[1], var, -1);
 }
-
-
-#if 0
-static void clear_variable_queue(varp_t* vp)
-{
-    variable_t* vptr;
-
-    vptr = vp->var_queue_hd;
-    while(vptr) {
-	variable_t* vptrn = vptr->qnext;
-	vptr->qnext = NULL;
-	vptr->flags &= ~VAR_FLAG_INQUEUE;
-	vptr = vptrn;
-    }
-    vp->var_queue_hd = NULL;
-    vp->var_queue_tl = NULL;
-}
-
-static int enqueue_variable(varp_t* vp, variable_t* vptr)
-{
-    if (vptr->flags & VAR_FLAG_INQUEUE)
-	return 0;
-    vptr->qnext = NULL;
-    if (vp->var_queue_tl == NULL)
-	vp->var_queue_hd = vptr;
-    else
-	vp->var_queue_tl->qnext = vptr;
-    vp->var_queue_tl = vptr;
-    vptr->flags |= VAR_FLAG_INQUEUE;
-    return 1;
-}
-
-static variable_t* dequeue_variable(varp_t* vp)
-{
-    variable_t* vptr;
-
-    if ((vptr = vp->var_queue_hd) != NULL) {
-	if ((vp->var_queue_hd = vptr->qnext) == NULL)
-	    vp->var_queue_tl = NULL;
-	vptr->qnext = NULL;
-	vptr->flags &= ~VAR_FLAG_INQUEUE;
-    }
-    return vptr;
-}
-
-#endif
 
 static int clause_insert(ErlNifEnv* env, varp_t* vp, clause_t* cp)
 {
@@ -2553,7 +2501,7 @@ static ERL_NIF_TERM varp_eval(ErlNifEnv* env, int argc,
 
     DBG("EVAL %ld\r\n", vp->eval_counter);
 
-    while((lp = lqueue_deq(vp)) != NULL) {
+    while((lp = lqueue_get(vp)) != NULL) {
 	wlink_t** wlp = &lp->wlist;
 	wlink_t*  wl;
 	

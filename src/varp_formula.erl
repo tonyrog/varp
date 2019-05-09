@@ -108,10 +108,9 @@
 
 new() ->
     new(varp_option:default_option()).
-%%
-%% FIXME
-%%  add options [{initial_size,Size},{grow,Expand},{bcp,boolean()}]
-%%
+
+new(OptList) when is_list(OptList) ->
+    new(varp_option:set_opts(OptList));
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{bcp,maps:get(bcp,OptMap)}]),
     Counters = counters:new(?NUM_COUNTERS, []),
@@ -417,11 +416,15 @@ is_unbound(Bs,Lit) ->
 is_equal(Bs,LitA, LitB) ->
     not varc:is_equal(Bs#bs.vp,LitA,LitB).
 
+equal(Bs,X,Y) when is_integer(X), is_integer(Y) ->
+    varc:put(Bs#bs.vp, X, Y);
 equal(Bs,X,Y) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
     varc:put(Bs#bs.vp, X0, Y0).
 
+equal(Bs,X,Y, Level) when is_integer(X), is_integer(Y) ->
+    varc:put(Bs#bs.vp, X, Y, Level);
 equal(Bs,X,Y,Level) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
@@ -503,43 +506,43 @@ use_clause(Bs, I) ->
 
 %% Bs is under the assumption that Var = TRUE
 intersect(Bs, Var, B0) ->
-    intersect_(Bs, varc:info(Bs#bs.vp, bcp), Var, B0).
+    intersect_(Bs, Var, B0).
 
 %% evaluate the bindings and build the intersection
  %% we may have this bindings, crash!
 
-intersect_(Bs,Bcp,Var,[{X,true}|B0]) ->
+intersect_(Bs,Var,[{X,?TRUE}|B0]) ->
     %% !Var -> X
-    case value(Bs, X) of
-	true ->  %% Var -> X, !Var -> X   =>  X
-	    [{X,true} | intersect_(Bs,Bcp,Var,B0)];
-	false when not Bcp -> %% Var -> !X, !Var -> X  =>  Var=!X
-	    [{Var,-X} | intersect_(Bs,Bcp,Var,B0)];
+    case varc:get(Bs#bs.vp, X) of
+	?TRUE ->  %% Var -> X, !Var -> X   =>  X
+	    [{X,?TRUE} | intersect_(Bs,Var,B0)];
+	?FALSE -> %% Var -> !X, !Var -> X  =>  Var=!X
+	    [{Var,-X} | intersect_(Bs,Var,B0)];
 	_ ->
-	    intersect_(Bs,Bcp,Var,B0)
+	    intersect_(Bs,Var,B0)
     end;
-intersect_(Bs,Bcp,Var,[{X,false}|B0]) ->
+intersect_(Bs,Var,[{X,false}|B0]) ->
     %% !Var -> !X
-    case value(Bs, X) of
-	false -> %% Var -> !X, !Var -> !X  =>  !X
-	    [{X,false} | intersect_(Bs,Bcp,Var,B0)];
-	true when not Bcp ->  %% Var -> X, !Var -> !X   =>  Var=X
-	    [{Var,X} | intersect_(Bs,Bcp,Var,B0)];
+    case varc:get(Bs#bs.vp, X) of
+	?FALSE -> %% Var -> !X, !Var -> !X  =>  !X
+	    [{X,?FALSE} | intersect_(Bs,Var,B0)];
+	?TRUE ->  %% Var -> X, !Var -> !X   =>  Var=X
+	    [{Var,X} | intersect_(Bs,Var,B0)];
 	_ ->
-	    intersect_(Bs,Bcp,Var,B0)
+	    intersect_(Bs,Var,B0)
     end;
-intersect_(Bs,Bcp=false,Var,[{X,Y}|B0]) ->
+intersect_(Bs,Var,[{X,Y}|B0]) ->
     Y1 = varc:get(Bs#bs.vp, X),
     if Y =:= ?TRUE,  Y1 =:= ?FALSE -> %% !Var => X, Var => !X
-	    [{Var,-X} | intersect_(Bs,Bcp,Var,B0)];
+	    [{Var,-X} | intersect_(Bs,Var,B0)];
        Y =:= ?FALSE, Y1 =:= ?TRUE -> %% !Var => !X, Var => X
-	    [{Var,X} | intersect_(Bs,Bcp,Var,B0)];
+	    [{Var,X} | intersect_(Bs,Var,B0)];
        true ->
-	    intersect_(Bs,Bcp,Var,B0)
+	    intersect_(Bs,Var,B0)
     end;
-intersect_(Bs,Bcp=true,Var,[_|B0]) ->
-    intersect_(Bs,Bcp,Var,B0);
-intersect_(_Bs,_Bcp,_Var,[]) ->
+intersect_(Bs,Var,[_|B0]) ->
+    intersect_(Bs,Var,B0);
+intersect_(_Bs,_Var,[]) ->
     [].
 
 %% compact version of fmt_var
@@ -756,11 +759,13 @@ build(F) ->
     build(F,[]).
 
 build(F,Opts) when is_list(Opts) ->
-    %% io:format("Opts = ~p\n", [Opts]),
-    build(F, varp_option:set_opts(Opts));
+    build1(F, new(Opts));
 build(F,Opts) when is_map(Opts) ->
-    ?dbg("Formula: ~p\n", [F]),
-    Bs = new(Opts),
+    build1(F, new(Opts));
+build(F,Bs) when is_record(Bs, bs) ->
+    build1(F, Bs).
+
+build1(F, Bs) ->
     Bs1 = build_code(getopt(Bs,defs),Bs),
     try build__(F, Bs1) of
       	Value -> Value

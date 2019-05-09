@@ -5,9 +5,17 @@
 -module(varp_vsaturate).
 
 -compile(export_all).
+-import(varp_formula, [format_literal/2]).
+
+-include("varp.hrl").
 
 -define(dbg(F,A), ok).
 %% -define(dbg(F,A), io:format((F),(A))).
+
+-define(if1(Cond,Then),
+	if Cond -> Then;
+	   true -> ok
+	end).
 
 -type index()::integer().
 -type var()::integer().
@@ -152,16 +160,34 @@ saturate_vec__(Bs,X,V,Mark) ->
 				    Bs,
 				    varp_formula:get_bindings(Bs,Mark+1))]),
 			    Ys = varp_formula:intersect(Bs, X, Xs),
+			    ?if1(Ys =/= [],
+				 begin io:format("intersect=~w\n", [Ys]) end),
 			    ?dbg("~sintersect = {~s}\n", 
 				 [indent(Mark),
 				  varp_formula:fmt_bind_list(Bs,Ys)]),
 			    varp_formula:undo(Bs,Mark),  %% undo (X=true)
-			    _ = [ varp_formula:equal(Bs,Y,W) || {Y,W} <- Ys],
+			    install_bindings(Bs, Ys),
 			    varp_formula:eval(Bs)
 		    end
 	    end
     end.
 
+install_bindings(Bs, Bnds) ->
+    Bcp = varp_option:getopt(bcp,Bs#bs.option),
+    install_bindings(Bs, Bcp, Bnds).
+
+install_bindings(Bs,Bcp,[{Y,W}|Xs]) when abs(W) =:= ?TRUE ->
+    varp_formula:equal(Bs,Y,W),
+    install_bindings(Bs,Bcp,Xs);
+install_bindings(Bs,Bcp=false,[{Y,W}|Xs]) ->
+    varp_formula:equal(Bs,Y,W),
+    install_bindings(Bs,Bcp,Xs);
+install_bindings(Bs,Bcp=true,[{Y,W}|Xs]) ->
+    io:format("install clause (~s, ~s)\n", 
+	      [format_literal(Bs,Y), format_literal(Bs, W)]),
+    install_bindings(Bs,Bcp,Xs);
+install_bindings(Bs,_Bcp,[]) ->
+    Bs.
 
 %% place mark before and after the decision variable
 mark_eq_eval(Bs,V,Value,Mark) ->

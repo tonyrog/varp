@@ -11,7 +11,7 @@
 -define(TRUE,   1).
 -define(FALSE, -1).
 
--define(NUM_COUNTERS, 8).
+-define(NUM_COUNTERS, 9).
 -define(COUNTER_CONFLICT_CLAUSES,   1).
 -define(COUNTER_MINIMIZE_COUNT,     2).
 -define(COUNTER_COMPRESS_CLAUSES,   3).
@@ -20,6 +20,7 @@
 -define(COUNTER_OLLE_COUNT,         6).
 -define(COUNTER_STUMBLE_OLLE_COUNT, 7).
 -define(COUNTER_EVAL_COUNTER,       8).
+-define(COUNTER_REORDER_COUNTER,    9).
 
 -record(cid,
 	{ 

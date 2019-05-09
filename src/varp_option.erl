@@ -350,6 +350,12 @@ options() ->
 	     default => 0,
 	     description => "Restart interval in milliseconds"},
 
+    V41 = #{ long => "starexec",
+	     key => starexec,
+	     spec =>  {enum,[?BOOL]},
+	     default => false,
+	     description => "Report result in starexec format"},
+
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
        print => V2, "print" => V2, "p" => V2,
@@ -397,7 +403,8 @@ options() ->
        keep_factor => V37, "keep_factor" => V37,
        min_keep_clauses => V38, "min_keep_clauses" => V38,
        restart_counter=>V39, "restart_counter"=>V39,
-       restart_interval=>V40, "restart_interval"=>V40
+       restart_interval=>V40, "restart_interval"=>V40,
+       starexec=>V41, "starexec"=>V41
      }.
 
 %% list of options with unique key
@@ -523,8 +530,10 @@ match_value(Spec, Val, As) ->
     end.
 
 %% Match a value list
+-ifdef(unused).
 match_values(Spec,Vs,As) ->
     match_values(Spec,Vs,[],As).
+-endif.
 
 match_values(Spec,[V|Vs],Acc,As) ->
     case match_value(Spec,V,As) of

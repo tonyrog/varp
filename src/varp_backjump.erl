@@ -259,9 +259,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
     if DoPurge, JLevel =:= ?TOP_LEVEL ->
 	    if Learned >= MaxLearned ->
 		    varp_formula:del_unused_clauses(Bs),
-		    %% Re-order literals
-		    Seed = varp_formula:getopt(Bs,seed),
-		    varp_formula:order_sort(Bs,'-occur',undefined,Seed);
+		    reorder(Bs);
 	       true ->
 		    %% but we can re-order literals?
 		    ok
@@ -280,21 +278,32 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
-	    Seed = varp_formula:getopt(Bs,seed),
-	    varp_formula:order_sort(Bs,'-occur',undefined,Seed),
-
+	    reorder(Bs),
 	    init(Bs, MaxLearned);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
 	    varp_formula:undo(Bs, ?TOP_LEVEL+1),
 	    varp_formula:mark(Bs, ?TOP_LEVEL),
-	    Seed = varp_formula:getopt(Bs,seed),
-	    varp_formula:order_sort(Bs,'-occur',undefined,Seed),
+	    reorder(Bs),
 	    init(Bs, MaxLearned);
        true ->
 	    loop(Bs2,JLevel,MaxLearned,INext,Stack1)
     end.
+
+reorder(Bs) ->
+    N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
+    counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
+    case N rem 2 of
+	0 ->
+	    io:format("RANDOM\n"),
+	    Seed = varp_formula:getopt(Bs,seed),
+	    varp_formula:order_sort(Bs,random,undefined,Seed);
+	1 ->
+	    io:format("OCCUR\n"),
+	    varp_formula:order_sort(Bs,'-occur',undefined,-1)
+    end.
+
 
 backjump(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
     backjump(Bs,Stack,JLevel);
@@ -325,6 +334,7 @@ do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
     if  M, L > 0, D2 >= L, K > 0, D2 > 0, D1 >= K*D2 ->
 	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_OLLE_COUNT, 1),
 	    J3;
+
 	L > 0, D2 >= L -> 
 	    counters:add(Bs#bs.counters, 
 			 ?COUNTER_STUMBLE_COUNT, 1),
@@ -370,6 +380,9 @@ display_stat(Bs) ->
 	      [counters:get(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT)]),
     io:format("usage olle counter: ~w\n",
 	      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
+    io:format("number of reorders: ~w\n",
+	      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]),
+
     %% delta usage histograms
     %% back jump distances
     io:format("Backjump deltas used\n", []),

@@ -138,21 +138,29 @@ run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
       end, Fs).
 
 run(satisfy, Formula, Opts) ->
-    R = run_formula(Formula,Opts++[{value,true}]),
-    result(R, satisfy);
+    Bs = varp_formula:new(Opts++[{value,true}]),
+    R = run_formula(Formula,Bs),
+    display_result(R, satisfy, Bs),
+    R;
 run(falsify, Formula, Opts) ->
-    R = run_formula(Formula,Opts++[{value,false}]),
-    result(R, falsify);
+    Bs = varp_formula:new(Opts++[{value,false}]),
+    R = run_formula(Formula,Bs),
+    display_result(R, falsify, Bs),
+    R;
 run(prove, Formula, Opts) ->
-    R = prove_formula(Formula,Opts),
-    result(R, prove);
+    Bs = varp_formula:new(Opts++[{value,false},{max,1},{method,count}]),
+    R = run_formula(Formula,Bs),
+    display_result(R, prove, Bs),
+    R;
 run(none, Formula, Opts) ->
-    R = run_formula(Formula,Opts),
-    result(R, none);
+    Bs = varp_formula:new(Opts),
+    R = run_formula(Formula,Bs),
+    display_result(R, none, Bs),
+    R;
 run(snf, Formula, Opts) ->
     %% generate dimacs snf from a formula
-    Bs = proplists:get_value(env,Opts,[]),
-    F = varp_expand:formula(Formula,Bs),
+    Env = proplists:get_value(env,Opts,[]),
+    F = varp_expand:formula(Formula,Env),
     %% Cs=clauses and Ls=literals eliminated
     {Cs,_Ls} = varp_cnf:clauses(F),
     Data = varp_cnf:format(Cs),
@@ -165,8 +173,8 @@ run(snf, Formula, Opts) ->
     ok;
 run(cnf, Formula, Opts) ->
     %% generate dimacs cnf from a formula
-    Bs = proplists:get_value(env,Opts,[]),
-    F = varp_expand:formula(Formula,Bs),
+    Env = proplists:get_value(env,Opts,[]),
+    F = varp_expand:formula(Formula,Env),
     %% Cs=clauses and Ls=literals eliminated
     {Cs,_Ls} = varp_cnf:clauses(F),
     Data = varp_dimacs:format(Cs),
@@ -182,12 +190,57 @@ run(help, _Formula, _Opts) ->
 run(version, _Formula, _Opts) ->
     varp_option:version().
 
-result(true,prove) ->       io:format("% TRUE\n", []);
-result(false,prove) ->      io:format("% FALSE\n", []);
-result(undefined,prove) ->  io:format("% UNKNOWN\n", []);
-result(undefined,_) ->      io:format("\n", []);
-result(N, _) when is_integer(N) -> io:format("% ~w\n", [N]);
-result({N,_Mdls}, _) -> io:format("% ~w\n", [N]).
+display_result({N,_Models}, Method, Bs) ->
+    display_result(N, Method, Bs);
+display_result(0, satisfy, Bs) ->
+    case varp_formula:getopt(Bs, starexec) of
+	true ->
+	    io:format("starexec-result: unsat\n");
+	false ->
+	    io:format("% 0\n", [])
+    end;
+display_result(N, satisfy, Bs) when is_integer(N) ->
+    case varp_formula:getopt(Bs, starexec) of
+	true ->
+	    io:format("starexec-result: sat\n"),
+	    io:format("num-models: ~w\n", [N]);
+	false ->
+	    io:format("% ~w\n", [N])
+    end;
+display_result(0, falsify, Bs) ->
+    case varp_formula:getopt(Bs, starexec) of
+	true ->
+	    io:format("starexec-valid: true\n");
+	false ->
+	    io:format("% 0\n", [])
+    end;
+display_result(N, falsify, Bs) when is_integer(N) ->
+    case varp_formula:getopt(Bs, starexec) of
+	true ->
+	    io:format("starexec-valid: false\n"),
+	    io:format("num-counter-models: ~w\n", [N]);
+	false ->
+	    io:format("% ~w\n", [N])
+    end;
+display_result(0,prove,Bs) ->
+    case varp_formula:getopt(Bs, starexec) of
+	true ->
+	    io:format("starexec-valid: true\n");
+	false ->
+	    io:format("% TRUE\n", [])
+    end;
+display_result(_N,prove,Bs) ->
+    case varp_formula:getopt(Bs, starexec) of
+	true ->
+	    io:format("starexec-valid: false\n");
+	false ->
+	    io:format("% FALSE\n", [])
+    end;
+display_result(undefined,prove,_Bs) ->
+    io:format("% UNKNOWN\n", []);
+display_result(undefined,_,_Bs) ->
+    io:format("\n", []).
+
 
 order_decl([]) -> [];
 order_decl(Vs) -> order_decl(Vs,[]).
@@ -385,7 +438,7 @@ run_formula(Formula,Opts) ->
 prove_formula(Formula) ->
     prove_formula(Formula,[]).
 prove_formula(Formula,Opts) ->
-    varp_prover:prove_formula(Formula, [{max,2}|Opts]).
+    varp_prover:prove_formula(Formula, [{max,1}|Opts]).
 
 file(File) ->
     case read_file(File) of

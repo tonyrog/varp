@@ -7,7 +7,7 @@
 
 -module(varp_prover).
 
--export([run_formula/1,run_formula/2]).
+-export([run_formula/2]).
 -export([prove_formula/1,prove_formula/2]).
 -export([falsify_formula/1,falsify_formula/2,falsify/1,falsify/2]).
 -export([satisfy_formula/1,satisfy_formula/2,satisfy/1,satisfy/2]).
@@ -19,6 +19,8 @@
 
 -define(dbg(F,A), ok).
 %% -define(dbg(F,A), io:format((F),(A))).
+
+-include("varp.hrl").
 
 apply_opts(Bs,F) ->
     case varp_formula:getopt(Bs,value) of
@@ -72,13 +74,13 @@ collect_order(Bs,I,Acc) ->
 	{J,Xj} -> collect_order(Bs,J,[Xj|Acc])
     end.
 
-run_formula(F) ->
-    run_formula(F, []).
-run_formula(F,Opts) ->
-    run(varp_formula:build(F,Opts)).
+run_formula(F,Opts) when is_list(Opts) ->
+    {X, Bs} = varp_formula:build(F,Opts),
+    run(X,Bs);
+run_formula(F,Bs0) when is_record(Bs0, bs) ->
+    {X, Bs} = varp_formula:build(F,Bs0),
+    run(X,Bs).
 
-run({F,Bs}) ->
-    run(F, Bs).
 
 run(undefined, Bs) ->
     no_models(Bs);
