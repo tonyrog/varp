@@ -55,8 +55,7 @@ options() ->
 	    key => value,
 	    spec => {enum,[?BOOL,{"none", none}]},
 	    default => none,
-	    description => "Main formula variable value."
-	  },
+	    description => "Main formula variable value."},
     V2 = #{ long => "print",
 	    short => "p",
 	    key => print,
@@ -95,19 +94,19 @@ options() ->
 	    default => [identity],
 	    description => "Specifiy variable order."
 	  },
-    V61 = #{ long => "order_first",
+    V61 = #{ long => "order-first",
 	     key => order_first,
 	     spec => {list,literal},
 	     default => [],
-	     description => "Sort literals first."
+	     description => "Literals sorted first."
 	   },
-    V62 = #{ long => "order_last",
+    V62 = #{ long => "order-last",
 	     key => order_last,
 	     spec => {list,literal},
 	     default => [],
-	     description => "Sort literals last."
+	     description => "Literals sorted last."
 	   },
-    V63 = #{ long => "display_order",
+    V63 = #{ long => "display-order",
 	     short => "d",
 	     key => display_order,
 	     spec => {enum,[?BOOL]},
@@ -290,7 +289,7 @@ options() ->
 	     default => 0,
 	     description => "extra backjump factor"},
 
-    V30 = #{ long => "stumble_olle",
+    V30 = #{ long => "stumble-olle",
 	     key => stumble_olle,
 	     spec =>  {enum,[?BOOL]},
 	     default => false,
@@ -302,49 +301,49 @@ options() ->
 	     default => -1,
 	     description => "random seed"},
 
-    V33 = #{ long => "max_conflicts",
+    V33 = #{ long => "max-conflicts",
 	     key => max_conflicts,
 	     spec =>  unsigned,
 	     default => 0,
 	     description => "max number of conflicts to generate per conflict"},
 
-    V34 = #{ long => "num_conflicts",
+    V34 = #{ long => "num-conflicts",
 	     key => num_conflicts,
 	     spec =>  unsigned,
 	     default => 1,
 	     description => "number of conflicts to analyse"},
 
-    V35 = #{ long => "max_learned_clauses",
+    V35 = #{ long => "max-learned_clauses",
 	     key => max_learned_clauses,
 	     spec =>  unsigned,
 	     default => 0,
 	     description => "Max number of clauses to generate in learning"},
 
-    V36 = #{ long => "max_learned_factor",
+    V36 = #{ long => "max-learned_factor",
 	     key => max_learned_factor,
 	     spec =>  float,
 	     default => 0,
 	     description => "Factor to calculate number of learned clauses"},
 
-    V37 = #{ long => "keep_factor",
+    V37 = #{ long => "keep-factor",
 	     key => keep_factor,
 	     spec =>  float01,
 	     default => 0.5,
 	     description => "Number of clauses to keep"},
 
-    V38 = #{ long => "min_keep_clauses",
+    V38 = #{ long => "min-keep-clauses",
 	     key => min_keep_clauses,
 	     spec =>  unsigned,
 	     default => 0,
 	     description => "Min number of clauses to keep"},
 
-    V39 = #{ long => "restart_counter",
+    V39 = #{ long => "restart-counter",
 	     key => restart_counter,
 	     spec =>  unsigned,
 	     default => 0,
 	     description => "Number of counts/eval until restart"},
 
-    V40 = #{ long => "restart_interval",
+    V40 = #{ long => "restart-interval",
 	     key => restart_interval,
 	     spec =>  unsigned,
 	     default => 0,
@@ -363,9 +362,12 @@ options() ->
        method  => V4, "method"  => V4,
        max => V5, "max" => V5, "n" => V5,
        order => V6, "order" => V6,
-       order_first => V61, "order_first" => V61,
-       order_last => V62, "order_last" => V62,
-       display_order => V63, "display_order" => V63, "d" => V63,
+       order_first => V61, "order_first" => V61, "order-first" => V61,
+       order_last => V62, "order_last" => V62, "order-last" => V62,
+       display_order => V63, 
+       "display_order" => V63,
+       "display-order" => V63,
+       "d" => V63,
        bcp => V7, "bcp" => V7,
        clause => V71, "clause" => V71, "c" => V71,
        saturate => V8, "saturate" => V8, "s" => V8,
@@ -394,16 +396,29 @@ options() ->
        iorder => V27, "iorder" => V27, "i" => V27,
        stumble => V28, "stumble" => V28, 
        olle => V29, "olle" => V29,
-       stumble_olle => V30, "stumble_olle" => V30,
+       stumble_olle => V30, "stumble_olle" => V30, "stumble-olle" => V30,
        seed => V31, "seed" => V31,
-       max_conflicts => V33, "max_conflicts" => V33,
-       num_conflicts => V34, "num_conflicts" => V34,
-       max_learned_clauses => V35, "max_learned_clauses" => V35,
-       max_learned_factor => V36, "max_learned_factor" => V36,
-       keep_factor => V37, "keep_factor" => V37,
-       min_keep_clauses => V38, "min_keep_clauses" => V38,
-       restart_counter=>V39, "restart_counter"=>V39,
-       restart_interval=>V40, "restart_interval"=>V40,
+       max_conflicts => V33, "max_conflicts" => V33, "max-conflicts" => V33,
+
+       num_conflicts => V34, "num_conflicts" => V34, "num-conflicts" => V34,
+       max_learned_clauses => V35, 
+       "max_learned_clauses" => V35,
+       "max-learned_clauses" => V35,
+       max_learned_factor => V36, 
+       "max_learned_factor" => V36,
+       "max-learned_factor" => V36,
+       keep_factor => V37, 
+       "keep_factor" => V37,
+       "keep-factor" => V37,
+       min_keep_clauses => V38,
+       "min_keep_clauses" => V38,
+       "min-keep-clauses" => V38,
+       restart_counter=>V39, 
+       "restart_counter"=>V39,
+       "restart-counter"=>V39,
+       restart_interval=>V40,
+       "restart_interval"=>V40,
+       "restart-interval"=>V40,
        starexec=>V41, "starexec"=>V41
      }.
 
@@ -492,28 +507,44 @@ process_args([], Mode, Opts, Bound) ->
 process_args(_, _Mode, _Opts, _Bound) ->
     usage().
 
+-ifdef(not_used).
+tr([From|Cs], From, To) -> [To|tr(Cs,From,To)];
+tr([C|Cs], From, To ) -> [C|tr(Cs,From,To)];
+tr([], _From, _To) -> [].
+-endif.
+
 get_long_opt(Cs) ->
-    {Name,Cs1} = get_option_name(Cs),
+    {Name,AltName,Cs1} = get_option_name(Cs),
     case maps:find(Name, options()) of
 	{ok,OptInfo=#{ long := Name }} -> {OptInfo,Cs1};
+	{ok,OptInfo=#{ long := AltName }} -> {OptInfo,Cs1};
 	_ -> false
     end.
 
 get_short_opt(Cs) ->
-    {Name,Cs1} = get_option_name(Cs),
+    {Name,_,Cs1} = get_option_name(Cs),
     case maps:find(Name, options()) of
 	{ok,OptInfo=#{ short := Name }} -> {OptInfo,Cs1};
 	_ -> false
     end.
-    
+%%
+%% option names are in ascii include letters _ - 
+%% - may only be located in between groups of letter
+%% _ may be any where
+%%
 get_option_name(Cs) ->
-    get_option_name(Cs,[]).
+    get_option_name(Cs,false,[],[]).
 
-get_option_name([C|Cs],Acc) when 
-      C >= $a, C =< $z; C >= $A, C =< $Z; C =:= $_ ->
-    get_option_name(Cs,[C|Acc]);
-get_option_name(Cs,Acc) ->
-    {lists:reverse(Acc), Cs}.
+
+get_option_name([$-|Cs],true,Alt,Acc) ->
+    get_option_name(Cs,false,[$_|Alt],[$-|Acc]);
+get_option_name([$_|Cs],_InName,Alt,Acc) ->
+    get_option_name(Cs,false,[$_|Alt],[$-|Acc]);
+get_option_name([C|Cs],_InName,Alt,Acc) when
+      C >= $a, C =< $z; C >= $A, C =< $Z ->
+    get_option_name(Cs,true,[C|Alt],[C|Acc]);
+get_option_name(Cs,_InName,Alt,Acc) ->
+    {lists:reverse(Acc), lists:reverse(Alt), Cs}.
 
 
 match_value(Spec, [], [Val|As]) ->
@@ -687,6 +718,7 @@ format_spec({enum,Vs}) when is_list(Vs) ->
     string:join([Name || {Name,_Enum} <- Vs], "|").
 
 format_value(N) when is_integer(N) -> integer_to_list(N);
+format_value(F) when is_float(F) -> io_lib_format:fwrite_g(F);
 format_value(A) when is_atom(A) -> atom_to_list(A);
 format_value(L) when is_list(L) ->
     try list_to_binary(L) of
@@ -718,17 +750,6 @@ set_opts([{Opt,Value} | Opts], OptMap) ->
     set_opts(Opts, setopt(Opt,Value,OptMap));
 set_opts([], OptMap) ->
     OptMap.
-
-%%    case getopt(saturate, OptMap) of
-%%	undefined ->
-%%	    OptMap;
-%%	_Level -> %% add the last saturation options
-%%	    List = getopt(saturations, OptMap),
-%%	    Sat  = get_saturate_opt(OptMap),
-%%	    io:format("s = ~p\n", [Sat]),
-%%	    List1 = List ++ [Sat],
-%%	    OptMap#{ saturate => undefined, saturations => List1 }
-%%    end.
 
 default_opts() ->
     default_opts_(options_list(), #{ }).

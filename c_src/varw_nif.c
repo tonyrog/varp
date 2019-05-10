@@ -19,7 +19,7 @@
 #define NDEBUG
 #include <assert.h>
 
-//#define DEBUG
+// #define DEBUG
 //#define PACKED_VALUE     // values are packed (now in 8 bit values)
 #define LIFO_LITERAL       // push literals on stack
 // #define FIFO_LITERAL       // put literals on queue

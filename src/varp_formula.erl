@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%%-define(DEBUG, true).
+%% -define(DEBUG, true).
 
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -248,7 +248,7 @@ add_clause(Bs,Op,Ls) ->
 			   {_,[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
 			   Flags = varc:get_clause_flags(Bs#bs.vp, I),
 			   {W0,W1} = proplists:get_value(watch, Flags, {-1,-1}),
-			   io:format("~w:(~w,~w) ~s\n", 
+			   io:format("~w:(~w,~w) ~s\n",
 				     [I,W0,W1,format_clause(Bs,CL)])
 		   end),
 	    I;
@@ -521,7 +521,7 @@ intersect_(Bs,Var,[{X,?TRUE}|B0]) ->
 	_ ->
 	    intersect_(Bs,Var,B0)
     end;
-intersect_(Bs,Var,[{X,false}|B0]) ->
+intersect_(Bs,Var,[{X,?FALSE}|B0]) ->
     %% !Var -> !X
     case varc:get(Bs#bs.vp, X) of
 	?FALSE -> %% Var -> !X, !Var -> !X  =>  !X
@@ -551,7 +551,7 @@ fmt_v(_,?FALSE) -> "0";
 fmt_v(_,true)   -> "1";
 fmt_v(_,false)  -> "0";
 fmt_v(Bs,X) ->
-    if X < 0 -> fmt_var_(Bs,-X, "~", "");
+    if X < 0 -> fmt_var_(Bs,-X, "!", "");
        true ->  fmt_var_(Bs,X, "", "")
     end.
 
@@ -561,8 +561,8 @@ fmt_q(Bs,X) ->
 fmt_var(Bs,X) ->
     fmt_var(Bs,X, "").
 
-fmt_var(_Bs,?TRUE,_Q)  -> "true";
-fmt_var(_Bs,?FALSE,_Q) -> "false";
+fmt_var(_Bs,?TRUE,_Q)  -> "1";
+fmt_var(_Bs,?FALSE,_Q) -> "0";
 fmt_var(_Bs,true,_Q)   -> "true";
 fmt_var(_Bs,false,_Q)  -> "false";
 fmt_var(Bs,X,Q) ->

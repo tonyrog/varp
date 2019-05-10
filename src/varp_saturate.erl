@@ -12,14 +12,22 @@
 
 -include("varp.hrl").
 
--define(dbg(F,A), ok).
-%% -define(dbg(F,A), io:format((F),(A))).
+%% -define(DEBUG, true).
 
-%%-type index()::integer().
-%% -type var()::integer().
+
+-define(dbg0(F,As), ok).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
+-define(dbg(F,A), ok).
+-define(dcall(Fun), ok).
+-endif.
+
 -type bs()::term().
 
--define(RUN_LEVEL, 2).
+-define(TOP_LEVEL, 0).
+-define(RUN_LEVEL, 1).
 
 -spec saturate(Bs::bs(), K::non_neg_integer()) -> false | bs().
 
@@ -56,11 +64,11 @@ saturate_(Bs,K,TRef,Threshold) when is_integer(K), K >= 1 ->
     end.
 
 loop_k(Bs,I,X,K,N,Level,TRef,Threshold) ->
-    case mark_eq_eval(Bs,X,false,Level) of
+    case mark_eq_eval(Bs,X,?FALSE,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    varp_formula:undo(Bs,Level),
-	    case eq_eval(Bs,X,true,Level) of
+	    case eq_eval(Bs,X,?TRUE,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
@@ -73,7 +81,7 @@ loop_k(Bs,I,X,K,N,Level,TRef,Threshold) ->
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 		    varp_formula:undo(Bs,Level),
-		    case eq_eval(Bs,X,true,Level) of
+		    case eq_eval(Bs,X,?TRUE,Level) of
 			false ->
 			    ?dbg("~scontradiction\n", [indent(Level)]),
 			    false;
@@ -88,7 +96,7 @@ loop_k(Bs,I,X,K,N,Level,TRef,Threshold) ->
 			  varp_formula:fmt_bind_list(Bs1,Xs)]),
 		    varp_formula:undo(Bs1,Level), %% (X=false)
 
-		    case mark_eq_eval(Bs1,X,true,Level) of
+		    case mark_eq_eval(Bs1,X,?TRUE,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level),Level]),
@@ -102,7 +110,7 @@ loop_k(Bs,I,X,K,N,Level,TRef,Threshold) ->
 				    ?dbg("~scontradiction, undo ~w\n", 
 					 [indent(Level),Level]),
 				    varp_formula:undo(Bs1,Level),  %% (X=true)
-				    eq_eval(Bs1,X,false,Level),
+				    eq_eval(Bs1,X,?FALSE,Level),
 				    loop_k_next(Bs1,I,X,K,N,Level,TRef,Threshold);
 				Bs2 ->
 				    ?dbg("~s~s/true: => {~s}\n",
@@ -111,7 +119,6 @@ loop_k(Bs,I,X,K,N,Level,TRef,Threshold) ->
 					    Bs2,
 					    varp_formula:get_bindings(Bs2,Level+1))]),
 				    Ys = varp_formula:intersect(Bs2, X, Xs),
-				    %% print_bindings(Bs,Level,Ys),
 				    ?dbg("~sintersect = {~s}\n", 
 					 [indent(Level),
 					  varp_formula:fmt_bind_list(Bs2,Ys)]),
@@ -124,35 +131,29 @@ loop_k(Bs,I,X,K,N,Level,TRef,Threshold) ->
 	    end
     end.
 
-print_bindings(_Bs,_Level,[]) ->
-    ok;
-print_bindings(_Bs,Level,Bnds) ->
-    io:format("~w: intersect=~w\n", [Level, Bnds]).
 
-
-install_bindings(_Bs,_Level,_X,[]) ->
+install_bindings(_Bs,_Level,_Var,[]) ->
     ok;
-install_bindings(Bs,Level,X,Bnds) ->
+install_bindings(Bs,Level,_Var,Bnds) ->
     Bcp = varp_option:getopt(bcp,Bs#bs.option),
-    io:format("sat ~s: ", [format_literal(Bs,X)]),
-    install_bindings_(Bs,Level,Bcp,Bnds),
-    io:format("\n").
-    
-
-install_bindings_(Bs,Level,Bcp,[{Y,W}|Xs]) when abs(W) =:= ?TRUE ->
-    varp_formula:equal(Bs,Y,W),
-    install_bindings_(Bs,Level,Bcp,Xs);
-install_bindings_(Bs,Level,Bcp=false,[{Y,W}|Xs]) ->
-    varp_formula:equal(Bs,Y,W),
-    install_bindings_(Bs,Level,Bcp,Xs);
-install_bindings_(Bs,Level,Bcp=true,[{Y,W}|Xs]) ->
     if Level =:= ?RUN_LEVEL ->
-	    io:format("(~s,~s) ", 
-		      [format_literal(Bs,-Y), format_literal(Bs, W)]),
-	    io:format("(~s,~s) ", 
-		      [format_literal(Bs,-W), format_literal(Bs, Y)]),
-	    varp_formula:add_clause(Bs, 'or', [?TRUE,Y,!W]),
-	    varp_formula:add_clause(Bs, 'or', [?TRUE,!Y,W]);
+	    varp_formula:mark(Bs,?TOP_LEVEL);
+       true ->
+	    ok
+    end,
+    install_bindings_(Bs,Level,Bcp,Bnds).
+
+
+install_bindings_(Bs,Level,Bcp,[{X,Y}|Xs]) when abs(Y) =:= ?TRUE ->
+    varp_formula:equal(Bs,X,Y),
+    install_bindings_(Bs,Level,Bcp,Xs);
+install_bindings_(Bs,Level,Bcp=false,[{Var,X}|Xs]) ->
+    varp_formula:equal(Bs,Var,X),
+    install_bindings_(Bs,Level,Bcp,Xs);
+install_bindings_(Bs,Level,Bcp=true,[{Var,X}|Xs]) ->
+    if Level =:= ?RUN_LEVEL ->
+	    varp_formula:add_clause(Bs, 'or', [?TRUE,Var,-X]),
+	    varp_formula:add_clause(Bs, 'or', [?TRUE,-Var,X]);
        true -> 
 	    ok
     end,
@@ -176,11 +177,11 @@ loop_k_next(Bs,I,_X,K,N,Level,TRef,Threshold) ->
     end.
 
 loop_1(Bs,I,X,N,Level,TRef,Threshold) ->
-    case mark_eq_eval(Bs,X,false,Level) of
+    case mark_eq_eval(Bs,X,?FALSE,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    varp_formula:undo(Bs,Level),
-	    case eq_eval(Bs,X,true,Level) of
+	    case eq_eval(Bs,X,?TRUE,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
@@ -195,12 +196,12 @@ loop_1(Bs,I,X,N,Level,TRef,Threshold) ->
 		  varp_formula:fmt_bind_list(Bs,Xs)]),
 	    varp_formula:undo(Bs,Level), %% (X=false)
 		    
-	    case mark_eq_eval(Bs,X,true,Level) of
+	    case mark_eq_eval(Bs,X,?TRUE,Level) of
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", 
 			 [indent(Level),Level]),
 		    varp_formula:undo(Bs,Level),  %% (X=true)
-		    eq_eval(Bs,X,false,Level),
+		    eq_eval(Bs,X,?FALSE,Level),
 		    loop_1_next(Bs,I,X,N,Level,TRef,Threshold);
 		true ->
 		    ?dbg("~s~s/true: => {~s}\n",
@@ -209,7 +210,6 @@ loop_1(Bs,I,X,N,Level,TRef,Threshold) ->
 			    Bs,
 			    varp_formula:get_bindings(Bs,Level+1))]),
 		    Ys = varp_formula:intersect(Bs, X, Xs),
-		    %% print_bindings(Bs,Level,Ys),
 		    ?dbg("~sintersect = {~s}\n", 
 			 [indent(Level),
 			  varp_formula:fmt_bind_list(Bs,Ys)]),

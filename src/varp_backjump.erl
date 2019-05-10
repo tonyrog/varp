@@ -14,7 +14,6 @@
 -include("varp.hrl").
 
 -define(TOP_LEVEL, 0).    %% constants
-%% -define(INIT_LEVEL, 1).
 
 -define(dbg0(F,As), ok).
 -ifdef(DEBUG).
