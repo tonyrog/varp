@@ -97,7 +97,7 @@ saturate_vec(Bs,Vec) ->
 	   end,
     ?dbg("vector: {~s}\n", 
 	 [varp_formula:fmt_var_list(Bs,[V||{_,V}<-Vec1])]),
-    varp_formula:mark(Bs, 1),
+    varp_formula:set_level(Bs, 1),
     Res = saturate_vec_(Bs,Vec1,2),
     ?dbg("bound => {~s}\n\n",
 	 [varp_formula:fmt_bind_list(Bs,
@@ -106,66 +106,66 @@ saturate_vec(Bs,Vec) ->
     varp_formula:remove_mark(Bs, 1),
     Res.
 
--spec saturate_vec_(Bs::bs(),Vec::[{index(),var()}],Mark::integer()) ->
+-spec saturate_vec_(Bs::bs(),Vec::[{index(),var()}],Level::integer()) ->
 			   boolean().
-saturate_vec_(Bs,[{_,X}|V],Mark) ->
+saturate_vec_(Bs,[{_,X}|V],Level) ->
     case varp_formula:is_bound(Bs, X) of %% skip already bound variables
 	true ->
 	    ?dbg("~svar ~s is bound value=~w\n", 
-		 [indent(Mark),varp_formula:fmt_var(Bs,X),
+		 [indent(Level),varp_formula:fmt_var(Bs,X),
 		  varp_formula:value(Bs, X)]),
-	    saturate_vec_(Bs,V,Mark);
+	    saturate_vec_(Bs,V,Level);
 	false ->
-	    saturate_vec__(Bs,X,V,Mark)
+	    saturate_vec__(Bs,X,V,Level)
     end;
-saturate_vec_(_Bs,[],_Mark) ->
+saturate_vec_(_Bs,[],_Level) ->
     true.
 
-saturate_vec__(Bs,X,V,Mark) ->
-    case mark_eq_eval(Bs,X,false,Mark) of
+saturate_vec__(Bs,X,V,Level) ->
+    case mark_eq_eval(Bs,X,false,Level) of
 	false ->
-	    ?dbg("~scontradiction, undo ~w\n", [indent(Mark),Mark]),
-	    varp_formula:undo(Bs,Mark),
-	    case eq_eval(Bs,X,true,Mark) of
+	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
+	    varp_formula:undo(Bs,Level),
+	    case eq_eval(Bs,X,true,Level) of
 		false ->
-		    ?dbg("~scontradiction\n", [indent(Mark)]),
+		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
 		true  -> 
-		    saturate_vec_(Bs,V,Mark+1)
+		    saturate_vec_(Bs,V,Level+1)
 	    end;
 	true ->
-	    case saturate_vec_(Bs,V,Mark+2) of
+	    case saturate_vec_(Bs,V,Level+2) of
 		false ->
-		    ?dbg("~scontradiction, undo ~w\n", [indent(Mark),Mark]),
-		    varp_formula:undo(Bs,Mark),
-		    eq_eval(Bs,X,true,Mark);
+		    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
+		    varp_formula:undo(Bs,Level),
+		    eq_eval(Bs,X,true,Level);
 		true ->
-		    Xs = varp_formula:get_bindings(Bs,Mark+1), %% + X=false!
+		    Xs = varp_formula:get_bindings(Bs,Level+1), %% + X=false!
 		    ?dbg("~s~s/false: => {~s}\n", 
-			 [indent(Mark),
+			 [indent(Level),
 			  varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(Bs,Xs)]),
-		    varp_formula:undo(Bs,Mark), %% (X=false)
+		    varp_formula:undo(Bs,Level), %% (X=false)
 		    
-		    case mark_eq_eval(Bs,X,true,Mark) of
+		    case mark_eq_eval(Bs,X,true,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
-				 [indent(Mark),Mark]),
-			    varp_formula:undo(Bs,Mark),  %% (X=true)
-			    eq_eval(Bs,X,false,Mark);
+				 [indent(Level),Level]),
+			    varp_formula:undo(Bs,Level),  %% (X=true)
+			    eq_eval(Bs,X,false,Level);
 			true ->
 			    ?dbg("~s~s/true: => {~s}\n",
-				 [indent(Mark),varp_formula:fmt_var(Bs,X),
+				 [indent(Level),varp_formula:fmt_var(Bs,X),
 				  varp_formula:fmt_bind_list(
 				    Bs,
-				    varp_formula:get_bindings(Bs,Mark+1))]),
+				    varp_formula:get_bindings(Bs,Level+1))]),
 			    Ys = varp_formula:intersect(Bs, X, Xs),
 			    ?if1(Ys =/= [],
 				 begin io:format("intersect=~w\n", [Ys]) end),
 			    ?dbg("~sintersect = {~s}\n", 
-				 [indent(Mark),
+				 [indent(Level),
 				  varp_formula:fmt_bind_list(Bs,Ys)]),
-			    varp_formula:undo(Bs,Mark),  %% undo (X=true)
+			    varp_formula:undo(Bs,Level),  %% undo (X=true)
 			    install_bindings(Bs, Ys),
 			    varp_formula:eval(Bs)
 		    end
@@ -190,15 +190,15 @@ install_bindings(Bs,_Bcp,[]) ->
     Bs.
 
 %% place mark before and after the decision variable
-mark_eq_eval(Bs,V,Value,Mark) ->
+mark_eq_eval(Bs,V,Value,Level) ->
     ?dbg("~seq_eval: ~s/~s\n", 
-	 [indent(Mark),
+	 [indent(Level),
 	  varp_formula:fmt_var(Bs,V),
 	  varp_formula:fmt_var(Bs,Value)]),
-    varp_formula:mark(Bs,Mark),
+    varp_formula:set_level(Bs,Level),
     case varp_formula:equal(Bs,V,Value) of
 	true ->
-	    varp_formula:mark(Bs,Mark+1),
+	    varp_formula:set_level(Bs,Level+1),
 	    varp_formula:eval(Bs);
 	false ->
 	    false

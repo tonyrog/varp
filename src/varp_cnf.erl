@@ -45,12 +45,12 @@ satisfy({cnf,{_Nv,_Nc,Decl,Literals,CLs}},N) ->
 
 satisfy(CLs, Ls, _Decl, N) ->
     Vp = varc:new(),
-    Mark = 1,
-    varc:mark(Vp,Mark),
+    Level = 1,
+    varc:set_level(Vp,Level),
     Vm = add_literals(Vp, Ls, #{}),
     Vm1 = add_clauses(Vp, CLs, Vm),
     ?dbg("bindings[~w]:  ~s\n", 
-	 [Mark,format_marked_bindings(Vp,Vm1,Mark)]),
+	 [Level,format_marked_bindings(Vp,Vm1,Level)]),
     case varc:eval(Vp) of
 	false -> 
 	    0;
@@ -117,21 +117,21 @@ bt_next(Vp,Vm,[{_,_,[],_}|Stack1]) ->
     ?dbg("empty next\n", []),
     bt_undo(Vp,Vm,Stack1),
     bt_next(Vp,Vm,Stack1);
-bt_next(Vp,Vm,Stack0=[{I,Xi,[V|_Vs],Mark}|_Stack]) ->
-    ?dbg("decision[~w]: ~s/~w=~w\n", [Mark,format_var(Vm,Xi),I,(V+1) div 2]),
-    varc:mark(Vp,Mark),
+bt_next(Vp,Vm,Stack0=[{I,Xi,[V|_Vs],Level}|_Stack]) ->
+    ?dbg("decision[~w]: ~s/~w=~w\n", [Level,format_var(Vm,Xi),I,(V+1) div 2]),
+    varc:set_level(Vp,Level),
     bt_next1(Vp,Vm,Stack0);
 bt_next(_Vp,_Vm,[]) ->
     false.
 
-bt_next1(Vp,Vm,Stack0=[{_I,Xi,[V|_Vs],Mark}|_Stack]) ->
+bt_next1(Vp,Vm,Stack0=[{_I,Xi,[V|_Vs],Level}|_Stack]) ->
     true = varc:put(Vp,Xi,V),
     case varc:eval(Vp) of
 	false -> %% conflict
 	    bt_conflict(Vp,Vm,Stack0);
 	true ->
 	    ?dbg("bindings[~w]: ~s\n", 
-		 [Mark,format_marked_bindings(Vp,Vm,Mark)]),
+		 [Level,format_marked_bindings(Vp,Vm,Level)]),
 	    bt_next_var(Vp,Vm,Stack0)
     end.
 
@@ -248,19 +248,19 @@ bt_next_var(Vp,Vm,[{I,Xi,[_|Vs],Mark}|Stack]) ->
 	    {true,[{J,Xj,?BT_ORDER,Mark+1},{I,Xi,Vs,Mark}|Stack]}
     end.
 
-bt_undo(Vp,Vm,[{_,_,_,Mark}|Stack],JMark) when Mark > JMark ->
-    ?dbg("undo: ~w\n", [Mark]),
-    varc:undo(Vp, Mark),
-    bt_undo(Vp,Vm,Stack,JMark);
-bt_undo(_Vp,_Vm,Stack=[{J,_Xj,_Vs,_Mark}|_],_JMark) ->
+bt_undo(Vp,Vm,[{_,_,_,Level}|Stack],JLevel) when Level > JLevel ->
+    ?dbg("undo: ~w\n", [Level]),
+    varc:undo_level(Vp, Level),
+    bt_undo(Vp,Vm,Stack,JLevel);
+bt_undo(_Vp,_Vm,Stack=[{J,_Xj,_Vs,_Level}|_],_JLevel) ->
     {J,Stack};
 bt_undo(_Vp,_Vm,[],_JMark) ->
     {2,[]}.
 
 
-bt_undo(Vp,_Vm,[{_,_,_,Mark}|_]) ->
-    ?dbg("undo: ~w\n", [Mark]),
-    varc:undo(Vp, Mark);
+bt_undo(Vp,_Vm,[{_,_,_,Level}|_]) ->
+    ?dbg("undo: ~w\n", [Level]),
+    varc:undo_level(Vp, Level);
 bt_undo(_Vp,_Vm,[]) ->
     ok.
 
@@ -941,8 +941,8 @@ add_var(true,VSet) -> VSet;
 add_var(false,VSet) -> VSet;
 add_var(V,VSet) -> sets:add_element(V,VSet).
 
-format_marked_bindings(Vp,Vs,Mark) ->
-    format_bindings(Vs,varc:get_bindings(Vp,Mark)).
+format_marked_bindings(Vp,Vs,Level) ->
+    format_bindings(Vs,varc:get_bindings(Vp,Level)).
 
 format_bindings(Vm,Bs) ->
     [[format_binding(Vm,V,Val)," "] || {V,Val} <- Bs].

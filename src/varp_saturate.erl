@@ -137,7 +137,7 @@ install_bindings(_Bs,_Level,_Var,[]) ->
 install_bindings(Bs,Level,_Var,Bnds) ->
     Bcp = varp_option:getopt(bcp,Bs#bs.option),
     if Level =:= ?RUN_LEVEL ->
-	    varp_formula:mark(Bs,?TOP_LEVEL);
+	    varp_formula:set_level(Bs,?TOP_LEVEL);
        true ->
 	    ok
     end,
@@ -180,6 +180,7 @@ loop_1(Bs,I,X,N,Level,TRef,Threshold) ->
     case mark_eq_eval(Bs,X,?FALSE,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
+	    varp_formula:undo(Bs,Level+1),
 	    varp_formula:undo(Bs,Level),
 	    case eq_eval(Bs,X,?TRUE,Level) of
 		false ->
@@ -194,6 +195,7 @@ loop_1(Bs,I,X,N,Level,TRef,Threshold) ->
 		 [indent(Level),
 		  varp_formula:fmt_var(Bs,X),
 		  varp_formula:fmt_bind_list(Bs,Xs)]),
+	    varp_formula:undo(Bs,Level+1), %% (X=false)
 	    varp_formula:undo(Bs,Level), %% (X=false)
 		    
 	    case mark_eq_eval(Bs,X,?TRUE,Level) of
@@ -243,10 +245,10 @@ mark_eq_eval(Bs,V,Value,Level) ->
 	 [indent(Level),
 	  varp_formula:fmt_var(Bs,V),
 	  varp_formula:fmt_var(Bs,Value)]),
-    varp_formula:mark(Bs,Level),
+    varp_formula:set_level(Bs,Level),
     case varp_formula:equal(Bs,V,Value) of
 	true ->
-	    varp_formula:mark(Bs,Level+1),
+	    varp_formula:set_level(Bs,Level+1),
 	    varp_formula:eval(Bs);
 	false ->
 	    false

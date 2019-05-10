@@ -79,10 +79,10 @@ next([{_,_Xi,[],_}|Stack1],Bs) ->
     undo(Bs,Stack1),
     next(Stack1,Bs);
 next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
-    varp_formula:mark(Bs,Mark),
+    varp_formula:set_level(Bs,Mark),
     case eq_eval(Bs,Xi,V,Mark) of
 	false -> %% hook this?
-	    varp_formula:undo(Bs,Mark),
+	    varp_formula:undo_level(Bs,Mark),
 	    next([{I,Xi,Vs,Mark}|Stack],Bs);
 	true ->
 	    case varp_formula:next_unbound(Bs,I) of
@@ -111,8 +111,8 @@ loop(Stack,Func,Acc,Bs) ->
 	    {false,Acc}
     end.
 
-undo(Bs,[{_,_,_,Mark}|_]) ->
-    varp_formula:undo(Bs,Mark);
+undo(Bs,[{_,_,_,Level}|_]) ->
+    varp_formula:undo_level(Bs,Level);
 undo(_Bs,[]) ->
     ok.
 

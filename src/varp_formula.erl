@@ -56,7 +56,6 @@
 -export([first_init/1]).
 -export([first_unbound/1]).
 -export([next_unbound/2, next_unbound/3]).
--export([latest_bound/1]).
 -export([info/3, debug/3]).
 -export([get_bindings/2]).
 -export([intersect/3]).
@@ -64,9 +63,9 @@
 -export([clear_queue/1]).
 -export([enqueue_all/1]).
 -export([eval/1]).
--export([mark/1, mark/2]).
--export([remove_mark/1, remove_mark/2]).
--export([undo/1, undo/2]).
+-export([set_level/2]).
+-export([keep_level/2]).
+-export([undo_level/2]).
 -export([vfold_op/4]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
@@ -366,23 +365,14 @@ enqueue_all(Bs) ->
 eval(Bs) ->
     varc:eval(Bs#bs.vp).
 
-undo(Bs) ->
-    varc:undo(Bs#bs.vp, -1).
+undo_level(Bs, Level) ->
+    varc:undo_level(Bs#bs.vp, Level).
 
-undo(Bs,Mark) ->
-    varc:undo(Bs#bs.vp,Mark).
+keep_level(Bs, Level) ->
+    varc:keep_level(Bs#bs.vp, Level).
 
-remove_mark(Bs) ->
-    varc:remove_mark(Bs#bs.vp, -1).
-
-remove_mark(Bs,Mark) ->
-    varc:remove_mark(Bs#bs.vp,Mark).
-
-mark(Bs) ->
-    varc:mark(Bs#bs.vp).
-
-mark(Bs,Level) ->
-    varc:mark(Bs#bs.vp, Level).
+set_level(Bs,Level) ->
+    varc:set_level(Bs#bs.vp, Level).
 
 value(Bs,V) ->
     case varc:get(Bs#bs.vp, V) of
@@ -476,15 +466,12 @@ next_unbound(Bs,I) ->
 next_unbound(Bs,I,Skip) ->
     varc:order_next(Bs#bs.vp,I,Skip).
 
-latest_bound(Bs) ->
-    varc:get_bindings(Bs#bs.vp, -1).
+get_bindings(Bs,Level) when is_integer(Level) ->
+    varc:get_bindings(Bs#bs.vp, Level).
 
 info(Bs,Fmt,As) -> ?info(Bs#bs.option, Fmt, As).
 
 debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
-
-get_bindings(Bs,Level) when is_integer(Level) -> 
-    varc:get_bindings(Bs#bs.vp, Level).
 
 conflicting_clause(Bs) ->
     conflicting_clause(Bs,0).

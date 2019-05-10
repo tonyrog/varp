@@ -89,7 +89,7 @@ test3() ->
     io:format("X8 clauses = ~p\n", [varc:get_clauses(V, X8)]),
 
     true = varc:eval(V),
-    true = varc:mark(V, 1),
+    true = varc:set_level(V, 1),
     true = varc:put(V, X3, ?TRUE),
     true = varc:put(V, X4, ?FALSE),
     {varc:get_bindings(V, 1), varc:get_number_of_clauses(V)}.
@@ -133,7 +133,7 @@ or_eval() ->
     0 = varc:get(V, X4),
     0 = varc:get(V, X5),
 
-    varc:mark(V, 1),
+    varc:set_level(V, 1),
     C0 = add_clause(V, [X2, ?FALSE, ?FALSE]),
     C1 = add_clause(V, [X3, ?TRUE, ?TRUE, ?TRUE]),
     C2 = add_clause(V, [-X4, ?FALSE, ?FALSE, ?FALSE]),
@@ -174,7 +174,7 @@ or_eval_bindings() ->
     X4 = add_variable(V),
     X5 = add_variable(V),
 
-    varc:mark(V, 1),
+    varc:set_level(V, 1),
     add_clause(V, [-X2, -X3, -X4]),
     add_clause(V, [-X2, -X3,  X5]),
     add_clause(V, [-X2,  X3, -X4]),
@@ -190,7 +190,7 @@ or_eval_bindings() ->
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
 
-    varc:mark(V, 2),
+    varc:set_level(V, 2),
     add_clause(V, [-X2,  X3,  X4, -X5]),
     io:format("watched = ~w\n", [get_watched(V)]),
     io:format("3/1\n", []),

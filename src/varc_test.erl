@@ -105,7 +105,7 @@ test3() ->
     true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_queue(V)),
     true = varc:eval(V),
     true = lists:sort([]) =:= lists:sort(varc:get_queue(V)),
-    true = varc:mark(V, 1),
+    true = varc:set_level(V, 1),
 
     true = varc:put(V, X3, ?TRUE),
     true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
@@ -124,7 +124,7 @@ test4() ->
     X6 = varc:add_variable(V),
     X7 = varc:add_variable(V),
 
-    true = varc:mark(V, 1),
+    true = varc:set_level(V, 1),
     varc:put(V, X2, X3),
     varc:put(V, X4, X5),
     varc:put(V, X6, X7),
@@ -256,11 +256,11 @@ or_conflict() ->
     io:format("clauses=~p\n", [[C0,C1]]),
     true = varc:eval(Vp),
 
-    true = varc:mark(Vp, 1),
+    true = varc:set_level(Vp, 1),
     true = varc:put(Vp,X2,?TRUE),
     true = varc:eval(Vp),
 
-    varc:undo(Vp),
+    varc:undo_level(Vp,1 ),
     true = varc:put(Vp,X2,?FALSE),
     false = varc:eval(Vp),
 

@@ -9,7 +9,7 @@
 
 -export([backjump/1]).
 
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 
 -include("varp.hrl").
 
@@ -67,7 +67,7 @@ backjump(Bs) ->
 			 0
 		 end,
     Permanent = varp_formula:get_info(Bs, permanent),
-    varp_formula:config(Bs, lru_size, KeepSize),
+    varp_formula:config(Bs, keep, KeepSize),
     io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
 	      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]),
     case varp_formula:getopt(Bs, restart_counter) of
@@ -192,8 +192,8 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	   end),
     ?dbg("undo[~w]: ~w\n", [Level, JLevel+1]),
 
-    varp_formula:undo(Bs, JLevel+1),
-    varp_formula:mark(Bs, JLevel),
+    varp_formula:undo_level(Bs, JLevel+1),
+    varp_formula:set_level(Bs, JLevel),
     {INext,Stack1} = backjump(Bs,Stack,JLevel),
     ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
 		    display_stack_ln(Bs, Stack1),
@@ -226,7 +226,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
     NewLearnedClauses = length(LClauseList7) +
 	if JClause =:= undefined -> 0; true -> 1 end,
     Learned = Learned0 + NewLearnedClauses,
-    DoPurge = varp_formula:get_info(Bs2, lru_size) > 0,
+    DoPurge = varp_formula:get_info(Bs2, keep) > 0,
 
     DoRestartCount =
 	case varp_formula:getopt(Bs, restart_counter) of
@@ -270,8 +270,8 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	    init(Bs, MaxLearned);
        DoPurge, Learned >= MaxLearned ->
 	    %% restart and purge!
-	    varp_formula:undo(Bs, ?TOP_LEVEL+1),
-	    varp_formula:mark(Bs, ?TOP_LEVEL),
+	    varp_formula:undo_level(Bs, ?TOP_LEVEL+1),
+	    varp_formula:set_level(Bs, ?TOP_LEVEL),
 	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
 	    varp_formula:del_unused_clauses(Bs),
 	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
@@ -282,8 +282,8 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
-	    varp_formula:undo(Bs, ?TOP_LEVEL+1),
-	    varp_formula:mark(Bs, ?TOP_LEVEL),
+	    varp_formula:undo_level(Bs, ?TOP_LEVEL+1),
+	    varp_formula:set_level(Bs, ?TOP_LEVEL),
 	    reorder(Bs),
 	    init(Bs, MaxLearned);
        true ->
@@ -320,9 +320,9 @@ next(Bs,Level,MaxLearned,I,Stack) ->
 	    1;
 	{J,Xj} ->
 	    NextLevel = Level+1,
-	    varp_formula:mark(Bs,NextLevel),
+	    varp_formula:set_level(Bs,NextLevel),
 	    true = varp_formula:equal(Bs,Xj,?TRUE),
-	    ?dbg("decision[~w] = ~s\n", [NextLevel,format_literal(Bs,Xj)]),
+	    ?dbg("decision@~w = ~s\n", [NextLevel,format_literal(Bs,Xj)]),
 	    loop(Bs,NextLevel,MaxLearned,J,[{J,Xj,NextLevel}|Stack])
     end.
 
@@ -413,11 +413,12 @@ model(Bs) ->
 
 add_conflict_clause(Bs,[]) ->
     Bs;
-add_conflict_clause(Bs,[L]) ->
-    ?dbg("~s=1@0(~w)\n", [format_literal(Bs,L),varp_formula:value(Bs,L)]),
+add_conflict_clause(Bs,_Clause=[L]) ->
+    ?dbg("conflict clause: ~s\n", [format_clause(Bs, _Clause)]),
     true = varp_formula:equal(Bs,L,?TRUE,?TOP_LEVEL),
     Bs;
 add_conflict_clause(Bs,Clause) ->
+    ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
     Max = varp_formula:get_info(Bs, max_clause_length),
     L = length(Clause),
     if L >= Max ->

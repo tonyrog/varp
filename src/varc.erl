@@ -29,9 +29,9 @@
 -export([is_bound/2]).
 -export([class_next/2]).
 -export([is_equal/3]).
--export([mark/1,mark/2]).
--export([undo/1,undo/2]).
--export([remove_mark/1, remove_mark/2]).
+-export([set_level/2]).
+-export([undo_level/2]).
+-export([keep_level/2]).
 -export([eval/1]).
 -export([add_clause/3]).
 -export([add_clause/4]).
@@ -123,7 +123,7 @@ info(_Vp, Item) when is_atom(Item) ->
 
 %% set config
 %%    permanent       -- number of clauses that are permanent
-%%    lru_size        -- size of lru cache for garbage collect conflict clauses
+%%    keep            -- size of lru cache for garbage collect conflict clauses
 %%    max_conflicting -- max number of conflicting <= MAX_CONFLICTING
 %% 
 config(_Vp, Item, _Value) when is_atom(Item) ->
@@ -164,11 +164,9 @@ put(_Vp, A, B) when is_integer(A),
 -spec put(Vp::varc(), A::literal(), B::literal(), Level::integer()) -> boolean().
 
 put(_Vp, A, B, Level) when is_integer(A),
-				 is_integer(B),
-				 is_integer(Level) ->
+			   is_integer(B),
+			   is_integer(Level) ->
     ?nif_stub().
-
-
 
 -spec class(Vp::varc(), Lit::literal()) -> integer().
 class(_Vp, Lit) when is_integer(Lit) ->
@@ -207,28 +205,17 @@ is_equal(_Vp, LitA, LitB) when is_integer(LitA),
 			       is_integer(LitB) ->
     ?nif_stub().
 
-mark(Vp) ->
-    mark(Vp, 0).
-
-mark(_Vp,Level) when is_integer(Level), Level >= 0 ->
+set_level(_Vp,Level) when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
-%% remove latest mark
-remove_mark(Vp) ->
-    remove_mark(Vp,-1).
+-spec keep_level(Vp::varc(), Mark::integer()) -> ok.
 
--spec remove_mark(Vp::varc(), Mark::integer()) -> ok.
-
-remove_mark(_Vp,_Mark) ->
+keep_level(_Vp,_Mark) ->
     ?nif_stub().
 
-%% undo every thing
-undo(_Vp) ->
-    ?nif_stub().
+-spec undo_level(Vp::varc(), Level::integer()) -> ok.
 
--spec undo(Vp::varc(), Mark::integer()) -> ok.
-
-undo(_Vp,_Mark) ->
+undo_level(_Vp,_Level) ->
     ?nif_stub().
 
 eval(_Vp) ->
@@ -411,7 +398,8 @@ info_keys() ->
      grow,
      size,
      permanent,
-     lru_size
+     keep,
+     level
     ].
 
 get_number_of_variables(Vp) ->

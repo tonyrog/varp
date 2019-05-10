@@ -108,12 +108,12 @@ static ERL_NIF_TERM varp_conflicting_clause(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_is_equal(ErlNifEnv* env, int argc,
 				  const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
-			     const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varp_remove_mark(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
-			      const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
+				   const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_keep_level(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_undo_level(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_eval(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
@@ -317,7 +317,7 @@ typedef struct _varp_t {
     int*         order_map;   // literal order table
     int          sort_key[2]; // sort order -1,-2,1,2
     clause_t**   clause_map;  // array of clauses, entries may be null
-    size_t       lru_size;    // number of clauses to keep
+    size_t       keep;        // number of clauses to keep
 
     size_t       unum;        // number of levels allocated
     undo_t*      undo;        // array of undo block, one for each level
@@ -368,10 +368,9 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "is_bound",            2,  varp_is_bound ),
     NIF_FUNC( "class_next",          2,  varp_class_next ),
     NIF_FUNC( "is_equal",            3,  varp_is_equal ),
-    NIF_FUNC( "mark",                2,  varp_mark ),
-    NIF_FUNC( "remove_mark",         2,  varp_remove_mark ),
-    NIF_FUNC( "undo",                1,  varp_undo ),
-    NIF_FUNC( "undo",                2,  varp_undo ),
+    NIF_FUNC( "set_level",           2,  varp_set_level ),
+    NIF_FUNC( "keep_level",          2,  varp_keep_level ),
+    NIF_FUNC( "undo_level",          2,  varp_undo_level ),
     NIF_FUNC( "eval",                1,  varp_eval ),
     NIF_FUNC( "add_clause",          3,  varp_add_clause ),
     NIF_FUNC( "add_clause",          4,  varp_add_clause ),
@@ -456,12 +455,12 @@ DECL_ATOM(eval_counter);
 DECL_ATOM(undo_stack_size);
 DECL_ATOM(value_stack_size);
 DECL_ATOM(class_stack_size);
-DECL_ATOM(mark);
 DECL_ATOM(unit);
 DECL_ATOM(use);
 DECL_ATOM(reset);
 DECL_ATOM(permanent);
-DECL_ATOM(lru_size);
+DECL_ATOM(keep);
+DECL_ATOM(level);
 
 
 #define EXT  0x80
@@ -1050,7 +1049,7 @@ static int set_level(varp_t* vp, int level)
 	memset(vp->undo+n, 0, n*sizeof(undo_t));
     }
     vp->level = level;
-    DBG("SET MARK: level=%d\r\n", level);
+    DBG("SET LEVEL: level=%d\r\n", level);
     return 0;
 }
 
@@ -1083,41 +1082,12 @@ static void undo_level(varp_t* vp, int level)
     vp->undo[level].bs_size = 0;
 }
 
-// undo all levels including ilevel or count
-static int pop_to_level(varp_t* vp, int count, int ilevel)
-{
-    int level = vp->level;
-    while(level > 0) {
-	undo_level(vp, level);
-	if (count) count--;
-	if ((level == ilevel) || ((ilevel < 0) && (count == 0)))
-	    return level;
-	level--;
-    }
-    return 0;
-}
-
-static void forget_bindings(varp_t* vp, int level)
+// clear but do not undo a level (keep the bindings)
+static void keep_level(varp_t* vp, int level)
 {
     vp->stack_size -= vp->undo[level].bs_size;
     vp->undo[level].bs = NULL;
     vp->undo[level].bs_size = 0;
-}
-
-// permanent bindings includeing mark level or count
-static int forget_to_level(varp_t* vp, int count, int ilevel)
-{
-    int level = vp->level;
-
-    // use level 0 as special place
-    while(level > 0) {
-	forget_bindings(vp, level);
-	if (count) count--;
-	if ((level == ilevel) || ((ilevel < 0) && (count == 0)))
-	    return level;
-	level--;
-    }
-    return 0;
 }
 
 static void init_literal(literal_t* lp, variable_t* var, int sign)
@@ -1402,7 +1372,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     vp->cnum = 0;
     vp->cpermanent = 0;
     vp->bcp  = bcp;
-    vp->lru_size = 0;
+    vp->keep = 0;
     
     if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
 	goto error;
@@ -2280,8 +2250,8 @@ static ERL_NIF_TERM varp_put(ErlNifEnv* env, int argc,
     return ATOM(true);
 }
 
-static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
-			     const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
+				   const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
@@ -2303,61 +2273,39 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 //   undo count number of marks
 // undo 0 = undo everything (mark can not exist)
 //
-static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
-			      const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varp_undo_level(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
     int level;
-    int count = 0;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (argc == 1)
-	level = 0;
-    else {
-	if (!enif_get_int(env, argv[1], &level))
-	    return enif_make_badarg(env);
-    }
-    if (level < 0)
-	count = -level;
-    if ((count == 0) && (level != 0)) {
-	if (level < (int)vp->unum)
-	    goto found;	    
-	return enif_make_badarg(env); // mark not found!
-    }
-found:
-    vp->level = pop_to_level(vp, count, level);
-    return enif_make_int(env, vp->level);
+    if (!enif_get_int(env, argv[1], &level) || (level < 0))
+	return enif_make_badarg(env);
+    if (level < (int)vp->unum)
+	undo_level(vp, level);
+    return ATOM(ok);
 }
 
 //
-// remove a mark, leave bindings intact
-// or remove count(-mark) number of marks
+// keep bindings on a level remove undo information
 //
-static ERL_NIF_TERM varp_remove_mark(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varp_keep_level(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
     int level;
-    int count = 0;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &level))
+    if (!enif_get_int(env, argv[1], &level) || (level < 0))
 	return enif_make_badarg(env);
-    if (level < 0)
-	count = -level;
-    if ((count == 0) && (level != 0)) {
-	if (level < (int)vp->unum)
-	    goto found;	    
-	return enif_make_badarg(env); // mark not found!
-    }
-found:
-    // fixme merge undo[mark] with undo[mark-1]
-    vp->level = forget_to_level(vp, count, level);
-    return enif_make_int(env, vp->level);
+    if (level < (int)vp->unum)
+	keep_level(vp, level);
+    return ATOM(ok);
 }
 
 #ifdef DEBUG
@@ -2600,9 +2548,12 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     else if (argv[1] == ATOM(permanent)) {
 	return enif_make_uint(env, vp->cpermanent);
     }
-    else if (argv[1] == ATOM(lru_size)) {
-	return enif_make_uint(env, vp->lru_size);
-    }    
+    else if (argv[1] == ATOM(keep)) {
+	return enif_make_uint(env, vp->keep);
+    }
+    else if (argv[1] == ATOM(level)) {
+	return enif_make_uint(env, vp->level);
+    }        
     return enif_make_badarg(env);
 }
 
@@ -2630,11 +2581,11 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->cpermanent = value;
 	return ATOM(ok);
     }
-    if (argv[1] == ATOM(lru_size)) {
+    if (argv[1] == ATOM(keep)) {
 	unsigned int value;
 	if (!enif_get_uint(env, argv[2], &value))
 	    return enif_make_badarg(env);
-	vp->lru_size = value;
+	vp->keep = value;
 	return ATOM(ok);
     }
     if (argv[1] == ATOM(max_conflicting)) {
@@ -3065,7 +3016,7 @@ static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_make_badarg(env);
-    if ((vp->lru_size == 0) || (vp->cpermanent == 0))
+    if ((vp->keep == 0) || (vp->cpermanent == 0))
 	return ATOM(ok);
 
     // sort the upper part of clause, the conflict clause
@@ -3078,15 +3029,15 @@ static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
     for (i = vp->cpermanent; i < (int)vp->cnext; i++)
 	vp->clause_map[i]->cix = i;
 
-    // remove all clauses from vp->cpermanent+vp->lru_size
-    for (i = vp->cpermanent+vp->lru_size; i < (int)vp->cnext; i++) {
+    // remove all clauses from vp->cpermanent+vp->keep
+    for (i = vp->cpermanent+vp->keep; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
 	long p;
 	if ((p = cp->wl[0].p) > 0) unwatch(vp, cp, cp->lit[p]);
 	if ((p = cp->wl[1].p) > 0) unwatch(vp, cp, cp->lit[p]);
 	clause_free(vp, cp);
     }
-    vp->cnext = vp->cpermanent+vp->lru_size;
+    vp->cnext = vp->cpermanent+vp->keep;
     return ATOM(ok);
 }
 //                    i
@@ -3315,10 +3266,8 @@ static ERL_NIF_TERM make_binding(ErlNifEnv* env, varp_t*vp, variable_t* v)
 			    enif_make_int(env, get_variable_value(vp, v)));
 }
 
-// get_bindings(Vp, Mark, ClauseInfo)
-// Mark > 0  collect bindings until Mark = mark (not including)
-// Mark < 0  collect bindings until number of marks N ( = -Mark )
-// Mark == 0 get all bindings
+// get_bindings(Vp, Level, ClauseInfo)
+// return bindings on Level
 
 static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
@@ -3327,24 +3276,17 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     varp_t* vp;
     ERL_NIF_TERM list;
     int level;
-    int mark;
-    int count = 0;
     int clause_info = 0;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &mark))
+    if (!enif_get_int(env, argv[1], &level) || (level<0))
 	return enif_make_badarg(env);
     if (!get_boolean(env, argv[2], &clause_info))
 	return enif_make_badarg(env);
-    if (mark < 0)
-	count = -mark;
     list = enif_make_list(env, 0);
-
-    level = vp->level;
-    while(level >= 0) {
+    if (level <= vp->level) {
 	variable_t* bp = vp->undo[level].bs;
-
 	while(bp != NULL) {
 	    ERL_NIF_TERM elem;
 	    if (clause_info)
@@ -3354,10 +3296,6 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 	    list = enif_make_list_cell(env, elem, list);
 	    bp = bp->next;
 	}
-	if (count) count--;
-	if ((level == mark) || ((mark<0) && (count == 0)))
-	    return list;
-	level--;
     }
     return list;
 }
@@ -3389,7 +3327,6 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
     level = vp->level;
     while((level >= 0) && count) {
 	variable_t* bp = vp->undo[level].bs;
-
 	while((bp != NULL) && count) {
 	    ERL_NIF_TERM elem;
 	    if (clause_info)
@@ -3450,12 +3387,12 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(undo_stack_size);
     LOAD_ATOM(value_stack_size);
     LOAD_ATOM(class_stack_size);
-    LOAD_ATOM(mark);
     LOAD_ATOM(unit);
     LOAD_ATOM(use);
     LOAD_ATOM(reset);
     LOAD_ATOM(permanent);
-    LOAD_ATOM(lru_size);
+    LOAD_ATOM(keep);
+    LOAD_ATOM(level);
 }
 
 static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
