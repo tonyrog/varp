@@ -11,6 +11,8 @@
 -define(TRUE,   1).
 -define(FALSE, -1).
 
+-define(TOP_LEVEL, 0).
+
 -define(NUM_COUNTERS, 9).
 -define(COUNTER_CONFLICT_CLAUSES,   1).
 -define(COUNTER_MINIMIZE_COUNT,     2).

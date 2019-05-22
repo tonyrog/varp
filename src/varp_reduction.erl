@@ -11,142 +11,69 @@
 
 -include("varp.hrl").
 
+reduction(Bs) ->
+    N = varp_formula:number_of_unbound(Bs),
+    case varp_formula:getopt(Bs,reduction) of
+	0 -> Bs;
+	all -> red(Bs,N);
+	M -> red(Bs,min(N,M))
+    end.
 
-file(Input,Output) ->
-    SNF = varp_dimacs:load(Input),
-    save_snf_to_red(SNF, Output).
+red(Bs,N) ->
+    case varp_formula:first_unbound(Bs) of
+	false -> Bs;
+	{I,X} -> red(Bs,I,X,N)
+    end.
 
-save_snf_to_red(SNF, Output) ->
-    T = transform(SNF),
-    file:write_file(Output,format_defs(T)).
+red(Bs,_I,_X,0) -> Bs;
+red(Bs, I, X,N) ->
+    Bs1 = add_var(Bs,X),
+    case varp_formula:next_unbound(Bs1,I) of
+	false -> Bs1;
+	{I1,X1} -> red(Bs1,I1,X1,N-1)
+    end.
 
-save_snf_to_red_plus_clauses(SNF={snf,{_Nv,_Nc,_Decls,_Ls0,CLs}}, Output) ->
-    {Decls,Ls,Defs} = transform(SNF),
-    Fs = format_cnf(CLs),
-    file:write_file(Output, [format_decls(Decls),Fs," &&\n",
-			     format_defs({[],Ls,Defs})]).
+add_var(Bs, V) ->
+    io:format("reduction ~s\n", [varp_formula:format_lit(Bs,V)]),
+    Bs1 = add_lit(Bs, V),
+    add_lit(Bs1, -V).
 
-save_snf_to_clauses({snf,{_Nv,_Nc,_Decls,_Ls0,CLs}}, Output) ->
-    Fs = format_cnf(CLs),
-    file:write_file(Output, Fs).
+add_lit(Bs, L) ->
+    Is = varp_formula:get_clauses(Bs, L, literal),
+    Cs = clauses(Bs, Is, L),
+    %% emit_def(Bs, L, Cs),
+    {{bool,V}, Bs1} = varp_formula:build({'ANY',Cs}, Bs),
+    varp_formula:xor_gate(Bs1, ?TRUE, [L,-V]).
 
+emit_def(Bs, L, Cs) ->
+    io:format("~s == ", [varp_formula:format_lit(Bs,L)]),
+    lists:foreach(
+      fun({'ALL',[{literal,L1}]}) ->
+	      io:format("{~s}|",[varp_formula:format_lit(Bs,L1)]);
+	 ({'ALL',[{literal,L1}|Ls]}) ->
+	      io:format("{~s",[varp_formula:format_lit(Bs,L1)]),
+	      lists:foreach(
+		fun({literal,Li}) ->
+			io:format("&~s", [varp_formula:format_lit(Bs,Li)])
+		end, Ls),
+	      io:format("}|")
+      end, Cs),
+    io:format("\n").
+    
 
-load(File) ->
-    varp_dimacs:load(File).
+clauses(Bs, [I|Cs], L) ->
+    [clause(get_clause(Bs, I), L, []) | clauses(Bs,Cs,L)];
+clauses(_Bs, [], _L) ->
+    [].
 
-transform({snf,{_Nv,_Nc,Decls,Ls0,CLs0}}) ->
-    {CLs,Ls1} = pp_clauses(CLs0,Ls0),
-    Vars = snf_vars(CLs),
-    Defs = sets:fold(
-	     fun(V,Acc) ->
-		     [def(V, CLs), def({'not',V},CLs) | Acc]
-	     end, [], Vars),
-    {Decls,Ls1,Defs}.
+%% from [A,B,L,C,D] => [-A,-B,-C,-D]
+clause([L|Ls], L, Acc) -> 
+    clause(Ls, L, Acc);
+clause([Li|Ls], L, Acc) -> 
+    clause(Ls, L, [{literal,-Li}|Acc]);
+clause([], _L, Acc) ->
+    {'ALL',Acc}.
 
-format_defs({Decls,Ls,Defs}) ->
-    [format_decls(Decls),
-     [[format_literal(L)," &&\n"] || L<-Ls],
-     concat([ ["(",format_literal(L)," <-> (", format_dnf(D),")",")"] ||
-		{L,D} <- Defs], " &&\n")].
-
-format_decls(Ds) ->
-    [["declare ",format_decl(D),";\n"] || D <- Ds].
-
-format_decl({Var,uint,Size}) ->
-    [varp_cnf:format_symbol(Var),":",integer_to_list(Size),
-     "/unsigned"];
-format_decl({Var,int,Size}) ->
-    [varp_cnf:format_symbol(Var),":",integer_to_list(Size),
-     "/signed"].
-
-format_cnf(CLs) ->
-    concat([format_cnf_clause(CL) || CL <- CLs], " &&\n").
-
-format_dnf(CLs) ->
-    concat([format_dnf_clause(CL) || CL <- CLs], " || ").
-
-format_cnf_clause([L]) ->
-    format_literal(L);
-format_cnf_clause(CL) ->
-    ["(",concat([format_literal(L) || L <- CL], " || "),")"].
-
-format_dnf_clause([L]) ->
-    format_literal(L);
-format_dnf_clause(CL) ->
-    ["(",concat([format_literal(L) || L <- CL], " && "),")"].
-
-
-
-format_literal({'not',V}) ->
-    ["!",varp_cnf:format_symbol(V)];
-format_literal(V) ->
-    varp_cnf:format_symbol(V).
-
-%% Def generates and clauses
-def(L, CLs) ->
-    {L,def(L, CLs, [])}.
-
-def(L, [CL|CLs], Acc) ->
-    case CL -- [L] of
-	CL -> def(L, CLs, Acc);
-	CL1 -> def(L, CLs, [[neg(M)||M<-CL1]|Acc])
-    end;
-def(_L, [], Acc) ->
-    Acc.
-
-neg({'not',V}) -> V;
-neg(V) -> {'not',V}.
-
-snf_vars(CLs) -> 
-    snf_vars(CLs,sets:new()).
-snf_vars([C|CLs],VSet) ->
-    VSet1 = lists:foldl(
-	      fun({'not',V}, Si) -> add_var(V,Si);
-		 (V,Si) -> add_var(V,Si)
-	      end, VSet, C),
-    snf_vars(CLs, VSet1);
-snf_vars([],VSet) ->
-    VSet.
-
-%% preprocess clauses and literls
-pp_clauses(CLs,Ls) ->
-    pp_clauses(CLs,[],Ls).
-
-pp_clauses([[L]|CLs],Acc,Ls) ->
-    pp_clauses(CLs,Acc,[[L]|Ls]);
-pp_clauses([CL|CLs],Acc,Ls) ->
-    pp_clauses(CLs,[pp_clause(CL)|Acc],Ls);
-pp_clauses([],Acc,Ls) ->
-    {Acc,Ls}.
-
-pp_clause(CL) ->
-    [pp_literal(L) || L <- CL].
-
-pp_literal({'not',V}) -> {'not',pp_var(V)};
-pp_literal(V) -> pp_var(V).
-
-pp_var({bit_index,Var,I}) -> 
-    {bit_index,pp_pred(Var),pp_expr(I)};
-pp_var({uint,Var,Size,N}) -> 
-    {uint,pp_pred(Var),pp_expr(Size),pp_expr(N)};
-pp_var({int,Var,Size,N}) -> 
-    {int,pp_pred(Var),pp_expr(Size),pp_expr(N)};
-pp_var(true) -> true;
-pp_var(false) -> false;
-pp_var(Var) -> pp_pred(Var).
-
-pp_pred({p,Var,I}) when is_integer(I) -> {p,Var,I};
-pp_pred({p,Var,Es}) -> {p,Var,[pp_expr(E)||E<-Es]}.
-
-pp_expr(#cconst{value=List,base=Base}) ->
-    list_to_integer(List,Base);
-pp_expr(E) when is_integer(E) -> 
-    E.
-
-add_var(true,VSet) -> VSet;
-add_var(false,VSet) -> VSet;
-add_var(V,VSet) -> sets:add_element(V,VSet).
-
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].
+get_clause(Bs, I) ->
+    {'or',[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
+    CL.

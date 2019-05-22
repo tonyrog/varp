@@ -183,7 +183,8 @@ backtrack({F,Bs}) ->
 
 %% Basic run
 method(X,Bs) ->
-    passes([apply,eval,saturate,backjump,backtrack],X,Bs).
+    %% run saturate/reduction/saturate?
+    passes([apply,eval,reduction,saturate,backjump,backtrack],X,Bs).
 
 passes([Pass|Ps],X,Bs) ->
     case pass_enabled(Pass,Bs) of
@@ -200,7 +201,9 @@ passes([],_X,Bs) ->
 pass_(Pass,Ps,X,Bs) ->
     case one_model(Bs) of
 	false ->
-	    ClauseCount0 = varp_formula:clause_eval_counter(Bs),
+	    ClauseCount_0 = varp_formula:clause_eval_counter(Bs,0),
+	    ClauseCount2_0 = varp_formula:clause_eval_counter(Bs,2),
+	    ClauseCount3_0 = varp_formula:clause_eval_counter(Bs,3),
 	    EvalCount0   = varp_formula:eval_counter(Bs),
 	    Bound0       = varp_formula:number_of_bound(Bs),
 	    varp_formula:info(Bs, "pass ~p\n", [Pass]),
@@ -209,13 +212,18 @@ pass_(Pass,Ps,X,Bs) ->
 	    T1 = erlang:monotonic_time(),
 	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
 	    Ts = Time/1000000,
-	    ClauseCount1 = varp_formula:clause_eval_counter(Bs),
+	    ClauseCount_1 = varp_formula:clause_eval_counter(Bs,0),
+	    ClauseCount2_1 = varp_formula:clause_eval_counter(Bs,2),
+	    ClauseCount3_1 = varp_formula:clause_eval_counter(Bs,3),
 	    EvalCount1   = varp_formula:eval_counter(Bs),
 	    Clauses1     = varp_formula:number_of_clauses(Bs),
-	    varp_formula:info(Bs, "    | eval: ~w, clause = ~w, #clauses = ~w, time=~.2fs\n",
+	    varp_formula:info(Bs, "    | eval: ~w, clause:~w,~w(2),~w(3), #clauses = ~w time=~.2fs\n",
 			      [EvalCount1-EvalCount0,
-			       ClauseCount1-ClauseCount0,
-			       Clauses1,Ts]),
+			       ClauseCount_1-ClauseCount_0,
+			       ClauseCount2_1-ClauseCount2_0,
+			       ClauseCount3_1-ClauseCount3_0,
+			       Clauses1,
+			       Ts]),
 	    case R of
 		false ->
 		    varp_formula:info(Bs,"    | contradiction\n", []),
@@ -254,6 +262,11 @@ pass_enabled(saturate,Bs) ->
 	    io:format("saturations = ~p\n", [List]),
 	    {true,[{saturate,Params}||Params<-List]}
     end;
+pass_enabled(reduction,Bs) ->
+    case varp_formula:getopt(Bs,reduction) of
+	0 -> false;
+	_ -> true
+    end;
 pass_enabled(backtrack,Bs) ->
     varp_formula:getopt(Bs,backtrack);
 pass_enabled(backjump,Bs) ->
@@ -274,6 +287,8 @@ pass({saturate,Params},_X,Bs) ->
 pass(saturate,_X,Bs) ->
     Params = #{ saturate => varp_formula:getopt(Bs,saturate) },
     varp_saturate:saturate(Bs,Params);
+pass(reduction,_X,Bs) ->
+    varp_reduction:reduction(Bs);
 pass(backtrack,_X,Bs) ->
     varp_backtrack:backtrack(Bs);
 pass(backjump,_X,Bs) ->

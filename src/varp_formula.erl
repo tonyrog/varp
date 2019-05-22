@@ -27,7 +27,7 @@
 -export([format_p/1]).
 -export([or_gate/3, and_gate/3, xor_gate/3]).
 -export([or_clause/2, and_clause/2]).
--export([format_literal/2, format_literal/3]).
+-export([format_lit/2, format_lit/3]).
 -export([format_literals/2, format_literals/3]).
 -export([format_var/2]).
 -export([format_clause/2, format_clause/3]).
@@ -48,6 +48,7 @@
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
+-export([clause_eval_counter/2]).
 -export([eval_counter/1]).
 -export([order_sort/2, order_sort/4]).
 -export([order_sort_first/2]).
@@ -71,6 +72,7 @@
 -export([conflicting_clause/2]).
 -export([implication_clause/2]).
 -export([get_clause/2]).
+-export([get_clauses/3]).
 -export([get_clause_flags/2]).
 -export([add_clause/3]).
 -export([use_clause/2]).
@@ -172,9 +174,9 @@ clause(Bs,'or',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
 	    add_clause(Bs,'or',Ls),
 	    Bs;
 	true -> %% install as clauses
-	    add_clause(Bs,'or',[1,-X,Y,Z]),
-	    add_clause(Bs,'or',[1,X,-Y]),
-	    add_clause(Bs,'or',[1,X,-Z]),
+	    add_clause(Bs,'or',[?TRUE,-X,Y,Z]),
+	    add_clause(Bs,'or',[?TRUE,X,-Y]),
+	    add_clause(Bs,'or',[?TRUE,X,-Z]),
 	    Bs
     end;
 clause(Bs,'xor',Ls=[X,Y,Z]) ->
@@ -182,19 +184,19 @@ clause(Bs,'xor',Ls=[X,Y,Z]) ->
     if not Clause -> %% install as gate
 	    add_clause(Bs,'xor',Ls),
 	    Bs;
-	X =:= 1 ->
-	    add_clause(Bs,'or',[1,-Y,-Z]),
-	    add_clause(Bs,'or',[1,Y,Z]),
+	X =:= ?TRUE ->
+	    add_clause(Bs,'or',[?TRUE,-Y,-Z]),
+	    add_clause(Bs,'or',[?TRUE,Y,Z]),
 	    Bs;
-	X =:= -1 ->
-	    add_clause(Bs,'or',[1,-Y,Z]),
-	    add_clause(Bs,'or',[1,Y,-Z]),
+	X =:= ?FALSE ->
+	    add_clause(Bs,'or',[?TRUE,-Y,Z]),
+	    add_clause(Bs,'or',[?TRUE,Y,-Z]),
 	    Bs;
 	true -> %% install as clauses
-	    add_clause(Bs,'or',[1,X,-Y,Z]),
-	    add_clause(Bs,'or',[1,X,Y,-Z]),
-	    add_clause(Bs,'or',[1,-X,-Y,-Z]),
-	    add_clause(Bs,'or',[1,-X,Y,Z]),
+	    add_clause(Bs,'or',[?TRUE,X,-Y,Z]),
+	    add_clause(Bs,'or',[?TRUE,X,Y,-Z]),
+	    add_clause(Bs,'or',[?TRUE,-X,-Y,-Z]),
+	    add_clause(Bs,'or',[?TRUE,-X,Y,Z]),
 	    Bs
     end;
 clause(Bs,'or',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
@@ -450,6 +452,9 @@ number_of_unbound(Bs) ->
 clause_eval_counter(Bs) ->
     varc:get_clause_eval_counter(Bs#bs.vp).
 
+clause_eval_counter(Bs,N) ->
+    varc:get_clause_eval_counter(Bs#bs.vp,N).
+
 eval_counter(Bs) ->
     varc:get_eval_counter(Bs#bs.vp).
 
@@ -484,6 +489,10 @@ implication_clause(Bs, V) ->
 
 get_clause(Bs, I) ->
     varc:get_clause(Bs#bs.vp, I).
+
+%% How = watch|literal|variable
+get_clauses(Bs, L, How) ->
+    varc:get_clauses(Bs#bs.vp, L, How).
 
 get_clause_flags(Bs, I) ->
     varc:get_clause_flags(Bs#bs.vp, I).
@@ -781,6 +790,8 @@ build_(true, Bs) ->
     {{bool,?TRUE}, Bs};
 build_(false, Bs) ->
     {{bool,?FALSE}, Bs};
+build_({literal,X}, Bs) when is_integer(X) ->
+    {{bool,X}, Bs};
 build_(V, Bs) when is_atom(V) -> %% meta variable
     W = eval_meta(V,Bs),
     if W >=0 ->
@@ -2532,22 +2543,24 @@ format_literals(Bs,Ls) ->
     format_literals(Bs,Ls,false).
 
 format_literals(Bs,Ls,Bound) ->
-    concat([format_literal(Bs,L,Bound)||L<-Ls],",").
+    concat([format_lit(Bs,L,Bound)||L<-Ls],",").
 
-format_literal(Bs,X) when is_integer(X) ->
-    format_literal(Bs,X,false).
+format_lit(Bs,X) when is_integer(X) ->
+    format_lit(Bs,X,false).
 
-format_literal(Bs,X,Bound) when is_integer(X), X<0 ->
+format_lit(_Bs,?FALSE,_Bound) -> "0";
+format_lit(_Bs,?TRUE,_Bound)  -> "1";
+format_lit(Bs,X,Bound) when is_integer(X), X<0 ->
     ["!",format_var(Bs,-X,Bound)];
-format_literal(Bs,X,Bound) when is_integer(X) ->
+format_lit(Bs,X,Bound) when is_integer(X) ->
     format_var(Bs,X,Bound).
 
 format_var(Bs,X) ->
     format_var(Bs,X,false).
 
-format_var(_Bs,?TRUE,_Bound) -> "TRUE";
-format_var(_Bs,?FALSE,_Bound) -> "FALSE";
-format_var(Bs,X,Bound) ->    
+format_var(_Bs,?TRUE,_Bound) -> "1";
+format_var(_Bs,?FALSE,_Bound) -> "0";
+format_var(Bs,X,Bound) ->
     case find_var(X,Bs) of
 	error ->
 	    format_bnd(Bs, X, X, Bound);
@@ -2573,7 +2586,7 @@ implication_level(Bs,Imp) ->
 format_symbol(true) -> "true";
 format_symbol(false) -> "false";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);
-format_symbol(I) when is_integer(I) -> [$$|integer_to_list(I)];
+format_symbol(I) when is_integer(I),I>0 -> [$$|integer_to_list(I)];
 format_symbol({bit,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({uint,V,_N,I}) ->

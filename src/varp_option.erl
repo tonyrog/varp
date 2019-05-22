@@ -185,9 +185,16 @@ options() ->
     V12t = #{ long  => "time",
 	      short => "t",
 	      key   => time,
-	      spec  => unsigned,
+	      spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	      default => infinity,
 	      description => "Max time to run saturation in milliseconds"
+	    },
+    V12l = #{ long  => "laps",
+	      short => "l",
+	      key   => laps,
+	      spec  => {union,[unsigned,{enum,[{"infinity",infinity}]}]},
+	      default => infinity,
+	      description => "Max saturation lap count"
 	    },
     V13 = #{ long => "carry",
 	     key => carry,
@@ -313,13 +320,13 @@ options() ->
 	     default => 1,
 	     description => "number of conflicts to analyse"},
 
-    V35 = #{ long => "max-learned_clauses",
-	     key => max_learned_clauses,
+    V35 = #{ long => "max-learned",
+	     key => max_learned,
 	     spec =>  unsigned,
 	     default => 0,
 	     description => "Max number of clauses to generate in learning"},
 
-    V36 = #{ long => "max-learned_factor",
+    V36 = #{ long => "max-learned-factor",
 	     key => max_learned_factor,
 	     spec =>  float,
 	     default => 0,
@@ -355,6 +362,14 @@ options() ->
 	     default => false,
 	     description => "Report result in starexec format"},
 
+    V42 = #{ long => "reduction",
+	     short => "r",
+	     key => reduction,
+	     spec => {union,[unsigned,{enum,[{"all",all}]}]},
+	     default => 0,
+	     description => "Add literal reduction clauses."
+	  },
+
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
        print => V2, "print" => V2, "p" => V2,
@@ -379,6 +394,7 @@ options() ->
        assoc => V11, "assoc" => V11,
        threshold => V12, "threshold" => V12,
        time => V12t, "time" => V12t, "t" => V12t,
+       laps => V12l, "laps" => V12l, "l" => V12l,
        carry => V13, "carry" => V13,
        borrow => V14, "borrow" => V14,
        divz => V15, "divz" => V15,
@@ -399,14 +415,11 @@ options() ->
        stumble_olle => V30, "stumble_olle" => V30, "stumble-olle" => V30,
        seed => V31, "seed" => V31,
        max_conflicts => V33, "max_conflicts" => V33, "max-conflicts" => V33,
-
        num_conflicts => V34, "num_conflicts" => V34, "num-conflicts" => V34,
-       max_learned_clauses => V35, 
-       "max_learned_clauses" => V35,
-       "max-learned_clauses" => V35,
+       max_learned => V35, "max_learned" => V35, "max-learned" => V35,
        max_learned_factor => V36, 
        "max_learned_factor" => V36,
-       "max-learned_factor" => V36,
+       "max-learned-factor" => V36,
        keep_factor => V37, 
        "keep_factor" => V37,
        "keep-factor" => V37,
@@ -419,7 +432,8 @@ options() ->
        restart_interval=>V40,
        "restart_interval"=>V40,
        "restart-interval"=>V40,
-       starexec=>V41, "starexec"=>V41
+       starexec=>V41, "starexec"=>V41,
+       reduction=>V42, "reduction"=>V42, "r"=>V42
      }.
 
 %% list of options with unique key
@@ -638,8 +652,18 @@ match_val_({list,Spec}, Val) ->
     Vals = string:tokens(Val, ", "),
     {ok,Vs,_} = match_values(Spec, Vals, [], []),
     {ok,Vs};
+match_val_({union,Ts}, Val) ->
+    match_union_(Ts, Val);
 match_val_(void, "") ->
     {ok,true}.
+
+match_union_([T|Ts], Val) ->
+    case match_val_(T, Val) of
+	false -> match_union_(Ts, Val);
+	Result -> Result
+    end;
+match_union_([], _Val) ->
+    false.
 
 
 version() ->
@@ -715,7 +739,9 @@ format_spec(literal)  -> "literal";
 format_spec(atom)     -> "atom";
 format_spec(void)     -> "void";
 format_spec({enum,Vs}) when is_list(Vs) ->
-    string:join([Name || {Name,_Enum} <- Vs], "|").
+    string:join([Name || {Name,_Enum} <- Vs], "|");
+format_spec({union,Ts}) ->
+    string:join([format_spec(T) || T <- Ts], "|").
 
 format_value(N) when is_integer(N) -> integer_to_list(N);
 format_value(F) when is_float(F) -> io_lib_format:fwrite_g(F);
@@ -735,6 +761,7 @@ format_value(L) when is_list(L) ->
 %%     order => undefined :: order(),               %% variable order
 %%     time  => infinity  :: infinity | integer(),  %% max time to run
 %%     threshold => 0,    :: integer()              %% fixpoint threshold
+%%     laps => infinity   :: infinity | integer(),  %% number of laps to run
 %% }
 %%
 
@@ -789,11 +816,12 @@ setopt(Key, Value, OptMap) when is_atom(Key) ->
 
 get_saturate_opt(OptMap) ->
     #{
-       saturate  => getopt(saturate, OptMap),
-       pair      => getopt(pair, OptMap),
-       order     => getopt(order, OptMap),
-       time      => getopt(time, OptMap),
-       threshold => getopt(threshold, OptMap)
+      saturate  => getopt(saturate, OptMap),
+      pair      => getopt(pair, OptMap),
+      order     => getopt(order, OptMap),
+      time      => getopt(time, OptMap),
+      threshold => getopt(threshold, OptMap),
+      laps      => getopt(laps, OptMap)
      }.
 
 %%

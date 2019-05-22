@@ -1,14 +1,20 @@
 // check if p (parameter) is prime
-// (C*C - D*D = p, C>D)
+// (C*C - D*D = n, C>D)
 
-declare C:(isize(p)-1);
-declare D:((isize(p)+1)/2);
-declare E:(2*isize(p));
-declare F:(isize(p)+1);
+declare A:(isize(n)-1);
+declare B:((isize(n)+1)/2);
+declare C:(isize(n)-1);
+declare D:((isize(n)+1)/2);
+declare E:(2*isize(n));
+declare F:(isize(n)+1);
 order D, -occur, C;
 
+// A*B = n        E    F
+// (c-d)(c+d) == c^2 - d^2 = n
+
+(A == C-D) &&
+(B == C+D) && 
 (((C*C) == E) &&
  ((D*D) == F) &&
- ((E - F) == p) &&
+ ((E - F) == n) &&
  (C > D) )
- 

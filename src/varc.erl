@@ -72,6 +72,7 @@
 -export([get_number_of_bound_variables/1]).
 -export([get_number_of_unbound_variables/1]).
 -export([get_clause_eval_counter/1]).
+-export([get_clause_eval_counter/2]).
 -export([get_eval_counter/1]).
 
 -define(debug, true).
@@ -266,8 +267,8 @@ del_unused_clauses(_Vp) ->
 get_clauses(Vp,Var) ->
     get_clauses(Vp,Var,literal).
 
-get_clauses(_Vp,Var,Type)
-  when (Type =:= variable orelse Type =:= literal orelse Type =:= watch),
+get_clauses(_Vp,Var,How)
+  when (How =:= variable orelse How =:= literal orelse How =:= watch),
        is_integer(Var), Var >= 0 ->
     ?nif_stub().
 
@@ -422,6 +423,14 @@ get_max_clause_length(Vp) ->
 
 get_clause_eval_counter(Vp) ->
     info(Vp, clause_eval_counter).
+
+get_clause_eval_counter(Vp,0) ->
+    info(Vp, clause_eval_counter);
+get_clause_eval_counter(Vp,2) ->
+    info(Vp, clause2_eval_counter);
+get_clause_eval_counter(Vp,3) ->
+    info(Vp, clause3_eval_counter).
+
 
 get_eval_counter(Vp) ->
     info(Vp, eval_counter).

@@ -64,10 +64,10 @@ Command line tool
 
 Backjump parameters
 
-    max_learned_clauses L
-    max_learned_factor  F
+    max-learned         L
+    max-learned-factor  F
     keep_factor         P
-    min_keep_clauses    K
+    min-keep-clauses    K
 
     MaxLearned = 
         min(L, F*|Clauses|)      if L and F are both defined (> 0) then
@@ -82,16 +82,16 @@ Backjump parameters
          K                       if K is defined
          inf                     otherwise
 
-    -num_conflicts <N>           Number of conflicts to analyse
+    -num-conflicts <N>           Number of conflicts to analyse
     -iorder <N>                  Max size of conflict clauses to activate
-    -max_conflicts <N>           Max number of conflict clauses to activate
+    -max-conflicts <N>           Max number of conflict clauses to activate
     
     -stumble <L>                 Extra Backjump if D1 >= L
     -olle <K>                    Extra Backjump if D1 >= K*D2
-    -stumble_olle <bool>         Both stumble AND olle must be true to take jump
+    -stumble-olle <bool>         Both stumble AND olle must be true to take jump
     
        D1 = Backjump distance
        D2 = Backstumble distance = distance from backjump to next level
 
-    restart_counter  <#eval>
-    restart_interval <ms>    
+    restart-counter  <#eval>
+    restart-interval <ms>    

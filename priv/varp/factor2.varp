@@ -7,6 +7,7 @@ declare B:(isize(n)+1);
 
 order Y,X,A,B, -occur;
 
+// [A i=0..isize(n)-2](T(i) == ((F1[i] == F2[i]))) && 
 (
 (n + B == A) &&
 (X*X == A) && (X > 0) &&

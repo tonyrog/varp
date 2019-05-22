@@ -146,7 +146,7 @@ bt_conflict(Vp,Vm,Stack0=[{I,Xi,Vs,Mark}|_Stack]) ->
     format_all_bindings(Vp,Vm),
     {JMark,Clause,UIP} = conflict(Vp,Vm,Mark),
     ?dbg("conflict clause=~s\n", [format_clause(Vm,Clause)]),
-    ?dbg(" mark=~w, jmark=~w, uip=~s\n", [Mark,JMark,format_literal(Vm,UIP)]),
+    ?dbg(" mark=~w, jmark=~w, uip=~s\n", [Mark,JMark,format_lit(Vm,UIP)]),
     {_J,Stack1} = bt_undo(Vp,Vm,Stack0,JMark),
     add_conflict_clause(Vp,Vm,Clause),
     %% [Vn|_] = tl(Vs),
@@ -281,12 +281,12 @@ conflict(Vp,Vm,Level) ->
 find_first_uip(Vp,Vm,Level,CLit) ->
     case implication_clause(Vp,CLit) of
 	-1 -> %% CLit is probably the decision variable
-	    ?dbg("conflict literal=~s, no cut\n",[format_literal(Vm,CLit)]),
+	    ?dbg("conflict literal=~s, no cut\n",[format_lit(Vm,CLit)]),
 	    {ok,[CLit]};
 	Cix1 ->
 	    Cix2 = varc:conflicting_clause(Vp),
 	    ?dbg("conflict literal=~s, Cix1=~w, Cix2=~w\n",
-		 [format_literal(Vm,CLit),Cix1,Cix2]),
+		 [format_lit(Vm,CLit),Cix1,Cix2]),
 	    Marks = sets:from_list([CLit,-CLit]),
 	    {Q1,Marks1,Num1,CSrc1} =
 		enq_imp(Vp,Level,CLit,Cix1,queue:new(),Marks,0,[]),
@@ -959,11 +959,11 @@ format_clause(Vm,CL) ->
     ["{",List,"}"].
 
 format_literals(Vm,Ls) ->
-    concat([format_literal(Vm,L)||L<-Ls],",").
+    concat([format_lit(Vm,L)||L<-Ls],",").
 
-format_literal(Vm,X) when X<0 ->
+format_lit(Vm,X) when X<0 ->
     ["-",format_var(Vm,-X)];
-format_literal(Vm,X) ->
+format_lit(Vm,X) ->
     format_var(Vm,X).
 
 format_var(Vs,X) ->
@@ -981,10 +981,10 @@ format_decl({Name,uint,Sz}) ->
 format_decl(_) -> [].
 
 format_clause(C) ->
-    concat([format_literal(L) || L <- C], " ").
+    concat([format_lit(L) || L <- C], " ").
 
-format_literal({'not',V}) -> ["!",format_symbol(V)];
-format_literal(V) ->  format_symbol(V).
+format_lit({'not',V}) -> ["!",format_symbol(V)];
+format_lit(V) ->  format_symbol(V).
 
 format_symbol(true) -> "true";
 format_symbol(false) -> "false";

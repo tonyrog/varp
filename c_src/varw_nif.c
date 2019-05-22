@@ -20,9 +20,11 @@
 #include <assert.h>
 
 // #define DEBUG
-//#define PACKED_VALUE     // values are packed (now in 8 bit values)
-#define LIFO_LITERAL       // push literals on stack
+// #define PACKED_VALUE       // values are packed (now in 8 bit values)
+#define LIFO_LITERAL          // push literals on stack
 // #define FIFO_LITERAL       // put literals on queue
+// #define USE_CLAUSE_SHUFFLE    // shuffle literals after cleanup
+// #define USE_CLAUSE_FIND          // avoid install clauses multiple times
 
 // Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))
@@ -136,13 +138,9 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 
-#define UNSAT  -1
-#define OK     0
-#define ERROR  1
-
-#define UNDEF 0
+#define UNDEF  0
 #define FALSE -1
-#define TRUE  1
+#define TRUE   1
 
 #define MAX_UINT32 0xffffffff
 #define MAX_CLAUSE_LENGTH  0xffffff
@@ -215,6 +213,7 @@ typedef struct _variable_t  // :object_t
 #ifndef PACKED_VALUE
     int  value;               // -1=false  0=unassigned  1=true
 #endif
+    int uvalue;               // undo value
     int vix;                  // variable index
     int pkey[3];              // sort keys for positive literals
     int nkey[3];              // sort keys for negative literals    
@@ -321,16 +320,14 @@ typedef struct _varp_t {
 
     size_t       unum;        // number of levels allocated
     undo_t*      undo;        // array of undo block, one for each level
-    size_t stack_size;        // number of element in undo stack
+    size_t       stack_size;  // number of element in undo stack
+    size_t       bound;       // number of bound variables
     int level;                // current undo level (mark)
     
     lqueue_t     q;            // literal queue for propagation
 
-    uint64_t  clause_eval_counter; // performance counter
+    uint64_t  clause_eval_counter[5]; // performance counter 2-clause,3-clause,n-clause
     uint64_t  eval_counter;        // performance counter
-
-    variable_t* var_queue_hd;      // var queue head
-    variable_t* var_queue_tl;      // var queue tail
 
     variable_t undef;
     variable_t constant;
@@ -451,6 +448,8 @@ DECL_ATOM(number_of_variables);
 DECL_ATOM(number_of_bound_variables);
 DECL_ATOM(number_of_unbound_variables);
 DECL_ATOM(clause_eval_counter);
+DECL_ATOM(clause2_eval_counter);
+DECL_ATOM(clause3_eval_counter);
 DECL_ATOM(eval_counter);
 DECL_ATOM(undo_stack_size);
 DECL_ATOM(value_stack_size);
@@ -526,6 +525,21 @@ static uint32_t djb_hash(uint8_t* ptr, size_t len)
     while(len--)
 	h = ((h << 5) + h) + (*ptr++);
     return h;
+}
+
+static inline int is_constant(int x)
+{
+    return ((x == TRUE) || (x == FALSE));
+}
+
+// return true if variable is constant or bound to other variable
+static int is_bound(varp_t* vp, int x)
+{
+#ifdef PACKED_VALUE
+    return is_constant(vp->var_value[ABS(x)]);
+#else
+    return is_constant(vp->var_map[ABS(x)]->value);
+#endif
 }
 
 // Clause point from wlink_t pointer
@@ -633,10 +647,7 @@ static inline variable_t* lit_variable(varp_t* vp, lit_t lp)
 #endif
 }
 
-
-#ifdef DEBUG
-
-static char* format_variable(variable_t* var)
+char* format_variable(variable_t* var)
 {
     static char varname[32];
     
@@ -648,7 +659,7 @@ static char* format_variable(variable_t* var)
     }
 }
 
-static char* lit_format(varp_t* vp, lit_t lp)
+char* lit_format(varp_t* vp, lit_t lp)
 {
     static char varname[32];    
 #ifdef LIT_INTEGER
@@ -669,7 +680,7 @@ static char* lit_format(varp_t* vp, lit_t lp)
     return varname;
 }
 
-static char* literal_format(varp_t* vp, literal_t* lp)
+char* literal_format(varp_t* vp, literal_t* lp)
 {
     static char varname[32];    
     UNUSED(vp);
@@ -680,7 +691,6 @@ static char* literal_format(varp_t* vp, literal_t* lp)
 	snprintf(varname, sizeof(varname), "%s%d", n, lp->var->vix);
     return varname;
 }
-#endif
 
 
 static heap_t* new_heap_block(heap_t* next)
@@ -931,7 +941,7 @@ static void lqueue_put(varp_t* vp, lit_t lp)
     lqueue_t* q = &vp->q;
     literal_t* mp;
     DBG("PUT/ENQ %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
-    assert(lit_value(vp, lp) == UNDEF);
+    assert(!is_constant(lit_value(vp, lp)));
     mp = lit_literal(vp, lp);
     mp->qlink = NULL;
     *q->tail = mp;
@@ -946,7 +956,7 @@ static void lqueue_put(varp_t* vp, lit_t lp)
     lqueue_t* q = &vp->q;
     literal_t* mp;
     DBG("PUT/PUSH %s qsize=%ld\r\n", lit_format(vp, lp), q->size);
-    assert(lit_value(vp, lp) == UNDEF);
+    assert(!is_constant(lit_value(vp, lp)));
     mp = lit_literal(vp, lp);
     mp->qlink = q->head;
     q->head = mp;
@@ -971,25 +981,31 @@ static literal_t* lqueue_get(varp_t* vp)
     return lp;
 }
 
-// assume literal is unassigned!
-static inline void set_literal_level(varp_t* vp,lit_t lp,int value,
-				     long li,int cix, int level)
+
+static void push_variable(varp_t* vp, variable_t* var, int level)
+{
+    DBG("PUSH VARIABLE: var=%s, level=%d, value=%d\r\n",
+	format_variable(var), level, get_variable_value(vp, var));
+    var->uvalue = get_variable_value(vp, var);
+    var->next = vp->undo[level].bs;
+    vp->undo[level].bs = var;
+    vp->undo[level].bs_size++;
+    vp->stack_size++;
+    vp->bound++;
+}
+
+static inline void set_literal(varp_t* vp,lit_t lp,int value,
+			       long li,int cix, int level)
 {
     variable_t* var = lit_variable(vp, lp);
     DBG("SET_LITERAL %d = %d\r\n", lit_index(lp), value);
-    assert(get_variable_value(vp, var) == UNDEF);
+    // if (level == 0) printf("PERMANENT_LITERAL %s\r\n", lit_format(vp, lp));
+    assert(!is_constant(get_variable_value(vp, var)));
     set_variable_value(vp, var, lit_negative(lp) ? -value : value);
     var->implication_clause = cix;
     var->literal_pos = li;
     var->level = level;
 }
-
-#ifdef NOT_USED
-static void set_literal(varp_t* vp,lit_t lp,int value,long li,int cix)
-{
-    set_literal_level(vp, lp, value, li, cix, vp->level);
-}
-#endif
 
 // put value set_literal and push the correct literal on queue
 // put (X, TRUE)   => enq(!X)   1  1  negate(X)
@@ -997,38 +1013,16 @@ static void set_literal(varp_t* vp,lit_t lp,int value,long li,int cix)
 // put (!X, TRUE)  == enq(X)   -1  1  negate(X)
 // put (!X, FALSE) == enq(!X)  -1 -1  X
 //
-static void put_literal_level(varp_t* vp,lit_t lp,int value,
-			      long li,int cix, int level)
+static void put_literal(varp_t* vp,lit_t lp,int value,long li,int cix,int level)
 {
-    lqueue_put(vp, (value==TRUE) ? lit_negate(lp) : lp);
-    set_literal_level(vp, lp, value, li, cix, level);
+    variable_t* var = lit_variable(vp, lp);
+    if (level < 0) level = vp->level;
+    push_variable(vp, var, level);
+    if (is_constant(value))
+	lqueue_put(vp, (value==TRUE) ? lit_negate(lp) : lp);
+    set_literal(vp, lp, value, li, cix, level);
 }
 
-static inline void put_literal(varp_t* vp,lit_t lp,int value,long li,int cix)
-{
-    put_literal_level(vp, lp, value, li, cix, vp->level);
-}
-
-static inline int is_constant(int x)
-{
-    return ((x == TRUE) || (x == FALSE));
-}
-
-// none constant
-static inline int is_literal(int x)
-{
-    return !((x == TRUE) || (x == FALSE));
-}
-
-// return true if variable is constant or bound to other variable
-static int is_bound(varp_t* vp, int x)
-{
-#ifdef PACKED_VALUE
-    return (vp->var_value[ABS(x)] != UNDEF);
-#else
-    return (vp->var_map[ABS(x)]->value != UNDEF);
-#endif
-}
 
 static void undo_init(varp_t* vp)
 {
@@ -1036,6 +1030,7 @@ static void undo_init(varp_t* vp)
     vp->undo = enif_alloc(DEFAULT_UNDO_SIZE * sizeof(undo_t));
     memset(vp->undo, 0, DEFAULT_UNDO_SIZE * sizeof(undo_t));
     vp->stack_size = 0;
+    vp->bound = 0;
     vp->level = 0;
 }
 
@@ -1053,31 +1048,19 @@ static int set_level(varp_t* vp, int level)
     return 0;
 }
 
-static void push_variable_level(varp_t* vp, variable_t* var, int level)
-{
-    DBG("PUSH VARIABLE: var=%s, level=%d, value=%d\r\n",
-	format_variable(var), level, get_variable_value(vp, var));
-    var->next = vp->undo[level].bs;
-    vp->undo[level].bs = var;
-    vp->undo[level].bs_size++;
-    vp->stack_size++;
-}
-
-static inline void push_variable(varp_t* vp, variable_t* var)
-{
-    push_variable_level(vp, var, vp->level);
-}
-
 static void undo_level(varp_t* vp, int level)
 {
     variable_t* bp = vp->undo[level].bs;
-    vp->stack_size -= vp->undo[level].bs_size;
+    int bound = vp->undo[level].bs_size;
+
     while(bp != NULL) {
 	DBG("POP VARIABLE %s value=%d\r\n",
 	    format_variable(bp), get_variable_value(vp, bp));
-	set_variable_value(vp, bp, UNDEF);
+	set_variable_value(vp, bp, bp->uvalue);
 	bp = bp->next;
     }
+    vp->stack_size -= bound;
+    vp->bound      -= bound;
     vp->undo[level].bs = NULL;
     vp->undo[level].bs_size = 0;
 }
@@ -1085,7 +1068,8 @@ static void undo_level(varp_t* vp, int level)
 // clear but do not undo a level (keep the bindings)
 static void keep_level(varp_t* vp, int level)
 {
-    vp->stack_size -= vp->undo[level].bs_size;
+    int bound = vp->undo[level].bs_size;
+    vp->stack_size -= bound;
     vp->undo[level].bs = NULL;
     vp->undo[level].bs_size = 0;
 }
@@ -1123,9 +1107,57 @@ static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
     init_literal(&var->lit[1], var, -1);
 }
 
-static int clause_insert(ErlNifEnv* env, varp_t* vp, clause_t* cp)
+// return 1 if a is equal to b, return 0 otherwise
+static int clause_is_equal(lit_t* a, lit_t* b, int size)
 {
-    (void) env;
+    int i = 0;
+    while((i<size) && (a[i] == b[i]))
+	i++;
+    return (i == size);
+}
+
+// return 1 if a is subclause of b, return 0 otherwise
+// assume both clauses are sorted in falling order
+// (C D E)   (A B C D E F)
+int clause_is_subclause(lit_t* a, lit_t* b, int size_a, int size_b)
+{
+    if (size_a == size_b)
+	return clause_is_equal(a, b, size_a);
+    else if (size_a < size_b) {
+	int i = 0;
+	int j = 0;
+
+	while(i < size_a) {
+	    while((j < size_b) && (a[i] > b[j]))
+		j++;
+	    if (j == size_b) return 0;
+	    if (a[i] < b[j]) return 0;
+	    i++;
+	    j++;
+	}
+	return (i == size_a);
+    }
+    else
+	return 0;
+}
+
+// see if clause is already installed return index to installed clause if success
+// return -1 otherwise
+int clause_find(varp_t* vp, uint16_t op, lit_t* lit, size_t size)
+{
+    int i;
+
+    // slow version just to get stats!!!
+    for (i = 0; i < (int)vp->cnext; i++) {
+	clause_t* cp = vp->clause_map[i];
+	if ((cp->size == size) && (cp->op == op) && clause_is_equal(lit, cp->lit, size))
+	    return cp->cix;
+    }
+    return -1;
+}
+
+static int clause_insert(varp_t* vp, clause_t* cp)
+{
     int i = vp->cnext++;
 
     cp->cix = i;
@@ -1387,7 +1419,11 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 
     vp->max_conflicting = MAX_CONFLICTING;
     vp->eval_counter = 0;
-    vp->clause_eval_counter = 0;
+    vp->clause_eval_counter[0] = 0;    // overall counter
+    vp->clause_eval_counter[1] = 0;    // not-used
+    vp->clause_eval_counter[2] = 0;    // not used
+    vp->clause_eval_counter[3] = 0;    // 2-clauses
+    vp->clause_eval_counter[4] = 0;    // 3-clauses
 
     vp->order_map[0] = 0;
     init_variable(vp, &vp->undef, UNDEF, 0);
@@ -1911,7 +1947,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	lit_t xp;
-	if (!get_lit(env, vp, head, &xp) || (lit_value(vp, xp) != UNDEF))
+	if (!get_lit(env, vp, head, &xp) || is_constant(lit_value(vp, xp)))
 	    return enif_make_badarg(env);
 	list = tail;
     }
@@ -1988,7 +2024,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	lit_t xp;
-	if (!get_lit(env, vp, head, &xp) || (lit_value(vp,xp) != UNDEF))
+	if (!get_lit(env, vp, head, &xp) || is_constant(lit_value(vp,xp)))
 	    return enif_make_badarg(env);
 	list = tail;
     }
@@ -2076,7 +2112,7 @@ static ERL_NIF_TERM varp_class(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_lit(env, vp, argv[1], &xp))
 	return enif_make_badarg(env);
-    if ((x = lit_value(vp, xp)) == UNDEF)
+    if (!is_constant(x = lit_value(vp, xp)))
 	return make_lit(env, xp);
     return enif_make_int(env, x);
 }
@@ -2137,7 +2173,7 @@ static ERL_NIF_TERM varp_is_variable(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_lit(env, vp, argv[1], &xp))
 	return enif_make_badarg(env);
-    return make_boolean(env, lit_value(vp, xp) == UNDEF);
+    return make_boolean(env, !is_constant(lit_value(vp, xp)));
 }
 
 // Get conflicting clause index and clear clause conflict flag!
@@ -2230,20 +2266,14 @@ static ERL_NIF_TERM varp_put(ErlNifEnv* env, int argc,
 	    (level >= (int)vp->unum))
 	    return enif_make_badarg(env);
     }
+    if (level < 0) level = vp->level;
     y = lit_value(vp, yp);
-    if (!is_constant(y))
-	return enif_make_badarg(env);
+    if (!is_constant(y)) {
+	if (level > 0) return enif_make_badarg(env);
+    }
     x = lit_value(vp, xp);
-    if (x == UNDEF) {
-	variable_t* var = lit_variable(vp, xp);
-	if (level < 0) {
-	    push_variable(vp, var);
-	    put_literal(vp, xp, y, -1, -1);
-	}
-	else {
-	    push_variable_level(vp, var, level);
-	    put_literal_level(vp, xp, y, -1, -1, level);
-	}
+    if (!is_constant(x)) {
+	put_literal(vp, xp, y, -1, -1, level);
     }
     else if (x != y)
 	return ATOM(false);
@@ -2363,7 +2393,8 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
     if (wi==0) {  // watch point 0
 	if ((lw = lit_value(vp, cp->lit[wp1])) == TRUE)
 	    return 0;
-	vp->clause_eval_counter++;    
+	vp->clause_eval_counter[0]++;
+	if (cp->size <= 4) vp->clause_eval_counter[cp->size]++;
 	
 	// find a new watch point
 	for (p = 1; p < (int)cp->size; p++) {
@@ -2381,10 +2412,7 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	    if (lw == FALSE)
 		return -1; // all are false
 	    else {
-		literal_t* mp = lit_literal(vp, cp->lit[wp1]);
-		variable_t* var = mp->var;
-		push_variable(vp, var);
-		put_literal(vp, cp->lit[wp1], TRUE, wp1, cp->cix);
+		put_literal(vp, cp->lit[wp1], TRUE, wp1, cp->cix, -1);
 	    }
 	}
 	else {  // move watch
@@ -2396,7 +2424,9 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
     else { // watch point 1
 	if ((lw = lit_value(vp, cp->lit[wp0])) == TRUE)
 	    return 0;
-	vp->clause_eval_counter++;    
+	vp->clause_eval_counter[0]++;
+	if (cp->size <= 4) vp->clause_eval_counter[cp->size]++;	
+
 	// find a new watch point
 	for (p = 1; p < (int)cp->size; p++) {
 	    int lv = lit_value(vp, cp->lit[p]);
@@ -2413,10 +2443,7 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	    if (lw == FALSE) // contradiction
 		return -1;
 	    else {
-		literal_t* mp = lit_literal(vp, cp->lit[wp0]);
-		variable_t* var = mp->var;
-		push_variable(vp, var);
-		put_literal(vp, cp->lit[wp0], TRUE, wp0, cp->cix);
+		put_literal(vp, cp->lit[wp0], TRUE, wp0, cp->cix, -1);
 	    }
 	}
 	else {  // move watch
@@ -2513,14 +2540,20 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->cnext - vp->cpermanent);
     }    
     else if (argv[1] == ATOM(number_of_bound_variables)) {
-	return enif_make_int(env, vp->stack_size);
+	return enif_make_int(env, vp->bound);
     }
     else if (argv[1] == ATOM(number_of_unbound_variables)) {
-	return enif_make_int(env, vp->vnum - vp->stack_size);
+	return enif_make_int(env, vp->vnum - vp->bound);
     }
     else if (argv[1] == ATOM(clause_eval_counter)) {
-	return enif_make_uint64(env, vp->clause_eval_counter);
+	return enif_make_uint64(env, vp->clause_eval_counter[0]);
     }
+    else if (argv[1] == ATOM(clause2_eval_counter)) {
+	return enif_make_uint64(env, vp->clause_eval_counter[3]);
+    }
+    else if (argv[1] == ATOM(clause3_eval_counter)) {
+	return enif_make_uint64(env, vp->clause_eval_counter[4]);
+    }        
     else if (argv[1] == ATOM(eval_counter)) {
 	return enif_make_uint64(env, vp->eval_counter);
     }
@@ -2772,21 +2805,6 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     }
     // PRINT_LIT("del-dup", lit, size);
 
-    // shuffle literals - possibly make watch literal chains shorter?
-#ifdef USE_CLAUSE_SHUFFLE    
-    {
-	shuffle_key_t skey[size];
-	for (i = 1; i < size; i++) {
-	    skey[i].lit = lit[i];
-	    skey[i].key = arc4_random(&vp->as);
-	}
-	QSORT_R(skey+1, size-1, sizeof(shuffle_key_t), cmp_shuffle, 0);
-	for (i = 1; i < size; i++)
-	    lit[i] = skey[i].lit;
-    }
-    PRINT_LIT("shuffle", lit, size);
-#endif
-
     if (op == OR_GATE) {
 	if (size == 1) {
 	    if ((Tc==0) && (Fc>0)) 
@@ -2820,14 +2838,38 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     if (size == 2) {  // unit
 	if (lit[1] == VARP_FALSE(vp))
 	    return ATOM(false);
-	put_literal_level(vp, lit[1], VARP_TRUE(vp), -1, -1, 0);
+	put_literal(vp, lit[1], VARP_TRUE(vp), -1, -1, 0);
 	// report as unit clause!?
 	return ATOM(true);
     }
+    
+#ifdef USE_CLAUSE_FIND
+    // check if clause is already installed!!!
+    if ((cix = clause_find(vp, op, lit, size)) >= 0) {
+	printf("Found clause %d size=%ld\r\n", cix, size-1);
+	return enif_make_tuple2(env, ATOM(true), enif_make_int(env, cix));
+    }
+#endif
+
+    // shuffle literals - possibly make watch literal chains shorter?
+#ifdef USE_CLAUSE_SHUFFLE
+    {
+	shuffle_key_t skey[size];
+	for (i = 1; i < size; i++) {
+	    skey[i].lit = lit[i];
+	    skey[i].key = arc4_random(&vp->as);
+	}
+	QSORT_R(skey+1, size-1, sizeof(shuffle_key_t), cmp_shuffle, 0);
+	for (i = 1; i < size; i++)
+	    lit[i] = skey[i].lit;
+    }
+    PRINT_LIT("shuffle", lit, size);
+#endif
+    
 
     if ((cp = clause_alloc(vp, op, size)) == NULL)
 	goto error;
-    if ((cix = clause_insert(env, vp, cp)) < 0)
+    if ((cix = clause_insert(vp, cp)) < 0)
 	goto error;
 
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
@@ -2873,9 +2915,7 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp, int op,
     
     if ((la[0] == INT_MAX) && (la[1] != INT_MAX)) {
 	if (!dead) {
-	    variable_t* var = lit_variable(vp, lit[pa[0]]);
-	    push_variable(vp, var);
-	    put_literal(vp, lit[pa[0]], TRUE, pa[0], cix);
+	    put_literal(vp, lit[pa[0]], TRUE, pa[0], cix, -1);
 	}
 	return enif_make_tuple2(env, ATOM(true), enif_make_int(env, cix));
 	// return enif_make_tuple2(env, ATOM(true), enif_make_int(env, cix));
@@ -3040,11 +3080,6 @@ static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
     vp->cnext = vp->cpermanent+vp->keep;
     return ATOM(ok);
 }
-//                    i
-//               
-//   2 3 4 7 . . . . .
-//           j
-//
 
 static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
@@ -3383,6 +3418,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(number_of_bound_variables);
     LOAD_ATOM(number_of_unbound_variables);
     LOAD_ATOM(clause_eval_counter);
+    LOAD_ATOM(clause2_eval_counter);
+    LOAD_ATOM(clause3_eval_counter);    
     LOAD_ATOM(eval_counter);
     LOAD_ATOM(undo_stack_size);
     LOAD_ATOM(value_stack_size);

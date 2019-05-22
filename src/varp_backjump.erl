@@ -9,11 +9,9 @@
 
 -export([backjump/1]).
 
--define(DEBUG, true).
+%% -define(DEBUG, true).
 
 -include("varp.hrl").
-
--define(TOP_LEVEL, 0).    %% constants
 
 -define(dbg0(F,As), ok).
 -ifdef(DEBUG).
@@ -25,14 +23,14 @@
 -endif.
 
 -compile(export_all).
--import(varp_formula, [format_literal/2, format_literal/3]).
+-import(varp_formula, [format_lit/2, format_lit/3]).
 -import(varp_formula, [format_var/2]).
 -import(varp_formula, [format_clause/2, format_clause/3]).
 -import(varp_formula, [format_literals/2]).
 
 max_learned(Bs) ->
     Permanent = varp_formula:get_info(Bs, permanent),
-    MaxLearnedClauses = varp_formula:getopt(Bs, max_learned_clauses),
+    MaxLearnedClauses = varp_formula:getopt(Bs, max_learned),
     MaxLearnedFactor = varp_formula:getopt(Bs, max_learned_factor),
     io:format("Permanent=~w, MaxLearnedClause=~w, MaxLearnedFactor=~w\n",
 	      [Permanent, MaxLearnedClauses, MaxLearnedFactor]),
@@ -183,18 +181,16 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 		do_jump(Bs,L,K,M,D1,D2,J2,J3)
 	end,
 
-    ?dbg(" level=~w, jlevel=~w\n",
-	 [Level,JLevel]),
+    ?dbg(" level=~w, jlevel=~w\n", [Level,JLevel]),
 
     ?dcall(fun() -> io:format("stack[~w]: ", [Level]),
 		    display_stack_ln(Bs, Stack),
 		    io:format("\n", [])
 	   end),
     ?dbg("undo[~w]: ~w\n", [Level, JLevel+1]),
-
-    varp_formula:undo_level(Bs, JLevel+1),
+    undo_until(Bs, Level, JLevel),  %% undo until JLevel
     varp_formula:set_level(Bs, JLevel),
-    {INext,Stack1} = backjump(Bs,Stack,JLevel),
+    {INext,Stack1} = pop_until(Bs,Stack,JLevel),
     ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
 		    display_stack_ln(Bs, Stack1),
 		    io:format("\n", [])
@@ -264,13 +260,15 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 		    ok
 	    end,
 	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
-	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w!\n", 
-		      [Learned, MaxLearned,Learned1]),
+	    NU = varp_formula:number_of_unbound(Bs2),
+	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", 
+		      [Learned, MaxLearned,Learned1,NU]),
 	    %%
 	    init(Bs, MaxLearned);
        DoPurge, Learned >= MaxLearned ->
 	    %% restart and purge!
-	    varp_formula:undo_level(Bs, ?TOP_LEVEL+1),
+
+	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:set_level(Bs, ?TOP_LEVEL),
 	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
 	    varp_formula:del_unused_clauses(Bs),
@@ -282,7 +280,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
-	    varp_formula:undo_level(Bs, ?TOP_LEVEL+1),
+	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:set_level(Bs, ?TOP_LEVEL),
 	    reorder(Bs),
 	    init(Bs, MaxLearned);
@@ -295,21 +293,32 @@ reorder(Bs) ->
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
     case N rem 2 of
 	0 ->
+	    io:format("OCCUR\n"),
+	    varp_formula:order_sort(Bs,'-occur',undefined,-1);
+	1 ->
 	    io:format("RANDOM\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,random,undefined,Seed);
-	1 ->
-	    io:format("OCCUR\n"),
-	    varp_formula:order_sort(Bs,'-occur',undefined,-1)
+	2 ->
+	    %% enable when 2-klauses works again
+	    io:format("SATURATE\n"),
+	    varp_saturate:saturate(Bs, 1, infinity, {{1},{1}}, 0)
     end.
 
 
-backjump(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
-    backjump(Bs,Stack,JLevel);
-backjump(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
-    ?dbg("backjump[~w]: ~s\n", [JLevel, format_literal(_Bs,_Xk)]),
+undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
+    ?dbg("undo: ~w\n", [Level]),
+    varp_formula:undo_level(Bs, Level),
+    undo_until(Bs, Level-1, NewLevel);
+undo_until(Bs, Level, Level) ->
+    Bs.
+
+pop_until(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
+    pop_until(Bs,Stack,JLevel);
+pop_until(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
+    ?dbg("backjump[~w]: ~s\n", [JLevel, format_lit(_Bs,_Xk)]),
     {K,Stack};
-backjump(Bs,[],_JLevel) ->
+pop_until(Bs,[],_JLevel) ->
     {varp_formula:first_init(Bs), []}.
 
 next(Bs,Level,MaxLearned,I,Stack) ->
@@ -322,7 +331,7 @@ next(Bs,Level,MaxLearned,I,Stack) ->
 	    NextLevel = Level+1,
 	    varp_formula:set_level(Bs,NextLevel),
 	    true = varp_formula:equal(Bs,Xj,?TRUE),
-	    ?dbg("decision@~w = ~s\n", [NextLevel,format_literal(Bs,Xj)]),
+	    ?dbg("decision@~w = ~s\n", [NextLevel,format_lit(Bs,Xj)]),
 	    loop(Bs,NextLevel,MaxLearned,J,[{J,Xj,NextLevel}|Stack])
     end.
 
@@ -517,7 +526,7 @@ conflict_analysis(Bs,Level) ->
 	  Ri = conflicting_reason(Bs,-P,I),
 	  varp_formula:use_clause(Bs, I),
 	  ?dbg("reason[~w] cix=~w: ~s,~s\n", 
-	       [I,_Cix,format_literal(Bs,-P),
+	       [I,_Cix,format_lit(Bs,-P),
 		format_literals(Bs,Ri)]),
 	  conflict_reason(Bs,Ri,Trail,Level,Seen0,1,[])
       end || {I,_Cix} <- lists:sublist(CList, L)].
@@ -689,7 +698,7 @@ get_literal_implications(Bs, Level) ->
     end.
 
 display_stack_ln(Bs,[{K,Xk,Level}|Stack]) ->
-    io:format("~s@~w/~w ", [format_literal(Bs,Xk), Level, K]),
+    io:format("~s@~w/~w ", [format_lit(Bs,Xk), Level, K]),
     display_stack_ln(Bs, Stack);
 display_stack_ln(_Bs,[]) ->
     ok.

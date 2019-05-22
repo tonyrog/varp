@@ -5,7 +5,7 @@
 -module(varp_vsaturate).
 
 -compile(export_all).
--import(varp_formula, [format_literal/2]).
+-import(varp_formula, [format_lit/2]).
 
 -include("varp.hrl").
 
@@ -122,11 +122,11 @@ saturate_vec_(_Bs,[],_Level) ->
     true.
 
 saturate_vec__(Bs,X,V,Level) ->
-    case mark_eq_eval(Bs,X,false,Level) of
+    case mark_eq_eval(Bs,X,?FALSE,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
-	    varp_formula:undo(Bs,Level),
-	    case eq_eval(Bs,X,true,Level) of
+	    varp_formula:undo_level(Bs,Level),
+	    case eq_eval(Bs,X,?TRUE,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
@@ -137,22 +137,22 @@ saturate_vec__(Bs,X,V,Level) ->
 	    case saturate_vec_(Bs,V,Level+2) of
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
-		    varp_formula:undo(Bs,Level),
-		    eq_eval(Bs,X,true,Level);
+		    varp_formula:undo_level(Bs,Level),
+		    eq_eval(Bs,X,?TRUE,Level);
 		true ->
 		    Xs = varp_formula:get_bindings(Bs,Level+1), %% + X=false!
 		    ?dbg("~s~s/false: => {~s}\n", 
 			 [indent(Level),
 			  varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(Bs,Xs)]),
-		    varp_formula:undo(Bs,Level), %% (X=false)
+		    varp_formula:undo_level(Bs,Level), %% (X=false)
 		    
-		    case mark_eq_eval(Bs,X,true,Level) of
+		    case mark_eq_eval(Bs,X,?TRUE,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level),Level]),
-			    varp_formula:undo(Bs,Level),  %% (X=true)
-			    eq_eval(Bs,X,false,Level);
+			    varp_formula:undo_level(Bs,Level),  %% (X=true)
+			    eq_eval(Bs,X,?FALSE,Level);
 			true ->
 			    ?dbg("~s~s/true: => {~s}\n",
 				 [indent(Level),varp_formula:fmt_var(Bs,X),
@@ -165,7 +165,7 @@ saturate_vec__(Bs,X,V,Level) ->
 			    ?dbg("~sintersect = {~s}\n", 
 				 [indent(Level),
 				  varp_formula:fmt_bind_list(Bs,Ys)]),
-			    varp_formula:undo(Bs,Level),  %% undo (X=true)
+			    varp_formula:undo_level(Bs,Level),  %% undo (X=true)
 			    install_bindings(Bs, Ys),
 			    varp_formula:eval(Bs)
 		    end
@@ -184,7 +184,7 @@ install_bindings(Bs,Bcp=false,[{Y,W}|Xs]) ->
     install_bindings(Bs,Bcp,Xs);
 install_bindings(Bs,Bcp=true,[{Y,W}|Xs]) ->
     io:format("install clause (~s, ~s)\n", 
-	      [format_literal(Bs,Y), format_literal(Bs, W)]),
+	      [format_lit(Bs,Y), format_lit(Bs, W)]),
     install_bindings(Bs,Bcp,Xs);
 install_bindings(Bs,_Bcp,[]) ->
     Bs.
