@@ -20,11 +20,11 @@
 #include <assert.h>
 
 // #define DEBUG
-// #define PACKED_VALUE       // values are packed (now in 8 bit values)
-#define LIFO_LITERAL          // push literals on stack
-// #define FIFO_LITERAL       // put literals on queue
-// #define USE_CLAUSE_SHUFFLE    // shuffle literals after cleanup
-// #define USE_CLAUSE_FIND          // avoid install clauses multiple times
+// #define PACKED_VALUE        // values are packed (now in 8 bit values)
+#define LIFO_LITERAL           // push literals on stack
+// #define FIFO_LITERAL        // put literals on queue
+// #define USE_CLAUSE_SHUFFLE  // shuffle literals after cleanup
+// #define USE_CLAUSE_FIND     // avoid install clauses multiple times
 
 // Dirty optional since 2.7 and mandatory since 2.12
 #if (ERL_NIF_MAJOR_VERSION > 2) || ((ERL_NIF_MAJOR_VERSION == 2) && (ERL_NIF_MINOR_VERSION >= 7))

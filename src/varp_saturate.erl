@@ -255,7 +255,7 @@ install_bindings_(Bs,Level,Bcp,[{X,Y}|Xs]) when abs(Y) =:= ?TRUE ->
 %%     	    io:format("~s=~s\n", [format_lit(Bs,X),format_lit(Bs,Y)]);
 %%       true -> ok
 %%    end,
-    varp_formula:equal(Bs,X,Y),
+    varp_formula:equal(Bs,Y,X),
     install_bindings_(Bs,Level,Bcp,Xs);
 install_bindings_(Bs,Level,Bcp,[{X,X}|Xs]) ->
     install_bindings_(Bs,Level,Bcp,Xs);    
@@ -264,8 +264,8 @@ install_bindings_(Bs,Level,Bcp=false,[{X,Y}|Xs]) ->
     install_bindings_(Bs,Level,Bcp,Xs);
 install_bindings_(Bs,Level,Bcp=true,[{X,Y}|Xs]) ->
     if Level =:= ?TOP_LEVEL ->
-	    io:format("install clause {~s,~s}\n", [format_lit(Bs,Y),format_lit(Bs,-X)]),
-	    io:format("install clause {~s,~s}\n", [format_lit(Bs,-Y),format_lit(Bs,X)]),
+%%	    io:format("install clause {~s,~s}\n", [format_lit(Bs,Y),format_lit(Bs,-X)]),
+%%	    io:format("install clause {~s,~s}\n", [format_lit(Bs,-Y),format_lit(Bs,X)]),
 	    varp_formula:add_clause(Bs, 'or', [?TRUE,X,-Y]),
 	    varp_formula:add_clause(Bs, 'or', [?TRUE,-X,Y]),
 	    varp_formula:equal(Bs,X,Y),

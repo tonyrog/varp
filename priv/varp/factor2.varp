@@ -3,11 +3,10 @@ declare F2:(isize(n)-1);
 declare X:(isize(n)-2);
 declare Y:(isize(n)-2);
 declare A:(2*(isize(n)-2));
-declare B:(isize(n)+1);
+declare B:(2*(isize(n)-2));
 
 order Y,X,A,B, -occur;
 
-// [A i=0..isize(n)-2](T(i) == ((F1[i] == F2[i]))) && 
 (
 (n + B == A) &&
 (X*X == A) && (X > 0) &&

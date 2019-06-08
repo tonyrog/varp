@@ -369,6 +369,13 @@ options() ->
 	     default => 0,
 	     description => "Add literal reduction clauses."
 	  },
+    V43 = #{ long => "reduction-type",
+	     short => "R",
+	     key => reduction_type,
+	     spec => {enum,[{"both",both},{"min",min},{"pos",pos},{"neg",neg}]},
+	     default => min,
+	     description => "Type of reductions clauses."
+	  },
 
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
@@ -433,7 +440,8 @@ options() ->
        "restart_interval"=>V40,
        "restart-interval"=>V40,
        starexec=>V41, "starexec"=>V41,
-       reduction=>V42, "reduction"=>V42, "r"=>V42
+       reduction=>V42, "reduction"=>V42, "r"=>V42,
+       reduction_type=>V43, "reduction-type"=>V43, "R"=>V43
      }.
 
 %% list of options with unique key

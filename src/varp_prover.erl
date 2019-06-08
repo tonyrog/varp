@@ -38,6 +38,9 @@ apply_opts_(false, Bs) ->
     display_order(Bs),
     false;
 apply_opts_(_, Bs) ->
+    order_literals(Bs).
+
+order_literals(Bs) ->
     Seed = varp_formula:getopt(Bs,seed),
     case varp_formula:getopt(Bs,order) of
 	[Key1,Key2] -> 
@@ -55,7 +58,7 @@ apply_opts_(_, Bs) ->
 	  end,
     display_order(Bs2),
     Bs2.
-
+    
 display_order(Bs) ->
     case varp_formula:getopt(Bs,display_order) of
 	false ->
@@ -288,7 +291,9 @@ pass(saturate,_X,Bs) ->
     Params = #{ saturate => varp_formula:getopt(Bs,saturate) },
     varp_saturate:saturate(Bs,Params);
 pass(reduction,_X,Bs) ->
-    varp_reduction:reduction(Bs);
+    Bs1 = varp_reduction:reduction(Bs),
+    %% order_literals(Bs1),
+    Bs1;
 pass(backtrack,_X,Bs) ->
     varp_backtrack:backtrack(Bs);
 pass(backjump,_X,Bs) ->
