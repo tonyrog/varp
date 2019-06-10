@@ -12,9 +12,6 @@ BIT   A * B = VALUE                    EVAL
 19 : 524309* 524341  = 
 20 : 674717 * 611147 = 
 
-bug n=129819 
-
-
 n=2021027
 
 	FACTOR (with sqrt)	FACTOR(2) (without sqrt)

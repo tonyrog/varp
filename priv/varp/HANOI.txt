@@ -1,0 +1,24 @@
+
+
+HANOI 4
+
+OLLE  0       2.0    3.0     4.0    5.0    6.0   7.0    8.0   9.0    10.0
+      39626   39314  39067   38978  38953  38940 38929  38926 38924  38922
+
+
+IBM-6
+OLLE     0      3.0
+STUMBLE  0      0
+         17109
+
+logistics.b:	18547
+	num_conflicts=0	iorder=2
+
+logistics.b:	18129
+	-num_conflicts=0 -iorder=4 --olle=16
+
+pigon=8
+	5935 6995
+pigon=9
+	22357 37977
+	

@@ -1,0 +1,11 @@
+(X1 <-> (A or B)) and
+(X2 <-> (C or D)) and
+(X1 or X2) and
+
+(A <-> (B and !X1)) and
+(B <-> (A and !X1)) and
+
+(C <-> (D and !X2)) and
+(D <-> (C and !X2))
+
+

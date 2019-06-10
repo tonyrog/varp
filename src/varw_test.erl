@@ -22,6 +22,8 @@ all() ->
     or_simplify(),
     or_eval(),
 
+    subst(),
+
     ok.
 
 
@@ -276,6 +278,32 @@ order() ->
 %%    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
     ok.
  
+
+subst() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
+    
+    _C0 = add_clause(V, [-X4,-X3,-X2]),
+    _C1 = add_clause(V, [-X5,-X4,-X3]),
+    _C2 = add_clause(V, [X6, X3, X2]),
+    _C3 = add_clause(V, [X7, X6, X2]),
+    _C4 = add_clause(V, [X3, -X6]),
+    _C5 = add_clause(V, [X2, X4]),
+    _C6 = add_clause(V, [X4, X7, -X2]),
+
+    print_clauses(V),
+    
+    %% substitute X6/X3
+
+    varc:subst(V, X6, X3),
+    
+    print_clauses(V),
+    ok.
 
 
 %% Utils

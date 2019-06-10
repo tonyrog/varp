@@ -20,6 +20,7 @@
 -export([find_symbol/2]).
 -export([get/2]).
 -export([put/3, put/4]).
+-export([subst/3]).
 -export([class/2]).
 -export([key/3]).
 -export([implication_clause/2]).
@@ -155,18 +156,26 @@ get(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 %% put literal value
--spec put(Vp::varc(), LitA::literal(), LibB::literal()) -> boolean().
+-spec put(Vp::varc(), X::literal(), Y::literal()) -> boolean().
 
-put(_Vp, A, B) when is_integer(A),
-		    is_integer(B) ->
+put(_Vp, X, Y) when is_integer(X),
+		    is_integer(Y) ->
     ?nif_stub().
 
-%% put literal value at level
--spec put(Vp::varc(), A::literal(), B::literal(), Level::integer()) -> boolean().
 
-put(_Vp, A, B, Level) when is_integer(A),
-			   is_integer(B),
+%% put literal value at level
+-spec put(Vp::varc(), X::literal(), Y::literal(), Level::integer()) -> boolean().
+
+put(_Vp, X, Y, Level) when is_integer(X),
+			   is_integer(Y),
 			   is_integer(Level) ->
+    ?nif_stub().
+
+%% X/Y substitute Y for X, replace all instances of Y with X
+-spec subst(Vp::varc(), X::literal(), Y::literal()) -> boolean().
+
+subst(_Vp, X, Y) when is_integer(X),
+		      is_integer(Y) ->
     ?nif_stub().
 
 -spec class(Vp::varc(), Lit::literal()) -> integer().

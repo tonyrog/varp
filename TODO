@@ -1,4 +1,22 @@
 
+- Options per backend
+
+  new option syntax and new control file format
+
+  plugin1 [options] plugin2 [options] ...
+
+  file format allows for nested options when possible:
+
+  %% erlang format?
+
+ {do [,otions], [
+    {plugin1, [option..]},
+    {plugin2, [option..]},
+    ...
+    ]}
+
+  some general options are 'timeout' and 'order' ... etc
+
 - simulator gui backjump
 
   Design GUI to track simple examples ~30-40 clauses

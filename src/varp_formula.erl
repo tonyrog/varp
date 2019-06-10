@@ -38,6 +38,7 @@
 -export([all/2, any/2]).
 -export([eqk/4, gtk/4]).
 -export([equal/3, equal/4]).
+-export([substitute/3]).
 -export([is_equivalent/3]).
 -export([is_equal/3]).
 -export([is_bound/2]).
@@ -421,6 +422,10 @@ equal(Bs,X,Y,Level) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
     varc:put(Bs#bs.vp, X0, Y0, Level).
+
+%% substitute X for Y ( X/Y ) replace all instances of Y with X
+substitute(Bs,X,Y) when is_integer(X), is_integer(Y) ->
+    varc:subst(Bs#bs.vp, X, Y).
 
 literal(true,_Bs)  -> ?TRUE;
 literal(false,_Bs) -> ?FALSE;
@@ -866,10 +871,9 @@ build_({vec,Fs}, Bs) ->
     Xs1 = join_vector(Xs),
     %% io:format("vec=~p, join=~p\n", [Xs, Xs1]),
     {{bit,length(Xs1),[bit(X)||X <- Xs1]},Bs1};
-build_({'=', V, F}, Bs) when is_atom(V) ->
+build_({':=', V={p,_P,_Ps}, F}, Bs) ->
     {Y,Bs1} = build__(F, Bs),
-    operation_('=', V, Y, Bs1);
-
+    operation_(':=', V, Y, Bs1);
 build_({'-',F}, Bs) ->
     {Y,Bs1} = build__(F, Bs),
     operation_('-', Y, Bs1);
@@ -1887,9 +1891,9 @@ operation('->', A, B, Bs) ->
 %%
 %% Alias operation
 %%
-operation('=',V,X={T,Size,Xs},Bs) when is_atom(V), ?is_vec_type(T) ->
+operation(':=',V,X={T,Size,Xs},Bs) when ?is_vec_type(T) ->
     {X, alias_vector(Bs,T,V,Size,Xs)};
-operation('=',V,X={bool,Xb},Bs) when is_atom(V) ->
+operation(':=',V,X={bool,Xb},Bs) ->
     {X, alias(V,Xb,Bs)};
 
 operation('<<',A,B,Bs) ->

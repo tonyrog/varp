@@ -1,9 +1,12 @@
+//
+// Factorize ODD prime number product n=F1*F2
+//
 declare F1:(isize(n)-1);
 declare F2:(isize(n)-1);
-declare X:(isize(n)-2);
-declare Y:(isize(n)-2);
+declare X:(isize(n)-1);
+declare Y:(isize(n)-1);
 declare A:(2*(isize(n)-2));
-declare B:(isize(n)+1);
+declare B:(2*(isize(n)-2));
 
 order Y,X,A,B,-occur;
 

@@ -187,7 +187,12 @@ backtrack({F,Bs}) ->
 %% Basic run
 method(X,Bs) ->
     %% run saturate/reduction/saturate?
-    passes([apply,eval,reduction,saturate,backjump,backtrack],X,Bs).
+    passes([{dump,0}, apply,
+	    {dump,1}, eval,
+	    {dump,2}, reduction,
+	    {dump,3}, saturate,
+	    {dump,4}, backjump,
+	    {dump,5}, backtrack],X,Bs).
 
 passes([Pass|Ps],X,Bs) ->
     case pass_enabled(Pass,Bs) of
@@ -201,6 +206,9 @@ passes([],_X,Bs) ->
 	R -> R
     end.
 
+pass_({dump,_I},Ps,X,Bs) ->
+    dump(Bs),
+    passes(Ps,X,Bs);
 pass_(Pass,Ps,X,Bs) ->
     case one_model(Bs) of
 	false ->
@@ -253,8 +261,13 @@ pass_(Pass,Ps,X,Bs) ->
 %% check if we are supposed to run a pass at all.
 pass_enabled(apply,_Bs) -> 
     true;
-pass_enabled(eval,_Bs) ->
+pass_enabled(eval,_Bs) -> 
     true;
+pass_enabled({dump,I}, Bs) ->
+    case varp_formula:getopt(Bs,dump) of    
+	I -> true;
+	_ -> false
+    end;
 pass_enabled({saturate,Params},_Bs) ->
     maps:get(saturate,Params,0) > 0;
 pass_enabled(saturate,Bs) ->
@@ -362,6 +375,23 @@ backtrack(Bs,F) ->
 	false -> no_models(Bs);
 	Bs1 -> varp_backtrack:backtrack(eval(Bs1))
     end.
+
+%% dump clauses
+dump(Bs) ->
+    N = varp_formula:get_info(Bs, number_of_clauses),
+    dump_(0, N, Bs).
+
+dump_(N, N, _Bs) ->
+    ok;
+dump_(I, N, Bs) ->
+    {'or',[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
+    io:put_chars([format_snf_clause(Bs,CL),".\n"]),
+    dump_(I+1,N,Bs).
+
+format_snf_clause(Bs,CL) ->
+    concat([varp_formula:format_lit(Bs,L,false)||L<-CL]," ").
+
+
 
 format_model(Model) ->
     concat([ varp_format:format_binding(Bound) || Bound <- Model ], ",").

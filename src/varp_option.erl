@@ -376,6 +376,12 @@ options() ->
 	     default => min,
 	     description => "Type of reductions clauses."
 	  },
+    V44 = #{ long => "dump",
+	     key => dump,
+	     spec => integer,
+	     default => -1,
+	     description => "dump clauses at phase i"
+	   },
 
     %% now build a map from long/short => Vi (will be a literal)
     #{ value => V1, "value" => V1, "v" => V1,
@@ -441,7 +447,8 @@ options() ->
        "restart-interval"=>V40,
        starexec=>V41, "starexec"=>V41,
        reduction=>V42, "reduction"=>V42, "r"=>V42,
-       reduction_type=>V43, "reduction-type"=>V43, "R"=>V43
+       reduction_type=>V43, "reduction-type"=>V43, "R"=>V43,
+       dump=>V44, "dump"=>V44
      }.
 
 %% list of options with unique key

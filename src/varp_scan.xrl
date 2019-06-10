@@ -101,6 +101,7 @@ PROD                : {token,{'PROD',TokenLine}}.
 >=		    : {token,{'>=',TokenLine}}.
 ==		    : {token,{'==',TokenLine}}.
 !=		    : {token,{'!=',TokenLine}}.
+:=		    : {token,{':=',TokenLine}}.
 ;		    : {token,{';',TokenLine}}.
 \{		    : {token,{'{',TokenLine}}.
 \}		    : {token,{'}',TokenLine}}.

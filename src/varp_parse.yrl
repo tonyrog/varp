@@ -8,7 +8,7 @@ Terminals
         'SUM' 'PROD'
         '<->' '>>>' '<<<' '$' '..'
         hexnum octnum binnum decnum flonum chrnum identifier
-	'->' '<<' '>>' '<' '>' '>=' '<=' '==' '!='
+	'->' '<<' '>>' '<' '>' '>=' '<=' '==' '!=' ':='
 	'&&' '||'
 	'(' ')' '[' ']' '{' '}' ',' '.' '&' '*' '+' '-' '~' '!'
 	'/' '%' '^' '|' ':' '?' '=' ';'
@@ -299,6 +299,7 @@ lexpr4 -> lexpr4 '>=' lexpr3      : { op('$2'), '$1', '$3' }.
 
 lexpr40 -> lexpr4                 : '$1'.
 lexpr40 -> lexpr40 '==' lexpr4    : { op('$2'), '$1', '$3' }.
+lexpr40 -> lexpr40 ':=' lexpr4    : { op('$2'), '$1', '$3' }.
 lexpr40 -> lexpr40 '!=' lexpr4    : { op('$2'), '$1', '$3' }.
 
 lexpr43 -> lexpr40                : '$1'.

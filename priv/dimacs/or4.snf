@@ -1,0 +1,8 @@
+p snf 6 7
+!X1 A B.
+X1 !A.
+X1 !B.
+!X2 C D.
+X2 !C.
+X2 !D.
+X1 X2.

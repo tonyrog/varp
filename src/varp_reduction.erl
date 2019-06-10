@@ -71,37 +71,42 @@ add_var(Bs,V,CMax,Type) ->
 
 add_lit(Bs,L,Is) ->
     {Cs,Bs1} = clauses(Bs,Is,L,[]),
-    %% emit_def(Bs, L, Cs),
+    emit_def(Bs, L, Cs),
     lists:foreach(
       fun({Y,Xs}) ->
 	      Xs1 = [-Xi||Xi<-Xs],
-	      varp_formula:or_clause(Bs1,[Y|Xs1]),
+	      or_clause(Bs1,[Y|Xs1]),
 	      lists:foreach(
 		fun(X) ->
-			varp_formula:or_clause(Bs1,[-Y,X])
+			or_clause(Bs1,[-Y,X])
 		end, Xs)
       end, Cs),
     Ys = [Y || {Y,_} <- Cs],
-    varp_formula:or_clause(Bs1,[-L|Ys]).
-    
-emit_def(Bs, L, Cs) ->
-    io:format("~s == ", [varp_formula:format_lit(Bs,L)]),
+    or_clause(Bs1,[-L|Ys]).
+
+or_clause(Bs, CL) ->
+    io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
+    varp_formula:or_clause(Bs, CL).
+
+
+emit_def(Bs, Yj, Cs) ->
+    io:format("~s == ", [varp_formula:format_lit(Bs,Yj)]),
     lists:foreach(
-      fun({'ALL',[{literal,L1}]}) ->
-	      io:format("{~s}|",[varp_formula:format_lit(Bs,L1)]);
-	 ({'ALL',[{literal,L1}|Ls]}) ->
-	      io:format("{~s",[varp_formula:format_lit(Bs,L1)]),
+      fun({_Y,[X1]}) ->
+	      io:format("{~s}|",[varp_formula:format_lit(Bs,X1)]);
+	 ({_Y,[X1|Xs]}) ->
+	      io:format("{~s",[varp_formula:format_lit(Bs,X1)]),
 	      lists:foreach(
-		fun({literal,Li}) ->
-			io:format("&~s", [varp_formula:format_lit(Bs,Li)])
-		end, Ls),
+		fun(Xi) ->
+			io:format("&~s", [varp_formula:format_lit(Bs,Xi)])
+		end, Xs),
 	      io:format("}|")
       end, Cs),
     io:format("\n").
     
 %% return list on form [{Y,[Xi]}]
 clauses(Bs,[I|Cs],L,Acc) ->
-    Clause = lists:delete(I, get_clause(Bs,I)),
+    Clause = lists:delete(L, get_clause(Bs,I)),
     {Y,Bs1} = varp_formula:fresh_var(Bs),
     clauses(Bs1,Cs,L,[{Y,Clause}|Acc]);
 clauses(Bs, [], _L, Acc) ->

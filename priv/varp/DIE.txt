@@ -1,0 +1,43 @@
+
+die_hard.varp n=6 order = '-occur'
+(ENQ)  	     	 	   EVAL		CLAUSE		TIME
+backjump=1 minimize=0	   2984		849649		0.70
+backjump=1 minimize=1	   2970		842884		0.73
+(PUSH)
+backjump=1 minimize=0	   1821		476475		0.41
+backjump=1 minimize=1	   1836		475694		0.43
+
+backjump=1 minimize=0	   1623		504037		0.72
+backjump=1 minimize=1	   1626		506653		0.79
+
+
+die_hard.varp n=5 order = '-occur'  
+(ENQ)  	     	 	   EVAL		CLAUSE		TIME
+backjump=1 minimize=0	   2278		638278		0.45
+backjump=1 minimize=1	   2263		632853		0.45
+(PUSH)
+backjump=1 minimize=0	   1599		404142          0.30
+backjump=1 minimize=1	   1596		401494		0.30
+
+backjump=1 minimize=0	   1225		384016          0.46
+backjump=1 minimize=1	   1224		381447		0.30
+
+
+is_prime.varp p=50851  order = '-occur'
+(ENQ)  	     	 	   EVAL		CLAUSE		TIME
+backjump=1 minimize=0	   256		145469		0.12
+backjump=1 minimize=1	   256		144718		0.13
+(PUSH)
+backjump=1 minimize=0	   1029		249086		0.21
+backjump=1 minimize=1	   1029		246685		0.22
+
+backjump=1 minimize=0	   149		99397		0.10
+backjump=1 minimize=1	   149		99019		0.12
+
+
+is_prime.varp p=2225513363 order = '-occur'  (ENQ)
+    	     	 	   EVAL		CLAUSE		TIME
+backjump=1 minimize=0      
+backjump=1 minimize=1
+backjump=0		   42746        121759094       2.56s
+
