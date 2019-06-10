@@ -1,11 +1,11 @@
 
-- add input conversion
++ add input conversion
 
 input(Line,Acc) ->
   {true,Form,Acc1}
 | {false,Acc1}
 
-- add assertion,
++ add assertion,
 
   assert(is_odd(n) && (n > 1))
 
