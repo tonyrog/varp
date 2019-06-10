@@ -15,7 +15,7 @@
 
 -include("varp.hrl").
 
--define(DEBUG, true).
+%% -define(DEBUG, true).
 
 -define(dbg0(F,As), ok).
 -ifdef(DEBUG).
@@ -186,7 +186,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
-		true  -> 
+		true -> 
 		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
 	    end;
 	true ->
@@ -250,25 +250,28 @@ install_bindings(Bs,Level,_Var,Bnds) ->
     Bcp = varp_option:getopt(bcp,Bs#bs.option),
     install_bindings_(Bs,Level,Bcp,Bnds).
 
-install_bindings_(Bs,Level,Bcp,[{X,Y}|Xs]) when abs(Y) =:= ?TRUE ->
-%%    if Level =:= ?TOP_LEVEL ->
-%%     	    io:format("~s=~s\n", [format_lit(Bs,X),format_lit(Bs,Y)]);
-%%       true -> ok
-%%    end,
-    varp_formula:equal(Bs,Y,X),
-    install_bindings_(Bs,Level,Bcp,Xs);
+
 install_bindings_(Bs,Level,Bcp,[{X,X}|Xs]) ->
-    install_bindings_(Bs,Level,Bcp,Xs);    
+    install_bindings_(Bs,Level,Bcp,Xs);
+
+install_bindings_(Bs,Level,Bcp,[{X,Y}|Xs]) when abs(Y) =:= ?TRUE ->
+    io:format("put ~s = ~s\n", [format_lit(Bs,X),format_lit(Bs,Y)]),
+    varp_formula:equal(Bs,X,Y),
+    install_bindings_(Bs,Level,Bcp,Xs);
+
 install_bindings_(Bs,Level,Bcp=false,[{X,Y}|Xs]) ->
     varp_formula:equal(Bs,X,Y),
     install_bindings_(Bs,Level,Bcp,Xs);
 install_bindings_(Bs,Level,Bcp=true,[{X,Y}|Xs]) ->
     if Level =:= ?TOP_LEVEL ->
+	    io:format("substitue [~s/~s]\n",
+		      [format_lit(Bs,X),format_lit(Bs,Y)]),
+	    varp_formula:substitute(Bs, X, Y),
 %%	    io:format("install clause {~s,~s}\n", [format_lit(Bs,Y),format_lit(Bs,-X)]),
 %%	    io:format("install clause {~s,~s}\n", [format_lit(Bs,-Y),format_lit(Bs,X)]),
-	    varp_formula:add_clause(Bs, 'or', [?TRUE,X,-Y]),
-	    varp_formula:add_clause(Bs, 'or', [?TRUE,-X,Y]),
-	    varp_formula:equal(Bs,X,Y),
+%%	    varp_formula:add_clause(Bs, 'or', [?TRUE,X,-Y]),
+%%	    varp_formula:add_clause(Bs, 'or', [?TRUE,-X,Y]),
+%%	    varp_formula:equal(Bs,X,Y),
 	    ok;
        true -> 
 	    ok

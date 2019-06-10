@@ -1972,7 +1972,9 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	lit_t xp;
-	if (!get_lit(env, vp, head, &xp) || is_constant(lit_value(vp, xp)))
+	if (!get_lit(env, vp, head, &xp))
+	    return enif_make_badarg(env);
+	if (is_constant(lit_index(xp))) // constant TRUE|FALSE
 	    return enif_make_badarg(env);
 	list = tail;
     }
@@ -2049,7 +2051,9 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	lit_t xp;
-	if (!get_lit(env, vp, head, &xp) || is_constant(lit_value(vp,xp)))
+	if (!get_lit(env, vp, head, &xp))
+	    return enif_make_badarg(env);
+	if (is_constant(lit_index(xp))) // constant TRUE|FALSE
 	    return enif_make_badarg(env);
 	list = tail;
     }
@@ -2488,6 +2492,8 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
     }
     // the new last x
     x->xlast = xpp;
+    // mark Y as bound (to X)
+    set_variable_value(vp, y, x->vix);
 }
 
 static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,

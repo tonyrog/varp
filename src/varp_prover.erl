@@ -305,7 +305,7 @@ pass(saturate,_X,Bs) ->
     varp_saturate:saturate(Bs,Params);
 pass(reduction,_X,Bs) ->
     Bs1 = varp_reduction:reduction(Bs),
-    %% order_literals(Bs1),
+    order_literals(Bs1),
     Bs1;
 pass(backtrack,_X,Bs) ->
     varp_backtrack:backtrack(Bs);

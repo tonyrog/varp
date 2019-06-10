@@ -40,7 +40,8 @@ red(Bs, I, X,N,CMax,Type) ->
     end.
 
 add_var(Bs,V,CMax,Type) ->
-    io:format("reduction=~s,cmax=~w\n",[varp_formula:format_lit(Bs,V),CMax]),
+    io:format("reduction=~s,cmax=~w,type=~w\n",
+	      [varp_formula:format_lit(Bs,V),CMax,Type]),
     case Type of
 	pos ->
 	    Is = get_clauses(Bs,V,CMax),
@@ -69,23 +70,58 @@ add_var(Bs,V,CMax,Type) ->
 	    end
     end.
 
+%% extract clauses containing literal l in delta:
+%% {l, D1}, {l, D2}, ... {l, Dn} where Di = {di1,..,din}
+%% define:   yi = !(Di)  = (!di1 & !di2 .. !dim)
+%% encoded (clauses):
+%%   {yi,di1,di2,...dim}
+%%   {!yi,!di1}
+%%   ..
+%%   {!yi,!dim}
+%% and the clause:
+%%   {!l,y1,...yn}
+%%
+
 add_lit(Bs,L,Is) ->
-    {Cs,Bs1} = clauses(Bs,Is,L,[]),
-    emit_def(Bs, L, Cs),
+    {Ds,Bs1} = clauses(Bs,Is,L,[]),
+    %% fixme: add option to emit definition in varp format!
+    %% emit_def(Bs, L, Ds),
     lists:foreach(
-      fun({Y,Xs}) ->
-	      Xs1 = [-Xi||Xi<-Xs],
-	      or_clause(Bs1,[Y|Xs1]),
+      fun({Yi,Di}) ->
+	      or_clause(Bs1,[Yi|Di]),
 	      lists:foreach(
-		fun(X) ->
-			or_clause(Bs1,[-Y,X])
-		end, Xs)
-      end, Cs),
-    Ys = [Y || {Y,_} <- Cs],
-    or_clause(Bs1,[-L|Ys]).
+		fun(Dij) ->
+			or_clause(Bs1,[-Yi,-Dij])
+		end, Di),
+	      add_multi(Bs,Yi,Di,Ds)
+      end, Ds),
+    case [Y || {Y,_} <- Ds] of
+	[] ->
+	    or_clause(Bs1,[-L]);
+	Ys ->
+	    or_clause(Bs1,[-L|Ys])
+    end.
+
+%% check if ~Di has an intersection with Dj in Ds
+%% the add clause {-Yi,-Yj}
+add_multi(Bs,Yi,Di,Ds) ->
+    NDi = [-L || L <- Di],
+    lists:foreach(
+      fun({Yj,Dj}) ->
+	      case intersect(NDi,Dj) of
+		  [] -> ok;
+		  _ -> 
+		      io:format("MULTI\n"),
+		      or_clause(Bs, [-Yi,-Yj])
+	      end
+      end, Ds).
+
+intersect(A,B) ->
+    A -- (A -- B).
 
 or_clause(Bs, CL) ->
-    io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
+    %% add option to add the new clauses?
+    %% io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
     varp_formula:or_clause(Bs, CL).
 
 
