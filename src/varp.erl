@@ -17,6 +17,7 @@
 -export([archive_path/1]).
 
 -include_lib("stdlib/include/zip.hrl").
+-include("varp.hrl").
 
 main(Args) ->
     application:start(varp),
@@ -55,16 +56,8 @@ main(Args) ->
 			{ok,{Sections1,Formula}} ->
 			    Formula1 = join_f('and',Formula0,Formula),
 			    Sections = append_sections(Sections0,Sections1),
-			    #{order:=Order,
-			      decls:=Decls,
-			      literals:=Literals,
-			      defs:=Defs} = Sections,
-			    OrderOpts = order_decl(Order),
-			    run(Mode,Formula1,
-				OrderOpts++
-				    [{defs,Defs},
-				     {decls,Decls},
-				     {literals,Literals}|Opts]);
+			    Opts1 = section_opts(Sections,Opts),
+			    run(Mode,Formula1,Opts1);
 			_Error ->
 			    halt(1)
 		    end;
@@ -77,16 +70,8 @@ main(Args) ->
 		    case load_files([F],Formula0,Sections0,'and',Opts) of
 			{ok,{Sections1,Formula}} ->
 			    Sections = append_sections(Sections0,Sections1),
-			    #{order:=Order,
-			      decls:=Decls,
-			      literals:=Literals,
-			      defs:=Defs} = Sections,
-			    OrderOpts = order_decl(Order),
-			    run(Mode,Formula,
-				OrderOpts++
-				    [{defs,Defs},
-				     {decls,Decls},
-				     {literals,Literals}|Opts]);
+			    Opts1 = section_opts(Sections, Opts),
+			    run(Mode,Formula,Opts1);
 			_Error ->
 			    halt(1)
 		    end;
@@ -97,16 +82,8 @@ main(Args) ->
 	    case load_files(Fs,Formula0,Sections0,'and',Opts) of
 		{ok,{Sections1,Formula}} ->
 		    Sections = append_sections(Sections0,Sections1),
-		    #{order:=Order,
-		      decls:=Decls,
-		      literals:=Literals,
-		      defs:=Defs} = Sections,
-		    OrderOpts = order_decl(Order),
-		    run(Mode,Formula,
-			OrderOpts++
-			    [{defs,Defs},
-			     {decls,Decls},
-			     {literals,Literals}|Opts]);
+		    Opts1 = section_opts(Sections, Opts),
+		    run(Mode,Formula,Opts1);
 		_Error ->
 		    halt(1)
 	    end
@@ -271,9 +248,9 @@ order_decl([],Opts) ->
 
 %% load files and form a conjunction over all files
 load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
-    {ok, Data} = read_file(F),
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
+	    {ok, Data} = read_file(F),
 	    case varp_dimacs:parse(Data) of
 		Error={error,Ln,Reason} ->
 		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
@@ -289,7 +266,19 @@ load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
 		    Sections1 = append_sections(Sections, Sections0),
 		    load_files(Fs,Formula1,Sections1,JoinOp,Opts)
 	    end;
+       Ext =:= ".dat"; Ext =:= ".txt" -> %% fixme
+	    %% try input modules
+	    Input = maps:get(input, Sections, []),
+	    Meta  = proplists:get_value(meta,Opts,[]),
+	    case varp_input(Input, F, Meta) of
+		{ok,Formula} ->
+		    Formula1 = join_f(JoinOp,Formula,Formula0),
+		    load_files(Fs,Formula1,Sections,JoinOp,Opts);
+		Error ->
+		    Error
+	    end;
        true ->
+	    {ok, Data} = read_file(F),
 	    case parse(F, Data) of
 		{ok,{Sections1,Formula}} ->
 		    %% io:format("% loaded: ~s\n", [F]),
@@ -303,6 +292,29 @@ load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
     end;
 load_files([],Formula,Sections,_JoinOp,_Opts) ->
     {ok,{Sections,Formula}}.
+
+
+%% special input format
+varp_input([#cid{name=ModuleName} | InputList], FileName, Meta) ->
+    Module = list_to_atom(ModuleName),
+    case code:ensure_loaded(Module) of
+	{module,M} ->
+	    case erlang:function_exported(M, file, 2) of
+		true ->
+		    apply(M, file, [FileName, Meta]);
+		false ->
+		    case erlang:function_exported(M, file, 1) of
+			true ->
+			    apply(M, file, [FileName]);
+			false ->
+			    varp_input(InputList, FileName, Meta)
+		    end
+	    end;
+	{error,_} ->
+	    varp_input(InputList, FileName, Meta)
+    end;
+varp_input([], _FileName, _Meta) ->
+    {error, no_input}.
 
 %% fixme analyze the path to see if there are 
 %% archive tar/tar.gz/tgz/zip compoinents in the path
@@ -385,15 +397,35 @@ parse_formulas([], Formula, Sections, _JoinOp) ->
     {ok,{Sections,Formula}}.
 
 empty_sections() ->
-    #{ decls=>[], order=>[], literals=>[], defs=>[]}.
+    #{ decls=>[], order=>[], literals=>[], defs=>[], assert=>[], input=>[]}.
 
-append_sections(#{ decls:=D0, order:=O0, literals:=Ls0, defs:=Ds0},
-		#{ decls:=D1, order:=O1, literals:=Ls1, defs:=Ds1}) ->
+append_sections(#{ decls:=D0,order:=O0,literals:=Ls0,defs:=Ds0,
+		   assert:=A0,input:=I0},
+		#{ decls:=D1,order:=O1,literals:=Ls1,defs:=Ds1,
+		   assert:=A1,input:=I1}) ->
     #{ decls=>D0++D1, 
        order=>O0++O1, 
        literals=>Ls0++Ls1,
-       defs=>Ds0++Ds1}.
+       defs=>Ds0++Ds1,
+       assert => A0++A1,
+       input => I0++I1 }.
 
+
+section_opts(#{ decls := Decls,
+		order := Order,
+		literals := Literals,
+		defs := Defs,
+		assert := Assert,
+		input := Input
+	      }, Opts0) ->
+    order_decl(Order) ++
+	[{defs,Defs},
+	 {decls,Decls},
+	 {literals,Literals},
+	 {assert,Assert},
+	 {input,Input}
+	 | Opts0].
+    
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;
 join_f(JoinOp,A,B) -> {JoinOp,A,B}.
@@ -564,6 +596,10 @@ split_sections([{literals,Ls}|Sections],Map=#{ literals:=Ls0 }) ->
     split_sections(Sections, Map#{ literals => Ls0++Ls });
 split_sections([{define,P,Expr}|Sections], Map=#{ defs:=Defs0 }) ->
     split_sections(Sections, Map#{ defs => Defs0++[{P,Expr}] });
+split_sections([{assert,Expr}|Sections], Map=#{ assert:=Assert0 }) ->
+    split_sections(Sections, Map#{ assert => Assert0++[Expr] });
+split_sections([{input,Name}|Sections], Map=#{ input:=Input0 }) ->
+    split_sections(Sections, Map#{ input => Input0++[Name] });
 split_sections([], Map) ->
     Map.
     

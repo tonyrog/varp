@@ -1,7 +1,7 @@
 %% -*- erlang -*-
 
 Terminals
-	symbol true false define declare literals
+	symbol true false define declare literals assert input
         order depth occur random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
@@ -29,8 +29,8 @@ Nonterminals
         integer sexpr
         qtype quantifier psymbol pexpr oexpr odecl odecls ldecl ldecls
         lexpr_prim
-        lexpr0 lexpr1 lexpr2 lexpr3 lexpr4 lexpr40 lexpr43 lexpr45 lexpr47 
-        lexpr5 lexpr6 lexpr7 lexpr8 lexpr9
+        lexpr0 lexpr10 lexpr20 lexpr30 lexpr40 lexpr41 lexpr43 lexpr45 lexpr47 
+        lexpr50 lexpr60 lexpr70 lexpr80 lexpr90
         lexpr lexprs
         definition definitions
         pdecl pdecls
@@ -49,6 +49,8 @@ definition -> 'define' pexpr lexpr ';' : {define,'$2','$3'}.
 definition -> 'declare' pdecls ';'     : {declare,'$2'}.
 definition -> 'literals' ldecls ';'    : {literals,'$2'}.
 definition -> 'order' odecls ';'       : {order,'$2'}.
+definition -> 'assert' expr ';'        : {assert,'$2'}.
+definition -> 'input' cidentifier ';'  : {input,'$2'}.
     
 primary_expr -> cidentifier  : '$1'.
 primary_expr -> constant     : '$1'.
@@ -276,34 +278,34 @@ lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bit_range,'$1','$3','$5', 1}.
 lexpr0 -> lexpr0 '[' expr ':' expr ':' expr ']' :
 	      { bit_range,'$1','$3','$5','$7'}.
 
-lexpr1 -> lexpr0                  : '$1'.
-lexpr1 -> lexpr1 '*' lexpr0       : { op('$2'), '$1', '$3'}.
-lexpr1 -> lexpr1 '/' lexpr0       : { op('$2'), '$1', '$3'}.
-lexpr1 -> lexpr1 '%' lexpr0       : { op('$2'), '$1', '$3'}.
+lexpr10 -> lexpr0                 : '$1'.
+lexpr10 -> lexpr10 '*' lexpr0     : { op('$2'), '$1', '$3'}.
+lexpr10 -> lexpr10 '/' lexpr0     : { op('$2'), '$1', '$3'}.
+lexpr10 -> lexpr10 '%' lexpr0     : { op('$2'), '$1', '$3'}.
 
-lexpr2 -> lexpr1                  : '$1'.
-lexpr2 -> lexpr2 '+' lexpr1       : { op('$2'), '$1', '$3' }.
-lexpr2 -> lexpr2 '-' lexpr1       : { op('$2'), '$1', '$3' }.
+lexpr20 -> lexpr10                : '$1'.
+lexpr20 -> lexpr20 '+' lexpr10    : { op('$2'), '$1', '$3' }.
+lexpr20 -> lexpr20 '-' lexpr10    : { op('$2'), '$1', '$3' }.
 
-lexpr3 -> lexpr2                  : '$1'.
-lexpr3 -> lexpr3 '<<' lexpr2      : { op('$2'), '$1', '$3'}.
-lexpr3 -> lexpr3 '>>' lexpr2      : { op('$2'), '$1', '$3'}.
-lexpr3 -> lexpr3 '<<<' lexpr2     : { op('$2'), '$1', '$3'}.
-lexpr3 -> lexpr3 '>>>' lexpr2     : { op('$2'), '$1', '$3'}.
+lexpr30 -> lexpr20                : '$1'.
+lexpr30 -> lexpr30 '<<' lexpr20   : { op('$2'), '$1', '$3'}.
+lexpr30 -> lexpr30 '>>' lexpr20   : { op('$2'), '$1', '$3'}.
+lexpr30 -> lexpr30 '<<<' lexpr20  : { op('$2'), '$1', '$3'}.
+lexpr30 -> lexpr30 '>>>' lexpr20  : { op('$2'), '$1', '$3'}.
 
-lexpr4 -> lexpr3                  : '$1'.
-lexpr4 -> lexpr4 '<'  lexpr3      : { op('$2'), '$1', '$3' }.
-lexpr4 -> lexpr4 '<=' lexpr3      : { op('$2'), '$1', '$3' }.
-lexpr4 -> lexpr4 '>'  lexpr3      : { op('$2'), '$1', '$3' }.
-lexpr4 -> lexpr4 '>=' lexpr3      : { op('$2'), '$1', '$3' }.
+lexpr40 -> lexpr30                : '$1'.
+lexpr40 -> lexpr40 '<'  lexpr30   : { op('$2'), '$1', '$3' }.
+lexpr40 -> lexpr40 '<=' lexpr30   : { op('$2'), '$1', '$3' }.
+lexpr40 -> lexpr40 '>'  lexpr30   : { op('$2'), '$1', '$3' }.
+lexpr40 -> lexpr40 '>=' lexpr30   : { op('$2'), '$1', '$3' }.
 
-lexpr40 -> lexpr4                 : '$1'.
-lexpr40 -> lexpr40 '==' lexpr4    : { op('$2'), '$1', '$3' }.
-lexpr40 -> lexpr40 ':=' lexpr4    : { op('$2'), '$1', '$3' }.
-lexpr40 -> lexpr40 '!=' lexpr4    : { op('$2'), '$1', '$3' }.
+lexpr41 -> lexpr40                : '$1'.
+lexpr41 -> lexpr41 '==' lexpr40   : { op('$2'), '$1', '$3' }.
+lexpr41 -> lexpr41 ':=' lexpr40   : { op('$2'), '$1', '$3' }.
+lexpr41 -> lexpr41 '!=' lexpr40   : { op('$2'), '$1', '$3' }.
 
-lexpr43 -> lexpr40                : '$1'.
-lexpr43 -> lexpr43 '&' lexpr40    : { op('$2'), '$1', '$3' }.   
+lexpr43 -> lexpr41                : '$1'.
+lexpr43 -> lexpr43 '&' lexpr41    : { op('$2'), '$1', '$3' }.   
 
 lexpr45 -> lexpr43                : '$1'.
 lexpr45 -> lexpr45 '^' lexpr43    : { op('$2'), '$1', '$3' }.
@@ -311,26 +313,26 @@ lexpr45 -> lexpr45 '^' lexpr43    : { op('$2'), '$1', '$3' }.
 lexpr47 -> lexpr45                : '$1'.
 lexpr47 -> lexpr47 '|' lexpr45    : { op('$2'), '$1', '$3' }.
 
-lexpr5 -> lexpr47                 : '$1'.
-lexpr5 -> lexpr5 'and' lexpr47    : { op('$2'), '$1', '$3' }.
-lexpr5 -> lexpr5 '&&'  lexpr47    : { op('$2'), '$1', '$3' }.
+lexpr50 -> lexpr47                : '$1'.
+lexpr50 -> lexpr50 'and' lexpr47  : { op('$2'), '$1', '$3' }.
+lexpr50 -> lexpr50 '&&'  lexpr47  : { op('$2'), '$1', '$3' }.
 
-lexpr6 -> lexpr5                  : '$1'.
-lexpr6 -> lexpr6 'xor' lexpr5     : { op('$2'), '$1', '$3' }.
+lexpr60 -> lexpr50                  : '$1'.
+lexpr60 -> lexpr60 'xor' lexpr50    : { op('$2'), '$1', '$3' }.
 
-lexpr7 -> lexpr6                  : '$1'.
-lexpr7 -> lexpr7 'or'  lexpr6     : { op('$2'), '$1', '$3' }.
-lexpr7 -> lexpr7 '||'  lexpr6     : { op('$2'), '$1', '$3' }.
+lexpr70 -> lexpr60                  : '$1'.
+lexpr70 -> lexpr70 'or'  lexpr60    : { op('$2'), '$1', '$3' }.
+lexpr70 -> lexpr70 '||'  lexpr60    : { op('$2'), '$1', '$3' }.
 
-lexpr8 -> lexpr7                  : '$1'.
-lexpr8 -> lexpr8 '->'  lexpr7     : { op('$2'), '$1', '$3' }.
-lexpr8 -> lexpr8 'imp' lexpr7     : { op('$2'), '$1', '$3' }.
+lexpr80 -> lexpr70                  : '$1'.
+lexpr80 -> lexpr80 '->'  lexpr70    : { op('$2'), '$1', '$3' }.
+lexpr80 -> lexpr80 'imp' lexpr70    : { op('$2'), '$1', '$3' }.
 
-lexpr9 -> lexpr8                  : '$1'.
-lexpr9 -> lexpr9 'equ' lexpr8     : { op('$2'), '$1', '$3' }.
-lexpr9 -> lexpr9 '<->' lexpr8     : { op('$2'), '$1', '$3' }.
+lexpr90 -> lexpr80                  : '$1'.
+lexpr90 -> lexpr90 'equ' lexpr80    : { op('$2'), '$1', '$3' }.
+lexpr90 -> lexpr90 '<->' lexpr80    : { op('$2'), '$1', '$3' }.
 
-lexpr -> lexpr9                   : '$1'.
+lexpr -> lexpr90                    : '$1'.
 
 %% fixme?
 %% lexpr -> lexpr '[' pexpr '/' pexpr ']' : {subst,'$3','$5','$1'}.

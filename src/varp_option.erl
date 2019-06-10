@@ -277,6 +277,14 @@ options() ->
 	     spec => {set,atom},
 	     default => [],  %% ordset
 	     description => "Internal list of all literals"},
+    V26_1 = #{ key => assert,
+	     spec => {list,term},
+	     default => [],  %% list
+	     description => "Internal list of all assertions"},
+    V26_2 = #{ key => input,
+	     spec => {list,term},
+	     default => [],  %% list
+	     description => "Internal list of input modules"},
 
     V27 = #{ long => "iorder",
 	     key => iorder,
@@ -420,6 +428,8 @@ options() ->
        defs => V22,
        decls => V23,
        literals => V26,
+       assert => V26_1,
+       input => V26_2,
        saturations => V25,
        %% Backjump options
        iorder => V27, "iorder" => V27, "i" => V27,

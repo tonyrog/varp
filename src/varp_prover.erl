@@ -183,11 +183,11 @@ backtrack_formula(F,Opts) ->
 backtrack({F,Bs}) ->
     backtrack(Bs,F).
 
-
 %% Basic run
 method(X,Bs) ->
     %% run saturate/reduction/saturate?
-    passes([{dump,0}, apply,
+    passes([assert,
+	    {dump,0}, apply,
 	    {dump,1}, eval,
 	    {dump,2}, reduction,
 	    {dump,3}, saturate,
@@ -208,6 +208,9 @@ passes([],_X,Bs) ->
 
 pass_({dump,_I},Ps,X,Bs) ->
     dump(Bs),
+    passes(Ps,X,Bs);
+pass_(assert,Ps,X,Bs) ->
+    assert(Bs#bs.assert, Bs),
     passes(Ps,X,Bs);
 pass_(Pass,Ps,X,Bs) ->
     case one_model(Bs) of
@@ -260,6 +263,8 @@ pass_(Pass,Ps,X,Bs) ->
 
 %% check if we are supposed to run a pass at all.
 pass_enabled(apply,_Bs) -> 
+    true;
+pass_enabled(assert,_Bs) ->
     true;
 pass_enabled(eval,_Bs) -> 
     true;
@@ -341,6 +346,20 @@ no_models(Bs) ->
 	collect -> {0,[]};
 	count -> 0
     end.
+
+assert([Assert|As], Bs) ->
+    case varp_formula:eval_meta(Assert,Bs) of
+	false ->
+	    io:format("assertion '~s' failed\n", 
+		      [varp_formula:format_meta(Assert)]),
+	    erlang:error(assertion),
+	    ok;
+	true ->
+	    assert(As,Bs)
+    end;
+assert([], _Bs) ->
+    ok.
+	    
 
 eval_list(Bs,[]) ->
     eval(Bs);

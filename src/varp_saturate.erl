@@ -279,12 +279,6 @@ install_bindings_(Bs,Level,Bcp=true,[{X,Y}|Xs]) ->
     install_bindings_(Bs,Level,Bcp,Xs);
 
 install_bindings_(Bs,_Level,_Bcp,[]) ->
-    %% if Level =:= ?TOP_LEVEL ->
-    %% 	    N = varp_formula:number_of_bound(Bs),
-    %% 	    io:format("Bound = ~w\n", [N]);
-    %%    true ->
-    %% 	    ok
-    %% end,
     Bs.
 
 %% push level, set (unbound) variable and eval

@@ -1,6 +1,13 @@
 //
-// Factorize ODD prime number product n=F1*F2
+// Factorize prime number product n=F1*F2 where F1 and F2 are odd
+// (2a+1)(2b+1) = 4ab + 2a +2b + 1  (n must be odd)
+// smallest n is a=1, b=1 => n=3*3=9  but f1 != f2
+// a=1, b=2 => n=3*5 = 15!
 //
+assert (n & 1) == 1;
+assert sqr(isqrt(n)) != n;
+assert n>=15;
+
 declare F1:(isize(n)-1);
 declare F2:(isize(n)-1);
 declare X:(isize(n)-1);

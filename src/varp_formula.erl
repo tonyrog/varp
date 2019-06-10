@@ -25,6 +25,7 @@
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 -export([format_p/1]).
+-export([format_meta/1]).
 -export([or_gate/3, and_gate/3, xor_gate/3]).
 -export([or_clause/2, and_clause/2]).
 -export([format_lit/2, format_lit/3]).
@@ -65,6 +66,7 @@
 -export([clear_queue/1]).
 -export([enqueue_all/1]).
 -export([eval/1]).
+-export([eval_meta/2]).
 -export([set_level/2]).
 -export([keep_level/2]).
 -export([undo_level/2]).
@@ -129,6 +131,8 @@ new(OptMap) when is_map(OptMap) ->
        defs = maps:get(defs,OptMap),
        decls = maps:get(decls,OptMap),
        literals = maps:get(literals,OptMap),
+       assert   = maps:get(assert,OptMap),
+       input    = maps:get(input,OptMap),
        counters = Counters,
        d1       = Delta1,
        d2       = Delta2,
@@ -1280,7 +1284,8 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
 	{#cid{name="binom"},[A,B]} -> varp_math:binom(A,B);
 	{#cid{name="sqrt"},[A]}    -> math:sqrt(A);
-	{#cid{name="isqrt"},[A]}    -> imath:isqrt(A);
+	{#cid{name="isqrt"},[A]}   -> imath:isqrt(A);
+	{#cid{name="sqr"},[A]}     -> A*A;
 	{#cid{name="nroot"},[A,N]} -> varp_math:nroot(A,N);
 	{#cid{name="ln"},[A]}      -> math:log(A);
 	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
@@ -1365,6 +1370,74 @@ subsets(K, As0=[A|As]) ->
 	    Bs = subsets(K-1,As),
 	    subsets(K, As) ++ [[A|B] || B <- Bs]
     end.
+
+-define(MAX_PRIO, 0).
+
+priority('*') -> 10;
+priority('/') -> 10;
+priority('%') -> 10;
+priority('+') -> 20;
+priority('-') -> 20;
+priority('<<') -> 30;
+priority('>>') -> 30;
+priority('<') -> 40;
+priority('<=') -> 40;
+priority('>') -> 40;
+priority('>=') -> 40;
+priority('==') -> 41;
+priority('!=') -> 41;
+priority('&') -> 43;
+priority('^') -> 45;
+priority('|') -> 47;
+priority('&&') -> 50;
+priority('||') -> 70.
+
+upriority('-')   -> 1;
+upriority('!')   -> 1;
+upriority('~')   -> 1.
+
+format_meta(Expr) ->
+    format_meta_(Expr, ?MAX_PRIO).
+
+format_meta_(I,_P) when is_integer(I) -> integer_to_list(I);
+format_meta_(V,_P) when is_atom(V) -> atom_to_list(V);
+format_meta_(#cid {name=Name},_P) -> Name;
+format_meta_(#cconst {base=B,value=V},_P) ->
+    case B of
+	10 -> V;
+	2 -> [$0,$b|V];
+	8 -> [$0|V];
+	16 -> [$0,$x|V];
+	_ -> V
+    end;
+format_meta_(#crange{from=A,to=B},_P) ->
+    if A =:= B -> A;
+       true -> [format_meta(A),"..",format_meta(B)]
+    end;
+format_meta_(#ccall{func=#cid{name=F},args=As},_P) ->
+    [F,"(", format_meta_list(As), ")"];
+format_meta_(#cbinary{op=Op,arg1=A,arg2=B},P) ->
+    P1 = priority(Op),
+    Fa = format_meta_(A,P1),
+    Fb = format_meta_(B,P1),
+    if P1 > P ->
+	    ["(",Fa," ",atom_to_list(Op)," ",Fb,")"];
+       true ->
+	    [Fa," ",atom_to_list(Op)," ",Fb]
+    end;
+format_meta_(#cunary{op=Op,arg=A},P) ->
+    P1 = upriority(Op),
+    Fa = format_meta_(A,P1),
+    if P1 > P ->
+	    ["(",atom_to_list(Op)," ",Fa,")"];
+       true ->
+	    [atom_to_list(Op)," ",Fa]
+    end.
+
+format_meta_list([]) -> [];
+format_meta_list([A]) -> [format_meta(A)];
+format_meta_list([A|As]) -> [format_meta(A),","|format_meta_list(As)].
+
 
 uint64(I,Bs) when is_integer(I) ->
     const_vector(uint,I,64,Bs);

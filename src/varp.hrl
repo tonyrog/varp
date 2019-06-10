@@ -98,7 +98,9 @@
 	 defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
 	 decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]
 	 subst=[],           %% var/function substitution(s)
-	 literals=[]         %% declared literals [atom()]
+	 literals=[],        %% declared literals [atom()]
+	 assert=[],          %% list of assertions [A1,...An]
+	 input=[]            %% list of input modules [I1,...In]
 	}).
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher
