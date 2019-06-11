@@ -2430,7 +2430,7 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 	// printf("y clause = %d\r\n", yptr->cix);
 	// printf("x clause = %d\r\n", xptr->cix);
 	
-	if (yptr->cix < xptr->cix) { // Y only
+	if ((xptr==NULL) || (yptr->cix < xptr->cix)) { // Y only
 	    xref_t* yptr1 = yptr->next;
 	    clause_t* cp = vp->clause_map[yptr->cix];
 	    lit_t yyl = cp->lit[yptr->p];
@@ -2448,8 +2448,7 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 		cp->lit[yptr->p] = lit_negate(xl);
 
 	    if (rewatch) {
-		// FIXME: test watch_clause result!
-		watch_clause(vp, cp);
+		watch_clause(vp, cp); // check result?
 	    }
 	    
 	    *xpp = yptr;
@@ -2463,14 +2462,13 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 	    lit_t yyl = cp->lit[yptr->p];
 	    lit_t xxl = cp->lit[xptr->p];
 	    int rewatch = 0;
-	    
-	    // if either x or y where watched remove and rewatch
-	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p) ||
-		(xptr->p == cp->wl[0].p) || (xptr->p == cp->wl[1].p)) {
+	
+	    // check if Y was TWL then update
+	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
 		unwatch_clause(vp, cp);
 		rewatch = 1;
 	    }
-
+	    
 	    if ((yl == yyl) && (xl == xxl)) { // same sign
 		cp->lit[yptr->p] = VARP_FALSE(vp);
 	    }
@@ -2479,16 +2477,20 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 	    }
 
 	    if (rewatch) {
-		// FIXME: test watch_clause result!
-		watch_clause(vp, cp);
+		watch_clause(vp, cp);  // check result?
 	    }
-	    
 	    varp_free(&vp->xref_allocator, yptr);
 	    yptr = yptr1;
 	}
 	else { // X only
 	    xpp = &(xptr->next);
 	}
+    }
+
+    // all the way and update xlast just in case
+    while(*xpp != NULL) {
+	xref_t* xptr = *xpp;	
+	xpp = &(xptr->next);
     }
     // the new last x
     x->xlast = xpp;
