@@ -1,7 +1,7 @@
 %% -*- erlang -*-
 
 Terminals
-	symbol true false define declare literals assert input
+	symbol true false define declare literals assert input output
         order depth occur random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
@@ -51,6 +51,7 @@ definition -> 'literals' ldecls ';'    : {literals,'$2'}.
 definition -> 'order' odecls ';'       : {order,'$2'}.
 definition -> 'assert' expr ';'        : {assert,'$2'}.
 definition -> 'input' cidentifier ';'  : {input,'$2'}.
+definition -> 'output' cidentifier ';' : {output,'$2'}.
     
 primary_expr -> cidentifier  : '$1'.
 primary_expr -> constant     : '$1'.

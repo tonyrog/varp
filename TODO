@@ -1,4 +1,11 @@
 
+- continue with backtrack after backjump
+  as alternative to install all models while
+  backjumping.
+  Only install the first model as blocked clause
+  (negate literals) and continue with backtracking
+  keep install conflict clauses...
+
 + add input conversion
 
 input(Line,Acc) ->

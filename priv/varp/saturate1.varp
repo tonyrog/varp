@@ -1,0 +1,6 @@
+//
+// Test file for saturation 
+//
+
+(X -> A & !B & C & !D) &
+(!X -> A & !B & !C & D)

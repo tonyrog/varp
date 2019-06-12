@@ -12,7 +12,30 @@ input(Line, _Acc) ->
 
 %% fixme: display a sudoku grid 
 output(Fd, Model) ->
-    io:format(Fd, "~p\n", [Model]).
+    %% io:format(Fd, "~p\n", [Model]).
+    io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n", []),
+    lists:foreach(
+      fun(I) ->
+	      io:format(Fd,"|~w|~w|~w | ~w|~w|~w | ~w|~w|~w |\n",
+			[s(I,J,Model) || J <- lists:seq(1,9)])
+      end, lists:seq(1,3)),
+    io:format(Fd, "+=+=+==+==+=+==+==+=+==+\n", []),
+    lists:foreach(
+      fun(I) ->
+	      io:format(Fd,"|~w|~w|~w | ~w|~w|~w | ~w|~w|~w |\n",
+			[s(I,J,Model) || J <- lists:seq(1,9)])
+      end, lists:seq(4,6)),
+    io:format(Fd,"+=+=+==+==+=+==+==+=+==+\n",[]),
+    lists:foreach(
+	  fun(I) ->
+		  io:format(Fd,"|~w|~w|~w | ~w|~w|~w | ~w|~w|~w |\n",
+			    [s(I,J,Model) || J <- lists:seq(1,9)])
+	  end, lists:seq(7,9)),
+    io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n",[]),
+    ok.
+
+s(I,J, [{{p,'S',[I,J,K]},true}|_Ms]) -> K;
+s(I,J, [_|Ms]) -> s(I,J,Ms).
 
 input_loop(Fd, RecNo, Acc) ->
     case file:read_line(Fd) of

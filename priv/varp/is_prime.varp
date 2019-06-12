@@ -5,4 +5,5 @@ declare A:(isize(n)-1);
 declare B:((isize(n)+1)/2);
 order B, A, -occur;
 
-( ((A * B) == n) && (A > B) && (B > 1) )
+((A * B) == n) && (A > B) && (B > 1)
+

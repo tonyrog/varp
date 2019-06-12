@@ -267,11 +267,6 @@ install_bindings_(Bs,Level,Bcp=true,[{X,Y}|Xs]) ->
 	    io:format("substitue [~s/~s]\n",
 		      [format_lit(Bs,X),format_lit(Bs,Y)]),
 	    varp_formula:substitute(Bs, X, Y),
-%%	    io:format("install clause {~s,~s}\n", [format_lit(Bs,Y),format_lit(Bs,-X)]),
-%%	    io:format("install clause {~s,~s}\n", [format_lit(Bs,-Y),format_lit(Bs,X)]),
-%%	    varp_formula:add_clause(Bs, 'or', [?TRUE,X,-Y]),
-%%	    varp_formula:add_clause(Bs, 'or', [?TRUE,-X,Y]),
-%%	    varp_formula:equal(Bs,X,Y),
 	    ok;
        true -> 
 	    ok

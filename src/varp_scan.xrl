@@ -30,6 +30,7 @@ unsigned	: {token,{unsigned,TokenLine}}.
 %% varp keywords
 assert              : {token,{'assert',TokenLine}}.
 input               : {token,{'input',TokenLine}}.
+output              : {token,{'output',TokenLine}}.
 declare             : {token,{'declare',TokenLine}}.
 literals            : {token,{'literals',TokenLine}}.
 define              : {token,{'define',TokenLine}}.

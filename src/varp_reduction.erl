@@ -124,7 +124,6 @@ or_clause(Bs, CL) ->
     %% io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
     varp_formula:or_clause(Bs, CL).
 
-
 emit_def(Bs, Yj, Cs) ->
     io:format("~s == ", [varp_formula:format_lit(Bs,Yj)]),
     lists:foreach(
@@ -143,8 +142,8 @@ emit_def(Bs, Yj, Cs) ->
 %% return list on form [{Y,[Xi]}]
 clauses(Bs,[I|Cs],L,Acc) ->
     Clause = lists:delete(L, get_clause(Bs,I)),
-    {Y,Bs1} = varp_formula:fresh_var(Bs),
-    clauses(Bs1,Cs,L,[{Y,Clause}|Acc]);
+    Y = varp_formula:add_variable(Bs),
+    clauses(Bs,Cs,L,[{Y,Clause}|Acc]);
 clauses(Bs, [], _L, Acc) ->
     {Acc,Bs}.
 

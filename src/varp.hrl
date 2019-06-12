@@ -100,7 +100,8 @@
 	 subst=[],           %% var/function substitution(s)
 	 literals=[],        %% declared literals [atom()]
 	 assert=[],          %% list of assertions [A1,...An]
-	 input=[]            %% list of input modules [I1,...In]
+	 input=[],           %% list of input modules [I1,...In]
+	 output=[]           %% list of output modules [I1,...In]
 	}).
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher

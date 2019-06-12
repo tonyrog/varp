@@ -15,6 +15,7 @@
 -export([scan_file/1]).
 -export([file/1, string/1, file_expand_cnf/2]).
 -export([archive_path/1]).
+-export([output_model/2]).
 
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").
@@ -33,7 +34,6 @@ main(Args) ->
 	    end,
     {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, satisfy),
     Opts = [{meta,Bound}|Opts0],
-    %% io:format("Opts = ~p\n", [Opts]),
     {ReadIn,{Sections0,Formula0}} =
 	case load_formulas(Opts, undefined, 'and') of
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
@@ -88,7 +88,6 @@ main(Args) ->
 		    halt(1)
 	    end
     end,
-    %% io:format("varp: arguments = ~p\n", [As]),
     halt(0).
 
 run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
@@ -316,6 +315,39 @@ varp_input([#cid{name=ModuleName} | InputList], FileName, Meta) ->
 varp_input([], _FileName, _Meta) ->
     {error, no_input}.
 
+%% special input format
+varp_output([#cid{name=ModuleName} | OutputList], Fd, Model) ->
+    Module = list_to_atom(ModuleName),
+    case code:ensure_loaded(Module) of
+	{module,M} ->
+	    case erlang:function_exported(M, output, 2) of
+		true ->
+		    apply(M, output, [Fd, Model]);
+		false ->
+		    varp_output(OutputList, Fd, Model)
+	    end;
+	{error,_} ->
+	    varp_output(OutputList, Fd, Model)
+    end;
+varp_output([], _Fd, _Model) ->
+    {error, no_output}.
+
+%% possibly emit a model
+
+output_model(Bs,I) ->
+    Model = varp_formula:model(Bs),
+    case varp_formula:getopt(Bs,print) of
+	false -> Model;
+	Print ->
+	    case varp_output(Bs#bs.output, user, Model) of
+		{error, no_output} ->
+		    varp_formula:print(Print,I,Model),
+		    Model;
+		_ ->
+		    Model
+	    end
+    end.
+
 %% fixme analyze the path to see if there are 
 %% archive tar/tar.gz/tgz/zip compoinents in the path
 %% in such case open the archive and extract the file
@@ -397,18 +429,21 @@ parse_formulas([], Formula, Sections, _JoinOp) ->
     {ok,{Sections,Formula}}.
 
 empty_sections() ->
-    #{ decls=>[], order=>[], literals=>[], defs=>[], assert=>[], input=>[]}.
+    #{ decls=>[], order=>[], literals=>[], defs=>[], 
+       assert=>[], input=>[], output=>[] }.
 
 append_sections(#{ decls:=D0,order:=O0,literals:=Ls0,defs:=Ds0,
-		   assert:=A0,input:=I0},
+		   assert:=A0,input:=I0, output:=T0 },
 		#{ decls:=D1,order:=O1,literals:=Ls1,defs:=Ds1,
-		   assert:=A1,input:=I1}) ->
+		   assert:=A1,input:=I1, output:=T1 }) ->
     #{ decls=>D0++D1, 
        order=>O0++O1, 
        literals=>Ls0++Ls1,
        defs=>Ds0++Ds1,
        assert => A0++A1,
-       input => I0++I1 }.
+       input => I0++I1,
+       output => T0++T1
+     }.
 
 
 section_opts(#{ decls := Decls,
@@ -416,14 +451,16 @@ section_opts(#{ decls := Decls,
 		literals := Literals,
 		defs := Defs,
 		assert := Assert,
-		input := Input
+		input := Input,
+		output := Output
 	      }, Opts0) ->
     order_decl(Order) ++
 	[{defs,Defs},
 	 {decls,Decls},
 	 {literals,Literals},
 	 {assert,Assert},
-	 {input,Input}
+	 {input,Input},
+	 {output,Output}
 	 | Opts0].
     
 join_f(_JoinOp,undefined,B) -> B;
@@ -600,6 +637,8 @@ split_sections([{assert,Expr}|Sections], Map=#{ assert:=Assert0 }) ->
     split_sections(Sections, Map#{ assert => Assert0++[Expr] });
 split_sections([{input,Name}|Sections], Map=#{ input:=Input0 }) ->
     split_sections(Sections, Map#{ input => Input0++[Name] });
+split_sections([{output,Name}|Sections], Map=#{ output:=Output0 }) ->
+    split_sections(Sections, Map#{ output => Output0++[Name] });
 split_sections([], Map) ->
     Map.
     

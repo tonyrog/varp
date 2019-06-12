@@ -2,26 +2,47 @@
 //  Square sum a^2+b^2 = c^2+d^2 = e^2+f^2
 //
 
-(Sum:(sz+1) == A:sz + B:sz) &&
-(Sum:(sz+1) == C:sz + D:sz) &&
-(Sum:(sz+1) == E:sz + F:sz) &&
+declare A:((sz+1)/2);
+declare B:((sz+1)/2);
+declare C:((sz+1)/2);
+declare D:((sz+1)/2);
+declare E:((sz+1)/2);
+declare F:((sz+1)/2);
+declare A2:sz;
+declare B2:sz;
+declare C2:sz;
+declare D2:sz;
+declare E2:sz;
+declare F2:sz;
+declare Sum:(sz+1);
+// set global options
+// options carry=false;
 
-(A:sz == A0:((sz+1)/2)*A0:((sz+1)/2)) &&
-(B:sz == B0:((sz+1)/2)*B0:((sz+1)/2)) &&
-(C:sz == C0:((sz+1)/2)*C0:((sz+1)/2)) &&
-(D:sz == D0:((sz+1)/2)*D0:((sz+1)/2)) &&
-(E:sz == E0:((sz+1)/2)*E0:((sz+1)/2)) &&
-(F:sz == F0:((sz+1)/2)*F0:((sz+1)/2)) &&
+(Sum == A2 + B2) &&
+(Sum == C2 + D2) &&
+(Sum == E2 + F2) &&
 
-(A:sz != B:sz) && (A:sz != C:sz) && (A:sz != D:sz) && (A:sz != E:sz) && (A:sz != F:sz) &&
-(B:sz != C:sz) && (B:sz != D:sz) && (B:sz != E:sz) && (B:sz != F:sz) &&
-(C:sz != D:sz) && (C:sz != E:sz) && (C:sz != F:sz) &&
-(D:sz != E:sz) && (D:sz != F:sz) &&
-(E:sz != F:sz) &&
+(A2 == A*A) &&
+(B2 == B*B) &&
+(C2 == C*C) &&
+(D2 == D*D) &&
+(E2 == E*E) &&
+(F2 == F*F) &&
 
-(A:sz != 0) && 
-(B:sz != 0) &&
-(C:sz != 0) &&
-(D:sz != 0) &&
-(E:sz != 0) &&
-(F:sz != 0)
+(A < B) &&
+(C < D) &&
+(E < F) &&
+(A < C) &&
+(C < E) &&
+
+(A > 0) && 
+(B > 0) &&
+(C > 0) &&
+(D > 0) &&
+(E > 0) &&
+(F > 0)
+
+//
+// solution sz=11
+// 1885:  11^2+42^2 = 21^2+38^2 = 27^2+34^2
+

@@ -64,7 +64,7 @@ options() ->
 		      {"literal",literal},
 		      {"erlang",erlang},
 		      {"model",model}]},
-	    default => false,
+	    default => model,
 	    description => "Print models when found."
 	  },
     V3 = #{ long => "partial",
@@ -229,9 +229,9 @@ options() ->
 	     default => ?LOG_LEVEL_NONE,
 	     description => "Output log level."
 	   },
-    V17 = #{ long => "output",
+    V17 = #{ long => "out",
 	     short => "o",
-	     key => output,
+	     key => out,
 	     spec => string, 
 	     default => "",
 	     description => "Output file name."
@@ -278,13 +278,17 @@ options() ->
 	     default => [],  %% ordset
 	     description => "Internal list of all literals"},
     V26_1 = #{ key => assert,
-	     spec => {list,term},
-	     default => [],  %% list
-	     description => "Internal list of all assertions"},
+	       spec => {list,term},
+	       default => [],  %% list
+	       description => "Internal list of all assertions"},
     V26_2 = #{ key => input,
-	     spec => {list,term},
-	     default => [],  %% list
-	     description => "Internal list of input modules"},
+	       spec => {list,term},
+	       default => [],  %% list
+	       description => "Internal list of input modules"},
+    V26_3 = #{ key => output,
+	       spec => {list,term},
+	       default => [],  %% list
+	       description => "Internal list of output modules"},
 
     V27 = #{ long => "iorder",
 	     key => iorder,
@@ -420,7 +424,7 @@ options() ->
        borrow => V14, "borrow" => V14,
        divz => V15, "divz" => V15,
        log => V16, "log" => V16,
-       output => V17, "output" => V17, "o" => V17,
+       out => V17, "out" => V17, "o" => V17,
        formula => V18, "formula" => V18, "f" => V18,
        version => V19, "version" => V19, "V" => V19,
        help => V20, "help" => V20, "h" => V20,
@@ -430,6 +434,7 @@ options() ->
        literals => V26,
        assert => V26_1,
        input => V26_2,
+       output => V26_3,
        saturations => V25,
        %% Backjump options
        iorder => V27, "iorder" => V27, "i" => V27,

@@ -11,8 +11,7 @@
 
 -export([build/1, build/2]).
 -export([new/0, new/1]).
--export([fresh_var/1]).
--export([add_variable/1]).
+-export([add_variable/1, add_variable/2]).
 -export([variable/2, alias/3]).
 -export([value/2, class/2]).
 -export([get_info/1, get_info/2]).
@@ -133,6 +132,7 @@ new(OptMap) when is_map(OptMap) ->
        literals = maps:get(literals,OptMap),
        assert   = maps:get(assert,OptMap),
        input    = maps:get(input,OptMap),
+       output   = maps:get(output,OptMap),
        counters = Counters,
        d1       = Delta1,
        d2       = Delta2,
@@ -140,12 +140,11 @@ new(OptMap) when is_map(OptMap) ->
        vp    = Vp
       }.
 
-fresh_var(Bs) ->
-    Var = varc:add_variable(Bs#bs.vp),
-    {Var,Bs}.
-
 add_variable(Bs) ->
-    varc:add_variable(Bs#bs.vp).
+    varc:add_variable(Bs#bs.vp, false).
+
+add_variable(Bs, IsAtom) ->
+    varc:add_variable(Bs#bs.vp, IsAtom).
 
 %% build an OR gate with Y as output and Xs as input
 %% Y = X1 or X2 .. or Xn
@@ -278,13 +277,13 @@ build_gate_tree(Bs,Op,X,Ls) ->
 	{[U],[V]} ->
 	    clause(Bs,'or',[X,U,V]);
 	{[U],[V1,V2]} ->
-	    X1 = varc:add_variable(Bs#bs.vp),
+	    X1 = add_variable(Bs),
 	    Bs1=clause(Bs,'or',[X1,V1,V2]),
 	    clause(Bs1,'or',[X,U,X1]);
 	{Us,Vs} ->
-	    X1 = varc:add_variable(Bs#bs.vp),
+	    X1 = add_variable(Bs),
 	    Bs2=build_gate_tree(Bs,Op,X1,Us),
-	    X2 = varc:add_variable(Bs#bs.vp),
+	    X2 = add_variable(Bs),
 	    Bs3=build_gate_tree(Bs2,Op,X2,Vs),
 	    clause(Bs3,'or',[X,X1,X2])
     end.
@@ -303,18 +302,18 @@ build_clause_tree(Bs,Op,X,Ls,L,N) ->
 build_branch_list(_Bs,_Op,[V],1,_N) -> [V];
 build_branch_list(_Bs,_Op,[],0,_N) -> [];
 build_branch_list(Bs,Op,Ls,L,N) when L >= N ->
-    V = varc:add_variable(Bs#bs.vp), %% child var
+    V = add_variable(Bs), %% child var
     {Ls1,Ls2} = lists:split(N-1,Ls),
     _Cix = add_clause(Bs,Op,[V|Ls1]),
     [V|build_branch_list(Bs,Op,Ls2,L-(N-1),N)];
 build_branch_list(Bs,Op,Ls,_L,_N) ->
-    V = varc:add_variable(Bs#bs.vp),
+    V = add_variable(Bs),
     _Cix = add_clause(Bs,Op,[V|Ls]),
     [V].
 
 make_variable(V, Bs) ->
-    {N,Bs1} = fresh_var(Bs),
-    {N, alias(V,N,Bs1)}.
+    N = add_variable(Bs, true),
+    {N, alias(V,N,Bs)}.
 
 order_sort_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
@@ -1512,8 +1511,8 @@ all([A], Bs) ->
     {A, Bs};
 all(As, Bs) ->
     As1 = [A || {bool,A} <- As],
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X}, and_gate(Bs1,X,As1)}.
+    X = add_variable(Bs),
+    {{bool,X}, and_gate(Bs,X,As1)}.
 
 any([], Bs) ->
     {{bool,?FALSE}, Bs};
@@ -1521,8 +1520,8 @@ any([A], Bs) ->
     {A, Bs};
 any(As, Bs) ->
     As1 = [A || {bool,A} <- As],
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X}, or_gate(Bs1,X,As1)}.
+    X = add_variable(Bs),
+    {{bool,X}, or_gate(Bs,X,As1)}.
 
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
@@ -1777,8 +1776,8 @@ operation('and',{bool,?FALSE},{bool,_Z}, Bs) ->
 operation('and',{bool,_Y},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('and',{bool,Y},{bool,Z}, Bs) ->
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X},and_gate(Bs1,X,[Y,Z])};
+    X = add_variable(Bs),
+    {{bool,X},and_gate(Bs,X,[Y,Z])};
 
 operation('and',A,B,Bs) ->
     operation_('&',A,B,Bs);
@@ -1807,8 +1806,8 @@ operation('or',{bool,?TRUE},{bool,_Z}, Bs) ->
 operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X},or_gate(Bs1,X,[Y,Z])};
+    X = add_variable(Bs),
+    {{bool,X},or_gate(Bs,X,[Y,Z])};
 
 operation('or',A,B,Bs) ->
     operation_('|',A,B,Bs);
@@ -1836,8 +1835,8 @@ operation('imp',{bool,?TRUE},{bool,?TRUE}, Bs) ->
 operation('imp',{bool,?TRUE},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X},or_gate(Bs1,X,[-Y,Z])};
+    X = add_variable(Bs),
+    {{bool,X},or_gate(Bs,X,[-Y,Z])};
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation_('~',A,Bs),
     operation_('|',An,B,Bs1);
@@ -1851,8 +1850,8 @@ operation('equ',{bool,?TRUE},{bool,?TRUE},Bs) ->
 operation('equ',{bool,?FALSE},{bool,?FALSE},Bs) ->
     {{bool,?TRUE},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X},xor_gate(Bs1,X,[-Y,Z])};
+    X = add_variable(Bs),
+    {{bool,X},xor_gate(Bs,X,[-Y,Z])};
 
 operation('equ',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -1870,8 +1869,8 @@ operation('equ',A,B,Bs) ->
     end;
 
 operation('xor',{bool,Y},{bool,Z},Bs) ->
-    {X,Bs1} = fresh_var(Bs),
-    {{bool,X},xor_gate(Bs1,X,[Y,Z])};
+    X = add_variable(Bs),
+    {{bool,X},xor_gate(Bs,X,[Y,Z])};
 operation('xor',A,B,Bs) ->
     operation_('^',A,B,Bs);
 operation('^',A,B,Bs) ->

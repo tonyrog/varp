@@ -417,8 +417,7 @@ display_stat(Bs) ->
     ok.
 
 model(Bs) ->
-    M = varp_formula:model(Bs),
-    varp_formula:print(model,1,M).
+    varp:output_model(Bs, 1).
 
 add_conflict_clause(Bs,[]) ->
     Bs;
@@ -433,7 +432,7 @@ add_conflict_clause(Bs,Clause) ->
     if L >= Max ->
 	    L2 = L div 2,
 	    {CL1,CL2} = lists:split(L2, Clause),
-	    {Vi,_Bs1} = varp_formula:fresh_var(Bs),
+	    Vi = varp_formula:add_variable(Bs),
 	    Bs1 = varp_formula:set_var({p,'#',[Vi]}, Vi, Bs),
 	    Bs2 = add_conflict_clause(Bs1,[Vi|CL1]),
 	    add_conflict_clause(Bs2,[-Vi|CL2]);

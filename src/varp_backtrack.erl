@@ -24,18 +24,15 @@ backtrack(Bs) ->
 	collect ->
 	    bt(Bs, fun({Count0,Acc},Bs1) ->
 			   Count = Count0+1,
-			   Mdl = varp_formula:model(Bs1),
-			   varp_formula:print(Print,Count,Mdl),
+			   Model = varp:output_model(Bs1,Count),
 			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,{Count,[Mdl|Acc]}}
+			   {Continue,{Count,[Model|Acc]}}
 		   end, {0,[]});
 	count ->
 	    bt(Bs, fun(Count0,Bs1) -> 
 			   Count = Count0+1,
 			   if Print =:= false -> ok;
-			      true ->
-				   Mdl = varp_formula:model(Bs1),
-				   varp_formula:print(Print,Count,Mdl)
+			      true -> varp:output_model(Bs1,Count)
 			   end,
 			   if Count rem 1000 =:= 0 ->
 				   io:format("~w\n", [Count]);
@@ -46,7 +43,6 @@ backtrack(Bs) ->
 			   {Continue,Count} 
 		   end, 0)
     end.
-
 
 %%
 %% Explicit recursion version, allow times backtracking

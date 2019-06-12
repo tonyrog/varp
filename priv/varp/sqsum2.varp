@@ -1,24 +1,33 @@
 //
 //  Square sum a^2+b^2 = c^2+d^2
-// run with --carry=false
 //
+declare A:((sz+1)/2);
+declare B:((sz+1)/2);
+declare C:((sz+1)/2);
+declare D:((sz+1)/2);
+declare A2:sz;
+declare B2:sz;
+declare C2:sz;
+declare D2:sz;
 
-(Sum:(sz+1) == A:sz + B:sz) &&
-(Sum:(sz+1) == C:sz + D:sz) &&
+declare Sum:(sz+1);
 
-(A:sz == A0:((sz+1)/2)*A0:((sz+1)/2)) &&
-(B:sz == B0:((sz+1)/2)*B0:((sz+1)/2)) &&
-(C:sz == C0:((sz+1)/2)*C0:((sz+1)/2)) &&
-(D:sz == D0:((sz+1)/2)*D0:((sz+1)/2)) &&
+(Sum == A2 + B2) &&
+(Sum == C2 + D2) &&
 
-(A:sz < B:sz) && (A:sz < C:sz) && (A:sz != D:sz) && 
-(B:sz != C:sz) && (B:sz != D:sz) && 
-(C:sz < D:sz) &&
+(A2 == A*A) &&
+(B2 == B*B) &&
+(C2 == C*C) &&
+(D2 == D*D) &&
 
-(A:sz != 0) && 
-(B:sz != 0) &&
-(C:sz != 0) &&
-(D:sz != 0)
+(A < B) &&
+(C < D) &&
+(A < C) && 
+
+(A > 0) && 
+(B > 0) &&
+(C > 0) &&
+(D > 0)
 
 // solutions for sz=7 (3)
 // 125 = 2^2 + 11^2 = 5^2 + 10^2

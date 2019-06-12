@@ -7,6 +7,7 @@
 // incase of a multi puzzle file 'recno' is set to
 // record (line) number, counting from 1.
 input sudoku_io;
+output sudoku_io;
 
 ( [A i=1..9,j=1..9] [E! k=1..9]  S(i,j,k) ) &&
 ( [A i=1..9,k=1..9] [E! j=1..9]  S(i,j,k) ) &&

@@ -9,20 +9,23 @@ assert sqr(isqrt(n)) != n;
 assert n>=15;
 
 declare F1:(isize(n)-1);
-declare F2:(isize(n)-1);
+declare F2:((isize(n)+1)/2);
 declare X:(isize(n)-1);
 declare Y:(isize(n)-1);
-declare A:(2*(isize(n)-2));
-declare B:(2*(isize(n)-2));
+// declare A:(2*(isize(n)-1));
+// declare B:(2*(isize(n)-1));
 
-order Y,X,A,B, -occur;
+// order Y,X,A,B, -occur;
+order F2, F1, -occur;
 
-(
-(n + B == A) &&
-(X*X == A) && (X > 0) &&
-(Y*Y == B) && (Y > 0) &&
-(X > Y) && 
+//
+// (n + B == A) &&
+// (X*X == A) && (X > 0) &&
+// (Y*Y == B) && (Y > 0) &&
+// (X > Y) && 
 (F1 == (X+Y)) &&
 (F2 == (X-Y)) &&
-(F1 > 1) && (F2 > 1)
-)
+(X == (F1+F2)/2) &&
+(Y == (F1-F2)/2) &&
+((F1*F2) == n) && (F1 > F2) && (F2 > 1)
+

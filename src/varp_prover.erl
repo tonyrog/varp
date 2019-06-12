@@ -322,11 +322,9 @@ one_model(Bs) ->
     NV = varp_formula:number_of_variables(Bs),
     NB = varp_formula:number_of_bound(Bs),
     if NV =:= NB ->
-	    Print = varp_formula:getopt(Bs,print),
-	    Mdl = varp_formula:model(Bs),
-	    varp_formula:print(Print,1,Mdl),
+	    Model = varp:output_model(Bs,1),
 	    case varp_formula:getopt(Bs,method) of
-		collect -> {1,[Mdl]};
+		collect -> {1,[Model]};
 		count -> 1
 	    end;
        true ->
@@ -403,9 +401,15 @@ dump(Bs) ->
 dump_(N, N, _Bs) ->
     ok;
 dump_(I, N, Bs) ->
-    {'or',[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
-    io:put_chars([format_snf_clause(Bs,CL),".\n"]),
-    dump_(I+1,N,Bs).
+    Flags = varc:get_clause_flags(Bs#bs.vp, I),
+    case lists:member(dead, Flags) of
+	true ->
+	    dump_(I+1,N,Bs);
+	false ->
+	    {'or',[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
+	    io:put_chars([format_snf_clause(Bs,CL),".\n"]),
+	    dump_(I+1,N,Bs)
+    end.
 
 format_snf_clause(Bs,CL) ->
     concat([varp_formula:format_lit(Bs,L,false)||L<-CL]," ").
