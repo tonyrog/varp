@@ -15,20 +15,19 @@
 -export([info/2]).
 -export([config/3]).
 -export([add_variable/1]).
+-export([add_variable/2]).
 -export([add_symbol/3]).
 -export([get_symbol/2]).
 -export([find_symbol/2]).
 -export([get/2]).
 -export([put/3, put/4]).
 -export([subst/3]).
--export([class/2]).
 -export([key/3]).
 -export([implication_clause/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([is_variable/2]).
 -export([is_bound/2]).
--export([class_next/2]).
 -export([is_equal/3]).
 -export([set_level/2]).
 -export([undo_level/2]).
@@ -76,7 +75,7 @@
 -export([get_clause_eval_counter/2]).
 -export([get_eval_counter/1]).
 
--define(debug, true).
+%% -define(debug, true).
 
 -ifdef(debug).
 -define(debug(F,A), io:format((F),(A))).
@@ -131,7 +130,10 @@ info(_Vp, Item) when is_atom(Item) ->
 config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
 
-add_variable(_Vp) ->
+add_variable(Vp) ->
+    add_variable(Vp, true).
+
+add_variable(_Vp, IsAtom) when is_boolean(IsAtom) ->
     ?nif_stub().
 
 -spec add_symbol(Vp::varc(), Lit::literal(), Name::term()) -> ok.
@@ -178,10 +180,6 @@ subst(_Vp, X, Y) when is_integer(X),
 		      is_integer(Y) ->
     ?nif_stub().
 
--spec class(Vp::varc(), Lit::literal()) -> integer().
-class(_Vp, Lit) when is_integer(Lit) ->
-    ?nif_stub().
-
 -spec key(Vp::varc(), Lit::literal(), K::integer()) -> integer().
 key(_Vp, Lit, _K) when is_integer(Lit) ->
     ?nif_stub().
@@ -205,9 +203,6 @@ is_variable(_Vp, Lit) when is_integer(Lit) ->
 
 -spec is_bound(Vp::varc(), Lit::literal()) -> boolean().
 is_bound(_Vp, Lit) when is_integer(Lit) ->
-    ?nif_stub().
-
-class_next(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec is_equal(Vp::varc(), LitA::literal(), LitB::literal()) -> boolean().
@@ -403,7 +398,6 @@ info_keys() ->
      eval_counter,
      undo_stack_size,
      value_stack_size,
-     class_stack_size,
      bcp,
      grow,
      size,
