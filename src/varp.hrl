@@ -10,6 +10,8 @@
 
 -define(TRUE,   1).
 -define(FALSE, -1).
+-define(BOUND,  2).
+-define(NBOUND, -2).
 
 -define(TOP_LEVEL, 0).
 

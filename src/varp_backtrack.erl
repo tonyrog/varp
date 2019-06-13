@@ -66,6 +66,8 @@ bt(Bs,Func,Acc) ->
 init(Bs) ->
     I0 = varp_formula:first_init(Bs),
     Next = varp_formula:next_unbound(Bs,I0),
+    %% Num = varp_formula:number_of_unbound(Bs),
+    %% io:format("I0=~w, next=~w, num=~w\n", [I0,Next,Num]),
     case Next  of
 	false  -> {model,[]};
 	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?START_MARK}]}
@@ -81,7 +83,10 @@ next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
 	    varp_formula:undo_level(Bs,Mark),
 	    next([{I,Xi,Vs,Mark}|Stack],Bs);
 	true ->
-	    case varp_formula:next_unbound(Bs,I) of
+	    Next = varp_formula:next_unbound(Bs,I),
+	    %% Num = varp_formula:number_of_unbound(Bs),
+	    %% io:format("I=~w, next=~w, num=~w\n", [I,Next,Num]),
+	    case Next of
 		false ->
 		    {model,[{I,Xi,Vs,Mark}|Stack]};
 		{J,Xj} ->

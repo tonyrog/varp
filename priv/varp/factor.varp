@@ -6,7 +6,7 @@
 //
 assert (n & 1) == 1;
 assert sqr(isqrt(n)) != n;
-assert n>=15;
+assert n>15;
 
 declare F1:(isize(n)-1);
 declare F2:(isize(n)-1);
@@ -17,20 +17,20 @@ declare B:(2*(isize(n)-1));
 
 order Y,X,A,B,-occur;
 
-[A k=isize(n)-3]
-(
-(n + B == A) &&
-[A i=k..0] (X[i] == (({false[0:(i-1)],1,X[(i+1):k]} *
-                      {false[0:(i-1)],1,X[(i+1):k]} <= A))) &&
-(X*X == A) && (X > 0) &&
+(n + B == A)
+&& (X*X == A) && (X > 0)
+&& (Y*Y == B) && (Y > 0)
+&& (X > Y)
+&& (F1 == (X+Y))
+&& (F2 == (X-Y))
+&& (F1 > 1)
+&& (F2 > 1)
+// && (F1*F2 == n)
 
-[A i=k..0] (Y[i] == (({false[0:(i-1)],1,Y[(i+1):k]} *
-                      {false[0:(i-1)],1,Y[(i+1):k]} <= B))) &&
-(Y*Y == B) && (Y > 0) &&
-
-(X > Y) && 
-
-(F1 == (X+Y)) &&
-(F2 == (X-Y)) &&
-(F1 > 1) && (F2 > 1)
+// FIXME the below does not work for 3*5!!!
+&& [A k=isize(n)-3] (
+   [A i=k..0] (X[i] == (({false[0:(i-1)],1,X[(i+1):k]} *
+                         {false[0:(i-1)],1,X[(i+1):k]} <= A))) &&
+   [A i=k..0] (Y[i] == (({false[0:(i-1)],1,Y[(i+1):k]} *
+                      {false[0:(i-1)],1,Y[(i+1):k]} <= B)))
 )
