@@ -107,6 +107,24 @@
 	 output=[]           %% list of output modules [I1,...In]
 	}).
 
+-define(BOOL,
+	{"true",true},
+	{"false",false},
+	{"1",true},
+	{"0",false}).
+
+-define(ORDER,
+	{"undefined", undefined},
+	{"identity",  identity},
+	{"random",    random},
+	{"depth",     '+depth'},
+	{"+depth",    '+depth'},
+	{"-depth",    '-depth'},
+	{"occur",     '+occur'},
+	{"+occur",    '+occur'},
+	{"-occur",    '-occur'}).
+
+
 -ifdef(OTP_RELEASE). %% this implies 21 or higher
 -define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).
 -define(GET_STACK(Stacktrace), Stacktrace).

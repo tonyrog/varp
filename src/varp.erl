@@ -24,16 +24,7 @@
 
 main(Args) ->
     application:start(varp),
-    XArgs = case os:getenv("VARP_CORE") of
-		false ->
-		    ["-bcp", "1", "-clause", "1"];
-		"varw" ->
-		    ["-bcp", "1", "-clause", "1"];
-		"varc" ->
-		   ["-clause", "0"];
-	       _ ->
-		    ["-clause", "0"]
-	    end,
+    XArgs = [],
     {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, satisfy),
     Opts = [{meta,Bound}|Opts0],
     {ReadIn,{Sections0,Formula0}} =

@@ -8,6 +8,7 @@
 -module(varp_saturate).
 
 -export([run/2]).
+-export([options/0]).
 -export([saturate/5]).
 
 -compile(export_all).
@@ -25,6 +26,40 @@
 -define(dbg(F,A), ok).
 -define(dcall(Fun), ok).
 -endif.
+
+options() ->
+    [#{ long  => "timeout",
+	short => "t",
+	key   => timeout,
+	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
+	default => infinity,
+	description => "Max time to run saturation in milliseconds"
+      },
+     
+     #{ long => "level",
+	short => "k",
+	key => degree,
+	spec => unsigned, 
+	default => 1,
+	description => "Saturation level."
+      },
+    
+     #{ long => "pair",
+	key => pair,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Add extra variable in saturation."
+      },
+     
+     #{ long => "threshold",
+	key => threshold,
+	spec => unsigned,
+	default => 0,
+	description => "Threshold for bound variables in saturation round"
+      }
+
+     ].
+
 
 run(Bs, Params) ->
     varp_formula:config(Bs, max_conflicting, 1),
@@ -246,8 +281,7 @@ loop_1_next(Bs,I,_X,N,Level,TRef,Laps,Threshold) ->
 install_bindings(_Bs,_Level,_Var,[]) ->
     ok;
 install_bindings(Bs,Level,_Var,Bnds) ->
-    Bcp = varp_option:getopt(bcp,Bs#bs.option),
-    install_bindings_(Bs,Level,Bcp,Bnds).
+    install_bindings_(Bs,Level,true,Bnds).
 
 install_bindings_(Bs,Level,Bcp,[{X,X}|Xs]) ->
     install_bindings_(Bs,Level,Bcp,Xs);

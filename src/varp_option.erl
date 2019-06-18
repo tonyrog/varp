@@ -21,6 +21,8 @@
 %% -define(dbg(F,A), io:format((F),(A))).
 -define(dbg(F,A), ok).
 
+-include("varp.hrl").
+
 %% debug/test
 -export([match_value/3]).
 %%
@@ -31,23 +33,6 @@
 %%  -l 123
 %%  -l123
 %%
-
--define(BOOL,
-	{"true",true},
-	{"false",false},
-	{"1",true},
-	{"0",false}).
-
--define(ORDER,
-	{"undefined", undefined},
-	{"identity",  identity},
-	{"random",    random},
-	{"depth",     '+depth'},
-	{"+depth",    '+depth'},
-	{"-depth",    '-depth'},
-	{"occur",     '+occur'},
-	{"+occur",    '+occur'},
-	{"-occur",    '-occur'}).
 
 options() ->
     V1 = #{ long => "value",
@@ -113,19 +98,7 @@ options() ->
 	     default => false,
 	     description => "Display declared variable order."
 	   },
-    V7 = #{ long => "bcp",
-	    key => bcp,
-	    spec => {enum,[?BOOL]},
-	    default => false,
-	    description => "Do not use equivalence classes."
-	  },
-    V71 = #{ long => "clause",
-	     short => "c",
-	     key => clause,
-	     spec => {enum,[?BOOL]},
-	     default => false,
-	     description => "Use clause form."
-	   },
+
     V8 = #{ long => "saturate",
 	    short => "s",
 	    key => saturate,
@@ -182,9 +155,9 @@ options() ->
 	     default => 0,
 	     description => "Threshold for bound variables in saturation round"
 	   },
-    V12t = #{ long  => "time",
+    V12t = #{ long  => "timeout",
 	      short => "t",
-	      key   => time,
+	      key   => timeout,
 	      spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	      default => infinity,
 	      description => "Max time to run saturation in milliseconds"
@@ -408,8 +381,6 @@ options() ->
        "display_order" => V63,
        "display-order" => V63,
        "d" => V63,
-       bcp => V7, "bcp" => V7,
-       clause => V71, "clause" => V71, "c" => V71,
        saturate => V8, "saturate" => V8, "s" => V8,
        backtrack => V9, "backtrack" => V9, "b" => V9,
        backjump => V91, "backjump" => V91, "j" => V91,
@@ -418,7 +389,7 @@ options() ->
        pair => V10, "pair" => V10,
        assoc => V11, "assoc" => V11,
        threshold => V12, "threshold" => V12,
-       time => V12t, "time" => V12t, "t" => V12t,
+       timeout => V12t, "timeout" => V12t, "t" => V12t,
        laps => V12l, "laps" => V12l, "l" => V12l,
        carry => V13, "carry" => V13,
        borrow => V14, "borrow" => V14,
@@ -849,7 +820,7 @@ get_saturate_opt(OptMap) ->
       saturate  => getopt(saturate, OptMap),
       pair      => getopt(pair, OptMap),
       order     => getopt(order, OptMap),
-      time      => getopt(time, OptMap),
+      timeout   => getopt(timeout, OptMap),
       threshold => getopt(threshold, OptMap),
       laps      => getopt(laps, OptMap)
      }.

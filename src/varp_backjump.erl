@@ -8,6 +8,7 @@
 -module(varp_backjump).
 
 -export([run/1]).
+-export([options/0]).
 
 %% -define(DEBUG, true).
 
@@ -28,21 +29,99 @@
 -import(varp_formula, [format_clause/2, format_clause/3]).
 -import(varp_formula, [format_literals/2]).
 
-max_learned(Bs) ->
-    Permanent = varp_formula:get_info(Bs, permanent),
-    MaxLearnedClauses = varp_formula:getopt(Bs, max_learned),
-    MaxLearnedFactor = varp_formula:getopt(Bs, max_learned_factor),
-    io:format("Permanent=~w, MaxLearnedClause=~w, MaxLearnedFactor=~w\n",
-	      [Permanent, MaxLearnedClauses, MaxLearnedFactor]),
-    if MaxLearnedFactor > 0, MaxLearnedClauses > 0 ->
-	    min(MaxLearnedClauses,trunc(MaxLearnedFactor*Permanent));
-       MaxLearnedFactor > 0 ->
-	    trunc(MaxLearnedFactor*Permanent);
-       MaxLearnedClauses > 0 ->
-	    MaxLearnedClauses;
-       true ->
-	    0
-    end.
+options() ->
+    [#{ long  => "timeout",
+	short => "t",
+	key   => timeout,
+	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
+	default => infinity,
+	description => "Max time to run saturation in milliseconds"
+      },
+     
+     #{ long => "minimize",
+	short => "z",
+	key => minimize,
+	spec => {enum,[?BOOL]},
+	default => true,
+	description => "Use conflict clause minimization."
+      },
+
+     #{ long => "iorder",
+	key => iorder,
+	spec => unsigned,
+	default => 0,
+	description => "max conflict clause length"},
+
+     #{ long => "stumble",
+	key => stumble,
+	spec => unsigned,
+	default => 0,
+	description => "extra backjump level"},
+
+     #{ long => "olle",
+	key => olle,
+	spec => float,
+	default => 0,
+	description => "extra backjump factor"},
+     
+     #{ long => "stumble-olle",
+	key => stumble_olle,
+	spec =>  {enum,[?BOOL]},
+	default => false,
+	description => "both backjump and factor"},
+
+     #{ long => "max-conflicts",
+	key => max_conflicts,
+	spec =>  unsigned,
+	default => 0,
+	description => "max number of conflicts to generate per conflict"},
+
+     #{ long => "num-conflicts",
+	key => num_conflicts,
+	spec =>  unsigned,
+	default => 1,
+	description => "number of conflicts to analyse"},
+
+     #{ long => "max-learned",
+	key => max_learned,
+	spec =>  unsigned,
+	default => 0,
+	description => "Max number of clauses to generate in learning"},
+
+     #{ long => "max-learned-factor",
+	key => max_learned_factor,
+	spec =>  float,
+	default => 0,
+	description => "Factor to calculate number of learned clauses"},
+
+     #{ long => "keep-factor",
+	key => keep_factor,
+	spec =>  float01,
+	default => 0.5,
+	description => "Number of clauses to keep"},
+     
+     #{ long => "min-keep-clauses",
+	key => min_keep_clauses,
+	spec =>  unsigned,
+	default => 0,
+	description => "Min number of clauses to keep"},
+
+     #{ long => "restart-counter",
+	key => restart_counter,
+	spec =>  unsigned,
+	default => 0,
+	description => "Number of counts/eval until restart"},
+
+     #{ long => "restart-interval",
+	key => restart_interval,
+	spec =>  unsigned,
+	default => 0,
+	description => "Restart interval in milliseconds"}
+
+    ].
+     
+
+
 
 run(false) ->
     false;
@@ -374,6 +453,22 @@ do_stat(Bs, D1, D2) ->
 	    counters:add(Bs#bs.d2, D2+1, 1)
     end.
 
+
+max_learned(Bs) ->
+    Permanent = varp_formula:get_info(Bs, permanent),
+    MaxLearnedClauses = varp_formula:getopt(Bs, max_learned),
+    MaxLearnedFactor = varp_formula:getopt(Bs, max_learned_factor),
+    io:format("Permanent=~w, MaxLearnedClause=~w, MaxLearnedFactor=~w\n",
+	      [Permanent, MaxLearnedClauses, MaxLearnedFactor]),
+    if MaxLearnedFactor > 0, MaxLearnedClauses > 0 ->
+	    min(MaxLearnedClauses,trunc(MaxLearnedFactor*Permanent));
+       MaxLearnedFactor > 0 ->
+	    trunc(MaxLearnedFactor*Permanent);
+       MaxLearnedClauses > 0 ->
+	    MaxLearnedClauses;
+       true ->
+	    0
+    end.
 
 display_stat(Bs) ->
     io:format("num conflict clauses added: ~w\n", 
