@@ -14,6 +14,16 @@
 -define(BOUND,  2).
 -define(NBOUND, -2).
 
+-define(dbg0(F,As), ok).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
+-define(dbg(F,A), ok).
+-define(dcall(Fun), ok).
+-endif.
+
+
 -define(TOP_LEVEL, 0).
 
 -define(NUM_COUNTERS, 9).

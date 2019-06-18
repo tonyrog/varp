@@ -17,9 +17,7 @@
 
 -compile(export_all).
 
--define(dbg(F,A), ok).
-%% -define(dbg(F,A), io:format((F),(A))).
-
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
 apply_opts(Bs,F) ->
@@ -207,7 +205,7 @@ passes([],_X,Bs) ->
     end.
 
 pass_({dump,_I},Ps,X,Bs) ->
-    dump(Bs),
+    varp_dump:run(Bs, #{}),
     passes(Ps,X,Bs);
 pass_(assert,Ps,X,Bs) ->
     assert(Bs#bs.assert, Bs),
@@ -275,7 +273,7 @@ pass_enabled(assert,_Bs) ->
 pass_enabled(eval,_Bs) -> 
     true;
 pass_enabled({dump,I}, Bs) ->
-    case varp_formula:getopt(Bs,dump) of    
+    case varp_formula:getopt(Bs,dump) of
 	I -> true;
 	_ -> false
     end;
@@ -308,7 +306,7 @@ pass_enabled(backjump,Bs) ->
 pass(apply,X,Bs) ->
     apply_opts(Bs,X);
 pass(eval,_X,Bs) ->
-    eval_(varp_formula:enqueue_all(Bs));
+    eval_(Bs);
 pass({saturate,Params},_X,Bs) ->
     varp_saturate:run(Bs,Params);
 pass(saturate,_X,Bs) ->
@@ -379,7 +377,7 @@ eval_list(Bs,[{F,V}|Ps]) ->
 
 %% eval all triples (push all triples on queue)
 eval(Bs) ->
-    eval_(varp_formula:enqueue_all(Bs)).
+    eval_(Bs).
 	    
 eval_list_([],Bs) ->
     eval_(Bs);
@@ -403,37 +401,5 @@ backtrack(Bs,F) ->
 	Bs1 -> varp_backtrack:backtrack(eval(Bs1))
     end.
 
-%% dump clauses
-dump(Bs) ->
-    N = varp_formula:get_info(Bs, number_of_clauses),
-    dump_(0, N, Bs).
-
-dump_(N, N, _Bs) ->
-    ok;
-dump_(I, N, Bs) ->
-    %% add option raw!
-    Flags = varc:get_clause_flags(Bs#bs.vp, I),
-    case lists:member(dead, Flags) of
-	true ->
-	    dump_(I+1,N,Bs);
-	false ->
-	    case varc:get_clause(Bs#bs.vp, I) of
-		[] ->
-		    dump_(I+1,N,Bs);
-		CL ->
-		    io:put_chars([format_snf_clause(Bs,CL),".\n"]),
-		    dump_(I+1,N,Bs)
-	    end
-    end.
-
-format_snf_clause(Bs,CL) ->
-    concat([varp_formula:format_lit(Bs,L,false)||L<-CL]," ").
-
-
-
 format_model(Model) ->
-    concat([ varp_format:format_binding(Bound) || Bound <- Model ], ",").
-
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].
+    lists:join(",",[ varp_format:format_binding(Bound) || Bound <- Model ]).

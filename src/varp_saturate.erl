@@ -14,18 +14,8 @@
 -compile(export_all).
 -import(varp_formula, [format_lit/2, format_var/2]).
 
--include("varp.hrl").
-
 %% -define(DEBUG, true).
-
--define(dbg0(F,As), ok).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
+-include("varp.hrl").
 
 options() ->
     [#{ long  => "timeout",
@@ -33,9 +23,8 @@ options() ->
 	key   => timeout,
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	default => infinity,
-	description => "Max time to run saturation in milliseconds"
+	description => "Max time to run saturation in milliseconds."
       },
-     
      #{ long => "level",
 	short => "k",
 	key => degree,
@@ -43,21 +32,18 @@ options() ->
 	default => 1,
 	description => "Saturation level."
       },
-    
      #{ long => "pair",
 	key => pair,
 	spec => {enum,[?BOOL]},
 	default => false,
 	description => "Add extra variable in saturation."
       },
-     
      #{ long => "threshold",
 	key => threshold,
 	spec => unsigned,
 	default => 0,
-	description => "Threshold for bound variables in saturation round"
+	description => "Threshold for bound variables in saturation round."
       }
-
      ].
 
 
@@ -66,19 +52,19 @@ run(Bs, Params) ->
     K = maps:get(saturate, Params, 1),
     _Pair = maps:get(pair, Params, false),
     Order = maps:get(order, Params, undefined),
-    MaxTime = maps:get(time, Params, infinity),
+    Timeout = maps:get(timeout, Params, infinity),
     Threshold = maps:get(threshold, Params, 0),
     Laps = maps:get(laps, Params, infinity),
     MaxLaps = max_laps(K, Laps),
     if Order =:= undefined -> ok;
        true -> varp_formula:order_sort(Bs, Order)
     end,
-    saturate(Bs, K, MaxTime, MaxLaps, Threshold).
+    saturate(Bs, K, Timeout, MaxLaps, Threshold).
 
-saturate(Bs, K, MaxTime, MaxLaps, Threshold) ->
-    TRef = if is_number(MaxTime), MaxTime > 0 ->
-		   erlang:start_timer(trunc(1000*MaxTime), undefined, ok);
-	      MaxTime =:= infinity ->
+saturate(Bs, K, Timeout, MaxLaps, Threshold) ->
+    TRef = if is_number(Timeout), Timeout > 0 ->
+		   erlang:start_timer(trunc(1000*Timeout), undefined, ok);
+	      Timeout =:= infinity ->
 		   undefined
 	   end,
     case saturate_(Bs,K,TRef,MaxLaps,Threshold) of

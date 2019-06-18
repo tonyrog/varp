@@ -22,8 +22,6 @@
 #define ASSERTIONS
 // #define DEBUG
 // #define PACKED_VALUE 1      // 1 or 4 values are packed in each byte
-#define LIFO_LITERAL           // push literals on stack
-// #define FIFO_LITERAL        // put literals on queue
 // #define USE_CLAUSE_SHUFFLE  // shuffle literals after cleanup
 // #define USE_CLAUSE_FIND     // avoid install clauses multiple times
 
@@ -81,10 +79,6 @@ static ERL_NIF_TERM varp_get_queue_first(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_get_queue_next(ErlNifEnv* env, int argc,
 					const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varp_clear_queue(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[]);
-static ERL_NIF_TERM varp_enqueue_all(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
@@ -339,8 +333,8 @@ typedef struct _varp_t {
     size_t       stack_size;  // number of element in undo stack
     size_t       num_bound;   // number of bound variables
     int level;                // current undo level (mark)
-    
-    lqueue_t     q;            // literal queue for propagation
+    int fifo;                 // literal queue is queue/stack 
+    lqueue_t     q;           // literal queue for propagation
 
     uint64_t  clause_eval_counter[5]; // performance counter 2-clause,3-clause,n-clause
     uint64_t  eval_counter;        // performance counter
@@ -401,8 +395,6 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "get_clauses",         3,  varp_get_clauses ),
     NIF_FUNC( "get_queue_first",     1,  varp_get_queue_first ),
     NIF_FUNC( "get_queue_next",      2,  varp_get_queue_next ),    
-    NIF_FUNC( "clear_queue",         1,  varp_clear_queue ),
-    NIF_FUNC( "enqueue_all",         1,  varp_enqueue_all ),
     NIF_FUNC( "get_bindings",        3,  varp_get_bindings ),
     NIF_FUNC( "get_nbindings",       3,  varp_get_nbindings ),
     NIF_FUNC( "order_first",         1,  varp_order_first ),
@@ -476,6 +468,8 @@ DECL_ATOM(reset);
 DECL_ATOM(permanent);
 DECL_ATOM(keep);
 DECL_ATOM(level);
+DECL_ATOM(fifo);
+DECL_ATOM(lifo);    
 
 
 #define EXT  0x80
@@ -1053,36 +1047,26 @@ static void lqueue_clear(lqueue_t* q)
     lqueue_init(q);
 }
 
-#ifdef FIFO_LITERAL
 static void lqueue_put(varp_t* vp, lit_t lp)
 {
     lqueue_t* q = &vp->q;
     literal_t* mp;
-    DBG("PUT/ENQ %s qsize=%ld\r\n", format_lit(vp, lp), q->size);
+    DBG("ENQ %s qsize=%ld\r\n", format_lit(vp, lp), q->size);
     assert(!is_constant_l(vp, lp));
     mp = l2ll(vp, lp);
-    mp->qlink = NULL;
-    *q->tail = mp;
-    q->tail = &(mp->qlink);
-    q->size++;
-}
-#endif
-
-#ifdef LIFO_LITERAL
-static void lqueue_put(varp_t* vp, lit_t lp)
-{
-    lqueue_t* q = &vp->q;
-    literal_t* mp;
-    DBG("PUT/PUSH %s qsize=%ld\r\n", format_lit(vp, lp), q->size);
-    assert(!is_constant_l(vp, lp));
-    mp = l2ll(vp, lp);
-    mp->qlink = q->head;
-    q->head = mp;
-    if (mp->qlink == NULL)
+    if (vp->fifo) {
+	mp->qlink = NULL;
+	*q->tail = mp;
 	q->tail = &(mp->qlink);
+    }
+    else {
+	mp->qlink = q->head;
+	q->head = mp;
+	if (mp->qlink == NULL)
+	    q->tail = &(mp->qlink);
+    }
     q->size++;
 }
-#endif
 
 static literal_t* lqueue_get(varp_t* vp)
 {
@@ -1488,6 +1472,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     ERL_NIF_TERM t;
     ERL_NIF_TERM list = argv[0];
     ERL_NIF_TERM head, tail;
+    int fifo = 0;
 	
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	const ERL_NIF_TERM* elem;
@@ -1510,6 +1495,12 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 	    else if ((vsize < 2) || (vsize > MAX_MAP_SIZE))
 		return enif_make_badarg(env);
 	}
+	else if (elem[0] == ATOM(fifo)) {
+	    fifo = 1;
+	}
+	else if (elem[0] == ATOM(lifo)) {
+	    fifo = 0;
+	}
 	else
 	    return enif_make_badarg(env);
 	list = tail;
@@ -1522,6 +1513,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 	goto error;
     memset(vp, 0, sizeof(varp_t));
 
+    vp->fifo = fifo;
     vp->vnext = 2;
     vp->vsize = vsize;
     vp->vnum  = 0;
@@ -2500,6 +2492,7 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
     xref_t** xpp  = &x->xfirst;
     xref_t* yptr = y->xfirst;
 
+    assert (yp != xp);
     assert(get_vv(vp, y) == UNDEF);
 
     // reset y xref
@@ -2585,10 +2578,6 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 	y->bound = l2ll(vp, neg_l(xl));
     else
 	y->bound = xp;
-    if (yp == xp) {
-	printf("SUBST %s = %s\r\n",
-	       format_literal(vp, xp), format_literal(vp, yp));
-    }
     vp->num_bound++;    
 }
 
@@ -3587,32 +3576,6 @@ static ERL_NIF_TERM varp_get_queue_next(ErlNifEnv* env, int argc,
     return ATOM(false);
 }
 
-// REMOVE?
-static ERL_NIF_TERM varp_clear_queue(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    return ATOM(ok);
-}
-
-// REMOVE?
-static ERL_NIF_TERM varp_enqueue_all(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    int count;
-    
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    count = vp->q.size;
-    return enif_make_int(env, count);
-}
-
 static ERL_NIF_TERM make_clause_info(ErlNifEnv* env, varp_t* vp, variable_t* v)
 {
     return enif_make_tuple4(env,
@@ -3756,6 +3719,9 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(permanent);
     LOAD_ATOM(keep);
     LOAD_ATOM(level);
+// misc
+    LOAD_ATOM(fifo);
+    LOAD_ATOM(lifo);
 }
 
 static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)

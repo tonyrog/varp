@@ -11,17 +11,33 @@
 -compile(export_all).
 
 %% -define(DEBUG, true).
+-include("varp.hrl").
 
 -define(LEVEL, 1).
 
--define(dbg0(F,As), ok).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
+options() ->
+    [#{ long => "max",
+	short => "n",
+	key => max,
+	spec => unsigned,
+	default => 0,
+	description => "Max number of models to count or collect, 0=all."
+      },
+     #{ long => "method",
+	key => method,
+	spec => {enum,
+		 [{"collect", collect},
+		  {"count", count}]},
+	default => collect,
+	description => "Count or collect models."
+      },
+     #{ long => "partial",
+	key => partial,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Print partial models when possible."
+      }
+    ].
 
 run(false) ->
     false;

@@ -1,8 +1,19 @@
 {application, varp,
  [{description, "VARP"},
   {vsn, git},
-  {modules, [varp, prover]},
   {registered, []},
-  {env, []},
+  {env, [
+	 {plugins, [
+		    {"satisfy", varp_satisfy},
+		    {"prove", varp_prove},
+		    {"order", varp_order},
+		    {"bt", varp_backtrack},
+		    {"bj", varp_backjump},
+		    {"sat", varp_saturate},
+		    {"red", varp_reduction},
+		    {"rat", varp_rat},
+		    {"dump", varp_dump}
+		   ]}
+	 ]},
   {applications,[kernel,stdlib]}
   ]}.

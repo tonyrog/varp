@@ -13,10 +13,8 @@
 -export([format/1]).
 -compile(export_all).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
-
-%% -define(dbg(F,As), ok).
--define(dbg(F,As), io:format(F,As)).
 
 %%
 %% Special CNF prover
@@ -959,7 +957,7 @@ format_clause(Vm,CL) ->
     ["{",List,"}"].
 
 format_literals(Vm,Ls) ->
-    concat([format_lit(Vm,L)||L<-Ls],",").
+    lists:join(",",[format_lit(Vm,L)||L<-Ls]).
 
 format_lit(Vm,X) when X<0 ->
     ["-",format_var(Vm,-X)];
@@ -981,7 +979,7 @@ format_decl({Name,uint,Sz}) ->
 format_decl(_) -> [].
 
 format_clause(C) ->
-    concat([format_lit(L) || L <- C], " ").
+    lists:join(" ", [format_lit(L) || L <- C]).
 
 format_lit({'not',V}) -> ["!",format_symbol(V)];
 format_lit(V) ->  format_symbol(V).
@@ -999,7 +997,3 @@ format_symbol({int,V,_N,I}) ->
 format_symbol({bit_index,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol(Var={p,_,_}) -> varp_formula:format_var(Var).
-
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].

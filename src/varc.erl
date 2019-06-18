@@ -51,8 +51,6 @@
 -export([get_queue/1]).
 -export([get_queue_first/1]).
 -export([get_queue_next/2]).
--export([clear_queue/1]).
--export([enqueue_all/1]).
 -export([get_latest_binding/1]).
 -export([get_nbindings/2]).
 -export([get_nbindings/3]).
@@ -284,12 +282,6 @@ get_queue_first(_Vp) ->
     ?nif_stub().
 
 get_queue_next(_Vp, _Cix) ->
-    ?nif_stub().
-
-clear_queue(_Vp) ->
-    ?nif_stub().
-
-enqueue_all(_Vp) ->
     ?nif_stub().
 
 %% get the very latest binding

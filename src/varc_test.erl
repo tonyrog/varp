@@ -22,7 +22,8 @@ all() ->
     or_simplify(),
     or_eval(),
 
-    subst(),
+    subst1(),
+    subst2(),
 
     ok.
 
@@ -283,7 +284,7 @@ order() ->
     ok.
  
 
-subst() ->
+subst1() ->
     V = varc:new(),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
@@ -300,14 +301,49 @@ subst() ->
     _C5 = add_clause(V, [X4, X2]),
     _C6 = add_clause(V, [X7, X4, -X2]),
 
+    io:format("subst1: Clause before\n"),
     print_clauses(V),
-    
-    %% substitute X6/X3
 
+    io:format(" [~w/~w]\n", [X6,X3]),
     varc:subst(V, X6, X3),
-    
+    io:format("subst1: Clause after\n"),    
     print_clauses(V),
-    ok.
+
+    true = varc:eval(V),
+    Bs = varc:get_bindings(V,0),
+    io:format("bindings@0 = ~w\n", [Bs]),
+    Bs.
+
+
+
+subst2() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    X6 = varc:add_variable(V),
+    X7 = varc:add_variable(V),
+
+    io:format("subst2: Clause before\n"),    
+    _C0 = add_clause(V, [X4,-X3]),
+    _C1 = add_clause(V, [X7,X3]),
+    _C2 = add_clause(V, [X7,-X5]),
+    _C3 = add_clause(V, [X3,X2]),
+    _C4 = add_clause(V, [-X4,X6]),
+
+    print_clauses(V),
+    %% io:format(" [~w/~w]\n", [X7,X3]),
+    %% varc:subst(V, X7, X3),
+    io:format(" [~w/~w]\n", [X3,X7]),
+    varc:subst(V, X3, X7),
+
+    io:format("subst2: Clause after\n"),
+    print_clauses(V,true),
+    true = varc:eval(V),
+    Bs = varc:get_bindings(V,0),
+    io:format("bindings@0 = ~w\n", [Bs]),
+    Bs.
 
 
 %% Utils
@@ -323,10 +359,12 @@ get_watched(_V, []) ->
     [].
 
 print_clauses(V) ->
+    print_clauses(V,false).
+print_clauses(V,Raw) ->
     lists:foreach(fun(I) ->
 			  F = varc:get_clause_flags(V, I),
 			  io:format("~w: ~w ~w\n",
-				    [I, F, varc:get_clause(V, I)])
+				    [I, F, varc:get_clause(V,I,undefined,Raw)])
 		  end, lists:seq(0, varc:info(V, number_of_clauses)-1)).
 
 add_variable(V) ->

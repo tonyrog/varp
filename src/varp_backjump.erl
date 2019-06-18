@@ -11,17 +11,7 @@
 -export([options/0]).
 
 %% -define(DEBUG, true).
-
 -include("varp.hrl").
-
--define(dbg0(F,As), ok).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
 
 -compile(export_all).
 -import(varp_formula, [format_lit/2, format_lit/3]).

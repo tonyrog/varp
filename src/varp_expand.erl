@@ -259,7 +259,7 @@ peval({'and',A,B}) ->
 		B1 -> {'and',A1,B1}
 	    end
     end;
-peval({'or',A,B}) -> 
+peval({'or',A,B}) ->
     case peval(A) of
 	true -> true;
 	false -> peval(B);
@@ -405,11 +405,8 @@ fmt_var(X) ->
 fmt_var({p,V,[]}, Q) -> 
     [Q,atom_to_list(V),Q];
 fmt_var({p,V,As},Q) ->
-    [Q,atom_to_list(V),"(",concat([io_lib:format("~w",[X])||X<-As], ","),")",Q].
+    [Q,atom_to_list(V),"(",lists:join(",",[io_lib:format("~w",[X])||X<-As]),")",Q].
 
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].
 %%
 %% Extract all variables from F
 %%

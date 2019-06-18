@@ -1,73 +1,51 @@
 Propositional logic library
 ===========================
 
-The main module is varp
-
-Current options to varp
-
-    Key         Value
-    value	boolean()|none	main formula variable value
-    print	boolean()	print models when found
-    method	collect|count	count or collect models
-    max		unsigned()	max number of models to collect
-    order	<order>
-    bcp		boolean()	do not use equivalence classes
-    saturate	unsigned()	saturation vector width
-    pair	boolean()    test two variables at a time
-    threshold	unsigned()   take more rounds in saturation.
-    carry	boolean()|ignore
-    borrow	boolean()|ignore
-    divz	boolean()|ignore
-    log		<level>
-
 Command line tool
 
-    varp [satisfy|falsify|prove] [options] [bindings] [file1.varp ... filen.varp]
+    varp [satisfy|falsify|prove] [plugin [options]]... [bindings] [file1.varp ... filen.varp]
 
-    options
-         --value      true|false|none	(none)
-         --print      true|false		(false)
-         --method     collect|count		(collect)
-         --max        <unsigned>		(0=all)
-         --order      <order>		(identity)
-         --bcp        true|false		(false)
-         --saturate   <unsigned>		(0=eval)
-         --pair       true|false		(true)
-         --threshold  <unsigned>		(0)
-         --carry      true|false|ignore	(ignore)
-         --borrow     true|false|ignore	(ignore)
-         --divz       true|false|ignore	(false)
-         --log        <level>		(none)
+# global options
+    
+    --print      true|false		(false)
+    --method     collect|count		(collect)
+    --carry      true|false|ignore      (ignore)
+    --borrow     true|false|ignore	(ignore)
+    --divz       true|false|ignore	(false)
+    --log        level()		(none)	 
 
-    bindings
-        <var> = <value>
+    level() = debug | info | notice | warning |
+    	      error | critical | alert | emergency | none
 
-    order
-        identity | 
-        reverse | 
-        depth|
-        occure |
-        depth_occure |
-        occure_depth |
-        <var>*
+#  "order" options
+   	 
+   --order      <order>		(identity)
+   --order_first "v1..vn"
+   --order_last  "v1..vn"
 
-    level
-        debug |
-        info |
-        notice |
-        warning |
-        error |
-        critical |
-        alert |
-        emergency |
-        none
+   order() = identity | reverse | '-occur' | '+occur'
 
-Backjump parameters
 
-    max-learned         L
-    max-learned-factor  F
-    keep_factor         P
-    min-keep-clauses    K
+# Saturation "sat" options
+
+    --timeout    timeout()              (infinity)
+    --level      unsigned()		(0=eval)
+    --pair       boolean()		(true)
+    --threshold  unsigned()		(0)
+
+# Backtrack "bt" parameters
+
+    --max unsigned()
+    --method collect|count
+    --partial boolean()    	     
+
+# Backjump "bj" parameters
+
+    --timeout timeout()
+    --max-learned         L
+    --max-learned-factor  F
+    --keep_factor         P
+    --min-keep-clauses    K
 
     MaxLearned = 
         min(L, F*|Clauses|)      if L and F are both defined (> 0) then
@@ -93,5 +71,16 @@ Backjump parameters
        D1 = Backjump distance
        D2 = Backstumble distance = distance from backjump to next level
 
-    restart-counter  <#eval>
-    restart-interval <ms>    
+    --restart-counter  <#eval>
+    --restart-interval <ms>    
+
+# Binding
+
+    <var> = <value>
+
+Variable (lowercase) variables are passed into varp as
+environment (meta) variables that can be used in
+formulas in quantifiers.
+
+
+

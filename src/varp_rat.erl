@@ -8,21 +8,29 @@
 -module(varp_rat).
 
 -export([run/1]).
+-export([options/0]).
+
 -compile(export_all).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
-%% -define(DEBUG, true).
-
--define(dbg0(F,As), ok).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
-
+options() ->
+    [
+     #{ long => "size",
+	short => "n",
+	key => rat,
+	spec => {union,[unsigned,{enum,[{"all",all}]}]},
+	default => 0,
+	description => "Number of literal rat clauses to delete."
+      },
+     #{ long => "type",
+	short => "r",
+	key => rat_type,
+	spec => {enum,[{"both",both},{"min",min},{"pos",pos},{"neg",neg}]},
+	default => min,
+	description => "Type of rat clauses to try."
+      }].
 
 run(Bs) ->
     N = varp_formula:number_of_unbound(Bs),

@@ -16,12 +16,15 @@
 -export([process_args/2]).
 -export([process_args/4]).
 
+-export([key_options/0]).
+-export([default_opts/1]).
+-export([options_string_map/1]).
+
 -include("log.hrl").
 
-%% -define(dbg(F,A), io:format((F),(A))).
--define(dbg(F,A), ok).
-
+%% -define(DEBUG, true).
 -include("varp.hrl").
+
 
 %% debug/test
 -export([match_value/3]).
@@ -437,6 +440,40 @@ options() ->
        dump=>V44, "dump"=>V44
      }.
 
+%% Given a option list construct a map
+%% from keywords to options
+%% Long :: string()  => OptMap
+%% Long_ :: string() => OptMap
+%% Short ::string()  => OptMap
+%% Key :: atom()     => OptMap
+options_string_map(Options) ->
+    lists:foldl(
+      fun(OptMap = #{ key := Key}, M0) ->
+	      M1 = M0#{ Key => OptMap },
+	      M2 = add_mapping(short, OptMap, M1),
+	      M3 = add_mapping(long, OptMap, M2),
+	      M4 = add_mapping(long, fun tr_/1, OptMap, M3),
+	      M4
+      end, #{}, Options).
+
+%% translate $- into $_
+tr_([$-|Cs]) -> [$_|tr_(Cs)];
+tr_([C|Cs]) ->  [C|tr_(Cs)];
+tr_([]) -> [].
+
+add_mapping(Key, OptMap, Map) ->
+    add_mapping(Key, false, OptMap, Map).
+
+add_mapping(Key, Rewrite, OptMap, Map) ->
+    case maps:find(Key, OptMap) of
+	error -> Map;
+	{ok,Value} -> maps:put(rewrite(Rewrite,Value), OptMap, Map)
+    end.
+
+rewrite(false, Value) -> Value;
+rewrite(Fun,Value) -> Fun(Value).
+    
+
 %% list of options with unique key
 key_options() ->
     L = maps:fold(
@@ -780,7 +817,10 @@ set_opts([], OptMap) ->
     OptMap.
 
 default_opts() ->
-    default_opts_(options_list(), #{ }).
+    default_opts(options_list()).
+
+default_opts(OptionsList) ->
+    default_opts_(OptionsList, #{ }).
 
 default_opts_([#{ key := Key, default := Value}|Opts], OptMap) ->
     default_opts_(Opts, OptMap#{ Key => Value});

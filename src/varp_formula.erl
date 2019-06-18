@@ -63,8 +63,6 @@
 -export([get_bindings/2]).
 -export([intersect/3]).
 -export([model_variables/2]).
--export([clear_queue/1]).
--export([enqueue_all/1]).
 -export([eval/1]).
 -export([eval_meta/2]).
 -export([set_level/2]).
@@ -103,15 +101,6 @@
 	       {uint,Size::integer(),pred()} |
 	       {int,pred(),Size::integer(),Bit::integer()} |
 	       {bit,pred(),Size::integer(),Bit::integer()}.
-
--define(dbg0(F,As), ok).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
 
 new() ->
     new(varp_option:default_option()).
@@ -295,14 +284,6 @@ order_sort(Bs,Key1,Key2,Arg)
 	   end,
     ?dbg("order ~w, ~w, ~w\n", [Key1,Key2,Arg1]),
     varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
-
-clear_queue(Bs) ->
-    varc:clear_queue(Bs#bs.vp),
-    Bs.
-
-enqueue_all(Bs) ->
-    varc:enqueue_all(Bs#bs.vp),
-    Bs.
 
 eval(Bs) ->
     varc:eval(Bs#bs.vp).
@@ -562,7 +543,7 @@ fmt_ordset([I|Is=[J|_]]) when is_integer(I), is_integer(J), I < J ->
     [integer_to_list(I),","|fmt_ordset(Is)].
     
 fmt_var_list(Bs,Xs) ->
-    concat([fmt_var(Bs,X)||X<-Xs],",").
+    lists:join(",", [fmt_var(Bs,X)||X<-Xs]).
 
 variable(V, Bs) ->
     W = expand_meta(V, Bs),
@@ -2516,22 +2497,23 @@ model_bor({X,Bit}, Ms) ->
 print(true,I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
+	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
 print(literal,I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || Bound <- Bindings1 ], ",")]);
+	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
 print(model,I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || 
-			    Bound <- Bindings1,
-			    element(2,Bound) =/= false ], ",")]);
+	      [I,lists:join(",",
+			    [ format_binding(Bound) || 
+				Bound <- Bindings1,
+				element(2,Bound) =/= false ])]);
 print(umodel,I,Bindings) ->
     io:format("~w: ~s\n",
-	      [I,concat([ format_binding(Bound) || 
-			    Bound <- Bindings,
-			    element(2,Bound) =/= false ], ",")]);
+	      [I,lists:join(",",[ format_binding(Bound) || 
+				    Bound <- Bindings,
+				    element(2,Bound) =/= false ])]);
 print(erlang,_I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w.\n", [Bindings1]);
@@ -2618,7 +2600,7 @@ format_literals(Bs,Ls) ->
     format_literals(Bs,Ls,false).
 
 format_literals(Bs,Ls,Bound) ->
-    concat([format_lit(Bs,L,Bound)||L<-Ls],",").
+    lists:join(",",[format_lit(Bs,L,Bound)||L<-Ls]).
 
 format_lit(Bs,X) when is_integer(X) ->
     format_lit(Bs,X,false).
@@ -2675,10 +2657,6 @@ format_symbol({bit_index,V,I}) ->
 format_symbol(Var={p,_,_}) ->
     format_p(Var).
 
-concat([], _) -> [];
-concat([H],_) -> [H];
-concat([H|T],S) -> [H,S | concat(T,S)].
-
 fmt_bind(Bs,X,Y,D) ->
     io_lib:format("~s/~s(~w)", [fmt_v(Bs,X),fmt_v(Bs,Y),D]).
 
@@ -2686,4 +2664,4 @@ fmt_bind(Bs,X,Y) ->
     io_lib:format("~s/~s", [fmt_v(Bs,X),fmt_v(Bs,Y)]).
 
 fmt_bind_list(Bs,Xs) ->
-    concat([fmt_bind(Bs,X,Y) || {X,Y} <- Xs],",").
+    lists:join(",", [fmt_bind(Bs,X,Y) || {X,Y} <- Xs]).

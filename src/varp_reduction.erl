@@ -7,20 +7,32 @@
 %%% Created : 25 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_reduction).
+
+-export([run/1]).
+-export([options/0]).
+
 -compile(export_all).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
-%% -define(DEBUG, true).
+options() ->
+    [
+     #{ long => "size",
+	short => "n",
+	key => size,
+	spec => {union,[unsigned,{enum,[{"all",all}]}]},
+	default => 0,
+	description => "Number of literal reduction clauses to add."
+      },
+     #{ long => "reduction-type",
+	short => "R",
+	key => reduction_type,
+	spec => {enum,[{"both",both},{"min",min},{"pos",pos},{"neg",neg}]},
+	default => min,
+	description => "Type of reductions clauses."
+      }].
 
--define(dbg0(F,As), ok).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
 
 run(Bs) ->
     N = varp_formula:number_of_unbound(Bs),

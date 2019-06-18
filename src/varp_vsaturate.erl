@@ -10,10 +10,8 @@
 
 -import(varp_formula, [format_lit/2]).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
-
--define(dbg(F,A), ok).
-%% -define(dbg(F,A), io:format((F),(A))).
 
 -define(if1(Cond,Then),
 	if Cond -> Then;

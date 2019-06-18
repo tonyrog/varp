@@ -24,6 +24,7 @@
 
 main(Args) ->
     application:start(varp),
+    io:format("plugins = ~p\n", [application:get_env(varp, plugins)]),
     XArgs = [],
     {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, satisfy),
     Opts = [{meta,Bound}|Opts0],
