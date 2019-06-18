@@ -8,6 +8,7 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
+-define(UNDEF,  0).
 -define(TRUE,   1).
 -define(FALSE, -1).
 -define(BOUND,  2).

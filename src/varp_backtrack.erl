@@ -7,16 +7,25 @@
 
 -module(varp_backtrack).
 
+-export([run/1]).
 -compile(export_all).
 
--define(START_MARK, 2).
+%% -define(DEBUG, true).
 
+-define(LEVEL, 1).
+
+-define(dbg0(F,As), ok).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
 -define(dbg(F,A), ok).
-%%-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), ok).
+-endif.
 
-backtrack(false) ->
+run(false) ->
     false;
-backtrack(Bs) ->
+run(Bs) ->
     N     = varp_formula:getopt(Bs,max),
     Print = varp_formula:getopt(Bs,print),
     varp_formula:config(Bs, max_conflicting, 1),
@@ -70,27 +79,27 @@ init(Bs) ->
     %% io:format("I0=~w, next=~w, num=~w\n", [I0,Next,Num]),
     case Next  of
 	false  -> {model,[]};
-	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?START_MARK}]}
+	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?LEVEL}]}
     end.
 
 next([{_,_Xi,[],_}|Stack1],Bs) ->
     undo(Bs,Stack1),
     next(Stack1,Bs);
-next([{I,Xi,[V|Vs],Mark}|Stack],Bs) ->
-    varp_formula:set_level(Bs,Mark),
-    case eq_eval(Bs,Xi,V,Mark) of
+next([{I,Xi,[V|Vs],Level}|Stack],Bs) ->
+    varp_formula:set_level(Bs,Level),
+    case eq_eval(Bs,Xi,V,Level) of
 	false -> %% hook this?
-	    varp_formula:undo_level(Bs,Mark),
-	    next([{I,Xi,Vs,Mark}|Stack],Bs);
+	    varp_formula:undo_level(Bs,Level),
+	    next([{I,Xi,Vs,Level}|Stack],Bs);
 	true ->
 	    Next = varp_formula:next_unbound(Bs,I),
 	    %% Num = varp_formula:number_of_unbound(Bs),
 	    %% io:format("I=~w, next=~w, num=~w\n", [I,Next,Num]),
 	    case Next of
 		false ->
-		    {model,[{I,Xi,Vs,Mark}|Stack]};
+		    {model,[{I,Xi,Vs,Level}|Stack]};
 		{J,Xj} ->
-		    {true,[{J,Xj,?BT_ORDER,Mark+1},{I,Xi,Vs,Mark}|Stack]}
+		    {true,[{J,Xj,?BT_ORDER,Level+1},{I,Xi,Vs,Level}|Stack]}
 	    end
     end;
 next([],_Bs) ->

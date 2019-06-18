@@ -11,7 +11,18 @@
 
 -include("varp.hrl").
 
-reduction(Bs) ->
+%% -define(DEBUG, true).
+
+-define(dbg0(F,As), ok).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
+-define(dbg(F,A), ok).
+-define(dcall(Fun), ok).
+-endif.
+
+run(Bs) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:get_info(Bs, permanent),
@@ -40,23 +51,23 @@ red(Bs, I, X,N,CMax,Type) ->
     end.
 
 add_var(Bs,V,CMax,Type) ->
-    io:format("reduction=~s,cmax=~w,type=~w\n",
-	      [varp_formula:format_lit(Bs,V),CMax,Type]),
+    ?dbg("reduction=~s,cmax=~w,type=~w\n",
+	 [varp_formula:format_lit(Bs,V),CMax,Type]),
     case Type of
 	pos ->
-	    Is = get_clauses(Bs,V,CMax),
+	    Is = get_delta_clauses(Bs,V,CMax),
 	    add_lit(Bs,V,Is);
 	neg ->
-	    Is = get_clauses(Bs,-V,CMax),
+	    Is = get_delta_clauses(Bs,-V,CMax),
 	    add_lit(Bs,-V,Is);
 	both ->
-	    Is1 = get_clauses(Bs,V,CMax),
-	    Is2 = get_clauses(Bs,-V,CMax),
+	    Is1 = get_delta_clauses(Bs,V,CMax),
+	    Is2 = get_delta_clauses(Bs,-V,CMax),
 	    Bs1 = add_lit(Bs,V,Is1),
 	    add_lit(Bs1,-V,Is2);
 	min ->
-	    Is1 = get_clauses(Bs,V,CMax),
-	    Is2 = get_clauses(Bs,-V,CMax),
+	    Is1 = get_delta_clauses(Bs,V,CMax),
+	    Is2 = get_delta_clauses(Bs,-V,CMax),
 	    Is1L = length(Is1),
 	    Is2L = length(Is2),
 	    if Is2L =:= 0 ->
@@ -111,7 +122,7 @@ add_multi(Bs,Yi,Di,Ds) ->
 	      case intersect(NDi,Dj) of
 		  [] -> ok;
 		  _ -> 
-		      io:format("MULTI\n"),
+		      ?dbg("MULTI\n", []),
 		      or_clause(Bs, [-Yi,-Yj])
 	      end
       end, Ds).
@@ -141,16 +152,23 @@ emit_def(Bs, Yj, Cs) ->
     
 %% return list on form [{Y,[Xi]}]
 clauses(Bs,[I|Cs],L,Acc) ->
-    Clause = lists:delete(L, get_clause(Bs,I)),
-    Y = varp_formula:add_variable(Bs),
-    clauses(Bs,Cs,L,[{Y,Clause}|Acc]);
+    Fs = varc:get_clause_flags(Bs#bs.vp,I),
+    case lists:member(dead, Fs) of
+	true ->
+	    io:format("DEAD\n"),
+	    clauses(Bs, Cs, L, Acc);
+	false ->
+	    Clause = lists:delete(L, get_clause(Bs,I)),
+	    Y = varp_formula:add_variable(Bs),
+	    clauses(Bs,Cs,L,[{Y,Clause}|Acc])
+    end;
 clauses(Bs, [], _L, Acc) ->
     {Acc,Bs}.
 
 get_clause(Bs, I) ->
-    {'or',[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
-    CL.
+    varc:get_clause(Bs#bs.vp, I).
 
-get_clauses(Bs, L, CMax) ->
+%% Return clauses in Delta
+get_delta_clauses(Bs, L, CMax) ->
     CLs = varp_formula:get_clauses(Bs,L,literal),
     [I || I <- CLs, I < CMax].

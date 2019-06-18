@@ -7,7 +7,7 @@
 
 -module(varp_backjump).
 
--export([backjump/1]).
+-export([run/1]).
 
 %% -define(DEBUG, true).
 
@@ -44,9 +44,9 @@ max_learned(Bs) ->
 	    0
     end.
 
-backjump(false) ->
+run(false) ->
     false;
-backjump(Bs) ->
+run(Bs) ->
     varp_formula:config(Bs, max_conflicting, 0),
     varp_formula:config(Bs, permanent, 0),
     MaxLearned = max_learned(Bs),
@@ -437,7 +437,7 @@ add_conflict_clause(Bs,Clause) ->
 	    Bs2 = add_conflict_clause(Bs1,[Vi|CL1]),
 	    add_conflict_clause(Bs2,[-Vi|CL2]);
        true ->
-	    varp_formula:add_clause(Bs, 'or', [?TRUE|Clause]),
+	    varp_formula:add_clause(Bs, Clause),
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,
 			 length(Clause)),
@@ -512,7 +512,7 @@ minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
 
 conflict_analysis(Bs,Level) ->
     Trail= [P|_] = get_literal_bindings(Bs,Level),
-    %% ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
+    ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
     Seen0 = #{ abs(P) => true }, %% a set of traversed literals
     N = varp_formula:get_info(Bs,num_conflicting),
     CList = [ {I,varp_formula:conflicting_clause(Bs,I)} || 
@@ -579,7 +579,7 @@ conflicting_reason(Bs,P,I) ->
 
 %% check if As is a subset of Bs
 is_subclause(As, Li, Bs) ->
-    case (As--[Li])-- Bs of
+    case (As--[Li]) -- Bs of
 	[] -> true;
 	_ -> false
     end.
@@ -619,8 +619,14 @@ implication_level(Bs,Imp) ->
     ImpLev.
 
 get_clause(Bs, I) ->
-    {'or',[?TRUE|Ls]} = varp_formula:get_clause(Bs,I),
-    Ls.
+    varp_formula:get_clause(Bs,I).
+
+check_dead(Bs, I) ->
+    Fs = varc:get_clause_flags(Bs#bs.vp,I),
+    case lists:member(dead, Fs) of
+	true -> erlang:error(dead);
+	false -> ok
+    end.
 
 %% -1 - 1 => 0 1
 neg01(Val) -> (Val+1) div 2. 

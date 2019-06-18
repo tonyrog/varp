@@ -26,12 +26,13 @@
 -export([format_p/1]).
 -export([format_meta/1]).
 -export([or_gate/3, and_gate/3, xor_gate/3]).
--export([or_clause/2, and_clause/2]).
+-export([or_clause/2]).
 -export([format_lit/2, format_lit/3]).
 -export([format_literals/2, format_literals/3]).
 -export([format_var/2]).
 -export([format_clause/2, format_clause/3]).
-
+-export([log_bindings/4]).
+-export([log_clause/2]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -68,6 +69,7 @@
 -export([eval_meta/2]).
 -export([set_level/2]).
 -export([keep_level/2]).
+-export([move_level/3]).
 -export([undo_level/2]).
 -export([vfold_op/4]).
 -export([conflicting_clause/1]).
@@ -76,12 +78,14 @@
 -export([get_clause/2]).
 -export([get_clauses/3]).
 -export([get_clause_flags/2]).
--export([add_clause/3]).
+-export([add_clause/2]).
 -export([use_clause/2]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([set_var/3, add_var/4]).
 -export([config/3]).
+-export([const_vector/2, const_vector/3]).
+-export([const_vector/4]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
@@ -96,7 +100,7 @@
 -type func() :: {f,Name::atom(),[index()]}.
 
 -type var() :: pred() |
-	       {uint,pred(),Size::integer(),Bit::integer()} |
+	       {uint,Size::integer(),pred()} |
 	       {int,pred(),Size::integer(),Bit::integer()} |
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
@@ -115,7 +119,7 @@ new() ->
 new(OptList) when is_list(OptList) ->
     new(varp_option:set_opts(OptList));
 new(OptMap) when is_map(OptMap) ->
-    Vp  = varc:new([{bcp,maps:get(bcp,OptMap)}]),
+    Vp  = varc:new([]),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
@@ -165,92 +169,47 @@ xor_gate(Bs,Y,Xs) ->
 %% build an OR clause with Xs as input
 %% 1 = X1 or X2 .. or Xn
 or_clause(Bs,Xs) ->
-    clause(Bs, 'or', [?TRUE|Xs]).
+    varc:add_clause(Bs#bs.vp, Xs).
 
-%% build an AND clause with Xs as input
-%% 0 = X1 and X2 .. and Xn => 1 = !X1 or !X2 .. or !Xn
-and_clause(Bs,Xs) ->
-    clause(Bs, 'or', [?TRUE|[-L||L<-Xs]]).
-
-clause(Bs,'or',Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
-    case varp_option:getopt(clause,Bs#bs.option) of
-	false -> %% install as gate
-	    add_clause(Bs,'or',Ls),
+clause(Bs,'or',_Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
+    add_clause(Bs,[-X,Y,Z]),
+    add_clause(Bs,[X,-Y]),
+    add_clause(Bs,[X,-Z]),
+    Bs;
+clause(Bs,'xor',_Ls=[X,Y,Z]) ->
+    if X =:= ?TRUE ->
+	    add_clause(Bs,[-Y,-Z]),
+	    add_clause(Bs,[Y,Z]),
 	    Bs;
-	true -> %% install as clauses
-	    add_clause(Bs,'or',[?TRUE,-X,Y,Z]),
-	    add_clause(Bs,'or',[?TRUE,X,-Y]),
-	    add_clause(Bs,'or',[?TRUE,X,-Z]),
-	    Bs
-    end;
-clause(Bs,'xor',Ls=[X,Y,Z]) ->
-    Clause = varp_option:getopt(clause,Bs#bs.option),
-    if not Clause -> %% install as gate
-	    add_clause(Bs,'xor',Ls),
+       X =:= ?FALSE ->
+	    add_clause(Bs,[-Y,Z]),
+	    add_clause(Bs,[Y,-Z]),
 	    Bs;
-	X =:= ?TRUE ->
-	    add_clause(Bs,'or',[?TRUE,-Y,-Z]),
-	    add_clause(Bs,'or',[?TRUE,Y,Z]),
-	    Bs;
-	X =:= ?FALSE ->
-	    add_clause(Bs,'or',[?TRUE,-Y,Z]),
-	    add_clause(Bs,'or',[?TRUE,Y,-Z]),
-	    Bs;
-	true -> %% install as clauses
-	    add_clause(Bs,'or',[?TRUE,X,-Y,Z]),
-	    add_clause(Bs,'or',[?TRUE,X,Y,-Z]),
-	    add_clause(Bs,'or',[?TRUE,-X,-Y,-Z]),
-	    add_clause(Bs,'or',[?TRUE,-X,Y,Z]),
+       true -> %% install as clauses
+	    add_clause(Bs,[X,-Y,Z]),
+	    add_clause(Bs,[X,Y,-Z]),
+	    add_clause(Bs,[-X,-Y,-Z]),
+	    add_clause(Bs,[-X,Y,Z]),
 	    Bs
     end;
 clause(Bs,'or',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
-    case varp_option:getopt(clause,Bs#bs.option) of
-	false ->
-	    L = length(Ls),
-	    N = varc:get_max_clause_length(Bs#bs.vp),
-	    if L =< N ->
-		    _Cix = add_clause(Bs,'or',Ls),
-		    Bs;
-	       true ->
-		    build_clause_tree(Bs,'or',hd(Ls),tl(Ls),L-1,N)
-	    end;
-	true -> %% install n-gate as clauses
-	    build_gate_tree(Bs,'or',hd(Ls),tl(Ls))
-    end;
+    build_gate_tree(Bs,'or',hd(Ls),tl(Ls));
 clause(Bs,'xor',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
-    case varp_option:getopt(clause,Bs#bs.option) of
-	false ->
-	    L = length(Ls),
-	    N = varc:get_max_clause_length(Bs#bs.vp),
-	    if L =< N ->
-		    _Cix = add_clause(Bs,'xor',Ls),
-		    Bs;
-	       true ->
-		    build_clause_tree(Bs,'xor',hd(Ls),tl(Ls),L-1,N)
-	    end;
-	true -> %% install n-gate as clauses
-	    build_gate_tree(Bs,'xor',hd(Ls),tl(Ls))
-    end;
-clause(Bs,Op,Ls) ->
-    ?dbg("clause: {~w,~w}\n", [Op,Ls]),
-    L = length(Ls),
-    N = varc:get_max_clause_length(Bs#bs.vp),
-    if L =< N ->
-	    _Cix = add_clause(Bs,Op,Ls),
-	    Bs;
-       true ->
-	    build_clause_tree(Bs,Op,hd(Ls),tl(Ls),L-1,N)
-    end.
+    build_gate_tree(Bs,'xor',hd(Ls),tl(Ls));
+clause(Bs,'or',[?TRUE|Ls]) ->
+    ?dbg("clause: {~w,~w}\n", ['or',Ls]),
+    varc:add_clause(Bs#bs.vp, Ls),
+    Bs.
 
-add_clause(Bs,Op,Ls) ->
-    case varc:add_clause(Bs#bs.vp,Op,Ls) of
+add_clause(Bs,Ls) ->
+    case varc:add_clause(Bs#bs.vp,Ls) of
 	{false,_I} ->
 	    error(conflict_clause_error);
 	false ->
 	    error(conflict_clause_error);
 	{true,I} -> %% non conflict
 	    ?dcall(fun() ->
-			   {_,[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
+			   CL = varc:get_clause(Bs#bs.vp, I),
 			   Flags = varc:get_clause_flags(Bs#bs.vp, I),
 			   {W0,W1} = proplists:get_value(watch, Flags, {-1,-1}),
 			   io:format("~w:(~w,~w) ~s\n",
@@ -275,41 +234,18 @@ del_unused_clauses(Bs) ->
 build_gate_tree(Bs,Op,X,Ls) ->
     case lists:split(length(Ls) div 2,Ls) of
 	{[U],[V]} ->
-	    clause(Bs,'or',[X,U,V]);
+	    clause(Bs,Op,[X,U,V]);
 	{[U],[V1,V2]} ->
 	    X1 = add_variable(Bs),
-	    Bs1=clause(Bs,'or',[X1,V1,V2]),
-	    clause(Bs1,'or',[X,U,X1]);
+	    Bs1=clause(Bs,Op,[X1,V1,V2]),
+	    clause(Bs1,Op,[X,U,X1]);
 	{Us,Vs} ->
 	    X1 = add_variable(Bs),
-	    Bs2=build_gate_tree(Bs,Op,X1,Us),
+	    Bs2 = build_gate_tree(Bs,Op,X1,Us),
 	    X2 = add_variable(Bs),
-	    Bs3=build_gate_tree(Bs2,Op,X2,Vs),
-	    clause(Bs3,'or',[X,X1,X2])
+	    Bs3 = build_gate_tree(Bs2,Op,X2,Vs),
+	    clause(Bs3,Op,[X,X1,X2])
     end.
-
-build_clause_tree(Bs,Op,X,Ls,L,N) ->
-    Ls1 = build_branch_list(Bs,Op,Ls,L,N),
-    L1 = length(Ls1),
-    if L1 >= N ->
-	    build_clause_tree(Bs,Op,X,Ls1,L1,N);
-       true ->
-	    _Cix = add_clause(Bs,Op,[X|Ls1]),
-	    Bs
-    end.
-
-%% build clauses of size <= N retrun a list of clause variables
-build_branch_list(_Bs,_Op,[V],1,_N) -> [V];
-build_branch_list(_Bs,_Op,[],0,_N) -> [];
-build_branch_list(Bs,Op,Ls,L,N) when L >= N ->
-    V = add_variable(Bs), %% child var
-    {Ls1,Ls2} = lists:split(N-1,Ls),
-    _Cix = add_clause(Bs,Op,[V|Ls1]),
-    [V|build_branch_list(Bs,Op,Ls2,L-(N-1),N)];
-build_branch_list(Bs,Op,Ls,_L,_N) ->
-    V = add_variable(Bs),
-    _Cix = add_clause(Bs,Op,[V|Ls]),
-    [V].
 
 make_variable(V, Bs) ->
     N = add_variable(Bs, true),
@@ -376,6 +312,9 @@ undo_level(Bs, Level) ->
 
 keep_level(Bs, Level) ->
     varc:keep_level(Bs#bs.vp, Level).
+
+move_level(Bs, Src, Dst) ->
+    varc:move_level(Bs#bs.vp, Src, Dst).
 
 set_level(Bs,Level) ->
     varc:set_level(Bs#bs.vp, Level).
@@ -892,19 +831,29 @@ build_({'!',A}, Bs) ->
 
 build_({bit_index,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
-%%    io:format("A=~w, I1=~w\n", [A,I1]),
-%%    A1 = case A of
-%%	     {p,Var,[]} -> {p,Var,[I1]};
-%%	     _ -> A
-%%	 end,
-    {B,Bs1} = build__(A, Bs),
-%%    io:format("B = ~w\n", [B]),
-    case B of
-	{uint,N,Xs} -> {select_bool(I1,N,Xs), Bs1};
-	{int,N,Xs}  -> {select_bool(I1,N,Xs), Bs1};
-	{bit,N,Xs}  -> {select_bool(I1,N,Xs), Bs1};
-	{bool,X}    -> {{bool,X},Bs1};
-	X -> {select_bool(I1,1,[X]),Bs1}
+    case A of
+	{p,P,Ps} ->  %% check if declared
+	    Px = {p,P,['_' || _ <- Ps]},
+	    case proplists:lookup(Px, Bs#bs.decls) of
+		none ->
+		    {X,Bs1} = variable({index,A,I1}, Bs),
+		    {{bool,X},Bs1};
+		{_,Sign,Size} ->
+		    case var_vector(Sign,A,Size,Bs) of
+			{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
+			{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+			{{bit,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+			{{bool,X},Bs1}    -> {{bool,X},Bs1}
+		    end
+	    end;
+	_ ->
+	    case build__(A, Bs) of
+		{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
+		{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+		{{bit,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
+		{{bool,X},Bs1}    -> {{bool,X},Bs1}
+                %% X -> {select_bool(I1,1,[X]),Bs}
+	    end
     end;
 
 build_({bit_range,A,I,J,S},Bs) ->
@@ -1065,21 +1014,21 @@ build_({{'PROD',Qs}, F}, Bs) ->
 %% Special build of cnf/snf
 %%
 build_cnf([CL|CLs], Bs) ->
-    Bs1 = build_or_clause(CL, Bs),
-    build_cnf(CLs, Bs1);
+    {Xs,Bs1} = args(CL,Bs),
+    Ls = [L || {bool,L} <- Xs],
+    %% io:format("CLAUSE: ~s\n", [format_clause(Bs1,Ls,true)]),
+    %% io:format("  ~w\n", [Ls]),
+    %% io:format("  ~p\n", [CL]),
+    %% io:format("  ~w\n", [[value(Bs,L)||L<-Ls]]),
+    try add_clause(Bs1,Ls) of
+	_ ->
+	    build_cnf(CLs, Bs1)
+    catch
+	error:Reason ->
+	    error(Reason)
+    end;
 build_cnf([], Bs) ->
     Bs.
-
-build_or_clause(CL, Bs) ->
-    build_or_clause(CL,[],Bs).
-
-build_or_clause([L|Ls], Acc, Bs) ->
-    {L1,Bs1} = build_(L, Bs),
-    build_or_clause(Ls, [L1|Acc], Bs1);
-build_or_clause([], Acc, Bs) ->
-    As1 = [A || {bool,A} <- lists:reverse(Acc)],
-    or_clause(Bs, As1).
-
 
 -ifdef(__UNUSED__).
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
@@ -1462,15 +1411,26 @@ uint8(V,Bs) ->
 %% generate a constant vector
 const_vector(Type,Value,Size,Bs) when is_integer(Value) ->
     N = eval_meta(Size,Bs),
-    const_vector_(N-1,Type,N,[],Value,Bs).
+    {const_vector_(N-1,Type,N,[],Value),Bs}.
 
-const_vector_(-1,Type,N,Cs,_Value,Bs) ->
-    {{Type,N,reverse(Cs)},Bs};
-const_vector_(I,Type,N,Cs,Value,Bs) ->
+const_vector(Type,Value,N) when is_integer(Value), is_integer(N) ->
+    const_vector_(N-1,Type,N,[],Value).
+
+const_vector(Type,Value) when is_integer(Value) ->
+    N = case Type of
+	    uint -> varp_math:unsigned_size(Value);
+	    bit  -> varp_math:unsigned_size(Value);
+	    int -> varp_math:integer_size(Value)
+	end,
+    const_vector_(N-1,Type,N,[],Value).
+
+const_vector_(-1,Type,N,Cs,_Value) ->
+    {Type,N,reverse(Cs)};
+const_vector_(I,Type,N,Cs,Value) ->
     if Value band 1 =:= 1 ->
-	    const_vector_(I-1,Type,N,[?TRUE|Cs],Value bsr 1, Bs);
+	    const_vector_(I-1,Type,N,[?TRUE|Cs],Value bsr 1);
        true ->
-	    const_vector_(I-1,Type,N,[?FALSE|Cs],Value bsr 1, Bs)
+	    const_vector_(I-1,Type,N,[?FALSE|Cs],Value bsr 1)
     end.
 
 %% Install alias vector
@@ -1752,7 +1712,7 @@ operation('-', A, Bs) ->
 	Av ->
 	    Av1 = -Av,
 	    An1 = varp_math:integer_size(Av1),
-	    const_vector_(An1-1,int,An1,[],Av1,Bs)
+	    {const_vector_(An1-1,int,An1,[],Av1),Bs}
     end;
 
 operation('abs', A={int,N,Ys}, Bs) ->
@@ -2595,6 +2555,41 @@ format_binding({Var,Value}) ->
        is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
     end.
 
+log_clause(Bs, Clause) ->
+    io:format("~s\n", [format_clause(Bs,Clause)]).
+
+log_bindings(Bs, X, Value, Xs) ->
+    log_(Bs, X, Value, Xs).
+
+log_(_Bs, _X, _Value, []) ->
+    ok;
+log_(_Bs, _X, _Value, [{A,A}]) ->
+    ok;
+log_(Bs, X, Value, Xs) ->
+    Val = case Value of
+	      ?TRUE -> "1";
+	      ?FALSE -> "0";
+	      ?UNDEF -> "1/0"
+	  end,
+    N = number_of_bound(Bs),
+    T = number_of_variables(Bs),
+    io:format("Log: saturation ~w '~s'/~s [~w/~w]\n",
+	      [length(Xs),fmt_var(Bs, X), Val, N, T]),
+    lists:foreach(
+      fun({A,A}) ->
+	      ok;
+	 ({A,?TRUE}) ->
+	      io:format("    '~s' = 1\n", 
+			[format_lit(Bs, A)]);
+	 ({A,?FALSE}) ->
+	      io:format("    '~s' = 0\n", 
+			[format_lit(Bs, A)]);
+	 ({A,B}) ->
+	      io:format("    '~s' = '~s'\n", 
+			[format_lit(Bs, A),
+			 format_lit(Bs, B)])
+      end, Xs).
+
 format_p({p,T,As}) when is_integer(T) ->
     [$T,integer_to_list(As)|format_params(As)];
 format_p({p,V,As}) when is_atom(V) ->
@@ -2602,7 +2597,11 @@ format_p({p,V,As}) when is_atom(V) ->
 format_p({p,Name,As}) when is_list(Name); is_binary(Name) ->
     [Name|format_params(As)];
 format_p({bit_index,Var,Index}) ->
+    [format_p(Var),"[",integer_to_list(Index), "]"];
+format_p({index,Var,Index}) ->
     [format_p(Var),"[",integer_to_list(Index), "]"].
+
+
 
 format_params([]) -> "";
 format_params(As) when is_list(As) ->
@@ -2664,6 +2663,8 @@ format_symbol(false) -> "false";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);
 format_symbol(I) when is_integer(I),I>0 -> [$$|integer_to_list(I)];
 format_symbol({bit,V,_N,I}) ->
+    format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({index,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({uint,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";

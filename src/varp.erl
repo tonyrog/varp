@@ -16,6 +16,8 @@
 -export([file/1, string/1, file_expand_cnf/2]).
 -export([archive_path/1]).
 -export([output_model/2]).
+-export([empty_sections/0]).
+
 
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").

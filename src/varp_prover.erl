@@ -253,12 +253,18 @@ pass_(Pass,Ps,X,Bs) ->
 		Bs1 -> 
 		    varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
 				      [varp_formula:number_of_bound(Bs)-Bound0,
-				       varp_formula:number_of_unbound(Bs),
+				       varp_formula:number_of_bound(Bs),
 				       varp_formula:number_of_variables(Bs)
 				      ]),
-		    passes(Ps,X,Bs1)
+		    case one_model(Bs1) of
+			false ->
+			    passes(Ps,X,Bs1);
+			R1 ->
+			    R1
+		    end
 	    end;
-	R -> R
+	R -> 
+	    R
     end.
 
 %% check if we are supposed to run a pass at all.
@@ -280,7 +286,7 @@ pass_enabled(saturate,Bs) ->
 	[] ->
 	    false;
 	List -> 
-	    io:format("saturations = ~p\n", [List]),
+	    %% io:format("saturations = ~p\n", [List]),
 	    {true,[{saturate,Params}||Params<-List]}
     end;
 pass_enabled(reduction,Bs) ->
@@ -304,18 +310,22 @@ pass(apply,X,Bs) ->
 pass(eval,_X,Bs) ->
     eval_(varp_formula:enqueue_all(Bs));
 pass({saturate,Params},_X,Bs) ->
-    varp_saturate:saturate(Bs,Params);
+    varp_saturate:run(Bs,Params);
 pass(saturate,_X,Bs) ->
     Params = #{ saturate => varp_formula:getopt(Bs,saturate) },
-    varp_saturate:saturate(Bs,Params);
+    varp_saturate:run(Bs,Params);
 pass(reduction,_X,Bs) ->
-    Bs1 = varp_reduction:reduction(Bs),
-    order_literals(Bs1),
+    Bs1 = varp_reduction:run(Bs),
+    order_literals(Bs1), %% fixme!
+    Bs1;
+pass(rat,_X,Bs) ->
+    Bs1 = varp_rat:run(Bs),
+    order_literals(Bs1),  %% fixme!
     Bs1;
 pass(backtrack,_X,Bs) ->
-    varp_backtrack:backtrack(Bs);
+    varp_backtrack:run(Bs);
 pass(backjump,_X,Bs) ->
-    varp_backjump:backjump(Bs).
+    varp_backjump:run(Bs).
 
 %% check if there is already a "unique" model
 one_model(Bs) ->
@@ -401,14 +411,19 @@ dump(Bs) ->
 dump_(N, N, _Bs) ->
     ok;
 dump_(I, N, Bs) ->
+    %% add option raw!
     Flags = varc:get_clause_flags(Bs#bs.vp, I),
     case lists:member(dead, Flags) of
 	true ->
 	    dump_(I+1,N,Bs);
 	false ->
-	    {'or',[?TRUE|CL]} = varc:get_clause(Bs#bs.vp, I),
-	    io:put_chars([format_snf_clause(Bs,CL),".\n"]),
-	    dump_(I+1,N,Bs)
+	    case varc:get_clause(Bs#bs.vp, I) of
+		[] ->
+		    dump_(I+1,N,Bs);
+		CL ->
+		    io:put_chars([format_snf_clause(Bs,CL),".\n"]),
+		    dump_(I+1,N,Bs)
+	    end
     end.
 
 format_snf_clause(Bs,CL) ->

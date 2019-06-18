@@ -4,7 +4,10 @@
 
 -module(varp_vsaturate).
 
+-export([run/2]).
+
 -compile(export_all).
+
 -import(varp_formula, [format_lit/2]).
 
 -include("varp.hrl").
@@ -21,9 +24,9 @@
 -type var()::integer().
 -type bs()::term().
 
--spec saturate(Bs::bs(), K::non_neg_integer()) -> false | bs().
+-spec run(Bs::bs(), K::non_neg_integer()) -> false | bs().
 
-saturate(Bs,K) when is_integer(K), K >= 1 ->
+run(Bs,K) when is_integer(K), K >= 1 ->
     varp_formula:info(Bs,"saturate-~w: pair:~w\n",
 		      [K,varp_formula:getopt(Bs,pair)]),
     ?dbg("bound => ~s\n",

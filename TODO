@@ -1,4 +1,3 @@
-
 - continue with backtrack after backjump
   as alternative to install all models while
   backjumping.
@@ -25,6 +24,67 @@ input(Line,Acc) ->
   file format allows for nested options when possible:
 
   %% erlang format?
+
+  plugin/backends
+  ---------------
+
+    General options
+
+    --seed <unsigned>		set random seed
+    --compress <bool>		compress clauses
+    --max <unsigned>		max number of models
+    --method=collect|count
+    --print true|false|model|umodel|literal|erlang
+    --clause <bool>
+    --starexec <boolean>
+    --timeout <seconds>|'infinity'    
+    
+    satisfy
+	-- no options, set formula value = 1, if possible
+    prove
+	-- no options, set formula value = 0, if possible
+    
+    saturate
+	-s <k>
+	--pair <bool>
+	--timeout <seconds>|'infinity'
+	--threshold <unsigned>
+	--laps <unsigned>|'infinity'
+	
+    backjump
+    	--timeout <seconds>|'infinity'
+	--minimize <bool>
+	--max-learned
+	--max-learned-factor
+	--keep-factor
+	--min-keep-clauses
+	--restart-counter
+	--restart-interval
+	--iorder
+	--max-conflicts
+	--num-conflicts
+	--stumble
+	--olle
+	--stumble-olle
+	
+    backtrack
+	--timeout <seconds>|'infinity'
+	
+    reduction
+    	--timeout <seconds>|'infinity'
+	--reduction <unsigned>|'all'
+	--reduction-type=pos|neg|both|min
+
+    rat
+    	--timeout <seconds>|'infinity'
+	--rat <unsigned>|'all'
+      	--rat-type=pos|neg|both|min
+
+    dump
+	--file <filename>
+
+
+
 
  {do [,otions], [
     {plugin1, [option..]},

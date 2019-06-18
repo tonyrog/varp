@@ -168,7 +168,7 @@ add_conflict_clause(Vp,Vm,Clause) ->
     if L >= 64 ->
 	    ignore;
        true ->
-	    Cix = varc:add_clause(Vp, 'or', [1|Clause]),
+	    Cix = varc:add_clause(Vp, Clause),
 	    io:format("add_clause: ~w, ~s\n", [Cix,format_clause(Vm,Clause)])
     end.
     
@@ -324,7 +324,7 @@ find_first_uip_(Vp,Level,Q,Marks,Num,CSrc) ->
     end.
 
 enq_imp(Vp,Level,L,Ci,Q,Marks,Num,CSrc) ->
-    {'or',[1|Ls]} = varc:get_clause(Vp,Ci),
+    Ls = varc:get_clause(Vp,Ci),
     enq_imp_(Vp,Level,L,Ls,Q,Marks,Num,CSrc).
 
 enq_imp_(Vp,Level,L,[L|Ls],Q,Marks,Num,CSrc) ->
@@ -400,7 +400,7 @@ next(Vp, Xv) ->
 
 add_clauses(Vp, [CL|Clauses], Vm) ->
     {Ls,Vm1} = add_clause(Vp, CL, [], Vm),
-    Cix = varc:add_clause(Vp, 'or', [1|Ls]),
+    Cix = varc:add_clause(Vp, Ls),
     io:format("~w: ~s\n", [Cix, format_clause(Vm1, Ls)]),
     add_clauses(Vp, Clauses, Vm1);
 add_clauses(_Vp, [], Vm) ->

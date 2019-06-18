@@ -11,7 +11,6 @@
 
 -export([new/0]).
 -export([new/1]).
--export([new/2]).
 -export([info/2]).
 -export([config/3]).
 -export([add_variable/1]).
@@ -32,14 +31,17 @@
 -export([set_level/2]).
 -export([undo_level/2]).
 -export([keep_level/2]).
+-export([move_level/3]).
 -export([eval/1]).
+-export([add_clause/2]).
 -export([add_clause/3]).
 -export([add_clause/4]).
 -export([add_clause/5]).
 -export([add_clause/6]).
 -export([add_clause/7]).
--export([add_clause/8]).
 -export([get_clause/2]).
+-export([get_clause/3]).
+-export([get_clause/4]).
 -export([get_clause_flags/2]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
@@ -84,7 +86,6 @@
 -endif.
 
 -type varc() :: reference().
--type clause_type() :: 'or' | 'xor'.
 -type literal() :: integer().
 -type sort_key()  :: identity|random|occur|depth|
 		     occur_depth|depth_occur|
@@ -94,29 +95,18 @@
 		     depth_occur_ascending|depth_occur_descending.
 -type sort_value() :: integer().
 
--define(is_op(Op), (((Op) =:= 'or') orelse ((Op) =:= 'xor'))).
-
 -define(nif_stub(),
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
 
 init() ->
-    NifCore = case os:getenv("VARP_CORE") of
-		  "varw" -> "varw_nif";
-		  "varc" -> "varc_nif";
-		  false  -> "varw_nif"
-	      end,
-    Nif = filename:join([code:priv_dir(varp), NifCore]),
+    Nif = filename:join([code:priv_dir(varp), "varc_nif"]),
     ?debug("Loading: ~s\n", [Nif]),
     erlang:load_nif(Nif, 0).
 
 new() ->
-    ?nif_stub().
+    new([]).
 
-new(Size) when is_integer(Size), Size >= 0 ->
-    ?nif_stub().
-
-new(Size,Expand) when is_integer(Size), Size >= 0,
-		      is_integer(Expand), Expand >= 0 ->
+new(Options) when is_list(Options) ->
     ?nif_stub().
 
 info(_Vp, Item) when is_atom(Item) ->
@@ -213,9 +203,14 @@ is_equal(_Vp, LitA, LitB) when is_integer(LitA),
 set_level(_Vp,Level) when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
--spec keep_level(Vp::varc(), Mark::integer()) -> ok.
+-spec keep_level(Vp::varc(), Level::integer()) -> ok.
 
-keep_level(_Vp,_Mark) ->
+keep_level(_Vp,_Level) ->
+    ?nif_stub().
+
+-spec move_level(Vp::varc(), From::integer(), To::integer()) -> ok.
+
+move_level(_Vp,_From,_To) ->
     ?nif_stub().
 
 -spec undo_level(Vp::varc(), Level::integer()) -> ok.
@@ -226,32 +221,41 @@ undo_level(_Vp,_Level) ->
 eval(_Vp) ->
     ?nif_stub().
 
--spec add_clause(Vp::varc(),Op::clause_type(),Ls::[literal()]) ->
+-spec add_clause(Vp::varc(),Ls::[literal()]) ->
 			false | error | integer().
 			    
 
-add_clause(_Vp,Op,Ls) when ?is_op(Op), is_list(Ls) ->
+add_clause(_Vp,Ls) when is_list(Ls) ->
     ?nif_stub().
 
--spec add_clause(Vp::varc(),Op::clause_type(),
-		 X1::literal(),X2::literal()) -> ok.
-add_clause(_Vp,_Op,_X1,_X2) ->
+-spec add_clause(Vp::varc(),X1::literal(),X2::literal()) -> ok.
+add_clause(_Vp,_X1,_X2) ->
     ?nif_stub().
 
-add_clause(_Vp,_Op,_X1,_X2,_X3) ->
+add_clause(_Vp,_X1,_X2,_X3) ->
     ?nif_stub().
 
-add_clause(_Vp,_Op,_X1,_X2,_X3,_X4) ->
+add_clause(_Vp,_X1,_X2,_X3,_X4) ->
     ?nif_stub().
 
-add_clause(_Vp,_Op,_X1,_X2,_X3,_X4,_X5) ->
+add_clause(_Vp,_X1,_X2,_X3,_X4,_X5) ->
     ?nif_stub().
 
-add_clause(_Vp,_Op,_X1,_X2,_X3,_X4,_X5,_X6) ->
+add_clause(_Vp,_X1,_X2,_X3,_X4,_X5,_X6) ->
     ?nif_stub().
 
-get_clause(_Vp,Index)
-  when is_integer(Index), Index >= 0 ->
+get_clause(Vp,Index) ->
+    get_clause(Vp,Index,undefined,false).
+
+get_clause(Vp,Index,Skip) ->
+    get_clause(Vp,Index,Skip,false).
+
+-spec get_clause(Vp::varc(), ClauseIndex::integer(),
+		 SkipLiteral::literal(),Raw::boolean()) ->
+			{Type::'or', Clause::[literal()]}.
+
+get_clause(_Vp,Index,_SkipLiteral,Raw)
+  when is_boolean(Raw), is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
 use_clause(_Vp,_Index) ->
@@ -398,7 +402,6 @@ info_keys() ->
      eval_counter,
      undo_stack_size,
      value_stack_size,
-     bcp,
      grow,
      size,
      permanent,

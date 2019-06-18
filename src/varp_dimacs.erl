@@ -40,8 +40,7 @@ load(File) ->
 %% c <chars> 'is' <integer>
 %% 
 parse(Bin) ->
-    preamble(Bin,
-	     #{ decls=>[], order=>[], literals=>[], defs=>[]}, 1).
+    preamble(Bin, varp:empty_sections(), 1).
 
 preamble(Bin,Sect,L) ->
     case binary_line(Bin) of
