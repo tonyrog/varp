@@ -158,7 +158,8 @@ xor_gate(Bs,Y,Xs) ->
 %% build an OR clause with Xs as input
 %% 1 = X1 or X2 .. or Xn
 or_clause(Bs,Xs) ->
-    varc:add_clause(Bs#bs.vp, Xs).
+    varc:add_clause(Bs#bs.vp, Xs),
+    Bs.
 
 clause(Bs,'or',_Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
     add_clause(Bs,[-X,Y,Z]),

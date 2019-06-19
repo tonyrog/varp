@@ -34,12 +34,12 @@ options() ->
       }].
 
 
-run(Bs, _Param) ->
+run(Bs, Param) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:get_info(Bs, permanent),
-    Type = varp_formula:getopt(Bs, reduction_type),
-    case varp_formula:getopt(Bs, reduction) of
+    Type = maps:get(reduction_type, Param),
+    case maps:get(size, Param) of
 	0 ->
 	    Bs;
 	all ->
@@ -146,6 +146,7 @@ or_clause(Bs, CL) ->
     %% add option to add the new clauses?
     %% io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
     varp_formula:or_clause(Bs, CL).
+
 
 emit_def(Bs, Yj, Cs) ->
     io:format("~s == ", [varp_formula:format_lit(Bs,Yj)]),

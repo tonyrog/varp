@@ -24,20 +24,6 @@ options() ->
 	spec => unsigned,
 	default => 0,
 	description => "Max number of models to count or collect, 0=all."
-      },
-     #{ long => "method",
-	key => method,
-	spec => {enum,
-		 [{"collect", collect},
-		  {"count", count}]},
-	default => collect,
-	description => "Count or collect models."
-      },
-     #{ long => "partial",
-	key => partial,
-	spec => {enum,[?BOOL]},
-	default => false,
-	description => "Print partial models when possible."
       }
     ].
 
@@ -47,7 +33,7 @@ run(Bs, Param) ->
     N     = maps:get(max, Param),
     Print = varp_formula:getopt(Bs,print),
     varp_formula:config(Bs, max_conflicting, 1),
-    case maps:get(method, Param) of
+    case varp_formula:getopt(Bs,method) of
 	collect ->
 	    bt(Bs, fun({Count0,Acc},Bs1) ->
 			   Count = Count0+1,

@@ -32,12 +32,12 @@ options() ->
 	description => "Type of rat clauses to try."
       }].
 
-run(Bs, _Param) ->
+run(Bs, Param) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:get_info(Bs, permanent),
-    Type = varp_formula:getopt(Bs, rat_type),
-    case varp_formula:getopt(Bs, rat) of
+    Type = maps:get(rat_type, Param),
+    case maps:get(size, Param) of
 	0 ->
 	    Bs;
 	all ->
@@ -112,9 +112,10 @@ rat_lit(Bs,L,Is,CMax) ->
 		  false ->
 		      ok
 	      end
-      end, Ds).
+      end, Ds),
+    Bs.
 
-rat_test(Bs, [C|Cs], L, D) ->
+rat_test(Bs, [{Cix,C}|Cs], L, D) ->
     Level = 1,
     varp_formula:set_level(Bs,1),
     true = varp_formula:equal(Bs,L,?FALSE),

@@ -29,6 +29,14 @@ global_options() ->
 	default => false,
 	description => "Report result in starexec format"
       },
+     #{ long => "method",
+	key => method,
+	spec => {enum,
+		 [{"collect", collect},
+		  {"count", count}]},
+	default => collect,
+	description => "Count or collect models."
+      },
      #{ long => "print",
 	short => "p",
 	key => print,
@@ -40,6 +48,12 @@ global_options() ->
 	default => model,
 	description => "Print models when found."
       },
+     #{ long => "partial",
+	key => partial,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Print partial models when possible."
+      }
      #{ long => "compress",
 	 short => "g",
 	 key => compress,
@@ -175,14 +189,14 @@ main(Args) ->
     application:start(varp),
 
     Plugins = load_plugins(),
-    io:format("plugins = ~p\n", [Plugins]),
+    %% io:format("plugins = ~p\n", [Plugins]),
 
     GlobalOptionList = global_options(),
     GlobalOptionSpec = varp_option:options_spec(GlobalOptionList),
     GOpts0 = varp_option:default_opts(GlobalOptionList),
-    io:format("options0 = ~p\n", [GOpts0]),
+    %% io:format("options0 = ~p\n", [GOpts0]),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
-    io:format("options1 = ~p\n", [GOpts1]),
+    %% io:format("options1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
 
     {Do1,Files,GOpts2,Bound} =
@@ -191,10 +205,10 @@ main(Args) ->
     Do = if Do1 =/= [] -> Do1;
 	    true -> Do0
 	 end,
-    io:format("do = ~p\n", [Do]),
-    io:format("files = ~p\n", [Files]),
-    io:format("options2 = ~p\n", [GOpts2]),
-    io:format("bound = ~p\n", [Bound]),
+    %% io:format("do = ~p\n", [Do]),
+    %% io:format("files = ~p\n", [Files]),
+    %% io:format("options2 = ~p\n", [GOpts2]),
+    %% io:format("bound = ~p\n", [Bound]),
 
     {ReadIn,{Sections0,Formula0}} =
 	case load_formulas(maps:get(formula,GOpts2,[]), undefined, 'and') of
@@ -372,13 +386,17 @@ do_run(Do, Formula, GOpts) ->
 do([{Plugin,Param}|Do], Bs) ->
     case Plugin:run(Bs, Param) of
 	false ->
-	    false;
-	Bs1 ->
-	    %% check model and output
-	    do(Do, Bs1)
+	    no_models(Bs);
+	Bs1 when is_record(Bs1,bs) ->
+	    case one_model(Bs1) of
+		false -> do(Do, Bs1);
+		Result -> Result
+	    end;
+	Result ->
+	    Result
     end;
-do([], Bs) ->
-    Bs.
+do([], _Bs) ->
+    undefined.
 
 %% extract "method" form Do list
 method(Do) ->
@@ -445,6 +463,35 @@ display_result(undefined,prove,_Bs) ->
     io:format("% UNKNOWN\n", []);
 display_result(undefined,_,_Bs) ->
     io:format("\n", []).
+
+
+%% check if there is already a "unique" model
+one_model(Bs) ->
+    NV = varp_formula:number_of_variables(Bs),
+    NB = varp_formula:number_of_bound(Bs),
+    if NV =:= NB ->
+	    Model = varp:output_model(Bs,1),
+	    case varp_formula:getopt(Bs,method) of
+		collect -> {1,[Model]};
+		count -> 1
+	    end;
+       true ->
+	    false
+    end.
+
+no_models(Bs) ->
+    case varp_formula:getopt(Bs,partial) of
+	true ->
+	    %% print partial model, the variables bound
+	    Mdl = varp_formula:model(Bs),
+	    io:format("partial: ~s\n",[varp_formula:format_model(Mdl)]);
+	false ->
+	    ok
+    end,
+    case varp_formula:getopt(Bs,method) of
+	collect -> {0,[]};
+	count -> 0
+    end.
 
 
 order_decl([]) -> [];
