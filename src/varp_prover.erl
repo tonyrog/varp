@@ -82,7 +82,6 @@ run_formula(F,Bs0) when is_record(Bs0, bs) ->
     {X, Bs} = varp_formula:build(F,Bs0),
     run(X,Bs).
 
-
 run(undefined, Bs) ->
     no_models(Bs);
 run({bool,X}, Bs) ->

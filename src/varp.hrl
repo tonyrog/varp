@@ -107,6 +107,7 @@
 	 clen :: reference(), %% histogram clause len counters(1024)
 	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
+	 main,                %% main formula variable
 	 meta=[],            %% meta variable bindings during build
 	 defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
 	 decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]

@@ -8,7 +8,7 @@
 
 -module(varp_reduction).
 
--export([run/1]).
+-export([run/2]).
 -export([options/0]).
 
 -compile(export_all).
@@ -34,7 +34,7 @@ options() ->
       }].
 
 
-run(Bs) ->
+run(Bs, _Param) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:get_info(Bs, permanent),

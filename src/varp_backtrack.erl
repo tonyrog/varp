@@ -7,7 +7,9 @@
 
 -module(varp_backtrack).
 
--export([run/1]).
+-export([options/0]).
+-export([run/2]).
+
 -compile(export_all).
 
 %% -define(DEBUG, true).
@@ -39,13 +41,13 @@ options() ->
       }
     ].
 
-run(false) ->
+run(false, _Param) ->
     false;
-run(Bs) ->
-    N     = varp_formula:getopt(Bs,max),
+run(Bs, Param) ->
+    N     = maps:get(max, Param),
     Print = varp_formula:getopt(Bs,print),
     varp_formula:config(Bs, max_conflicting, 1),
-    case varp_formula:getopt(Bs,method) of
+    case maps:get(method, Param) of
 	collect ->
 	    bt(Bs, fun({Count0,Acc},Bs1) ->
 			   Count = Count0+1,

@@ -27,7 +27,7 @@ options() ->
       },
      #{ long => "level",
 	short => "k",
-	key => degree,
+	key => level,
 	spec => unsigned, 
 	default => 1,
 	description => "Saturation level."
@@ -43,18 +43,25 @@ options() ->
 	spec => unsigned,
 	default => 0,
 	description => "Threshold for bound variables in saturation round."
+      },
+     #{ long  => "laps",
+	short => "l",
+	key   => laps,
+	spec  => {union,[unsigned,{enum,[{"infinity",infinity}]}]},
+	default => infinity,
+	description => "Max saturation lap count"
       }
      ].
 
 
-run(Bs, Params) ->
+run(Bs, Param) ->
     varp_formula:config(Bs, max_conflicting, 1),
-    K = maps:get(saturate, Params, 1),
-    _Pair = maps:get(pair, Params, false),
-    Order = maps:get(order, Params, undefined),
-    Timeout = maps:get(timeout, Params, infinity),
-    Threshold = maps:get(threshold, Params, 0),
-    Laps = maps:get(laps, Params, infinity),
+    K = maps:get(level, Param, 1),
+    _Pair = maps:get(pair, Param, false),
+    Order = maps:get(order, Param, undefined),
+    Timeout = maps:get(timeout, Param, infinity),
+    Threshold = maps:get(threshold, Param, 0),
+    Laps = maps:get(laps, Param, infinity),
     MaxLaps = max_laps(K, Laps),
     if Order =:= undefined -> ok;
        true -> varp_formula:order_sort(Bs, Order)

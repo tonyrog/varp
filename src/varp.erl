@@ -8,7 +8,6 @@
 -module(varp).
 
 -export([main/1]).
--export([run/3]).
 -export([run_formula/1, run_formula/2]).
 -export([prove_formula/1, prove_formula/2]).
 -export([parse/1, parse/2]).
@@ -18,40 +17,208 @@
 -export([output_model/2]).
 -export([empty_sections/0]).
 
-
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").
+-include("log.hrl").
+
+global_options() ->
+    [
+     #{ long => "starexec",
+	key => starexec,
+	spec =>  {enum,[?BOOL]},
+	default => false,
+	description => "Report result in starexec format"
+      },
+     #{ long => "print",
+	short => "p",
+	key => print,
+	spec => {enum,
+		 [?BOOL,
+		  {"literal",literal},
+		  {"erlang",erlang},
+		  {"model",model}]},
+	default => model,
+	description => "Print models when found."
+      },
+     #{ long => "compress",
+	 short => "g",
+	 key => compress,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "Compress clauses."
+       },
+      #{ long => "seed",
+	 key => seed,
+	 spec => integer,
+	 default => -1,
+	 description => "random seed"
+       },
+      #{ long => "assoc",
+	 key => assoc,
+	 spec => {enum,
+		  [{"left",left},
+		   {"right",right},
+		   {"middle",middle}]}, 
+	 default => left,
+	 description => "Specify the order how all and any are built."
+       },
+      #{ long  => "timeout",
+	 short => "t",
+	 key   => timeout,
+	 spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
+	 default => infinity,
+	 description => "Max time to run in seconds"
+       },
+      #{ long => "carry",
+	 key => carry,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => ignore,
+	 description => "How to handle carry in addition."
+       },
+      #{ long => "borrow",
+	 key => borrow,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => ignore,
+	 description => "How to handle borrow in subtraction."
+       },
+      #{ long => "divz",
+	 key => divz,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => false,
+	 description => "How to handle divide by zero."
+       },
+      #{ long => "log",
+	 key => log,
+	 spec => {enum,
+		  [{"debug",?LOG_LEVEL_DEBUG},
+		   {"info",?LOG_LEVEL_INFO},
+		   {"notice",?LOG_LEVEL_NOTICE},
+		   {"warning",?LOG_LEVEL_WARNING},
+		   {"error",?LOG_LEVEL_ERROR},
+		   {"critical",?LOG_LEVEL_CRITICAL},
+		   {"alert",?LOG_LEVEL_ALERT},
+		   {"emergency",?LOG_LEVEL_EMERGENCY},
+		   {"none",?LOG_LEVEL_NONE}]},
+	 default => ?LOG_LEVEL_NONE,
+	 description => "Output log level."
+       },
+      #{ long => "out",
+	 short => "o",
+	 key => out,
+	 spec => string, 
+	 default => "",
+	 description => "Output file name."
+       },
+      #{ long => "formula",
+	 short => "f",
+	 key => formula,
+	 spec => {multiple,string},
+	 default => [],
+	 description => "Command line formula."
+       },
+      #{ long => "version",
+	 short => "V", 
+	 key => version,
+	 spec => string,
+	 default => vsn(),
+	 description => "Report current version."
+       },
+      #{ long => "help",
+	 short => "h", 
+	 key => help,
+	 spec => void,
+	 default => undefined,
+	 description => "This help."
+       }
+    ].
+
+internal_options() -> %% needed?
+    [
+     #{ key => meta,
+	spec => {set,{string,term}},
+	default => [],  %% ordset
+	description => "Internal list of meta variables and values"},
+     #{ key => defs,
+	spec => {set,{pred,term}},
+	default => [],  %% ordset
+	description => "Internal list of all definitions"},
+     #{ key => decls,
+	spec => {set,{predpat,atom,term}},
+	default => [],  %% ordset
+	description => "Internal list of all declarations"},     
+     #{ key => literals,
+	spec => {set,atom},
+	default => [],  %% ordset
+	description => "Internal list of all literals"},
+     #{ key => assert,
+	spec => {list,term},
+	default => [],  %% list
+	description => "Internal list of all assertions"},
+     #{ key => input,
+	spec => {list,term},
+	default => [],  %% list
+	description => "Internal list of input modules"},
+     #{ key => output,
+	spec => {list,term},
+	default => [],  %% list
+	description => "Internal list of output modules"}
+    ].
+    
+
+vsn() ->
+    case application:get_key(varp,vsn) of
+	{ok,V} -> V;
+	undefined -> "undefined"
+    end.
 
 main(Args) ->
     application:start(varp),
-    io:format("plugins = ~p\n", [application:get_env(varp, plugins)]),
-    XArgs = [],
-    {Mode,Bound,Opts0,Files} = process_args0(Args, XArgs, satisfy),
-    Opts = [{meta,Bound}|Opts0],
+
+    Plugins = load_plugins(),
+    io:format("plugins = ~p\n", [Plugins]),
+
+    GlobalOptionList = global_options(),
+    GlobalOptionSpec = varp_option:options_spec(GlobalOptionList),
+    GOpts0 = varp_option:default_opts(GlobalOptionList),
+    io:format("options0 = ~p\n", [GOpts0]),
+    GOpts1 = load_options(GlobalOptionSpec, GOpts0),
+    io:format("options1 = ~p\n", [GOpts1]),
+    Do0 = load_do(Plugins),
+
+    {Do1,Files,GOpts2,Bound} =
+	process_args(Args, Plugins, [], [], GlobalOptionSpec, GOpts1, []),
+
+    Do = if Do1 =/= [] -> Do1;
+	    true -> Do0
+	 end,
+    io:format("do = ~p\n", [Do]),
+    io:format("files = ~p\n", [Files]),
+    io:format("options2 = ~p\n", [GOpts2]),
+    io:format("bound = ~p\n", [Bound]),
+
     {ReadIn,{Sections0,Formula0}} =
-	case load_formulas(Opts, undefined, 'and') of
+	case load_formulas(maps:get(formula,GOpts2,[]), undefined, 'and') of
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
 	    {ok,R0} -> {false,R0};
 	    __Error -> halt(1)
 	end,
+
+    GOpts3 = section_opts(Sections0, GOpts2#{ meta => Bound }),
+
     case Files of
-	[] when Mode =:= help; Mode =:= version ->
-	    run(Mode, undefined, Opts);
 	[] when not ReadIn ->
-	    Defs0 = maps:get(defs,Sections0),
-	    run(Mode,Formula0,[{defs,Defs0}|Opts]);
+	    do_run(Do, Formula0, GOpts3);
 	[] when ReadIn ->
 	    case read_in() of
 		{ok,<<>>} ->
-		    Defs0 = maps:get(defs,Sections0),
-		    run(Mode,Formula0,[{defs,Defs0}|Opts]);
+		    do_run(Do, Formula0, GOpts3);
 		{ok,Data} ->
 		    case parse("*stdin*", Data) of
 			{ok,{Sections1,Formula}} ->
 			    Formula1 = join_f('and',Formula0,Formula),
 			    Sections = append_sections(Sections0,Sections1),
-			    Opts1 = section_opts(Sections,Opts),
-			    run(Mode,Formula1,Opts1);
+			    GOpts4 = section_opts(Sections,GOpts3),
+			    do_run(Do,Formula1,GOpts4);
 			_Error ->
 			    halt(1)
 		    end;
@@ -61,105 +228,173 @@ main(Args) ->
 	[F] -> %% check if batch mode, run tar/zip over all formulas
 	    case archive_type(F) of
 		undefined ->
-		    case load_files([F],Formula0,Sections0,'and',Opts) of
+		    case load_files([F],Formula0,Sections0,'and',GOpts3) of
 			{ok,{Sections1,Formula}} ->
 			    Sections = append_sections(Sections0,Sections1),
-			    Opts1 = section_opts(Sections, Opts),
-			    run(Mode,Formula,Opts1);
+			    GOpts4 = section_opts(Sections, GOpts3),
+			    do_run(Do,Formula,GOpts4);
 			_Error ->
 			    halt(1)
 		    end;
 		Type ->
-		    run_batch(Mode,Type,F,[{max,1}|Opts])
+		    run_batch(Do,Type,F,GOpts3)
 	    end;
 	Fs ->
-	    case load_files(Fs,Formula0,Sections0,'and',Opts) of
+	    case load_files(Fs,Formula0,Sections0,'and',GOpts3) of
 		{ok,{Sections1,Formula}} ->
 		    Sections = append_sections(Sections0,Sections1),
-		    Opts1 = section_opts(Sections, Opts),
-		    run(Mode,Formula,Opts1);
+		    GOpts4 = section_opts(Sections, GOpts3),
+		    do_run(Do,Formula,GOpts4);
 		_Error ->
 		    halt(1)
 	    end
     end,
     halt(0).
 
-run_batch(Mode,ArchiveType,ArchiveFile,Opts) ->
+
+load_options(OptionSpec,GOpts) ->
+    case application:get_env(varp, options) of
+	undefined -> GOpts;
+	{ok,OptionList} ->
+	    lists:foldl(
+	      fun({Key,Value}, Mi) ->
+		      varp_option:setopt(Key,Value,Mi,OptionSpec)
+	      end, GOpts, OptionList)
+    end.
+
+%% load the do config
+load_do(Plugins) ->
+    case application:get_env(varp, do) of
+	undefined -> [];
+	{ok,Do} ->
+	    %% convert all option lists info maps
+	    %% for all plugins
+	    load_do_(Do, Plugins, [])
+    end.
+
+load_do_([{P, OptionList}|Ps], Plugins, Acc) ->
+    case maps:get(P, Plugins, undefined) of
+	undefined ->
+	    io:format("plugin ~s does not exist\n", [P]),
+	    load_do_(Ps, Plugins, Acc);
+	Mod ->
+	    OptionInfoList = Mod:options(),
+	    OptionSpec = varp_option:options_spec(OptionInfoList),
+	    OptMap = varp_option:default_opts(OptionInfoList),
+	    io:format("mod = ~p\n", [Mod]),
+	    io:format("list = ~p\n", [OptionInfoList]),
+	    io:format("spec = ~p\n", [OptionSpec]),
+	    io:format("map = ~p\n", [OptMap]),
+	    OptMap1 =
+		lists:foldl(
+		  fun({Key,Value}, Mi) ->
+			  varp_option:setopt(Key,Value,Mi,OptionSpec)
+		  end, OptMap, OptionList),
+	    load_do_(Ps, Plugins, [{P, OptMap1}|Acc])
+    end;
+load_do_([], _Plugins, Acc) ->
+    Acc.
+
+%% load a map of plugins Name => Module | Atom => Module
+load_plugins() ->
+    case application:get_env(varp, plugins) of
+	undefined -> [];
+	{ok,Ps} ->
+	    lists:foldl(
+	      fun({ShortName,LongName,Mod},Plugins) ->
+		      case load_plugin(Mod) of
+			  true ->
+			      Plugins#{ ShortName => Mod,
+					list_to_atom(ShortName) => Mod,
+					LongName => Mod,
+					list_to_atom(LongName) => Mod };
+			  false ->
+			      Plugins
+		      end
+	      end, #{}, Ps)
+    end.
+		
+load_plugin(Mod) ->
+    case code:ensure_loaded(Mod) of
+	{module,Mod} ->
+	    case erlang:function_exported(Mod, options, 0) of
+		false ->
+		    io:format("error: options/0 not exported by ~s\n", [Mod]),
+		    false;
+		true ->
+		    true
+	    end 
+		and
+	    case erlang:function_exported(Mod, run, 2) of
+		false ->
+		    io:format("error: run/2 not exported by ~s\n",[Mod]),
+		    false;
+		true ->
+		    true
+	    end;
+	{error,Reason} ->
+	    io:format("error: unabled to load plugin ~p\n", 
+		      [Reason]),
+	    false
+    end.
+
+run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
     {ok,Fs} = archive_file_list(ArchiveType,ArchiveFile),
     lists:foreach(
       fun(F) ->
 	      AFile = filename:join(ArchiveFile,F),
-	      case load_files([AFile],true,empty_sections(),'and',Opts) of
+	      case load_files([AFile],true,empty_sections(),'and',GOpts) of
 		  {ok,{Sections,Formula}} ->
-		      #{order:=Order,
-			decls:=Decls,
-			literals:=Literals,
-			defs:=Defs} = Sections,
+		      #{order := Order,
+			decls := Decls,
+			literals := Literals,
+			defs := Defs} = Sections,
 		      OrderOpts = order_decl(Order),
-		      run(Mode,Formula,
-			  OrderOpts++
-			      [{defs,Defs},
-			       {decls,Decls},
-			       {literals,Literals}|Opts]);
+		      do_run(Do,Formula,
+			     GOpts#{ order => OrderOpts,
+				     defs => Defs,
+				     decls => Decls,
+				     literals => Literals});
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
 		      ok
 	      end
       end, Fs).
 
-run(satisfy, Formula, Opts) ->
-    Bs = varp_formula:new(Opts++[{value,true}]),
-    R = run_formula(Formula,Bs),
-    display_result(R, satisfy, Bs),
-    R;
-run(falsify, Formula, Opts) ->
-    Bs = varp_formula:new(Opts++[{value,false}]),
-    R = run_formula(Formula,Bs),
-    display_result(R, falsify, Bs),
-    R;
-run(prove, Formula, Opts) ->
-    Bs = varp_formula:new(Opts++[{value,false},{max,1},{method,count}]),
-    R = run_formula(Formula,Bs),
-    display_result(R, prove, Bs),
-    R;
-run(none, Formula, Opts) ->
-    Bs = varp_formula:new(Opts),
-    R = run_formula(Formula,Bs),
-    display_result(R, none, Bs),
-    R;
-run(snf, Formula, Opts) ->
-    %% generate dimacs snf from a formula
-    Env = proplists:get_value(env,Opts,[]),
-    F = varp_expand:formula(Formula,Env),
-    %% Cs=clauses and Ls=literals eliminated
-    {Cs,_Ls} = varp_cnf:clauses(F),
-    Data = varp_cnf:format(Cs),
-    case proplists:get_value(output,Opts,"") of
-	"" ->
-	    io:put_chars(Data);
-	FileName ->
-	    file:write_file(FileName, Data)
-    end,
-    ok;
-run(cnf, Formula, Opts) ->
-    %% generate dimacs cnf from a formula
-    Env = proplists:get_value(env,Opts,[]),
-    F = varp_expand:formula(Formula,Env),
-    %% Cs=clauses and Ls=literals eliminated
-    {Cs,_Ls} = varp_cnf:clauses(F),
-    Data = varp_dimacs:format(Cs),
-    case proplists:get_value(output,Opts,"") of
-	"" ->
-	    io:put_chars(Data);
-	FileName ->
-	    file:write_file(FileName, Data)
-    end,
-    ok;
-run(help, _Formula, _Opts) ->
-    varp_option:usage();
-run(version, _Formula, _Opts) ->
-    varp_option:version().
 
+do_run(Do, Formula, GOpts) ->
+    {{bool,Main}, Bs} = varp_formula:build(Formula,GOpts),
+    Bs1 = Bs#bs { main = Main },
+    R = do(Do, Bs1),
+    Method = method(Do),
+    display_result(R, Method, Bs1).
+
+do([{Plugin,Param}|Do], Bs) ->
+    case Plugin:run(Bs, Param) of
+	false ->
+	    false;
+	Bs1 ->
+	    %% check model and output
+	    do(Do, Bs1)
+    end;
+do([], Bs) ->
+    Bs.
+
+%% extract "method" form Do list
+method(Do) ->
+    case lists:keymember(varp_satisfy,1,Do) of
+	true -> satisfy;
+	false ->
+	    case lists:keymember(varp_falsify,1,Do) of
+		true -> falsify;
+		false ->
+		    case lists:keymember(varp_prove,1,Do) of
+			true -> prove;
+			false -> none
+		    end
+	    end
+    end.
+    
 display_result({N,_Models}, Method, Bs) ->
     display_result(N, Method, Bs);
 display_result(0, satisfy, Bs) ->
@@ -240,7 +475,7 @@ order_decl([],Opts) ->
     end.
 
 %% load files and form a conjunction over all files
-load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
+load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
 	    {ok, Data} = read_file(F),
@@ -252,21 +487,21 @@ load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
 		    %% io:format("% loaded: ~p\n", [Cnf]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
 		    Sections1 = append_sections(Sections, Sections0),
-		    load_files(Fs,Formula1,Sections1,JoinOp,Opts);
+		    load_files(Fs,Formula1,Sections1,JoinOp,GOpts);
 		Snf = {snf,{_NVars,_NClauses,Sections0,_Ls,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Snf]),
 		    Formula1 = join_f(JoinOp,Snf,Formula0),
 		    Sections1 = append_sections(Sections, Sections0),
-		    load_files(Fs,Formula1,Sections1,JoinOp,Opts)
+		    load_files(Fs,Formula1,Sections1,JoinOp,GOpts)
 	    end;
        Ext =:= ".dat"; Ext =:= ".txt" -> %% fixme
 	    %% try input modules
 	    Input = maps:get(input, Sections, []),
-	    Meta  = proplists:get_value(meta,Opts,[]),
+	    Meta  = maps:get(meta,GOpts,[]),
 	    case varp_input(Input, F, Meta) of
 		{ok,Formula} ->
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
-		    load_files(Fs,Formula1,Sections,JoinOp,Opts);
+		    load_files(Fs,Formula1,Sections,JoinOp,GOpts);
 		Error ->
 		    Error
 	    end;
@@ -278,12 +513,12 @@ load_files([F|Fs],Formula0,Sections,JoinOp,Opts) ->
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
 		    load_files(Fs,Formula1,
 			       append_sections(Sections,Sections1),
-			       JoinOp,Opts);
+			       JoinOp,GOpts);
 		Error ->
 		    Error
 	    end
     end;
-load_files([],Formula,Sections,_JoinOp,_Opts) ->
+load_files([],Formula,Sections,_JoinOp,_GOpts) ->
     {ok,{Sections,Formula}}.
 
 
@@ -405,11 +640,10 @@ fjoin(Fs) -> filename:join(Fs).
 
 
 %% load/parse formulas given on command line like -f "A && B"
-load_formulas(Opts, A, JoinOp) ->
-    case proplists:get_all_values(formula, Opts) of
-	[] -> {ok,{empty_sections(),A}};
-	Fs -> parse_formulas(Fs,A,empty_sections(),JoinOp)
-    end.
+load_formulas([], A, _JoinOp) ->
+    {ok,{empty_sections(),A}};
+load_formulas(Fs, A, JoinOp) ->
+    parse_formulas(Fs,A,empty_sections(),JoinOp).
 
 parse_formulas([F|Fs], Formula, Sections0,JoinOp) ->
     case parse("*command-line*", F) of
@@ -421,6 +655,7 @@ parse_formulas([F|Fs], Formula, Sections0,JoinOp) ->
     end;
 parse_formulas([], Formula, Sections, _JoinOp) ->
     {ok,{Sections,Formula}}.
+
 
 empty_sections() ->
     #{ decls=>[], order=>[], literals=>[], defs=>[], 
@@ -446,40 +681,40 @@ section_opts(#{ decls := Decls,
 		defs := Defs,
 		assert := Assert,
 		input := Input,
-		output := Output
-	      }, Opts0) ->
-    order_decl(Order) ++
-	[{defs,Defs},
-	 {decls,Decls},
-	 {literals,Literals},
-	 {assert,Assert},
-	 {input,Input},
-	 {output,Output}
-	 | Opts0].
+		output := Output },
+	     GOpts) ->
+    GOpts#{
+	   order => order_decl(Order),
+	   defs => Defs,
+	   decls => Decls,
+	   literals => Literals,
+	   assert => Assert,
+	   input => Input,
+	   output => Output}.
     
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;
 join_f(JoinOp,A,B) -> {JoinOp,A,B}.
 
-%% check "base" mode satisfy|falsify|prove
-process_args0(["satisfy"|As], Bs, _Mode) ->
-    varp_option:process_args(Bs++As, satisfy);
-process_args0(["falsify"|As], Bs, _Mode) ->
-    varp_option:process_args(Bs++As, falsify);
-process_args0(["prove"|As], Bs, _Mode) ->
-    varp_option:process_args(Bs++As, prove);
-process_args0(["cnf"|As], Bs, _Mode) ->
-    varp_option:process_args(Bs++As, cnf);
-process_args0(["snf"|As], Bs, _Mode) ->
-    varp_option:process_args(Bs++As, snf);
-process_args0(["help"|As],Bs, _Mode) ->
-    varp_option:process_args(Bs++As, help);
-process_args0(["version"|As],Bs,_Mode) ->
-    varp_option:process_args(Bs++As, version);
-process_args0(["none"|As], Bs, _Mode) ->
-    varp_option:process_args(Bs++As, nonde);
-process_args0(As, Bs, Mode) ->
-    varp_option:process_args(Bs++As, Mode).
+process_args(As=[[$-|_]|_], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
+    {As1,GOpts1,Bound1} = 
+	varp_option:process_args(As, GOptSpec, GOpts, Bound),
+    process_args(As1,Plugins,Do,Files,GOptSpec,GOpts1,Bound1);    
+process_args([Arg|As], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
+    case maps:get(Arg, Plugins, undefined) of
+	undefined ->
+	    process_args(As,Plugins,Do,[Arg|Files],GOptSpec,GOpts,Bound);
+	Mod ->
+	    OptionInfoList = Mod:options(),
+	    OptionSpec = varp_option:options_spec(OptionInfoList),
+	    OptMap = varp_option:default_opts(OptionInfoList),
+	    {As1,OptMap1,Bound1} = 
+		varp_option:process_args(As, OptionSpec, OptMap, Bound),
+	    process_args(As1, Plugins, [{Mod, OptMap1}|Do], Files,
+			 GOptSpec,GOpts,Bound1)
+    end;
+process_args([], _Plugins, Do, Files,_GOptSpec,GOpts,Bound) ->
+    {lists:reverse(Do), lists:reverse(Files), GOpts, Bound}.
 
 
 read_in() ->

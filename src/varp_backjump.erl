@@ -7,7 +7,7 @@
 
 -module(varp_backjump).
 
--export([run/1]).
+-export([run/2]).
 -export([options/0]).
 
 %% -define(DEBUG, true).
@@ -111,17 +111,15 @@ options() ->
     ].
      
 
-
-
-run(false) ->
+run(false, _Param) ->
     false;
-run(Bs) ->
+run(Bs, Param) ->
     varp_formula:config(Bs, max_conflicting, 0),
     varp_formula:config(Bs, permanent, 0),
-    MaxLearned = max_learned(Bs),
+    MaxLearned = max_learned(Bs,Param),
     %% Calculate size of lru cache
-    KeepFactor = varp_formula:getopt(Bs, keep_factor),
-    MinKeep    = varp_formula:getopt(Bs, min_keep_clauses),
+    KeepFactor = maps:get(keep_factor, Param),
+    MinKeep    = maps:get(min_keep_clauses, Param),
     KeepSize   = if MaxLearned =:= 0 ->
 			 0;
 		    KeepFactor > 0, MinKeep > 0 ->
@@ -137,40 +135,40 @@ run(Bs) ->
     varp_formula:config(Bs, keep, KeepSize),
     io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
 	      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]),
-    case varp_formula:getopt(Bs, restart_counter) of
+    case maps:get(restart_counter,Param) of
 	0 -> ok;
 	_ ->
 	    EvalCounter = varp_formula:get_info(Bs, eval_counter),
 	    counters:put(Bs#bs.counters,?COUNTER_EVAL_COUNTER, EvalCounter)
     end,
-    case varp_formula:getopt(Bs, restart_interval) of
+    case maps:get(restart_interval,Param) of
 	0 -> ok;
 	RestartInterval ->
 	    erlang:start_timer(RestartInterval, self(), restart)
     end,
-    init(Bs, MaxLearned).
+    init(Bs, Param, MaxLearned).
 
-init(Bs, MaxLearned) ->
-    loop(Bs,?TOP_LEVEL,MaxLearned,varp_formula:first_init(Bs),[]).
+init(Bs, Param, MaxLearned) ->
+    loop(Bs,Param,?TOP_LEVEL,MaxLearned,varp_formula:first_init(Bs),[]).
 
-loop(Bs,Level,MaxLearned,I,Stack) ->
+loop(Bs,Param,Level,MaxLearned,I,Stack) ->
     Eval = varp_formula:eval(Bs),
     case Eval of
 	false ->
 	    if Level =:= 0 ->
-		    display_stat(Bs),
+		    display_stat(Bs,Param),
 		    0;
 	       true ->
-		    contradiction(Bs,Level,MaxLearned,I,Stack)
+		    contradiction(Bs,Param,Level,MaxLearned,I,Stack)
 	    end;
 	true ->
-	    next(Bs,Level,MaxLearned,I,Stack)
+	    next(Bs,Param,Level,MaxLearned,I,Stack)
     end.
 
-contradiction(Bs,Level,MaxLearned,_I,Stack) ->
-    ClauseList0 = conflict_analysis(Bs,Level),
+contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
+    ClauseList0 = conflict_analysis(Bs,Param,Level),
     ClauseList1 = 
-	lists:usort([ minimize(Bs, Clause) || Clause <- ClauseList0]),
+	lists:usort([ minimize(Bs,Param,Clause) || Clause <- ClauseList0]),
 
     LClauseList1 = [{length(Clause),Clause} || Clause <- ClauseList1],
 
@@ -221,7 +219,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 			      LClauseList4),
 
     LClauseList6 = 
-	case varp_formula:getopt(Bs, iorder) of
+	case maps:get(iorder,Param) of
 	    0 -> 
 		LClauseList5;
 	    IOrder ->
@@ -229,7 +227,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 				LClauseList5)
 	end,
 
-    LClauseList7 = case varp_formula:getopt(Bs, max_conflicts) of
+    LClauseList7 = case maps:get(max_conflicts,Param) of
 		       0 -> 
 			   LClauseList6;
 		       1 ->
@@ -238,9 +236,9 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 			   lists:sublist(LClauseList6, MaxC-1)
 		   end,
 
-    L = varp_formula:getopt(Bs,stumble),
-    K = varp_formula:getopt(Bs,olle),
-    M = varp_formula:getopt(Bs,stumble_olle),
+    L = maps:get(stumble,Param),
+    K = maps:get(olle,Param),
+    M = maps:get(stumble_olle,Param),
 
     JLevel =
 	case JClause of
@@ -294,7 +292,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
     DoPurge = varp_formula:get_info(Bs2, keep) > 0,
 
     DoRestartCount =
-	case varp_formula:getopt(Bs, restart_counter) of
+	case maps:get(restart_counter,Param) of
 	    0 -> false;
 	    RestartCounter ->
 		EvalCounter = varp_formula:get_info(Bs, eval_counter),
@@ -311,7 +309,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
     DoRestartTime = 
 	receive 
 	    {timeout,_Timer,restart} ->
-		RestartInterval = varp_formula:getopt(Bs, restart_interval),
+		RestartInterval = maps:get(restart_interval,Param),
 		erlang:start_timer(RestartInterval, self(), restart),
 		true
 	after 0 ->
@@ -333,7 +331,7 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", 
 		      [Learned, MaxLearned,Learned1,NU]),
 	    %%
-	    init(Bs, MaxLearned);
+	    init(Bs,Param,MaxLearned);
        DoPurge, Learned >= MaxLearned ->
 	    %% restart and purge!
 
@@ -345,16 +343,16 @@ contradiction(Bs,Level,MaxLearned,_I,Stack) ->
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
 	    reorder(Bs),
-	    init(Bs, MaxLearned);
+	    init(Bs,Param,MaxLearned);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
 	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:set_level(Bs, ?TOP_LEVEL),
 	    reorder(Bs),
-	    init(Bs, MaxLearned);
+	    init(Bs,Param, MaxLearned);
        true ->
-	    loop(Bs2,JLevel,MaxLearned,INext,Stack1)
+	    loop(Bs2,Param,JLevel,MaxLearned,INext,Stack1)
     end.
 
 reorder(Bs) ->
@@ -390,18 +388,18 @@ pop_until(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
 pop_until(Bs,[],_JLevel) ->
     {varp_formula:first_init(Bs), []}.
 
-next(Bs,Level,MaxLearned,I,Stack) ->
+next(Bs,Param,Level,MaxLearned,I,Stack) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
 	    model(Bs),
-	    display_stat(Bs),
+	    display_stat(Bs,Param),
 	    1;
 	{J,Xj} ->
 	    NextLevel = Level+1,
 	    varp_formula:set_level(Bs,NextLevel),
 	    true = varp_formula:equal(Bs,Xj,?TRUE),
 	    ?dbg("decision@~w = ~s\n", [NextLevel,format_lit(Bs,Xj)]),
-	    loop(Bs,NextLevel,MaxLearned,J,[{J,Xj,NextLevel}|Stack])
+	    loop(Bs,Param,NextLevel,MaxLearned,J,[{J,Xj,NextLevel}|Stack])
     end.
 
 %% J2 is backjump level, J3 is backstumble level
@@ -444,10 +442,10 @@ do_stat(Bs, D1, D2) ->
     end.
 
 
-max_learned(Bs) ->
+max_learned(Bs,Param) ->
     Permanent = varp_formula:get_info(Bs, permanent),
-    MaxLearnedClauses = varp_formula:getopt(Bs, max_learned),
-    MaxLearnedFactor = varp_formula:getopt(Bs, max_learned_factor),
+    MaxLearnedClauses = maps:get(max_learned,Param),
+    MaxLearnedFactor = maps:get(max_learned_factor,Param),
     io:format("Permanent=~w, MaxLearnedClause=~w, MaxLearnedFactor=~w\n",
 	      [Permanent, MaxLearnedClauses, MaxLearnedFactor]),
     if MaxLearnedFactor > 0, MaxLearnedClauses > 0 ->
@@ -460,7 +458,7 @@ max_learned(Bs) ->
 	    0
     end.
 
-display_stat(Bs) ->
+display_stat(Bs,_Param) ->
     io:format("num conflict clauses added: ~w\n", 
 	      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
     io:format("num conflict ilterals: ~w\n",
@@ -529,8 +527,8 @@ add_conflict_clause(Bs,Clause) ->
 	    Bs
     end.
 
-compress(Bs,Clause) ->
-    case varp_formula:getopt(Bs,compress) of
+compress(Bs,Param,Clause) ->
+    case maps:get(compress,Param) of
 	true ->
 	    Len = length(Clause),
 	    if Len > 2 ->
@@ -556,10 +554,10 @@ compress(Bs,Clause) ->
 compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
 compress_([_Ln]) -> [].
 
-minimize(_Bs,[]) -> [];
-minimize(_Bs,Clause=[_]) -> Clause;
-minimize(Bs,Clause0) ->
-    case varp_formula:getopt(Bs,minimize) of
+minimize(_Bs,_Param,[]) -> [];
+minimize(_Bs,_Param,Clause=[_]) -> Clause;
+minimize(Bs,Param,Clause0) ->
+    case maps:get(minimize,Param) of
 	true ->
 	    Clause = sort_abs_clause(Clause0),
 	    %% io:format("minimize: ~p\n", [Clause]),
@@ -595,14 +593,14 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
     {Removed,Length,lists:reverse(NewClause)}.
 
-conflict_analysis(Bs,Level) ->
+conflict_analysis(Bs,Param,Level) ->
     Trail= [P|_] = get_literal_bindings(Bs,Level),
     ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
     Seen0 = #{ abs(P) => true }, %% a set of traversed literals
     N = varp_formula:get_info(Bs,num_conflicting),
     CList = [ {I,varp_formula:conflicting_clause(Bs,I)} || 
 		I <- lists:seq(0, N-1)],
-    M = varp_formula:getopt(Bs, num_conflicts),
+    M = maps:get(num_conflicts,Param),
     L = if M =:= 0 -> N;
 	   true -> min(M, N)
 	end,

@@ -1,0 +1,80 @@
+%%% @author Tony Rogvall <tony@rogvall.se>
+%%% @copyright (C) 2019, Tony Rogvall
+%%% @doc
+%%%    varp plugin to order variables
+%%% @end
+%%% Created : 18 Jun 2019 by Tony Rogvall <tony@rogvall.se>
+
+-module(varp_order).
+-export([options/0, run/2]).
+
+-include("varp.hrl").
+
+options() ->
+    [#{ long => "sort",
+	key => sort,
+	spec => {list,{enum,[?ORDER]}},
+	default => [identity],
+	description => "Specifiy variable order."
+      },
+     #{ long => "first",
+	short => "f",
+	key => first,
+	spec => {list,literal},
+	default => [],
+	description => "Literals sorted first."
+      },
+     #{ long => "last",
+	short => "l",
+	key => last,
+	spec => {list,literal},
+	default => [],
+	description => "Literals sorted last."
+      },
+     #{ long => "display",
+	short => "d",
+	key => display_order,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Display declared variable order."
+      }].
+
+run(Bs, Par) ->
+    order_literals(Bs, Par).
+
+order_literals(Bs, Par) ->
+    Seed = maps:get(seed,Par),
+    case maps:get(order,Par) of
+	[Key1,Key2] -> 
+	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
+	[Key1] -> 
+	    varp_formula:order_sort(Bs,Key1,undefined,Seed)
+    end,
+    Bs1 = case maps:get(first,Par) of
+	      [] -> Bs;
+	      First -> varp_formula:order_sort_first(Bs,First)
+	  end,
+    Bs2 = case maps:get(last,Par) of
+	      [] -> Bs1;
+	      Last -> varp_formula:order_sort_last(Bs1,Last)
+	  end,
+    display_order(Bs2,Par),
+    Bs2.
+    
+display_order(Bs,Par) ->
+    case maps:get(display,Par) of
+	false ->
+	    ok;
+	true ->
+	    Order = collect_order(Bs,varp_formula:first_init(Bs),[]),
+	    lists:foreach(fun(V) ->
+				  io:format("~s ",[varp_formula:fmt_var(Bs,V)])
+			  end, Order),
+	    io:format("\n")
+    end.
+
+collect_order(Bs,I,Acc) ->
+    case varp_formula:next_unbound(Bs,I) of
+	false -> lists:reverse(Acc);
+	{J,Xj} -> collect_order(Bs,J,[Xj|Acc])
+    end.

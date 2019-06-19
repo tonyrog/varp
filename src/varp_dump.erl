@@ -23,6 +23,7 @@ options() ->
       #{ long => "raw",
 	 short => "r",
 	 key   => raw,
+	 spec => {enum,[?BOOL]},
 	 default => false,
 	 description => "Dump 'raw' clauses."
        }

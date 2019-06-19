@@ -105,8 +105,8 @@
 new() ->
     new(varp_option:default_option()).
 
-new(OptList) when is_list(OptList) ->
-    new(varp_option:set_opts(OptList));
+new(Options) when is_list(Options) ->
+    new(maps:from_list(Options));  %% fixme validate?
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([]),
     Counters = counters:new(?NUM_COUNTERS, []),

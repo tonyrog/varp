@@ -7,27 +7,24 @@
 
 -module(varp_option).
 
--export([set_opts/1, set_opts/2]).
--export([default_opts/0]).
--export([setopt/3, getopt/2]).
--export([usage/0]).
+-export([getopt/2]).
+-export([setopt/4]).
+-export([usage/1, usage/2, usage/3]).
 
--export([options/0]).
--export([process_args/2]).
 -export([process_args/4]).
 
--export([key_options/0]).
 -export([default_opts/1]).
--export([options_string_map/1]).
+-export([options_spec/1]).
+-export([options_spec_list/1]).
 
 -include("log.hrl").
 
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
-
 %% debug/test
 -export([match_value/3]).
+
 %%
 %% Option format:
 %%  --long 123
@@ -36,409 +33,9 @@
 %%  -l 123
 %%  -l123
 %%
+%% fixme: boolean options -lax == -l true -a true -x true
+%% 
 
-options() ->
-    V1 = #{ long => "value",
-	    short => "v",
-	    key => value,
-	    spec => {enum,[?BOOL,{"none", none}]},
-	    default => none,
-	    description => "Main formula variable value."},
-    V2 = #{ long => "print",
-	    short => "p",
-	    key => print,
-	    spec => {enum,
-		     [?BOOL,
-		      {"literal",literal},
-		      {"erlang",erlang},
-		      {"model",model}]},
-	    default => model,
-	    description => "Print models when found."
-	  },
-    V3 = #{ long => "partial",
-	    key => partial,
-	    spec => {enum,[?BOOL]},
-	    default => false,
-	    description => "Print partial models when possible."
-	  },
-    V4 = #{ long => "method",
-	    key => method,
-	    spec => {enum,
-		     [{"collect", collect},
-		      {"count", count}]},
-	    default => collect,
-	    description => "Count or collect models."
-	  },
-    V5 = #{ long => "max",
-	    short => "n",
-	    key => max,
-	    spec => unsigned,
-	    default => 0,
-	    description => "Max number of models to count or collect, 0=all."
-	  },
-    V6 = #{ long => "order",
-	    key => order,
-	    spec => {list,{enum,[?ORDER]}},
-	    default => [identity],
-	    description => "Specifiy variable order."
-	  },
-    V61 = #{ long => "order-first",
-	     key => order_first,
-	     spec => {list,literal},
-	     default => [],
-	     description => "Literals sorted first."
-	   },
-    V62 = #{ long => "order-last",
-	     key => order_last,
-	     spec => {list,literal},
-	     default => [],
-	     description => "Literals sorted last."
-	   },
-    V63 = #{ long => "display-order",
-	     short => "d",
-	     key => display_order,
-	     spec => {enum,[?BOOL]},
-	     default => false,
-	     description => "Display declared variable order."
-	   },
-
-    V8 = #{ long => "saturate",
-	    short => "s",
-	    key => saturate,
-	    spec => unsigned, 
-	    default => undefined,
-	    description => "Saturation level."
-	  },
-    V9 = #{ long => "backtrack",
-	    short => "b",
-	    key => backtrack,
-	    spec => {enum,[?BOOL]},
-	    default => true,
-	    description => "Use backtracking."
-	  },
-    V91 = #{ long => "backjump",
-	     short => "j",
-	     key => backjump,
-	     spec => {enum,[?BOOL]},
-	     default => false,
-	     description => "Use backjumping during backtrack."
-	  },
-    V92 = #{ long => "minimize",
-	     short => "z",
-	     key => minimize,
-	     spec => {enum,[?BOOL]},
-	     default => true,
-	     description => "Use conflict clause minimization."
-	   },
-    V93 = #{ long => "compress",
-	     short => "g",
-	     key => compress,
-	     spec => {enum,[?BOOL]},
-	     default => false,
-	     description => "Compress clauses."
-	   },
-    V10 = #{ long => "pair",
-	     key => pair,
-	     spec => {enum,[?BOOL]},
-	     default => false,
-	     description => "Add extra variable in saturation."
-	   },
-    V11 = #{ long => "assoc",
-	     key => assoc,
-	     spec => {enum,
-		      [{"left",left},
-		       {"right",right},
-		       {"middle",middle}]}, 
-	     default => left,
-	     description => "Specify the order how all and any are built."
-	   },
-    V12 = #{ long => "threshold",
-	     key => threshold,
-	     spec => unsigned,
-	     default => 0,
-	     description => "Threshold for bound variables in saturation round"
-	   },
-    V12t = #{ long  => "timeout",
-	      short => "t",
-	      key   => timeout,
-	      spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
-	      default => infinity,
-	      description => "Max time to run saturation in milliseconds"
-	    },
-    V12l = #{ long  => "laps",
-	      short => "l",
-	      key   => laps,
-	      spec  => {union,[unsigned,{enum,[{"infinity",infinity}]}]},
-	      default => infinity,
-	      description => "Max saturation lap count"
-	    },
-    V13 = #{ long => "carry",
-	     key => carry,
-	     spec => {enum,[?BOOL,{"ignore",ignore}]},
-	     default => ignore,
-	     description => "How to handle carry in addition."
-	   },
-    V14 = #{ long => "borrow",
-	     key => borrow,
-	     spec => {enum,[?BOOL,{"ignore",ignore}]},
-	     default => ignore,
-	     description => "How to handle borrow in subtraction."
-	   },
-    V15 = #{ long => "divz",
-	     key => divz,
-	     spec => {enum,[?BOOL,{"ignore",ignore}]},
-	     default => false,
-	     description => "How to handle divide by zero."
-	   },
-    V16 = #{ long => "log",
-	     key => log,
-	     spec => {enum,
-		      [{"debug",?LOG_LEVEL_DEBUG},
-		       {"info",?LOG_LEVEL_INFO},
-		       {"notice",?LOG_LEVEL_NOTICE},
-		       {"warning",?LOG_LEVEL_WARNING},
-		       {"error",?LOG_LEVEL_ERROR},
-		       {"critical",?LOG_LEVEL_CRITICAL},
-		       {"alert",?LOG_LEVEL_ALERT},
-		       {"emergency",?LOG_LEVEL_EMERGENCY},
-		       {"none",?LOG_LEVEL_NONE}]},
-	     default => ?LOG_LEVEL_NONE,
-	     description => "Output log level."
-	   },
-    V17 = #{ long => "out",
-	     short => "o",
-	     key => out,
-	     spec => string, 
-	     default => "",
-	     description => "Output file name."
-	   },
-    V18 = #{ long => "formula",
-	     short => "f",
-	     key => formula,
-	     spec => {multiple,string},
-	     default => [],
-	     description => "Command line formula."
-	   },
-    V19 = #{ long => "version",
-	     short => "V", 
-	     key => version,
-	     spec => string,
-	     default => vsn(),
-	     description => "Report current version."
-	   },
-    V20 = #{ long => "help",
-	     short => "h", 
-	     key => help,
-	     spec => void,
-	     default => undefined,
-	     description => "This help."
-	   },
-    V21 = #{ key => meta,
-	     spec => {set,{string,term}},
-	     default => [],  %% ordset
-	     description => "Internal list of meta variables and values"},
-    V22 = #{ key => defs,
-	     spec => {set,{pred,term}},
-	     default => [],  %% ordset
-	     description => "Internal list of all definitions"},
-    V23 = #{ key => decls,
-	     spec => {set,{predpat,atom,term}},
-	     default => [],  %% ordset
-	     description => "Internal list of all declarations"},
-    V25 = #{ key => saturations,
-	     spec => {list,term},
-	     default => [],
-	     description => "Internal sequence of saturations"},
-    V26 = #{ key => literals,
-	     spec => {set,atom},
-	     default => [],  %% ordset
-	     description => "Internal list of all literals"},
-    V26_1 = #{ key => assert,
-	       spec => {list,term},
-	       default => [],  %% list
-	       description => "Internal list of all assertions"},
-    V26_2 = #{ key => input,
-	       spec => {list,term},
-	       default => [],  %% list
-	       description => "Internal list of input modules"},
-    V26_3 = #{ key => output,
-	       spec => {list,term},
-	       default => [],  %% list
-	       description => "Internal list of output modules"},
-
-    V27 = #{ long => "iorder",
-	     key => iorder,
-	     spec => unsigned,
-	     default => 0,
-	     description => "max conflict clause length"},
-
-    V28 = #{ long => "stumble",
-	     key => stumble,
-	     spec => unsigned,
-	     default => 0,
-	     description => "extra backjump level"},
-
-    V29 = #{ long => "olle",
-	     key => olle,
-	     spec => float,
-	     default => 0,
-	     description => "extra backjump factor"},
-
-    V30 = #{ long => "stumble-olle",
-	     key => stumble_olle,
-	     spec =>  {enum,[?BOOL]},
-	     default => false,
-	     description => "both backjump and factor"},
-
-    V31 = #{ long => "seed",
-	     key => seed,
-	     spec => integer,
-	     default => -1,
-	     description => "random seed"},
-
-    V33 = #{ long => "max-conflicts",
-	     key => max_conflicts,
-	     spec =>  unsigned,
-	     default => 0,
-	     description => "max number of conflicts to generate per conflict"},
-
-    V34 = #{ long => "num-conflicts",
-	     key => num_conflicts,
-	     spec =>  unsigned,
-	     default => 1,
-	     description => "number of conflicts to analyse"},
-
-    V35 = #{ long => "max-learned",
-	     key => max_learned,
-	     spec =>  unsigned,
-	     default => 0,
-	     description => "Max number of clauses to generate in learning"},
-
-    V36 = #{ long => "max-learned-factor",
-	     key => max_learned_factor,
-	     spec =>  float,
-	     default => 0,
-	     description => "Factor to calculate number of learned clauses"},
-
-    V37 = #{ long => "keep-factor",
-	     key => keep_factor,
-	     spec =>  float01,
-	     default => 0.5,
-	     description => "Number of clauses to keep"},
-
-    V38 = #{ long => "min-keep-clauses",
-	     key => min_keep_clauses,
-	     spec =>  unsigned,
-	     default => 0,
-	     description => "Min number of clauses to keep"},
-
-    V39 = #{ long => "restart-counter",
-	     key => restart_counter,
-	     spec =>  unsigned,
-	     default => 0,
-	     description => "Number of counts/eval until restart"},
-
-    V40 = #{ long => "restart-interval",
-	     key => restart_interval,
-	     spec =>  unsigned,
-	     default => 0,
-	     description => "Restart interval in milliseconds"},
-
-    V41 = #{ long => "starexec",
-	     key => starexec,
-	     spec =>  {enum,[?BOOL]},
-	     default => false,
-	     description => "Report result in starexec format"},
-
-    V42 = #{ long => "reduction",
-	     short => "r",
-	     key => reduction,
-	     spec => {union,[unsigned,{enum,[{"all",all}]}]},
-	     default => 0,
-	     description => "Add literal reduction clauses."
-	  },
-    V43 = #{ long => "reduction-type",
-	     short => "R",
-	     key => reduction_type,
-	     spec => {enum,[{"both",both},{"min",min},{"pos",pos},{"neg",neg}]},
-	     default => min,
-	     description => "Type of reductions clauses."
-	  },
-    V44 = #{ long => "dump",
-	     key => dump,
-	     spec => integer,
-	     default => -1,
-	     description => "dump clauses at phase i"
-	   },
-
-    %% now build a map from long/short => Vi (will be a literal)
-    #{ value => V1, "value" => V1, "v" => V1,
-       print => V2, "print" => V2, "p" => V2,
-       partial => V3, "partial" => V3,
-       method  => V4, "method"  => V4,
-       max => V5, "max" => V5, "n" => V5,
-       order => V6, "order" => V6,
-       order_first => V61, "order_first" => V61, "order-first" => V61,
-       order_last => V62, "order_last" => V62, "order-last" => V62,
-       display_order => V63, 
-       "display_order" => V63,
-       "display-order" => V63,
-       "d" => V63,
-       saturate => V8, "saturate" => V8, "s" => V8,
-       backtrack => V9, "backtrack" => V9, "b" => V9,
-       backjump => V91, "backjump" => V91, "j" => V91,
-       minimize => V92, "minimize" => V92, "z" => V92,
-       compress => V93, "compress" => V93, "g" => V93,
-       pair => V10, "pair" => V10,
-       assoc => V11, "assoc" => V11,
-       threshold => V12, "threshold" => V12,
-       timeout => V12t, "timeout" => V12t, "t" => V12t,
-       laps => V12l, "laps" => V12l, "l" => V12l,
-       carry => V13, "carry" => V13,
-       borrow => V14, "borrow" => V14,
-       divz => V15, "divz" => V15,
-       log => V16, "log" => V16,
-       out => V17, "out" => V17, "o" => V17,
-       formula => V18, "formula" => V18, "f" => V18,
-       version => V19, "version" => V19, "V" => V19,
-       help => V20, "help" => V20, "h" => V20,
-       meta => V21,
-       defs => V22,
-       decls => V23,
-       literals => V26,
-       assert => V26_1,
-       input => V26_2,
-       output => V26_3,
-       saturations => V25,
-       %% Backjump options
-       iorder => V27, "iorder" => V27, "i" => V27,
-       stumble => V28, "stumble" => V28, 
-       olle => V29, "olle" => V29,
-       stumble_olle => V30, "stumble_olle" => V30, "stumble-olle" => V30,
-       seed => V31, "seed" => V31,
-       max_conflicts => V33, "max_conflicts" => V33, "max-conflicts" => V33,
-       num_conflicts => V34, "num_conflicts" => V34, "num-conflicts" => V34,
-       max_learned => V35, "max_learned" => V35, "max-learned" => V35,
-       max_learned_factor => V36, 
-       "max_learned_factor" => V36,
-       "max-learned-factor" => V36,
-       keep_factor => V37, 
-       "keep_factor" => V37,
-       "keep-factor" => V37,
-       min_keep_clauses => V38,
-       "min_keep_clauses" => V38,
-       "min-keep-clauses" => V38,
-       restart_counter=>V39, 
-       "restart_counter"=>V39,
-       "restart-counter"=>V39,
-       restart_interval=>V40,
-       "restart_interval"=>V40,
-       "restart-interval"=>V40,
-       starexec=>V41, "starexec"=>V41,
-       reduction=>V42, "reduction"=>V42, "r"=>V42,
-       reduction_type=>V43, "reduction-type"=>V43, "R"=>V43,
-       dump=>V44, "dump"=>V44
-     }.
 
 %% Given a option list construct a map
 %% from keywords to options
@@ -446,98 +43,99 @@ options() ->
 %% Long_ :: string() => OptMap
 %% Short ::string()  => OptMap
 %% Key :: atom()     => OptMap
-options_string_map(Options) ->
+options_spec(OptionInfoList) ->
     lists:foldl(
-      fun(OptMap = #{ key := Key}, M0) ->
-	      M1 = M0#{ Key => OptMap },
-	      M2 = add_mapping(short, OptMap, M1),
-	      M3 = add_mapping(long, OptMap, M2),
-	      M4 = add_mapping(long, fun tr_/1, OptMap, M3),
+      fun(Info = #{ key := Key}, M0) ->
+	      M1 = M0#{ Key => Info },
+	      M2 = add_mapping(short, Info, M1),
+	      M3 = add_mapping(long, Info, M2),
+	      M4 = add_mapping(long, fun tr_/1, Info, M3),
 	      M4
-      end, #{}, Options).
+      end, #{}, OptionInfoList).
 
 %% translate $- into $_
 tr_([$-|Cs]) -> [$_|tr_(Cs)];
 tr_([C|Cs]) ->  [C|tr_(Cs)];
 tr_([]) -> [].
 
-add_mapping(Key, OptMap, Map) ->
-    add_mapping(Key, false, OptMap, Map).
+add_mapping(Key, Info, Map) ->
+    add_mapping(Key, false, Info, Map).
 
-add_mapping(Key, Rewrite, OptMap, Map) ->
-    case maps:find(Key, OptMap) of
+add_mapping(Key, Rewrite, Info, Map) ->
+    case maps:find(Key, Info) of
 	error -> Map;
-	{ok,Value} -> maps:put(rewrite(Rewrite,Value), OptMap, Map)
+	{ok,Value} -> maps:put(rewrite(Rewrite,Value), Info, Map)
     end.
 
 rewrite(false, Value) -> Value;
 rewrite(Fun,Value) -> Fun(Value).
     
 
-%% list of options with unique key
-key_options() ->
+key_options(Spec) ->
     L = maps:fold(
 	  fun(_K,V=#{key:=Key},Acc) ->
 		  [{Key,V}|Acc]
-	  end, [], options()),
+	  end, [], Spec),
     lists:ukeysort(1, L).
 
 %% generate a list of options from option map, with unique 'key'
-options_list() ->
-    [V || {_,V} <- key_options()].
+options_spec_list(Spec) ->
+    [V || {_,V} <- key_options(Spec)].
 
-process_args(Args, Mode) ->
-    %% io:format("process_args:~w: ~p\n", [Mode,Args]),
-    process_args(Args, Mode, [], []).
 
 %% process long options and values
-process_args(["--"++OptName|As],Mode,Opts,Bound) ->
-    case get_long_opt(OptName) of
-	false -> usage(OptName);
-	{#{ key:=help },_Val} -> usage();
+process_args(["--"++OptName|As],Spec,Map,Bound) ->
+    case get_long_opt(OptName,Spec) of
+	false -> usage(OptName, Spec);
+	{#{ key:=help },_Val} -> usage(Spec);
 	{#{ key:=version },_Val} -> version();
-	{#{ key:=Key,spec:=ValSpec },Val} ->
-	    case match_value(ValSpec,Val,As) of
-		false -> usage();
+	{#{ key:=Key,spec:=Type },Val} ->
+	    case match_value(Type,Val,As) of
+		false -> usage(Spec);
 		{ok,Value,As1} ->
-		    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
+		    process_args(As1,Spec,
+				 insert_value(Key,Value,Type,Map),Bound)
 	    end
     end;
-process_args(["-"++OptName|As],Mode,Opts,Bound) ->
-    case get_long_opt(OptName) of
+process_args(["-"++OptName|As],Spec,Map,Bound) ->
+    case get_long_opt(OptName,Spec) of
 	false ->
-	    case get_short_opt(OptName) of
-		false -> usage(OptName);
-		{#{ key:=help },_Val} -> usage();
+	    case get_short_opt(OptName,Spec) of
+		false -> usage(OptName, Spec);
+		{#{ key:=help },_Val} -> usage(Spec);
 		{#{ key:=version },_Val} -> version();
-		{#{ key:=Key,spec:=ValSpec },Val} ->
-		    case match_value(ValSpec,Val,As) of
-			false -> usage();
+		{#{ key:=Key,spec:=Type },Val} ->
+		    case match_value(Type,Val,As) of
+			false -> usage(Spec);
 			{ok,Value,As1} ->
-			    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
+			    process_args(As1,Spec,
+					 insert_value(Key,Value,Type,Map),
+					 Bound)
 		    end
 	    end;
-	{#{ key:=help },_Val} -> usage();
+	{#{ key:=help },_Val} -> usage(Spec);
 	{#{ key:=version },_Val} -> version();
-	{#{ key:=Key,spec:=ValSpec },Val} ->
-	    case match_value(ValSpec,Val,As) of
-		false -> usage(Key,Val);
+	{#{ key:=Key,spec:=Type },Val} ->
+	    case match_value(Type,Val,As) of
+		false -> usage(Key,Val,Spec);
 		{ok,Value,As1} ->
-		    process_args(As1,Mode,[{Key,Value}|Opts],Bound)
+		    process_args(As1,Spec,
+				 insert_value(Key,Value,Type,Map),
+				 Bound)
 	    end
     end;
-process_args([Var,"=",Value|As],Mode,Opts,Bound) ->
+process_args([Var,"=",Value|As],Spec,Map,Bound) ->
     try list_to_integer(Value) of
 	N ->
-	    process_args(As,Mode,Opts,[{Var,N}|Bound])
+	    process_args(As,Spec,Map,[{Var,N}|Bound])
     catch
 	error:badarg ->
-	    process_args(As,Mode,Opts,[{Var,Value}|Bound])
+	    process_args(As,Spec,Map,[{Var,Value}|Bound])
     end;
-process_args([A|As],Mode,Opts,Bound) ->
+process_args([A|As],Spec,Map,Bound) ->
     case string:chr(A,$=) of
 	0 -> 
-	    {Mode,Bound,lists:reverse(Opts),[A|As]};
+	    {[A|As],Map,Bound};
 	I ->
 	    {Var,"="++Value0} = lists:split(I-1,A),
 	    {Value,As1} = 
@@ -550,14 +148,18 @@ process_args([A|As],Mode,Opts,Bound) ->
 		end,
 	    %% V = list_to_atom(Var),
 	    case string:to_integer(Value) of
-		{N,""} -> process_args(As1,Mode,Opts,[{Var,N}|Bound]);
-		_ -> process_args(As1,Mode,Opts,[{Var,Value}|Bound])
+		{N,""} -> process_args(As1,Spec,Map,[{Var,N}|Bound]);
+		_ -> process_args(As1,Spec,Map,[{Var,Value}|Bound])
 	    end
     end;
-process_args([], Mode, Opts, Bound) ->
-    {Mode, Bound, lists:reverse(Opts), []};
-process_args(_, _Mode, _Opts, _Bound) ->
-    usage().
+process_args([], _Spec, Map, Bound) ->
+    {[], Map, Bound}.
+
+insert_value(Key, Value, {multiple,_Type}, Map) ->
+    List = maps:get(Key, Map, []),
+    Map#{ Key=>List++[Value]};
+insert_value(Key, Value, _Type, Map) ->
+    Map#{ Key=>Value }.
 
 -ifdef(not_used).
 tr([From|Cs], From, To) -> [To|tr(Cs,From,To)];
@@ -565,17 +167,17 @@ tr([C|Cs], From, To ) -> [C|tr(Cs,From,To)];
 tr([], _From, _To) -> [].
 -endif.
 
-get_long_opt(Cs) ->
+get_long_opt(Cs,OptSpec) ->
     {Name,AltName,Cs1} = get_option_name(Cs),
-    case maps:find(Name, options()) of
+    case maps:find(Name, OptSpec) of
 	{ok,OptInfo=#{ long := Name }} -> {OptInfo,Cs1};
 	{ok,OptInfo=#{ long := AltName }} -> {OptInfo,Cs1};
 	_ -> false
     end.
 
-get_short_opt(Cs) ->
+get_short_opt(Cs,OptSpec) ->
     {Name,_,Cs1} = get_option_name(Cs),
-    case maps:find(Name, options()) of
+    case maps:find(Name, OptSpec) of
 	{ok,OptInfo=#{ short := Name }} -> {OptInfo,Cs1};
 	_ -> false
     end.
@@ -714,54 +316,53 @@ vsn() ->
 	undefined -> "undefined"
     end.
 
-usage() ->
-    io:format("varp: usage: varp [<Mode>] [Options] [Bindings] [files]\n"),
-    io:format("  <Mode> = satisfy|falsify|prove|cnf|snf|version|help\n"),
+usage(Spec) ->
+    io:format("varp: usage: varp [<plugin> [Options]]* <bindings>* <files>*\n"),
     io:format("Options\n"),
     lists:foreach(
-      fun(I=#{ long:=LongOpt, spec:=Spec,
-	       default:=Def, description:=Desc }) ->
+      fun({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
+		     default:=Def, description:=Desc }}) ->
 	      ShortOpt = maps:get(short,I,undefined),
 	      Names = [["--",LongOpt],"|",["-",LongOpt],
 		       if ShortOpt =:= undefined -> "";
 			  true -> ["|","-",ShortOpt]
 		       end],
-	      if Spec =:= undefined ->
+	      if TypeSpec =:= undefined ->
 		      io:format("  ~s\n    ~s\n\n", 
 				[Names,Desc]);
 		 true ->
 		      io:format("  ~s = ~s (~s)\n    ~s\n\n", 
-				[Names,format_spec(Spec),
+				[Names,format_spec(TypeSpec),
 				 format_value(Def),
 				 Desc])
 	      end;
 	 (#{ key := _Key }) -> %% ignore internal options
 	      ok
-      end, options_list()),
+      end, key_options(Spec)),
     halt(1).
 
-usage(Opt) when is_list(Opt) ->
+usage(Opt,_Spec) when is_list(Opt) ->
     io:format("varp: unknown option ~s\n", [Opt]),
     halt(1);
-usage(Key) when is_atom(Key) ->
-    case lists:keyfind(Key, 1, key_options()) of
+usage(Key,Spec) when is_atom(Key) ->
+    case lists:keyfind(Key, 1, key_options(Spec)) of
 	false -> 
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
-	#{long:=Long, spec:=Spec} ->
+	#{long:=Long, spec:=TypeSpec} ->
 	    io:format("varp: bad argument to option '~s', allowed values are ~s\n", 
-		      [Long,format_spec(Spec)]),
+		      [Long,format_spec(TypeSpec)]),
 	    halt(1)
     end.
 
-usage(Key,Value) when is_atom(Key) ->
-    case lists:keyfind(Key, 1, key_options()) of
+usage(Key,Value,Spec) when is_atom(Key) ->
+    case lists:keyfind(Key, 1, key_options(Spec)) of
 	false ->
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
-	#{long:=Long,spec:=Spec} ->
+	#{long:=Long,spec:=TypeSpec} ->
 	    io:format("varp: bad argument ~s to option '~s', allowed values are ~s\n", 
-		      [Value,Long,format_spec(Spec)]),
+		      [Value,Long,format_spec(TypeSpec)]),
 	    halt(1)
     end.
 
@@ -792,50 +393,17 @@ format_value(L) when is_list(L) ->
 	    string:join([format_value(V)||V<-L], ",")
     end.
 
-%% saturation options
-%% #{ 
-%%     saturate => 1      :: unsigned()             %% saturation level
-%%     pair => false      :: boolean()              %% add extra variable
-%%     order => undefined :: order(),               %% variable order
-%%     time  => infinity  :: infinity | integer(),  %% max time to run
-%%     threshold => 0,    :: integer()              %% fixpoint threshold
-%%     laps => infinity   :: infinity | integer(),  %% number of laps to run
-%% }
-%%
+default_opts(OptionInfoList) ->
+    default_opts_(OptionInfoList, #{ }).
 
-%%
-%% Set options
-%%
-
-set_opts(Opts) when is_list(Opts) ->
-    set_opts(Opts, default_opts()).
-
-set_opts([{Opt,Value} | Opts], OptMap) ->
-    ?dbg("set_opts: ~w ~p\n", [Opt,Value]),
-    set_opts(Opts, setopt(Opt,Value,OptMap));
-set_opts([], OptMap) ->
-    OptMap.
-
-default_opts() ->
-    default_opts(options_list()).
-
-default_opts(OptionsList) ->
-    default_opts_(OptionsList, #{ }).
-
-default_opts_([#{ key := Key, default := Value}|Opts], OptMap) ->
-    default_opts_(Opts, OptMap#{ Key => Value});
+default_opts_([#{ key := Key, default := Value}|OptionInfoList], OptMap) ->
+    default_opts_(OptionInfoList, OptMap#{ Key => Value});
 default_opts_([], OptMap) ->
     OptMap.
 
-setopt(saturate, Level, OptMap) when is_integer(Level), Level > 0 ->
-    List = getopt(saturations, OptMap),
-    Sat  = get_saturate_opt(OptMap#{ saturate=>Level}),
-    ?dbg("s = ~p\n", [Sat]),
-    List1 = List ++ [Sat],
-    OptMap#{ saturate => Level, saturations => List1 };
-setopt(Key, Value, OptMap) when is_atom(Key) ->
+setopt(Key, Value, OptMap, OptSpec) when is_atom(Key) ->
     %% io:format("key=~w, value=~w\n", [Key,Value]),
-    case maps:find(Key, options()) of
+    case maps:find(Key, OptSpec) of
 	{ok,OptInfo=#{ key := Key, spec := Spec }} ->
 	    OldValue = case maps:find(Key, OptMap) of
 			   error -> maps:get(default,OptInfo);
@@ -852,18 +420,9 @@ setopt(Key, Value, OptMap) when is_atom(Key) ->
 		    erlang:error(badarg)
 	    end;
 	_ ->
+	    io:format("key ~p not in ~p\n", [Key,OptSpec]),
 	    erlang:error(badkey)
     end.
-
-get_saturate_opt(OptMap) ->
-    #{
-      saturate  => getopt(saturate, OptMap),
-      pair      => getopt(pair, OptMap),
-      order     => getopt(order, OptMap),
-      timeout   => getopt(timeout, OptMap),
-      threshold => getopt(threshold, OptMap),
-      laps      => getopt(laps, OptMap)
-     }.
 
 %%
 %% Check value against spec
