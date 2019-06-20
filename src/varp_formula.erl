@@ -1495,23 +1495,37 @@ vfold_op(Bs,Op,D,[Y|As]) ->
 vfold_op(Bs,_Op,D,[]) ->
     {D,Bs}.
 
-all([], Bs) ->
-    {{bool,?TRUE}, Bs};
-all([A], Bs) ->
-    {A, Bs};
 all(As, Bs) ->
-    As1 = [A || {bool,A} <- As],
-    X = add_variable(Bs),
-    {{bool,X}, and_gate(Bs,X,As1)}.
+    all_(As, [], Bs).
 
-any([], Bs) ->
-    {{bool,?FALSE}, Bs};
-any([A], Bs) ->
-    {A, Bs};
-any(As, Bs) ->
-    As1 = [A || {bool,A} <- As],
+all_([{bool,?FALSE}|_], _Xs, Bs) ->
+    {{bool,?FALSE},Bs};
+all_([{bool,?TRUE}|As], Xs, Bs) ->
+    all_(As, Xs,Bs);
+all_([{bool,A}|As], Xs, Bs) ->
+    all_(As, [A|Xs],Bs);
+all_([], [], Bs) ->
+    {{bool,?TRUE},Bs};    
+all_([], Xs, Bs) ->
     X = add_variable(Bs),
-    {{bool,X}, or_gate(Bs,X,As1)}.
+    {{bool,X}, and_gate(Bs,X,Xs)}.
+
+
+any(As, Bs) ->
+    any_(As, [], Bs).
+
+any_([{bool,?TRUE}|_], _Xs, Bs) ->
+    {{bool,?TRUE},Bs};
+any_([{bool,?FALSE}|As], Xs, Bs) ->
+    any_(As, Xs,Bs);
+any_([{bool,A}|As], Xs, Bs) ->
+    any_(As, [A|Xs],Bs);
+any_([], [], Bs) ->
+    {{bool,?FALSE},Bs};    
+any_([], Xs, Bs) ->
+    X = add_variable(Bs),
+    {{bool,X}, or_gate(Bs,X,Xs)}.
+
 
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
@@ -2263,27 +2277,39 @@ vrem(X, Y, R, N, I, Bs) ->
 %%
 vsub(Ys, Zs, Bs) ->
     Zs1 = vnot(Zs),
-    vadd(Ys,Zs1,[],{bool,?TRUE},Bs).
+    case getopt(Bs,adder) of
+	plain ->
+	    vadd_plain(Ys,Zs1,?TRUE,Bs);
+	fast ->
+	    vadd_fast(Ys,Zs1,?TRUE,Bs)
+    end.
 
 %%
 %% Adder circuit
 %%
 vadd(Ys,Zs,Bs) ->
-%%    vadd(Ys,Zs,[],{bool,?FALSE},Bs).
-    vadd_fast(Ys,Zs,Bs).
+    case getopt(Bs,adder) of
+	plain ->
+	    vadd_plain(Ys,Zs,?FALSE,Bs);
+	fast ->
+	    vadd_fast(Ys,Zs,?FALSE,Bs)
+    end.
 
-vadd([?FALSE|Ys],[?FALSE|Zs],Xs,{bool,Ci},Bs) ->
-    vadd(Ys,Zs,[Ci|Xs],{bool,?FALSE},Bs);
-vadd([?FALSE|Ys],[Z|Zs],Xs,Ci,Bs) ->
+vadd_plain(Ys,Zs,C0,Bs) ->
+    vadd_plain_(Ys,Zs,[],{bool,C0},Bs).
+
+vadd_plain_([?FALSE|Ys],[?FALSE|Zs],Xs,{bool,Ci},Bs) ->
+    vadd_plain_(Ys,Zs,[Ci|Xs],{bool,?FALSE},Bs);
+vadd_plain_([?FALSE|Ys],[Z|Zs],Xs,Ci,Bs) ->
     {{bool,X},Co,Bs1} = half_adder({bool,Z},Ci,Bs),
-    vadd(Ys,Zs,[X|Xs],Co,Bs1);
-vadd([Y|Ys],[?FALSE|Zs],Xs,Ci,Bs) ->
+    vadd_plain_(Ys,Zs,[X|Xs],Co,Bs1);
+vadd_plain_([Y|Ys],[?FALSE|Zs],Xs,Ci,Bs) ->
     {{bool,X},Co,Bs1} = half_adder({bool,Y},Ci,Bs),
-    vadd(Ys,Zs,[X|Xs],Co,Bs1);
-vadd([Y|Ys],[Z|Zs],Xs,Ci,Bs) ->
+    vadd_plain_(Ys,Zs,[X|Xs],Co,Bs1);
+vadd_plain_([Y|Ys],[Z|Zs],Xs,Ci,Bs) ->
     {{bool,X},Co,Bs1} = full_adder({bool,Y},{bool,Z},Ci,Bs),
-    vadd(Ys,Zs,[X|Xs],Co,Bs1);
-vadd([],[],Xs,Ci,Bs) -> 
+    vadd_plain_(Ys,Zs,[X|Xs],Co,Bs1);
+vadd_plain_([],[],Xs,Ci,Bs) -> 
     {Ci,reverse(Xs),Bs}.
 
 %% 
@@ -2291,23 +2317,21 @@ vadd([],[],Xs,Ci,Bs) ->
 %% then feed them into half address also using Gs
 %% G(i) = Y(i)Z(i)
 %% P(i) = Y(i)+Z(i)
-%% C(0) = FALSE
-%% C(1) = G(0)
-%% C(2) = G(1) + P(1)C(1) = G(1) + P(1)G(0)
-%% C(3) = G(2) + P(2)C(2) = G(2) + P(2)G(1) + P(2)P(1)G(0)
-%% C(4) = G(3) + P(3)C(3) = G(3) + P(3)(G(2) + P(2)G(1) + P(2)P(1)G(0)) =
-%%      = G(3) + P(3)G(2) + P(3)P(2)G(1) + P(3)P(2)P(1)G(0)
+%% C(0) = FALSE | TRUE
+%% C(1) = G(0) + P(0)C(0)
+%% C(2) = G(1) + P(1)G(0) + P(1)P(0)C(0)
+%% C(3) = G(2) + P(2)G(1) + P(2)P(1)G(0) + P(2)P(1)P(0)C(0)
+%% C(4) = G(3) + P(3)G(2) + P(3)P(2)G(1) + P(3)P(2)P(1)G(0) + P(2)P(1)P(0)C(0)
 %% C(i+1) = G(i) + (P(i)*(Ci))
 %% S(0) = Y(0) xor Z(0)
 %% S(1) = Y(1) xor Z(1) xor C(1)
 %% S(i) = Y(i) xor Z(i) xor C(i)
 %%
-
-vadd_fast(Ys,Zs,Bs) ->
+vadd_fast(Ys,Zs,C0,Bs) ->
     %% io:format("vadd_fast: ~w, ~w\n", [Ys,Zs]),
     {Gs,Bs1} = map_op('and',Ys,Zs,Bs),
     {Ps,Bs2} = map_op('or',Ys,Zs,Bs1),
-    {Cs,Bs3} = carry_lookahead(Gs,Ps,Bs2),
+    {Cs,Bs3} = carry_lookahead(Gs,Ps,{bool,C0},Bs2),
     vadd_fast_sum(Ys,Zs,Cs,Bs3).
 
 vadd_fast_sum(Ys,Zs,Cs,Bs) ->
@@ -2320,25 +2344,23 @@ vadd_fast_sum_([Yi|Ys],[Zi|Zs],[Ci|Cs],Sum,Bs) ->
 vadd_fast_sum_([],[],[Co],Sum,Bs) ->
     {Co,reverse(Sum),Bs}.
 
-carry_lookahead(Gs,Ps,Bs) ->
-    carry_lookahead_(Gs,Ps,1,length(Gs)+1,[{bool,?FALSE}],Bs).
+carry_lookahead(Gs,Ps,C0,Bs) ->
+    carry_lookahead_(Gs,Ps,1,length(Gs)+1,[C0],C0,Bs).
 
-carry_lookahead_(_Gs,_Ps,I,I,Cs,Bs) ->
+carry_lookahead_(_Gs,_Ps,I,I,Cs,_C0,Bs) ->
     {reverse(Cs),Bs};
-carry_lookahead_(Gs,Ps,I,N,Cs,Bs) ->
+carry_lookahead_(Gs,Ps,I,N,Cs,C0,Bs) ->
     G = lists:sublist(Gs,I),      %% [G(0),G(1),..G(i)]
-    P = tl(lists:sublist(Ps,I)),  %% [P(1),P(2),..P(i)]
-    {Ci,Bs1} = carry_ci(G,P,Bs),
-    carry_lookahead_(Gs,Ps,I+1,N,[Ci|Cs],Bs1).
+    P = lists:sublist(Ps,I),      %% [P(0),P(1),..P(i)]
+    {X0,Bs1} = all([C0|P],Bs),
+    {Ci,Bs1} = carry_ci(G,tl(P),[X0],Bs),
+    carry_lookahead_(Gs,Ps,I+1,N,[Ci|Cs],C0,Bs1).
 
-carry_ci(G,P,Bs) ->
-    carry_ci_(G,P,[],Bs).
-
-carry_ci_([Gn],[],Acc,Bs) ->
-    any([Gn|Acc], Bs);
-carry_ci_([Gi|Gs],P,Acc,Bs) ->    
+carry_ci([Gn],[],Xs,Bs) ->
+    any([Gn|Xs], Bs);
+carry_ci([Gi|Gs],P,Xs,Bs) ->
     {Xi,Bs1} = all([Gi|P],Bs),
-    carry_ci_(Gs,tl(P),[Xi|Acc],Bs1).
+    carry_ci(Gs,tl(P),[Xi|Xs],Bs1).
 
 %% Full adder circuit.
 full_adder(Y,Z,Ci,Bs) ->

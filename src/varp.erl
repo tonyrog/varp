@@ -88,6 +88,15 @@ global_options() ->
 	 default => none,
 	 description => "Specify the order how all and any are built."
        },
+      #{ long => "adder",
+	 key => adder,
+	 spec => {enum,
+		  [{"plain",plain},
+		   {"fast",fast}
+		  ]},
+	 default => plain,
+	 description => "Specify style of adder to use."
+       },
       #{ long  => "timeout",
 	 short => "t",
 	 key   => timeout,
