@@ -599,6 +599,4 @@ is_string(_) -> false.
 %% Get options
 %%
 getopt(Key, OptMap) ->
-    case OptMap of
-	#{ Key := Value }  -> Value
-    end.
+    maps:get(Key, OptMap).

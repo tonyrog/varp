@@ -8,6 +8,8 @@
 -module(varp).
 
 -export([main/1]).
+-export([do_run/3]).
+
 -export([run_formula/1, run_formula/2]).
 -export([prove_formula/1, prove_formula/2]).
 -export([parse/1, parse/2]).
@@ -16,6 +18,14 @@
 -export([archive_path/1]).
 -export([output_model/2]).
 -export([empty_sections/0]).
+
+-export([load_plugins/0]).
+-export([load_do/0, load_do/1]).
+-export([parse_do/1, parse_do/2]).
+
+-export([load_options/0, load_options/1, load_options/2]).
+-export([load_option_list/1, load_option_list/3]).
+
 
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").
@@ -53,7 +63,7 @@ global_options() ->
 	spec => {enum,[?BOOL]},
 	default => false,
 	description => "Print partial models when possible."
-      }
+      },
      #{ long => "compress",
 	 short => "g",
 	 key => compress,
@@ -72,8 +82,10 @@ global_options() ->
 	 spec => {enum,
 		  [{"left",left},
 		   {"right",right},
-		   {"middle",middle}]}, 
-	 default => left,
+		   {"balanced",balanced},
+		   {"none", none}
+		  ]},
+	 default => none,
 	 description => "Specify the order how all and any are built."
        },
       #{ long  => "timeout",
@@ -191,9 +203,9 @@ main(Args) ->
     Plugins = load_plugins(),
     %% io:format("plugins = ~p\n", [Plugins]),
 
-    GlobalOptionList = global_options(),
-    GlobalOptionSpec = varp_option:options_spec(GlobalOptionList),
-    GOpts0 = varp_option:default_opts(GlobalOptionList),
+    GlobalOptionSpec = global_option_spec(),
+    GOpts0 = default_options(),
+
     %% io:format("options0 = ~p\n", [GOpts0]),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
     %% io:format("options1 = ~p\n", [GOpts1]),
@@ -265,54 +277,83 @@ main(Args) ->
     end,
     halt(0).
 
+global_option_spec() ->
+    GlobalOptionList = global_options(),
+    varp_option:options_spec(GlobalOptionList).
+
+default_options() ->
+    varp_option:default_opts(global_options() ++ internal_options()).
+
+load_options() ->
+    load_options(default_options()).
+
+load_options(GOpts) ->
+    load_options(global_option_spec(), GOpts).
 
 load_options(OptionSpec,GOpts) ->
     case application:get_env(varp, options) of
 	undefined -> GOpts;
 	{ok,OptionList} ->
-	    lists:foldl(
-	      fun({Key,Value}, Mi) ->
-		      varp_option:setopt(Key,Value,Mi,OptionSpec)
-	      end, GOpts, OptionList)
+	    load_option_list(OptionSpec,GOpts,OptionList)
     end.
 
+load_option_list(OptionList) when is_list(OptionList) ->
+    load_option_list(global_option_spec(), default_options(), OptionList).
+
+load_option_list(OptionSpec,OptMap,[{Key,Value}|Opts]) ->
+    OptMap1 = varp_option:setopt(Key,Value,OptMap,OptionSpec),
+    load_option_list(OptionSpec,OptMap1,Opts);
+load_option_list(_OptionSpec,OptMap,[]) ->
+    OptMap.
+
+
 %% load the do config
+load_do() ->
+    load_do(load_plugins()).
+
 load_do(Plugins) ->
     case application:get_env(varp, do) of
 	undefined -> [];
 	{ok,Do} ->
 	    %% convert all option lists info maps
 	    %% for all plugins
-	    load_do_(Do, Plugins, [])
+	    parse_do_(Do, Plugins, [])
     end.
 
-load_do_([{P, OptionList}|Ps], Plugins, Acc) ->
-    case maps:get(P, Plugins, undefined) of
+parse_do(Do) when is_list(Do) ->
+    parse_do_(Do, load_plugins(), []).
+
+parse_do(Do, PluginMap) when is_list(Do), is_map(PluginMap) ->
+    parse_do_(Do, PluginMap, []).
+
+parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
+    case maps:get(P, PluginMap, undefined) of
 	undefined ->
 	    io:format("plugin ~s does not exist\n", [P]),
-	    load_do_(Ps, Plugins, Acc);
+	    parse_do_(Ps, PluginMap, Acc);
 	Mod ->
 	    OptionInfoList = Mod:options(),
 	    OptionSpec = varp_option:options_spec(OptionInfoList),
 	    OptMap = varp_option:default_opts(OptionInfoList),
-	    io:format("mod = ~p\n", [Mod]),
-	    io:format("list = ~p\n", [OptionInfoList]),
-	    io:format("spec = ~p\n", [OptionSpec]),
-	    io:format("map = ~p\n", [OptMap]),
+	    %% io:format("mod = ~p\n", [Mod]),
+	    %% io:format("list = ~p\n", [OptionInfoList]),
+	    %% io:format("spec = ~p\n", [OptionSpec]),
+	    %% io:format("map = ~p\n", [OptMap]),
 	    OptMap1 =
 		lists:foldl(
 		  fun({Key,Value}, Mi) ->
 			  varp_option:setopt(Key,Value,Mi,OptionSpec)
 		  end, OptMap, OptionList),
-	    load_do_(Ps, Plugins, [{P, OptMap1}|Acc])
+	    parse_do_(Ps, PluginMap, [{Mod, OptMap1}|Acc])
     end;
-load_do_([], _Plugins, Acc) ->
-    Acc.
+parse_do_([], _PluginMap, Acc) ->
+    lists:reverse(Acc).
+
 
 %% load a map of plugins Name => Module | Atom => Module
 load_plugins() ->
     case application:get_env(varp, plugins) of
-	undefined -> [];
+	undefined -> #{};
 	{ok,Ps} ->
 	    lists:foldl(
 	      fun({ShortName,LongName,Mod},Plugins) ->
@@ -381,10 +422,13 @@ do_run(Do, Formula, GOpts) ->
     Bs1 = Bs#bs { main = Main },
     R = do(Do, Bs1),
     Method = method(Do),
-    display_result(R, Method, Bs1).
+    case varp_formula:getopt(Bs, print) of
+	false -> R;
+	_ -> display_result(R, Method, Bs1), R
+    end.
 
 do([{Plugin,Param}|Do], Bs) ->
-    case Plugin:run(Bs, Param) of
+    try Plugin:run(Bs, Param) of
 	false ->
 	    no_models(Bs);
 	Bs1 when is_record(Bs1,bs) ->
@@ -394,6 +438,11 @@ do([{Plugin,Param}|Do], Bs) ->
 	    end;
 	Result ->
 	    Result
+    catch
+	?EXCEPTION(error, Reason, Stacktrace) ->
+	    io:format("~s crashed ~p: ~p\n",
+		      [Plugin, Reason, ?GET_STACK(Stacktrace)]),
+	    error
     end;
 do([], _Bs) ->
     undefined.

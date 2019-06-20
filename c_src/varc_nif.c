@@ -725,6 +725,7 @@ static inline int get_literal_value(varp_t* vp, literal_t* lp)
 static inline void set_literal_value(varp_t* vp, literal_t* lp, int value)
 {
     while (lp->var->bound) { // resolve literal
+	printf("set_literal_value: %d\r\n", lp->var->vix);
 	if (lp->sign < 0) value = -value;
 	lp = lp->var->bound;
     }
@@ -985,7 +986,7 @@ static void unwatch(varp_t* vp, clause_t* cp, lit_t l)
     wlink_t** wlp = &lp->wlist;
     wlink_t* wl;
 
-    DBG("UNWATCH cix=%d lit=%d wl=%p\r\n", cp->cix, index_l(lp), *wlp);
+    DBG("UNWATCH cix=%d lit=%d wl=%p\r\n", cp->cix, index_l(l), *wlp);
 
     while((wl = *wlp) && (clause_pointer(wl) != cp))
 	wlp = &(wl->next);
@@ -1054,12 +1055,12 @@ static void lqueue_put(varp_t* vp, lit_t lp)
     DBG("ENQ %s qsize=%ld\r\n", format_lit(vp, lp), q->size);
     assert(!is_constant_l(vp, lp));
     mp = l2ll(vp, lp);
-    if (vp->fifo) {
+    if (vp->fifo) { // put element last
 	mp->qlink = NULL;
 	*q->tail = mp;
 	q->tail = &(mp->qlink);
     }
-    else {
+    else {  // put element first
 	mp->qlink = q->head;
 	q->head = mp;
 	if (mp->qlink == NULL)
@@ -1068,6 +1069,7 @@ static void lqueue_put(varp_t* vp, lit_t lp)
     q->size++;
 }
 
+// always get from head of list(queue)
 static literal_t* lqueue_get(varp_t* vp)
 {
     lqueue_t* q = &vp->q;
@@ -1096,17 +1098,30 @@ static void push_variable(varp_t* vp, variable_t* var, int level)
     vp->num_bound++;
 }
 
+static inline void log_permanent(varp_t* vp, variable_t* var, int level)
+{
+#if LOG_ASSIGN_ATOM    
+    if ((level == 0) && (var->flags & VAR_FLAG_ATOM)) {
+	// fixme: send message monitor variables...
+	printf("PERMANENT(ATOM) %s=%d\r\n",format_variable(var),(get_vv(vp,var)+1)>>1);
+    }
+#endif
+}
+
+
 static inline void set_literal(varp_t* vp,lit_t lp,int value,
 			       long li,int cix, int level)
 {
     variable_t* var = var_l(vp, lp);
     DBG("SET_LITERAL %d = %d\r\n", index_l(lp), value);
-    // if (level == 0) printf("PERMANENT_LITERAL %s\r\n", format_lit(vp, lp));
     assert(!is_constant(get_variable_value(vp, var)));
-    set_variable_value(vp, var, is_neg_l(lp) ? -value : value);
+    assert(var->bound == NULL);
+    set_vv(vp, var, is_neg_l(lp) ? -value : value);
+    // set_variable_value(vp, var, is_neg_l(lp) ? -value : value);
     var->implication_clause = cix;
     var->literal_pos = li;
     var->level = level;
+    log_permanent(vp, var, level);
 }
 
 // put value set_literal and push the correct literal on queue
@@ -1124,7 +1139,6 @@ static void put_literal(varp_t* vp,lit_t lp,int value,long li,int cix,int level)
 	lqueue_put(vp, (value==TRUE) ? neg_l(lp) : lp);
     set_literal(vp, lp, value, li, cix, level);
 }
-
 
 static void undo_init(varp_t* vp)
 {
@@ -1176,6 +1190,8 @@ static void undo_level(varp_t* vp, int level)
     vp->num_bound  -= nbound;
     vp->undo[level].bs = NULL;
     vp->undo[level].bs_size = 0;
+    // must clear queue
+    lqueue_clear(&vp->q);
 }
 
 // move bindings from src level to dst level
@@ -1185,9 +1201,12 @@ static void move_level(varp_t* vp, int src, int dst)
     variable_t* var = vp->undo[src].bs;
 
     if (var) {
+	log_permanent(vp, var, dst);
 	// find last binding
-	while(var->next)
+	while(var->next) {	    
 	    var = var->next;
+	    log_permanent(vp, var, dst);
+	}
 	var->next = vp->undo[dst].bs;
 	vp->undo[dst].bs = vp->undo[src].bs;
 	vp->undo[dst].bs_size += vp->undo[src].bs_size;
@@ -2375,8 +2394,9 @@ static ERL_NIF_TERM varp_put(ErlNifEnv* env, int argc,
     if (!is_constant(y))
         return enif_make_badarg(env);
     x = get_l(vp, xp);
-    if (!is_constant(x))
+    if (!is_constant(x)) {
 	put_literal(vp, xp, y, -1, -1, level);
+    }
     else if (x != y)
 	return ATOM(false);
     return ATOM(true);
@@ -2495,6 +2515,13 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
     assert (yp != xp);
     assert(get_vv(vp, y) == UNDEF);
 
+#if LOG_ASSIGN_ATOM
+    if (y->flags & VAR_FLAG_ATOM) {
+	printf("PERMANENT(ATOM) %s -> %s\r\n",
+	       format_literal(vp, yp),
+	       format_literal(vp, xp));
+    }
+#endif
     // reset y xref
     y->xfirst = NULL;
     y->xlast  = &y->xfirst;
@@ -2633,12 +2660,7 @@ static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
 }
 
 //
-// undo mark
-//   undo all bindings until mark is found
-//   mark must exist!
-// undo count (=-mark)
-//   undo count number of marks
-// undo 0 = undo everything (mark can not exist)
+// Undo bindings on a level
 //
 static ERL_NIF_TERM varp_undo_level(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
@@ -2711,7 +2733,7 @@ static ERL_NIF_TERM varp_move_level(ErlNifEnv* env, int argc,
 #endif
 
 #ifdef DEBUG
-static void print_lit_arry(char* label, lit_t* lit, size_t size)
+static void print_lit_array(char* label, lit_t* lit, size_t size)
 {
     if (size == 0)
 	printf("%s={}", label);
@@ -3088,7 +3110,7 @@ static void del_xref(varp_t* vp, clause_t* cp, long p)
 	}
 	xpp = &(xp->next);
     }
-    DBG("xref not found for clause %d pos = %l\r\n", cp->cix, p);
+    DBG("xref not found for clause %d pos = %ld\r\n", cp->cix, p);
 }
 
 
@@ -3283,7 +3305,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int i, k;
+    int i;
     clause_t* cp;
     long p;
 
@@ -3294,6 +3316,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     if (vp->level != 0)
 	return enif_make_badarg(env);
     cp = vp->clause_map[i];
+    vp->clause_map[i] = NULL;
 
     unwatch_clause(vp, cp);      // remove watched literals
 
@@ -3302,15 +3325,19 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 	del_xref(vp, cp, p);
     
     clause_free(vp, cp);
-
-    // fixme check if permanent is set the !
-
-    k = (int)vp->cnext - 1;  // index of last element
-    if (i < k) {  // swap in last element
-	vp->clause_map[i] = vp->clause_map[k];
-	vp->clause_map[i]->cix = i;
+    // fixme now we leave a hole, maybe garbage collect?
+#if 0
+    {
+	int k;
+	// fixme check if permanent is set the !
+	k = (int)vp->cnext - 1;  // index of last element
+	if (i < k) {  // swap in last element
+	    vp->clause_map[i] = vp->clause_map[k];
+	    vp->clause_map[i]->cix = i;
+	}
+	vp->cnext--;
     }
-    vp->cnext--;
+#endif
     return ATOM(ok);
 }
 

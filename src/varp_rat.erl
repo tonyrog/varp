@@ -26,7 +26,7 @@ options() ->
       },
      #{ long => "type",
 	short => "r",
-	key => rat_type,
+	key => type,
 	spec => {enum,[{"both",both},{"min",min},{"pos",pos},{"neg",neg}]},
 	default => min,
 	description => "Type of rat clauses to try."
@@ -36,7 +36,7 @@ run(Bs, Param) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:get_info(Bs, permanent),
-    Type = maps:get(rat_type, Param),
+    Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
 	    Bs;
@@ -98,55 +98,70 @@ rat_var(Bs,V,CMax,Type) ->
 %%
 
 rat_lit(Bs,L,Is,CMax) ->
-    {Ds,Bs1} = clauses(Bs,Is,L,[]),
+    Ds = clauses(Bs,Is,L,[]),
     %% fixme: add option to emit definition in varp format!
-    %% emit_def(Bs, L, Ds),
     lists:foreach(
       fun({I,D}) ->
 	      Js = get_delta_clauses(Bs,-L,CMax),
-	      {Cs,Bs2} = clauses(Bs1,Js,-L,[]),
-	      case rat_test(Bs2,Cs,L,D) of
+	      Cs = clauses(Bs,Js,-L,[]),
+	      %% io:format("rat_test l=~w, d=~w, cs=~w\n", [L,D,Cs]),
+	      varp_formula:set_level(Bs,1),
+	      true = varp_formula:equal(Bs,L,?FALSE),
+	      true = put_all(Bs,D,?FALSE),
+	      case rat_test(Bs,Cs) of
 		  true ->
-		      io:format("remove clause ~w\n", [I]),
-		      varp:del_clause(Bs2#bs.vp, I);
+		      varp_formula:undo_level(Bs,1),
+		      io:format("remove clause ~w = ~w\n", [I,[L|D]]),
+		      varp_formula:set_level(Bs,0), %% must be done at level=0!
+		      varp_formula:del_clause(Bs, I);
 		  false ->
+		      varp_formula:undo_level(Bs,1),
 		      ok
 	      end
       end, Ds),
     Bs.
 
-rat_test(Bs, [{Cix,C}|Cs], L, D) ->
-    Level = 1,
-    varp_formula:set_level(Bs,1),
-    true = varp_formula:equal(Bs,L,?FALSE),
-    lists:foreach(fun(Ci) ->
-			  true = varp_formula:equal(Bs,Ci,?FALSE)
-		  end, C),
-    lists:foreach(fun(Di) ->
-			  true = varp_formula:equal(Bs,Di,?FALSE)
-		  end, D),
-    case varp_formula:eval(Bs) of
+rat_test(Bs, [{_Cix,C}|Cs]) ->
+    Level = 2,
+    varp_formula:set_level(Bs,Level),
+    case put_all(Bs,C,?FALSE) of
 	false ->
 	    varp_formula:undo_level(Bs,Level),
 	    false;
 	true ->
-	    varp_formula:undo_level(Bs,Level),
-	    rat_test(Bs, Cs, L, D)
+	    case varp_formula:eval(Bs) of
+		false ->
+		    varp_formula:undo_level(Bs,Level),
+		    false;
+		true ->
+		    varp_formula:undo_level(Bs,Level),
+		    rat_test(Bs, Cs)
+	    end
     end;
-rat_test(_Bs, [], _L, _D) ->
+rat_test(_Bs, []) ->
     true.
 
+put_all(Bs, [Xi|Xs], Value) ->
+    case varp_formula:equal(Bs,Xi,Value) of
+	false -> false;
+	true -> put_all(Bs,Xs,Value)
+    end;
+put_all(_Bs, [], _Value) ->
+    true.
 
 %% Extract clauses and remove the literal L while doing it 
-%% (fix me add option to get_clause to remove one literal while extracting)
 clauses(Bs,[I|Cs],L,Acc) ->
-    Clause = lists:delete(L, get_clause(Bs,I)),
-    clauses(Bs,Cs,L,[{I,Clause}|Acc]);
-clauses(Bs, [], _L, Acc) ->
-    {Acc,Bs}.
+    case get_clause(Bs,I, L) of
+	[] ->
+	    clauses(Bs,Cs,L,Acc);
+	Clause ->
+	    clauses(Bs,Cs,L,[{I,Clause}|Acc])
+    end;
+clauses(_Bs, [], _L, Acc) ->
+    Acc.
 
-get_clause(Bs, I) ->
-    varc:get_clause(Bs#bs.vp, I).
+get_clause(Bs, I, Skip) ->
+    varc:get_clause(Bs#bs.vp, I, Skip).
 
 %% only extract clauses in Delta (fixme remove dead clauses)
 get_delta_clauses(Bs, L, CMax) ->

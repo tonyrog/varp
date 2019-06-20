@@ -13,7 +13,7 @@
 -export([new/0, new/1]).
 -export([add_variable/1, add_variable/2]).
 -export([variable/2, alias/3]).
--export([value/2, class/2]).
+-export([value/2]).
 -export([get_info/1, get_info/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
 -export([fmt_var_list/2]).
@@ -40,7 +40,6 @@
 -export([eqk/4, gtk/4]).
 -export([equal/3, equal/4]).
 -export([substitute/3]).
--export([is_equivalent/3]).
 -export([is_equal/3]).
 -export([is_bound/2]).
 -export([is_unbound/2]).
@@ -73,7 +72,7 @@
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([implication_clause/2]).
--export([get_clause/2]).
+-export([get_clause/2, get_clause/3, get_clause/4]).
 -export([get_clauses/3]).
 -export([get_clause_flags/2]).
 -export([add_clause/2]).
@@ -84,6 +83,8 @@
 -export([config/3]).
 -export([const_vector/2, const_vector/3]).
 -export([const_vector/4]).
+
+-export([vconst/1]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
@@ -139,34 +140,39 @@ add_variable(Bs) ->
 add_variable(Bs, IsAtom) ->
     varc:add_variable(Bs#bs.vp, IsAtom).
 
+%% add symbol name to literal 
+-spec add_symbol(Bs::#bs{}, L::integer(), Sym::term()|iolist()) ->
+		       ok.
+add_symbol(Bs, L, Sym) ->
+    varc:add_symbol(Bs#bs.vp, L, Sym).
+
 %% build an OR gate with Y as output and Xs as input
 %% Y = X1 or X2 .. or Xn
 or_gate(Bs,Y,Xs) ->
-    clause(Bs, 'or', [Y|Xs]).
+    gate(Bs, 'or', Y, Xs).
 
 %% build an AND gate with Y as output and Xs as input
 %% Y = X1 and X2 .. and Xn =>  !Y = !X1 or !X2 ... !Xn
 %%
 and_gate(Bs,Y,Xs) ->
-    clause(Bs, 'or', [-Y|[-L||L<-Xs]]).
+    gate(Bs, 'or', -Y, [-Xi||Xi<-Xs]).
 
 %% build an OR gate with Y as output and Xs as input
 %% Y = X1 xor X2 .. xor Xn
 xor_gate(Bs,Y,Xs) ->
-    clause(Bs, 'xor', [Y|Xs]).
+    gate(Bs, 'xor', Y, Xs).
 
-%% build an OR clause with Xs as input
-%% 1 = X1 or X2 .. or Xn
-or_clause(Bs,Xs) ->
-    varc:add_clause(Bs#bs.vp, Xs),
-    Bs.
-
-clause(Bs,'or',_Ls=[X,Y,Z]) when abs(X) =/= 1 ->  %% or 2-gate
+gate(Bs, 'or', X, [Y,Z]) when abs(X) =/= 1 ->  %% 2-gate
     add_clause(Bs,[-X,Y,Z]),
     add_clause(Bs,[X,-Y]),
     add_clause(Bs,[X,-Z]),
     Bs;
-clause(Bs,'xor',_Ls=[X,Y,Z]) ->
+gate(Bs,'or', X, Xs) when abs(X) =/= 1 -> %% or n-gate
+    gate_tree(Bs,'or',X,Xs);
+gate(Bs,'or', ?TRUE, Xs) ->
+    add_clause(Bs, Xs),
+    Bs;
+gate(Bs,'xor',X, [Y,Z]) ->
     if X =:= ?TRUE ->
 	    add_clause(Bs,[-Y,-Z]),
 	    add_clause(Bs,[Y,Z]),
@@ -182,14 +188,8 @@ clause(Bs,'xor',_Ls=[X,Y,Z]) ->
 	    add_clause(Bs,[-X,Y,Z]),
 	    Bs
     end;
-clause(Bs,'or',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
-    build_gate_tree(Bs,'or',hd(Ls),tl(Ls));
-clause(Bs,'xor',Ls=[X,_,_|_]) when abs(X) =/= 1 -> %% or n-gate
-    build_gate_tree(Bs,'xor',hd(Ls),tl(Ls));
-clause(Bs,'or',[?TRUE|Ls]) ->
-    ?dbg("clause: {~w,~w}\n", ['or',Ls]),
-    varc:add_clause(Bs#bs.vp, Ls),
-    Bs.
+gate(Bs, 'xor',X, Xs) when abs(X) =/= 1 -> %% or n-gate
+    gate_tree(Bs,'xor',X,Xs).
 
 add_clause(Bs,Ls) ->
     case varc:add_clause(Bs#bs.vp,Ls) of
@@ -214,31 +214,77 @@ add_clause(Bs,Ls) ->
 		   end),
 	    true
     end.
-		
+
+%% build an OR clause with Xs as input
+%% 1 = X1 or X2 .. or Xn
+or_clause(Bs,Xs) ->
+    add_clause(Bs, Xs),
+    Bs.
+
 del_clause(Bs, Cix) ->
     varc:del_clause(Bs#bs.vp, Cix).
 
 del_unused_clauses(Bs) ->
     varc:del_unused_clauses(Bs#bs.vp).
 
-build_gate_tree(Bs,Op,X,Ls) ->
-    case lists:split(length(Ls) div 2,Ls) of
+%% "balanced tree"
+gate_tree(Bs,Op,X,Xs) ->
+    case getopt(Bs,assoc) of
+	balanced -> gate_tree_b(Bs,Op,X,Xs);
+	left  -> gate_tree_l(Bs,Op,X,Xs);
+	right -> gate_tree_r(Bs,Op,X,Xs);
+	none  -> gate_tree_n(Bs,Op,X,Xs)
+    end.
+
+%% left balanced 
+gate_tree_l(Bs,Op,X,[X1,X2|Xs]) ->
+    Y1 = add_variable(Bs),
+    gate(Bs,Op,Y1,[X1,X2]),
+    gate_tree_l_(Bs,Op,X,Xs,[Y1]).
+
+gate_tree_l_(Bs,Op,X,[Xn],[Yi|_Ys]) ->
+    gate(Bs,Op,X,[Yi,Xn]);
+gate_tree_l_(Bs,Op,X,[Xi|Xs],Ys=[Yi|_]) ->
+    Yj = add_variable(Bs),
+    gate(Bs,Op,Yj,[Yi,Xi]),
+    gate_tree_l_(Bs,Op,X,Xs,[Yj|Ys]).
+
+%% right balanced 
+gate_tree_r(Bs,Op,X,Xs) ->
+    gate_tree_l(Bs,Op,X,lists:reverse(Xs)).
+
+%% none balanced, install as a number of clauses
+%% install as n+1 clauses
+gate_tree_n(Bs,'or',X,Xs) ->
+    add_clause(Bs,[-X|Xs]),  %% all Xi false => X is false
+    lists:foreach(
+      fun(Xi) ->
+	      add_clause(Bs,[X,-Xi])  %% any Xi true => X is true
+      end, Xs),
+    Bs;
+gate_tree_n(Bs,'xor',X,Xs) ->
+    gate_tree_b(Bs,'xor',X,Xs).
+
+%% balanced
+gate_tree_b(Bs,Op,X,Xs) ->
+    case lists:split(length(Xs) div 2,Xs) of
 	{[U],[V]} ->
-	    clause(Bs,Op,[X,U,V]);
+	    gate(Bs,Op,X,[U,V]);
 	{[U],[V1,V2]} ->
 	    X1 = add_variable(Bs),
-	    Bs1=clause(Bs,Op,[X1,V1,V2]),
-	    clause(Bs1,Op,[X,U,X1]);
+	    Bs1 = gate(Bs,Op,X1,[V1,V2]),
+	    gate(Bs1,Op,X,[U,X1]);
 	{Us,Vs} ->
 	    X1 = add_variable(Bs),
-	    Bs2 = build_gate_tree(Bs,Op,X1,Us),
+	    Bs2 = gate_tree_b(Bs,Op,X1,Us),
 	    X2 = add_variable(Bs),
-	    Bs3 = build_gate_tree(Bs2,Op,X2,Vs),
-	    clause(Bs3,Op,[X,X1,X2])
+	    Bs3 = gate_tree_b(Bs2,Op,X2,Vs),
+	    gate(Bs3,Op,X,[X1,X2])
     end.
 
 make_variable(V, Bs) ->
     N = add_variable(Bs, true),
+    add_symbol(Bs, N, format_symbol(V)),
     {N, alias(V,N,Bs)}.
 
 order_sort_last(Bs, VarList) ->
@@ -303,7 +349,7 @@ set_level(Bs,Level) ->
 
 value(Bs,V) ->
     case varc:get(Bs#bs.vp, V) of
-	?TRUE -> true;
+	?TRUE  -> true;
 	?FALSE -> false;
 	W -> W
     end.
@@ -317,13 +363,6 @@ get_info(Bs) ->
 get_info(Bs, Key) ->
     varc:info(Bs#bs.vp, Key).
 
-class(Bs,V) ->
-    case varc:class(Bs#bs.vp, V) of
-	?TRUE  -> ?TRUE;
-	?FALSE -> ?FALSE;
-	X -> abs(X)
-    end.
-
 is_bound(Bs,Lit) ->
     varc:is_bound(Bs#bs.vp,Lit).
 
@@ -334,18 +373,24 @@ is_equal(Bs,LitA, LitB) ->
     not varc:is_equal(Bs#bs.vp,LitA,LitB).
 
 equal(Bs,X,Y) when is_integer(X), is_integer(Y) ->
-    varc:put(Bs#bs.vp, X, Y);
+    put(Bs, X, Y);
 equal(Bs,X,Y) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
-    varc:put(Bs#bs.vp, X0, Y0).
+    put(Bs, X0, Y0).
 
 equal(Bs,X,Y, Level) when is_integer(X), is_integer(Y) ->
-    varc:put(Bs#bs.vp, X, Y, Level);
+    put(Bs, X, Y, Level);
 equal(Bs,X,Y,Level) ->
     X0 = literal(X,Bs),
     Y0 = literal(Y,Bs),
-    varc:put(Bs#bs.vp, X0, Y0, Level).
+    put(Bs, X0, Y0, Level).
+
+put(Bs,X,Y) ->
+    varc:put(Bs#bs.vp,X,Y).
+
+put(Bs,X,Y,Level) ->
+    varc:put(Bs#bs.vp,X,Y,Level).
 
 %% substitute X for Y ( X/Y ) replace all instances of Y with X
 substitute(Bs,X,Y) when is_integer(X), is_integer(Y) ->
@@ -419,6 +464,12 @@ implication_clause(Bs, V) ->
 get_clause(Bs, I) ->
     varc:get_clause(Bs#bs.vp, I).
 
+get_clause(Bs, I, SkipLiteral) ->
+    varc:get_clause(Bs#bs.vp, I, SkipLiteral).
+
+get_clause(Bs, I, SkipLiteral, Raw) ->
+    varc:get_clause(Bs#bs.vp, I, SkipLiteral, Raw).
+
 %% How = watch|literal|variable
 get_clauses(Bs, L, How) ->
     varc:get_clauses(Bs#bs.vp, L, How).
@@ -432,9 +483,6 @@ use_clause(Bs, I) ->
 %% Bs is under the assumption that Var = TRUE
 intersect(Bs, Var, B0) ->
     intersect_(Bs, Var, B0).
-
-%% evaluate the bindings and build the intersection
- %% we may have this bindings, crash!
 
 intersect_(Bs,Var,[{X,?TRUE}|B0]) ->
     %% !Var -> X
@@ -850,16 +898,16 @@ build_({bit_range,A,I,J,S},Bs) ->
     end;
 
 %% Fixme: implement shift for variable argument
-build_({'<<',A,K},Bs) when is_integer(K), K>=0 ->
+build_({'<<',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     operation_('<<',Y,K,Bs1);
-build_({'<<<',A,K},Bs) when is_integer(K), K>=0 ->
+build_({'<<<',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     operation_('<<<',Y,K,Bs1);
-build_({'>>',A,K},Bs) when is_integer(K), K >= 0 ->
+build_({'>>',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     operation_('>>',Y,K,Bs1);
-build_({'>>>',A,K},Bs) when is_integer(K), K >= 0 ->
+build_({'>>>',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     operation_('>>>',Y,K,Bs1);
 
@@ -2221,7 +2269,8 @@ vsub(Ys, Zs, Bs) ->
 %% Adder circuit
 %%
 vadd(Ys,Zs,Bs) ->
-    vadd(Ys,Zs,[],{bool,?FALSE},Bs).
+%%    vadd(Ys,Zs,[],{bool,?FALSE},Bs).
+    vadd_fast(Ys,Zs,Bs).
 
 vadd([?FALSE|Ys],[?FALSE|Zs],Xs,{bool,Ci},Bs) ->
     vadd(Ys,Zs,[Ci|Xs],{bool,?FALSE},Bs);
@@ -2236,6 +2285,60 @@ vadd([Y|Ys],[Z|Zs],Xs,Ci,Bs) ->
     vadd(Ys,Zs,[X|Xs],Co,Bs1);
 vadd([],[],Xs,Ci,Bs) -> 
     {Ci,reverse(Xs),Bs}.
+
+%% 
+%% Generate carry look-ahead
+%% then feed them into half address also using Gs
+%% G(i) = Y(i)Z(i)
+%% P(i) = Y(i)+Z(i)
+%% C(0) = FALSE
+%% C(1) = G(0)
+%% C(2) = G(1) + P(1)C(1) = G(1) + P(1)G(0)
+%% C(3) = G(2) + P(2)C(2) = G(2) + P(2)G(1) + P(2)P(1)G(0)
+%% C(4) = G(3) + P(3)C(3) = G(3) + P(3)(G(2) + P(2)G(1) + P(2)P(1)G(0)) =
+%%      = G(3) + P(3)G(2) + P(3)P(2)G(1) + P(3)P(2)P(1)G(0)
+%% C(i+1) = G(i) + (P(i)*(Ci))
+%% S(0) = Y(0) xor Z(0)
+%% S(1) = Y(1) xor Z(1) xor C(1)
+%% S(i) = Y(i) xor Z(i) xor C(i)
+%%
+
+vadd_fast(Ys,Zs,Bs) ->
+    %% io:format("vadd_fast: ~w, ~w\n", [Ys,Zs]),
+    {Gs,Bs1} = map_op('and',Ys,Zs,Bs),
+    {Ps,Bs2} = map_op('or',Ys,Zs,Bs1),
+    {Cs,Bs3} = carry_lookahead(Gs,Ps,Bs2),
+    vadd_fast_sum(Ys,Zs,Cs,Bs3).
+
+vadd_fast_sum(Ys,Zs,Cs,Bs) ->
+    vadd_fast_sum_(Ys,Zs,Cs,[],Bs).
+
+vadd_fast_sum_([Yi|Ys],[Zi|Zs],[Ci|Cs],Sum,Bs) ->
+    {X1,Bs1} = operation('xor',{bool,Yi},{bool,Zi},Bs),
+    {{bool,X2},Bs2} = operation('xor',X1,Ci,Bs1),
+    vadd_fast_sum_(Ys,Zs,Cs,[X2|Sum],Bs2);
+vadd_fast_sum_([],[],[Co],Sum,Bs) ->
+    {Co,reverse(Sum),Bs}.
+
+carry_lookahead(Gs,Ps,Bs) ->
+    carry_lookahead_(Gs,Ps,1,length(Gs)+1,[{bool,?FALSE}],Bs).
+
+carry_lookahead_(_Gs,_Ps,I,I,Cs,Bs) ->
+    {reverse(Cs),Bs};
+carry_lookahead_(Gs,Ps,I,N,Cs,Bs) ->
+    G = lists:sublist(Gs,I),      %% [G(0),G(1),..G(i)]
+    P = tl(lists:sublist(Ps,I)),  %% [P(1),P(2),..P(i)]
+    {Ci,Bs1} = carry_ci(G,P,Bs),
+    carry_lookahead_(Gs,Ps,I+1,N,[Ci|Cs],Bs1).
+
+carry_ci(G,P,Bs) ->
+    carry_ci_(G,P,[],Bs).
+
+carry_ci_([Gn],[],Acc,Bs) ->
+    any([Gn|Acc], Bs);
+carry_ci_([Gi|Gs],P,Acc,Bs) ->    
+    {Xi,Bs1} = all([Gi|P],Bs),
+    carry_ci_(Gs,tl(P),[Xi|Acc],Bs1).
 
 %% Full adder circuit.
 full_adder(Y,Z,Ci,Bs) ->
@@ -2342,6 +2445,16 @@ vlteq([Y|Ys],[Z|Zs],Bs) ->
     {Ev2,Bs6} = operation('and',Ev,E1,Bs5),
     {Lv2,Ev2,Bs6}.
 
+%% same as vmap_op but over list of bool instead of integer vars
+map_op(Op,Ys,Zs,Bs) ->
+    map_op(Op,Ys,Zs,[],Bs).
+
+map_op(Op,[Y|Ys],[Z|Zs],Xs,Bs) ->
+    {X,Bs1} = operation(Op,{bool,Y},{bool,Z},Bs),
+    map_op(Op,Ys,Zs,[X|Xs],Bs1);
+map_op(_Op,[],[],Xs,Bs) ->
+    {reverse(Xs),Bs}.
+
 %% Apply same operator on two vectors
 vmap_op(Op,Ys,Zs,Bs) ->
     vmap_op(Op,Ys,Zs,[],Bs).
@@ -2392,12 +2505,6 @@ minmax2(X1,X2,Bs) ->
     {Max,Bs1} = operation('or',X1,X2,Bs),
     {Min,Bs2} = operation('and',X1,X2,Bs1),
     {Min,Max,Bs2}.
-
-%% cnf_to_formula(Cs) ->
-%%    {'ALL', [{'ANY', C} || C <- Cs]}.
-
-is_equivalent(Bs, X, Y) ->
-    class(Bs,X) =:= class(Bs,Y).
 
 %% Return a list of input variables
 
@@ -2542,7 +2649,8 @@ log_clause(Bs, Clause) ->
     io:format("~s\n", [format_clause(Bs,Clause)]).
 
 log_bindings(Bs, X, Value, Xs) ->
-    log_(Bs, X, Value, Xs).
+    %% log_(Bs, X, Value, Xs).
+    ok.
 
 log_(_Bs, _X, _Value, []) ->
     ok;

@@ -25,9 +25,9 @@ options() ->
 	default => 0,
 	description => "Number of literal reduction clauses to add."
       },
-     #{ long => "reduction-type",
-	short => "R",
-	key => reduction_type,
+     #{ long => "type",
+	short => "r",
+	key => type,
 	spec => {enum,[{"both",both},{"min",min},{"pos",pos},{"neg",neg}]},
 	default => min,
 	description => "Type of reductions clauses."
@@ -38,7 +38,7 @@ run(Bs, Param) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:get_info(Bs, permanent),
-    Type = maps:get(reduction_type, Param),
+    Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
 	    Bs;
@@ -168,18 +168,17 @@ clauses(Bs,[I|Cs],L,Acc) ->
     Fs = varc:get_clause_flags(Bs#bs.vp,I),
     case lists:member(dead, Fs) of
 	true ->
-	    io:format("DEAD\n"),
 	    clauses(Bs, Cs, L, Acc);
 	false ->
-	    Clause = lists:delete(L, get_clause(Bs,I)),
+	    Clause = get_clause(Bs,I, L),
 	    Y = varp_formula:add_variable(Bs),
 	    clauses(Bs,Cs,L,[{Y,Clause}|Acc])
     end;
 clauses(Bs, [], _L, Acc) ->
     {Acc,Bs}.
 
-get_clause(Bs, I) ->
-    varc:get_clause(Bs#bs.vp, I).
+get_clause(Bs, I, Skip) ->
+    varc:get_clause(Bs#bs.vp, I, Skip).
 
 %% Return clauses in Delta
 get_delta_clauses(Bs, L, CMax) ->
