@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -1931,6 +1931,8 @@ operation('+',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {Carry,Cx,Bs1} = vadd(Ax1,Bx1,Bs),
+    io:format("plus: ~w,~w, carry=~w, Xs=~w\n",
+	      [At,Bt,Carry,Cx]),
     Bs2 = set_carry_(Carry,maps:get(carry,Bs1#bs.option),Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
@@ -2065,6 +2067,8 @@ operation('-',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {BorrowNot,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
+    io:format("minus: ~w,~w, !borrow=~w Xs=~w\n",
+	      [At,Bt,BorrowNot,Cx]),
     Bs2 = set_carry_(negate(BorrowNot),
 		     maps:get(borrow,Bs1#bs.option),Bs1),
     Ct = mix_type(At,Bt),

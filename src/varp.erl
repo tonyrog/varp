@@ -31,6 +31,16 @@
 -include("varp.hrl").
 -include("log.hrl").
 
+-record(stat,
+	{
+	 clause_count,
+	 clause_count_2,
+	 clause_count_3,
+	 eval_count,
+	 bound,
+	 clauses
+	}).
+
 global_options() ->
     [
      #{ long => "starexec",
@@ -437,16 +447,26 @@ do_run(Do, Formula, GOpts) ->
     end.
 
 do([{Plugin,Param}|Do], Bs) ->
+    S0 = stat(Bs),
+    T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
-	false ->
-	    no_models(Bs);
-	Bs1 when is_record(Bs1,bs) ->
-	    case one_model(Bs1) of
-		false -> do(Do, Bs1);
-		Result -> Result
-	    end;
-	Result ->
-	    Result
+	R ->
+	    T1 = erlang:monotonic_time(),
+	    S1 = stat(Bs),
+	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
+	    Ts = Time/1000000,
+	    show_info(S1, S0, Ts, Bs),
+	    case R of
+		false ->
+		    no_models(Bs);
+		Bs1 when is_record(Bs1,bs) ->
+		    case one_model(Bs1) of
+			false -> do(Do, Bs1);
+			Result -> Result
+		    end;
+		Result ->
+		    Result
+	    end
     catch
 	?EXCEPTION(error, Reason, Stacktrace) ->
 	    io:format("~s crashed ~p: ~p\n",
@@ -455,6 +475,24 @@ do([{Plugin,Param}|Do], Bs) ->
     end;
 do([], _Bs) ->
     undefined.
+
+show_info(S1, S0, Ts, Bs) ->
+    varp_formula:info(Bs, "    | eval: ~w, clause:~w,~w(2),~w(3), #clauses = ~w time=~.2fs\n",
+		      [S1#stat.eval_count-S0#stat.eval_count,
+		       S1#stat.clause_count - S0#stat.clause_count,
+		       S1#stat.clause_count_2 - S0#stat.clause_count_2,
+		       S1#stat.clause_count_3 - S0#stat.clause_count_3,
+		       S1#stat.clauses,
+		       Ts]).
+
+stat(Bs) ->
+    #stat { clause_count   = varp_formula:clause_eval_counter(Bs,0),
+	    clause_count_2 = varp_formula:clause_eval_counter(Bs,2),
+	    clause_count_3 = varp_formula:clause_eval_counter(Bs,3),
+	    eval_count     = varp_formula:eval_counter(Bs),
+	    bound          = varp_formula:number_of_bound(Bs),
+	    clauses        = varp_formula:number_of_clauses(Bs)
+	  }.
 
 %% extract "method" form Do list
 method(Do) ->
