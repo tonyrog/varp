@@ -1506,6 +1506,8 @@ all_([{bool,A}|As], Xs, Bs) ->
     all_(As, [A|Xs],Bs);
 all_([], [], Bs) ->
     {{bool,?TRUE},Bs};    
+all_([], [X], Bs) ->
+    {{bool,X},Bs};    
 all_([], Xs, Bs) ->
     X = add_variable(Bs),
     {{bool,X}, and_gate(Bs,X,Xs)}.
@@ -1521,7 +1523,9 @@ any_([{bool,?FALSE}|As], Xs, Bs) ->
 any_([{bool,A}|As], Xs, Bs) ->
     any_(As, [A|Xs],Bs);
 any_([], [], Bs) ->
-    {{bool,?FALSE},Bs};    
+    {{bool,?FALSE},Bs};
+any_([], [X], Bs) ->
+    {{bool,X},Bs};
 any_([], Xs, Bs) ->
     X = add_variable(Bs),
     {{bool,X}, or_gate(Bs,X,Xs)}.
@@ -1779,12 +1783,17 @@ operation('and',{bool,?FALSE},{bool,_Z}, Bs) ->
     {{bool,?FALSE},Bs};
 operation('and',{bool,_Y},{bool,?FALSE}, Bs) ->
     {{bool,?FALSE},Bs};
+operation('and',{bool,?TRUE},{bool,Z}, Bs) ->
+    {{bool,Z},Bs};
+operation('and',{bool,Y},{bool,?TRUE}, Bs) ->
+    {{bool,Y},Bs};
 operation('and',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
     {{bool,X},and_gate(Bs,X,[Y,Z])};
 
 operation('and',A,B,Bs) ->
     operation_('&',A,B,Bs);
+
 operation('&',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1809,12 +1818,17 @@ operation('or',{bool,?TRUE},{bool,_Z}, Bs) ->
     {{bool,?TRUE},Bs};
 operation('or',{bool,_Y},{bool,?TRUE}, Bs) ->
     {{bool,?TRUE},Bs};
+operation('or',{bool,?FALSE},{bool,Z}, Bs) ->
+    {{bool,Z},Bs};
+operation('or',{bool,Y},{bool,?FALSE}, Bs) ->
+    {{bool,Y},Bs};
 operation('or',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
     {{bool,X},or_gate(Bs,X,[Y,Z])};
 
 operation('or',A,B,Bs) ->
     operation_('|',A,B,Bs);
+
 operation('|',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
@@ -1872,11 +1886,29 @@ operation('equ',A,B,Bs) ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
 
-operation('xor',{bool,Y},{bool,Z},Bs) ->
+operation('xor',{bool,?TRUE},{bool,?TRUE}, Bs) ->
+    {{bool,?FALSE},Bs};
+operation('xor',{bool,?FALSE},{bool,?FALSE}, Bs) ->
+    {{bool,?FALSE},Bs};
+operation('xor',{bool,?FALSE},{bool,?TRUE}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('xor',{bool,?TRUE},{bool,?FALSE}, Bs) ->
+    {{bool,?TRUE},Bs};
+operation('xor',{bool,?FALSE},{bool,Z}, Bs) ->
+    {{bool,Z},Bs};
+operation('xor',{bool,?TRUE},{bool,Z}, Bs) ->
+    {{bool,-Z},Bs};
+operation('xor',{bool,Z},{bool,?FALSE}, Bs) ->
+    {{bool,Z},Bs};
+operation('xor',{bool,Z},{bool,?TRUE}, Bs) ->
+    {{bool,-Z},Bs};
+operation('xor',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
     {{bool,X},xor_gate(Bs,X,[Y,Z])};
+
 operation('xor',A,B,Bs) ->
     operation_('^',A,B,Bs);
+
 operation('^',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
