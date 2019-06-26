@@ -10,11 +10,9 @@
 -export([main/1]).
 -export([do_run/3]).
 
--export([run_formula/1, run_formula/2]).
--export([prove_formula/1, prove_formula/2]).
 -export([parse/1, parse/2]).
 -export([scan_file/1]).
--export([file/1, string/1, file_expand_cnf/2]).
+-export([file/1, string/1]).
 -export([archive_path/1]).
 -export([output_model/2]).
 -export([empty_sections/0]).
@@ -26,6 +24,7 @@
 -export([load_options/0, load_options/1, load_options/2]).
 -export([load_option_list/1, load_option_list/3]).
 
+-export([default_options/0]).
 
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").
@@ -275,20 +274,18 @@ main(Args) ->
 		undefined ->
 		    case load_files([F],Formula0,Sections0,'and',GOpts3) of
 			{ok,{Sections1,Formula}} ->
-			    Sections = append_sections(Sections0,Sections1),
-			    GOpts4 = section_opts(Sections, GOpts3),
+			    GOpts4 = section_opts(Sections1, GOpts3),
 			    do_run(Do,Formula,GOpts4);
 			_Error ->
 			    halt(1)
 		    end;
-		Type ->
+		Type -> %% with formula?
 		    run_batch(Do,Type,F,GOpts3)
 	    end;
 	Fs ->
 	    case load_files(Fs,Formula0,Sections0,'and',GOpts3) of
 		{ok,{Sections1,Formula}} ->
-		    Sections = append_sections(Sections0,Sections1),
-		    GOpts4 = section_opts(Sections, GOpts3),
+		    GOpts4 = section_opts(Sections1, GOpts3),
 		    do_run(Do,Formula,GOpts4);
 		_Error ->
 		    halt(1)
@@ -419,35 +416,31 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
 	      AFile = filename:join(ArchiveFile,F),
 	      case load_files([AFile],true,empty_sections(),'and',GOpts) of
 		  {ok,{Sections,Formula}} ->
-		      #{order := Order,
-			decls := Decls,
-			literals := Literals,
-			defs := Defs} = Sections,
-		      OrderOpts = order_decl(Order),
-		      do_run(Do,Formula,
-			     GOpts#{ order => OrderOpts,
-				     defs => Defs,
-				     decls => Decls,
-				     literals => Literals});
+		      do_run(Do,Formula, section_opts(Sections, GOpts));
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
 		      ok
 	      end
       end, Fs).
 
-
 do_run(Do, Formula, GOpts) ->
+    R = do_run_(Do, Formula, GOpts),
+    garbage_collect(self(),[{type,major}]),
+    R.
+
+do_run_(Do, Formula, GOpts) ->
     {{bool,Main}, Bs} = varp_formula:build(Formula,GOpts),
     Bs1 = Bs#bs { main = Main },
     R = do(Do, Bs1),
     Method = method(Do),
-    case varp_formula:getopt(Bs, print) of
+    case varp_formula:getopt(Bs1, print) of
 	false -> R;
 	_ -> display_result(R, Method, Bs1), R
     end.
 
 do([{Plugin,Param}|Do], Bs) ->
     S0 = stat(Bs),
+    varp_formula:info(Bs, "pass ~p\n", [Plugin]),
     T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
 	R ->
@@ -483,7 +476,12 @@ show_info(S1, S0, Ts, Bs) ->
 		       S1#stat.clause_count_2 - S0#stat.clause_count_2,
 		       S1#stat.clause_count_3 - S0#stat.clause_count_3,
 		       S1#stat.clauses,
-		       Ts]).
+		       Ts]),
+    varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
+		      [S1#stat.bound-S0#stat.bound,
+		       S1#stat.bound,
+		       varp_formula:number_of_variables(Bs)
+		      ]).
 
 stat(Bs) ->
     #stat { clause_count   = varp_formula:clause_eval_counter(Bs,0),
@@ -580,7 +578,9 @@ no_models(Bs) ->
 	true ->
 	    %% print partial model, the variables bound
 	    Mdl = varp_formula:model(Bs),
-	    io:format("partial: ~s\n",[varp_formula:format_model(Mdl)]);
+	    Mdl1 = varp_formula:filter_bindings(Mdl),
+	    io:format("partial: ~s\n",
+		      [lists:join(",",[varp_formula:format_binding(Bound) || Bound <- Mdl1 ])]);
 	false ->
 	    ok
     end,
@@ -589,6 +589,10 @@ no_models(Bs) ->
 	count -> 0
     end.
 
+anon_decls([{{p,P,Ps},Type,Size}|Decls]) ->
+    [{{p,P,['_' || _ <- Ps]},Type,Size}|anon_decls(Decls)];
+anon_decls([]) ->
+    [].
 
 order_decl([]) -> [];
 order_decl(Vs) -> order_decl(Vs,[]).
@@ -649,6 +653,7 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		    Error
 	    end;
        true ->
+	    io:format("Read file ~s\n", [F]),
 	    {ok, Data} = read_file(F),
 	    case parse(F, Data) of
 		{ok,{Sections1,Formula}} ->
@@ -828,8 +833,8 @@ section_opts(#{ decls := Decls,
 	     GOpts) ->
     GOpts#{
 	   order => order_decl(Order),
+	   decls => anon_decls(Decls),
 	   defs => Defs,
-	   decls => Decls,
 	   literals => Literals,
 	   assert => Assert,
 	   input => Input,
@@ -871,21 +876,13 @@ collect_in(Acc) ->
 	    collect_in([Line|Acc])
     end.
 
-run_formula(Formula) ->
-    run_formula(Formula,[]).
-run_formula(Formula,Opts) ->
-    varp_prover:run_formula(Formula, Opts).
-
-prove_formula(Formula) ->
-    prove_formula(Formula,[]).
-prove_formula(Formula,Opts) ->
-    varp_prover:prove_formula(Formula, [{max,1}|Opts]).
-
 file(File) ->
     case read_file(File) of
 	{ok,Binary} ->
 	    parse(File,Binary);
-	Error ->
+	Error={error,Reason} ->
+	    io:format("Unable to read file ~s (~w)\n",
+		      [File, Reason]),
 	    Error
     end.
 
@@ -893,7 +890,10 @@ scan_file(File) ->
     case read_file(File) of
 	{ok,Binary} ->    
 	    tokens(binary_to_list(Binary));
-	Error -> Error
+	Error={error,Reason} ->
+	    io:format("Unable to read file ~s (~w)\n",
+		      [File, Reason]),
+	    Error
     end.
 
 %% Archive aware file:read
@@ -1044,15 +1044,3 @@ remove_block([]) -> [].
 remove_line(Cs=[$\n|_]) -> Cs;
 remove_line([_|Cs]) -> remove_line(Cs);
 remove_line([]) -> [].
-
-
-%% special
-file_expand_cnf(File, MetaBind) ->
-    case file(File) of
-	{ok,F} ->
-	    F1 = varp_expand:formula(F,MetaBind),
-	    {CLs,_Ls} = varp_cnf:clauses(F1),
-	    CLs;
-	Error ->
-	    Error
-    end.

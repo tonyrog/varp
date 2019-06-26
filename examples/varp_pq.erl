@@ -70,9 +70,15 @@ pq(P, Q, Opts) ->
 %%  formula (P*Q == N) && (P > Q) && (Q > 1)
 %%
 formula(P, Q, Opts) ->
-    N = max(bit:size(P),bit:size(Q)),
-    Pn = {uint,N,{p,'P',[]}},
-    Qn = {uint,N,{p,'Q',[]}},
+    %% Np = Nq = max(bit:size(P),bit:size(Q)),
+    %% Pn = {uint,Np,{p,'P',[]}},
+    %% Qn = {uint,Nq,{p,'Q',[]}},
+    N  = bit:size(P*Q),
+    Np = N-1,
+    Nq = (N+1) div 2,
+    Pn = {uint,Np,{p,'P',[]}},
+    Qn = {uint,Nq,{p,'Q',[]}},
+
     {'ALL',
      case lists:member(commute, Opts) of
 	 true ->

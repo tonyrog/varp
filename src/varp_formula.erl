@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
--define(DEBUG, true).
+%% -define(DEBUG, true).
 
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -30,6 +30,8 @@
 -export([format_lit/2, format_lit/3]).
 -export([format_literals/2, format_literals/3]).
 -export([format_var/2]).
+-export([format_binding/1]).
+-export([filter_bindings/1]).
 -export([format_clause/2, format_clause/3]).
 -export([log_bindings/4]).
 -export([log_clause/2]).
@@ -43,7 +45,7 @@
 -export([is_equal/3]).
 -export([is_bound/2]).
 -export([is_unbound/2]).
--export([getopt/2, setopt/3]).
+-export([getopt/2]).
 -export([number_of_variables/1]).
 -export([number_of_clauses/1]).
 -export([number_of_bound/1]).
@@ -104,7 +106,7 @@
 	       {bit,pred(),Size::integer(),Bit::integer()}.
 
 new() ->
-    new(varp_option:default_option()).
+    new(varp:default_options()).
 
 new(Options) when is_list(Options) ->
     new(maps:from_list(Options));  %% fixme validate?
@@ -116,13 +118,11 @@ new(OptMap) when is_map(OptMap) ->
     CLen     = counters:new(1024, []),
     #bs {
        option = OptMap,
-       vs = #{ true => ?TRUE,
-	       ?TRUE => true,
-	       false => ?FALSE,
-	       ?FALSE => false},
-       meta = maps:get(meta,OptMap),
-       defs = maps:get(defs,OptMap),
-       decls = maps:get(decls,OptMap),
+       vs = #{ true => ?TRUE, ?TRUE => true,
+	       false => ?FALSE, ?FALSE => false},
+       meta     = maps:get(meta,OptMap),
+       defs     = maps:get(defs,OptMap),
+       decls    = maps:get(decls,OptMap),
        literals = maps:get(literals,OptMap),
        assert   = maps:get(assert,OptMap),
        input    = maps:get(input,OptMap),
@@ -405,11 +405,6 @@ literal(X, Bs) -> maps:get(X, Bs#bs.vs).
 
 getopt(Bs,Key) ->
     varp_option:getopt(Key, Bs#bs.option).
-
-setopt(Bs,Key,Value) ->
-    Option = varp_option:setopt(Key,Value,Bs#bs.option),
-    %% Mybe set option in backend as well? probably
-    Bs#bs { option = Option }.
 
 number_of_variables(Bs) ->
     varc:get_number_of_variables(Bs#bs.vp).
@@ -752,7 +747,9 @@ build_code([], Bs) ->
 build_code(Defs, Bs) ->
     case proplists:get_value(code, Defs) of
 	undefined -> Bs;
-	Code -> varp_code:generate(Code, Bs)
+	_Code ->
+	    %% varp_code:generate(Code, Bs)
+	    Bs
     end.
 
 build__(F, Bs) ->
@@ -783,12 +780,13 @@ build_(V={p,P,Ps}, Bs) ->
     %% match delcs to see if this predicate is declared with
     %% sign and bit size look for {p,P,['_','_',...]}
     Px = {p,P,['_' || _ <- Ps]},
+    %% io:format("find ~p in ~p\n", [Px, Bs#bs.decls]),
     case proplists:lookup(Px, Bs#bs.decls) of
 	none ->
 	    {X,Bs1} = variable(V, Bs),
 	    {{bool,X},Bs1};
-	{_,Sign,Size} ->
-	    var_vector(Sign,V,Size,Bs)
+	_Decl={_,Type,Size} ->
+	    var_vector(Type,V,Size,Bs)
     end;
 build_({uint,N,V}, Bs) ->
     if is_atom(V) ->
@@ -868,8 +866,8 @@ build_({bit_index,A,I},Bs) ->
 		none ->
 		    {X,Bs1} = variable({index,A,I1}, Bs),
 		    {{bool,X},Bs1};
-		{_,Sign,Size} ->
-		    case var_vector(Sign,A,Size,Bs) of
+		{_,Type,Size} ->
+		    case var_vector(Type,A,Size,Bs) of
 			{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
 			{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
 			{{bit,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
@@ -1264,7 +1262,7 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	{#cid{name="sqrt"},[A]}    -> math:sqrt(A);
 	{#cid{name="isqrt"},[A]}   -> imath:isqrt(A);
 	{#cid{name="sqr"},[A]}     -> A*A;
-	{#cid{name="nroot"},[A,N]} -> varp_math:nroot(A,N);
+	{#cid{name="nroot"},[A,N]} -> imath:nroot(A,N);
 	{#cid{name="ln"},[A]}      -> math:log(A);
 	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
 	{#cid{name="log2"},[A]}    -> math:log(A)/math:log(2);
@@ -1292,7 +1290,7 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	%% ordsets
 	{#cid{name="union"},[A,B]}   -> ordsets:union(A,B);
 	{#cid{name="subtract"},[A,B]}   -> ordsets:subtract(A,B);
-	{#cid{name="intersect"},[A,B]}   -> ordsets:intersect(A,B);
+	{#cid{name="intersect"},[A,B]}   -> ordsets:intersection(A,B);
 	{#cid{name="product"},[A,B]}   -> [ [Ai,Bi] || Ai <- A, Bi <- B ];
 	%% function symbol
 	{#cid{name=Func},As1} -> {f,Func,As1}
@@ -1764,9 +1762,9 @@ operation('-', A, Bs) ->
     end;
 
 operation('abs', A={int,N,Ys}, Bs) ->
-    Sign = sign_bit(A),
+    SignBit = sign_bit(A),
     {{_,_,Zs},Bs1} = operation_('-',A,Bs),
-    {Xs,Bs2} = vite(Sign, Zs, Ys, Bs1),
+    {Xs,Bs2} = vite(SignBit, Zs, Ys, Bs1),
     {{int,N,Xs},Bs2};
 operation('abs', A={uint,_N,_Ys}, Bs) ->
     {A,Bs}.
@@ -1931,8 +1929,7 @@ operation('+',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {Carry,Cx,Bs1} = vadd(Ax1,Bx1,Bs),
-    io:format("plus: ~w,~w, carry=~w, Xs=~w\n",
-	      [At,Bt,Carry,Cx]),
+    %% io:format("plus: ~w,~w, carry=~w, Xs=~w\n", [At,Bt,Carry,Cx]),
     Bs2 = set_carry_(Carry,maps:get(carry,Bs1#bs.option),Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2};
@@ -2067,8 +2064,7 @@ operation('-',A,B,Bs) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {BorrowNot,Cx,Bs1} = vsub(Ax1,Bx1,Bs),
-    io:format("minus: ~w,~w, !borrow=~w Xs=~w\n",
-	      [At,Bt,BorrowNot,Cx]),
+    %% io:format("minus: ~w,~w, !borrow=~w Xs=~w\n", [At,Bt,BorrowNot,Cx]),
     Bs2 = set_carry_(negate(BorrowNot),
 		     maps:get(borrow,Bs1#bs.option),Bs1),
     Ct = mix_type(At,Bt),
@@ -2473,8 +2469,8 @@ vushift_right(K,N,Xs) when K >= 0 ->
 %%               [X2,X3,X4,X5,X6,X7,X7,X7]
 vshift_right(K,N,Xs) when K >= 0 ->
     K1 = erlang:min(K,N),
-    Sign = lists:nth(N, Xs),
-    lists:sublist(Xs, K1+1, N) ++ lists:duplicate(K1,Sign).
+    SignBit = lists:nth(N, Xs),
+    lists:sublist(Xs, K1+1, N) ++ lists:duplicate(K1,SignBit).
 
 %% Compare equal
 veq(Ys, Zs, Bs) ->

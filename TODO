@@ -1,3 +1,14 @@
+
+- size (atoms ?)
+
+
+- occure + clause length
+
+  occure A =  1/N1 + ... + 1/Nk
+
+  om A förekommer i (A ... Pn1) (A ... Pn2) + ... + (A + Pnk)
+  
+
 - continue with backtrack after backjump
   as alternative to install all models while
   backjumping.
@@ -15,7 +26,7 @@ input(Line,Acc) ->
 
   assert(is_odd(n) && (n > 1))
 
-- Options per backend
++ Options per backend
 
   new option syntax and new control file format
 
@@ -99,7 +110,7 @@ input(Line,Acc) ->
   Design GUI to track simple examples ~30-40 clauses
   and conflict clauses and assignments levels
 
-- Statistcs
++ Statistcs
 
   histogram over conflict clause lengths added
 

@@ -21,7 +21,8 @@
 
 #define ASSERTIONS
 // #define DEBUG
-// #define PACKED_VALUE 1      // 1 or 4 values are packed in each byte
+// #define DEBUG_MEM
+#define PACKED_VALUE 4         // 1 or 4 values are packed in each byte
 // #define USE_CLAUSE_SHUFFLE  // shuffle literals after cleanup
 // #define USE_CLAUSE_FIND     // avoid install clauses multiple times
 
@@ -29,6 +30,8 @@
 #define FALSE  -1
 #define TRUE    1
 #define BOUND   2
+
+#define NEGATE(x) (-(x))
 
 // packed values are stored like
 // |--------|xx|  1 value  xx=3 BOUND, 2=TRUE, 0=UNDEF, 1=FALSE
@@ -166,9 +169,6 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
 #define ABS(x) (((x)<0) ? (-(x)) : (x))
 
 #define	RANDOMDEV	"/dev/urandom"
-
-// #define TRACE(f,va...) fprintf(stderr, (f), va)
-#define TRACE(f,va...)
 
 typedef struct _heap_t
 {
@@ -443,9 +443,6 @@ DECL_ATOM(random);
 DECL_ATOM(occur);
 DECL_ATOM(plus_occur);
 DECL_ATOM(minus_occur);
-DECL_ATOM(depth);
-DECL_ATOM(plus_depth);
-DECL_ATOM(minus_depth);
 
 // info
 DECL_ATOM(max_clause_length);
@@ -469,8 +466,59 @@ DECL_ATOM(permanent);
 DECL_ATOM(keep);
 DECL_ATOM(level);
 DECL_ATOM(fifo);
-DECL_ATOM(lifo);    
+DECL_ATOM(lifo);
 
+
+#ifdef DEBUG_MEM
+#define VARP_ALLOC(n)       debug_alloc((n))
+#define VARP_REALLOC(ptr,n) debug_realloc((ptr),(n))
+#define VARP_FREE(ptr)      debug_free((ptr))
+#else
+#define VARP_ALLOC(n)       enif_alloc((n))
+#define VARP_REALLOC(ptr,n) enif_realloc((ptr),(n))
+#define VARP_FREE(ptr)      enif_free((ptr))
+#endif
+
+size_t varp_allocated = 0;
+
+void* debug_alloc(size_t n)
+{
+    void* ptr;
+
+    if ((ptr = enif_alloc(sizeof(size_t) + n)) != NULL) {
+	*((size_t*)ptr) = n;
+	varp_allocated += n;
+	return ptr+sizeof(size_t);
+    }
+    return NULL;
+}
+
+void* debug_realloc(void* ptr, size_t n)
+{
+    if (ptr == NULL)
+	return debug_alloc(n);
+    else {
+	void* pptr = ptr - sizeof(size_t);
+	size_t m = *((size_t*)pptr);
+	varp_allocated -= m;
+	if ((ptr = enif_realloc(pptr, sizeof(size_t) + n)) != NULL) {
+	    *((size_t*)ptr) = n;
+	    varp_allocated += n;
+	    return ptr+sizeof(size_t);
+	}
+	return NULL;
+    }
+}
+
+void debug_free(void* ptr)
+{
+    if (ptr != NULL) {
+	void* pptr = ptr - sizeof(size_t);
+	size_t m = *((size_t*)pptr);
+	varp_allocated -= m;
+	enif_free(pptr);
+    }
+}
 
 #define EXT  0x80
 #define SIGN 0x40
@@ -568,7 +616,7 @@ static inline lit_t vix_l(varp_t* vp, int vix)
     UNUSED(vp);    
     return (lit_t) vix;
 #else
-    return (lit_t) vix_ll(vp, cix);
+    return (lit_t) vix_ll(vp, vix);
 #endif
 }
 
@@ -648,7 +696,8 @@ static inline int get_vv(varp_t* vp, variable_t* var)
 #ifdef PACKED_VALUE
     
 #if PACKED_VALUE == 1
-    return ((int)vp->var_value[var->vix])-1;
+    int i = var->vix;
+    return ((int)vp->var_value[i])-1;
 #elif PACKED_VALUE == 4
     int i = var->vix >> 2;    
     int j = ((var->vix) & 0x3) << 1;  // shift 0,2,4,6
@@ -666,7 +715,8 @@ static inline void set_vv(varp_t* vp, variable_t* var, int value)
 #ifdef PACKED_VALUE
     
 #if PACKED_VALUE == 1
-    vp->var_value[var->vix] = (value+1)&0x3;
+    int i = var->vix;
+    vp->var_value[i] = (value+1)&0x3;
 #elif PACKED_VALUE == 4
     int i = var->vix >> 2;
     int j = ((var->vix)&0x3) << 1;  // shift 0,2,4,6
@@ -683,7 +733,7 @@ static inline void set_vv(varp_t* vp, variable_t* var, int value)
 // primitiv get literal value
 static inline int get_ll(varp_t* vp, literal_t* lp)
 {
-    return (lp->sign < 0) ? -get_vv(vp,lp->var) : get_vv(vp,lp->var);
+    return (lp->sign < 0) ? NEGATE(get_vv(vp,lp->var)) : get_vv(vp,lp->var);
 }
 
 // primitive get lit value
@@ -696,7 +746,7 @@ static inline int get_l(varp_t* vp, lit_t l)
 static inline void set_ll(varp_t* vp, literal_t* lp, int value)
 {
     if (lp->sign < 0)
-	set_vv(vp,lp->var,-value);
+	set_vv(vp,lp->var,NEGATE(value));
     else
 	set_vv(vp,lp->var,value);
 }
@@ -716,17 +766,13 @@ static inline literal_t* lookup_literal(literal_t* lp)
 static inline int get_literal_value(varp_t* vp, literal_t* lp)
 {
     lp = lookup_literal(lp);
-    if (lp->sign < 0)
-	return -get_vv(vp, lp->var);
-    else
-	return get_vv(vp, lp->var);
+    return get_ll(vp, lp);
 }
 
 static inline void set_literal_value(varp_t* vp, literal_t* lp, int value)
 {
     while (lp->var->bound) { // resolve literal
-	printf("set_literal_value: %d\r\n", lp->var->vix);
-	if (lp->sign < 0) value = -value;
+	if (lp->sign < 0) value = NEGATE(value);
 	lp = lp->var->bound;
     }
     set_ll(vp, lp, value);
@@ -805,7 +851,7 @@ static heap_t* new_heap_block(heap_t* next)
 {
     heap_t* hp;
 
-    if ((hp = enif_alloc(HEAP_BLOCK_SIZE + HEAP_ALIGN - 1)) == NULL)
+    if ((hp = VARP_ALLOC(HEAP_BLOCK_SIZE + HEAP_ALIGN - 1)) == NULL)
 	return NULL;
     hp->next    = next;
     hp->current = hp->base + PAD(hp->base,HEAP_ALIGN);
@@ -837,7 +883,7 @@ static void cleanup_heap(heap_t* hp)
 {
     while(hp != NULL) {
 	heap_t* hp_next = hp->next;
-	enif_free(hp);
+	VARP_FREE(hp);
 	hp = hp_next;
     }
 }
@@ -1004,6 +1050,10 @@ static void unwatch_clause(varp_t* vp, clause_t* cp)
     if ((p = cp->wl[1].p) > 0) unwatch(vp, cp, cp->lit[p]);
 }
 
+// FIXME clauses should really be heap allocated?
+// except we need to garbage collect in that case when
+// deleting clauses...or
+
 static clause_t* clause_alloc(varp_t* vp, int size)
 {
     UNUSED(vp);
@@ -1098,6 +1148,11 @@ static void push_variable(varp_t* vp, variable_t* var, int level)
     vp->num_bound++;
 }
 
+//
+// FIXME: log_permanent
+// send message to process(es) interested in permanent assignments
+// of variables.
+//
 static inline void log_permanent(varp_t* vp, variable_t* var, int level)
 {
 #if LOG_ASSIGN_ATOM    
@@ -1105,6 +1160,10 @@ static inline void log_permanent(varp_t* vp, variable_t* var, int level)
 	// fixme: send message monitor variables...
 	printf("PERMANENT(ATOM) %s=%d\r\n",format_variable(var),(get_vv(vp,var)+1)>>1);
     }
+#else
+    UNUSED(vp);
+    UNUSED(var);
+    UNUSED(level);
 #endif
 }
 
@@ -1116,7 +1175,7 @@ static inline void set_literal(varp_t* vp,lit_t lp,int value,
     DBG("SET_LITERAL %d = %d\r\n", index_l(lp), value);
     assert(!is_constant(get_variable_value(vp, var)));
     assert(var->bound == NULL);
-    set_vv(vp, var, is_neg_l(lp) ? -value : value);
+    set_vv(vp, var, is_neg_l(lp) ? NEGATE(value) : value);
     // set_variable_value(vp, var, is_neg_l(lp) ? -value : value);
     var->implication_clause = cix;
     var->literal_pos = li;
@@ -1143,7 +1202,7 @@ static void put_literal(varp_t* vp,lit_t lp,int value,long li,int cix,int level)
 static void undo_init(varp_t* vp)
 {
     vp->unum = DEFAULT_UNDO_SIZE;
-    vp->undo = enif_alloc(DEFAULT_UNDO_SIZE * sizeof(undo_t));
+    vp->undo = VARP_ALLOC(DEFAULT_UNDO_SIZE * sizeof(undo_t));
     memset(vp->undo, 0, DEFAULT_UNDO_SIZE * sizeof(undo_t));
     vp->stack_size = 0;
     vp->num_bound = 0;
@@ -1156,7 +1215,7 @@ static int set_level(varp_t* vp, int level)
     if (level >= (int)vp->unum) {
 	unsigned int n = vp->unum;
 	vp->unum *= 2;
-	vp->undo = enif_realloc(vp->undo, vp->unum*sizeof(undo_t));
+	vp->undo = VARP_REALLOC(vp->undo, vp->unum*sizeof(undo_t));
 	memset(vp->undo+n, 0, n*sizeof(undo_t));
     }
     vp->level = level;
@@ -1234,11 +1293,10 @@ static void init_literal(literal_t* lp, variable_t* var, int sign)
 
 static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
 {
-    set_vv(vp, var, value);
+    var->vix   = vix;
     var->next = NULL;    
     var->flags = 0;
     var->bound = NULL;
-    var->vix   = vix;
     var->pkey[0] = var->pkey[1] = var->pkey[2] = 0;
     var->nkey[0] = var->nkey[1] = var->nkey[2] = 0;    
 
@@ -1249,11 +1307,13 @@ static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
     var->strname = NULL;
     var->names = NULL;
 
+    var->xfirst = NULL;
+    var->xlast  = &var->xfirst;    
+
+    set_vv(vp, var, value);  // may use var->vix!!!
+
     init_literal(&var->lit[LIT_POS], var, TRUE);
     init_literal(&var->lit[LIT_NEG], var, FALSE);
-    
-    var->xfirst = NULL;
-    var->xlast  = &var->xfirst;
 }
 
 // return 1 if a is equal to b, return 0 otherwise
@@ -1316,7 +1376,7 @@ static int clause_insert(varp_t* vp, clause_t* cp)
 	unsigned int new_csize = vp->csize + vp->grow;
 	clause_t** cpp;
 	
-	if (!(cpp = enif_realloc(vp->clause_map, new_csize*sizeof(clause_t**))))
+	if (!(cpp = VARP_REALLOC(vp->clause_map, new_csize*sizeof(clause_t**))))
 	    return -1;
 	vp->clause_map = cpp;
 	vp->csize = new_csize;
@@ -1429,26 +1489,26 @@ static void cleanup(varp_t* vp)
 	for (i = 0; i < (int)vp->ssize; i++) {
 	    symbol_t* sp = vp->sym_map[i];
 	    while(sp) {
-		enif_free(sp->data);
+		VARP_FREE(sp->data);
 		sp = sp->next;
 	    }
 	}
-	enif_free(vp->sym_map);
+	VARP_FREE(vp->sym_map);
 	vp->sym_map = NULL;		    
     }
     
     if (vp->var_map) {
-	enif_free(vp->var_map);
+	VARP_FREE(vp->var_map);
 	vp->var_map = NULL;
     }
 #ifdef PACKED_VALUE
     if (vp->var_value) {
-	enif_free(vp->var_value);
+	VARP_FREE(vp->var_value);
 	vp->var_value = NULL;
     }
 #endif    
     if (vp->order_map) {
-	enif_free(vp->order_map);
+	VARP_FREE(vp->order_map);
 	vp->order_map = NULL;
     }
     
@@ -1458,12 +1518,12 @@ static void cleanup(varp_t* vp)
 	    clause_t* cp = vp->clause_map[i];
 	    clause_free(vp, cp);
 	}
-	enif_free(vp->clause_map);
+	VARP_FREE(vp->clause_map);
 	vp->clause_map = NULL;
     }
 
     if (vp->undo) {
-	enif_free(vp->undo);
+	VARP_FREE(vp->undo);
 	vp->undo = NULL;
     }
     
@@ -1475,8 +1535,15 @@ static void cleanup(varp_t* vp)
 static void varp_dtor(ErlNifEnv* env, void* obj)
 {
     (void) env;
-    TRACE("dtor called %s\r\n", "");
+#ifdef DEBUG_MEM
+    printf("allocated memory before dtor = %ld\r\n",
+	   varp_allocated);
+#endif    
     cleanup((varp_t*) obj);
+#ifdef DEBUG_MEM
+    printf("allocated memory after dtor = %ld\r\n",
+	   varp_allocated);
+#endif
 }
 
 static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
@@ -1538,21 +1605,21 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     vp->vnum  = 0;
 
     vp->grow = grow;
-    if (!(vp->var_map = enif_alloc(vsize*sizeof(variable_t**))))
+    if (!(vp->var_map = VARP_ALLOC(vsize*sizeof(variable_t**))))
 	goto error;
 #ifdef PACKED_VALUE
-    if (!(vp->var_value = enif_alloc(PACKED_BYTES(vsize)*sizeof(int8_t))))
+    if (!(vp->var_value = VARP_ALLOC(PACKED_BYTES(vsize)*sizeof(uint8_t))))
 	goto error;
 #endif
     ssize = 1;
     while(ssize < vsize) ssize *= 2;
-    if (!(vp->sym_map = enif_alloc(ssize*sizeof(symbol_t**))))
+    if (!(vp->sym_map = VARP_ALLOC(ssize*sizeof(symbol_t**))))
 	goto error;
     memset(vp->sym_map, 0, ssize*sizeof(symbol_t**));
     vp->ssize = ssize;
     vp->snum = 0;
     
-    if (!(vp->order_map = enif_alloc(vsize*sizeof(int))))
+    if (!(vp->order_map = VARP_ALLOC(vsize*sizeof(int))))
 	goto error;
     vp->cnext = 0;
     vp->csize = csize;
@@ -1560,7 +1627,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     vp->cpermanent = 0;
     vp->keep = 0;
     
-    if (!(vp->clause_map = enif_alloc(csize*sizeof(clause_t**))))
+    if (!(vp->clause_map = VARP_ALLOC(csize*sizeof(clause_t**))))
 	goto error;
 
     if (init_allocator(&vp->var_allocator, sizeof(variable_t)) < 0)
@@ -1632,16 +1699,16 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
 	unsigned int new_vsize = vp->vsize + vp->grow;
 	void* ptr;
 
-	if (!(ptr = enif_realloc(vp->var_map, new_vsize*sizeof(variable_t*))))
+	if (!(ptr = VARP_REALLOC(vp->var_map, new_vsize*sizeof(variable_t*))))
 	    return enif_make_badarg(env);
 	vp->var_map = ptr;
 	
-	if (!(ptr = enif_realloc(vp->order_map, new_vsize*sizeof(int))))
+	if (!(ptr = VARP_REALLOC(vp->order_map, new_vsize*sizeof(int))))
 	    return enif_make_badarg(env);
 	vp->order_map = ptr;
 #ifdef PACKED_VALUE
-	if (!(ptr = enif_realloc(vp->var_value,
-				 PACKED_BYTES(new_vsize)*sizeof(int8_t))))
+	if (!(ptr = VARP_REALLOC(vp->var_value,
+				 PACKED_BYTES(new_vsize)*sizeof(uint8_t))))
 	    return enif_make_badarg(env);
 	vp->var_value = ptr;
 #endif
@@ -1701,12 +1768,12 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     sp->var  = var;    
     // copy term or binary
     if (is_term) {
-	sp->data = enif_alloc(bin.size);
+	sp->data = VARP_ALLOC(bin.size);
 	memcpy(sp->data, bin.data, bin.size);
 	sp->size = bin.size;	
     }
     else {
-	sp->data = enif_alloc(bin.size+1);
+	sp->data = VARP_ALLOC(bin.size+1);
 	memcpy(sp->data, bin.data, bin.size);
 	sp->data[bin.size] = '\0';
 	sp->size = bin.size;
@@ -1721,7 +1788,7 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     if (vp->snum >= vp->ssize) { // rehash	
 	unsigned int ssize1 = vp->ssize*2;
 	int i;
-	symbol_t** sym_map1 = enif_alloc(ssize1*sizeof(symbol_t**));
+	symbol_t** sym_map1 = VARP_ALLOC(ssize1*sizeof(symbol_t**));
 
 	memset(sym_map1, 0, ssize1*sizeof(symbol_t**));
 	for (i = 0; i < (int)vp->ssize; i++) {
@@ -1734,7 +1801,7 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 	    }
 	    vp->sym_map[i] = NULL;
 	}
-	enif_free(vp->sym_map);
+	VARP_FREE(vp->sym_map);
 	vp->sym_map = sym_map1;
 	vp->ssize = ssize1;
 	hix  = hash & (ssize1-1);  // hash index for new element
@@ -1946,29 +2013,6 @@ static void order_k_occur(varp_t* vp, int k)
     }
 }
 
-// FIXME: order variables according to "depth"
-static void order_k_depth(varp_t* vp, int k)
-{
-    int i;
-    
-    for (i = 2; i < (int)vp->vnext; i++) {
-	vp->var_map[i]->pkey[k] = 0;
-	vp->var_map[i]->nkey[k] = 0;
-    }
-
-    for (i = 0; i < (int)vp->cnext; i++) {
-	clause_t* cp = vp->clause_map[i];
-	int j;
-	for (j = 0; j < (int)cp->size; j++) {
-	    int x = index_l(cp->lit[j]);
-	    if (x < 1)
-		vp->var_map[-x]->nkey[k]++;
-	    else if (x > 1)
-		vp->var_map[x]->pkey[k]++;
-	}
-    }
-}
-
 // this is INSANE!!!
 #if defined(_GNU_SOURCE)
 #define QSORT_R(base,nmemb,size,compar,arg) \
@@ -2053,13 +2097,6 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    order_k_occur(vp, k);
 	    k = -k;
 	}
-	else if ((argv[i] == ATOM(depth)) || (argv[i] == ATOM(plus_depth))) {
-	    order_k_depth(vp, k);
-	}
-	else if (argv[i] == ATOM(minus_depth)) {
-	    order_k_depth(vp, k);
-	    k = -k;
-	}
 	else
 	    return enif_make_badarg(env);
 	vp->sort_key[i-1] = k;
@@ -2116,7 +2153,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     if (!enif_is_empty_list(env, list))
 	return enif_make_badarg(env);
 
-    if (!(map = enif_alloc(vp->vsize*sizeof(int))))
+    if (!(map = VARP_ALLOC(vp->vsize*sizeof(int))))
 	return enif_make_badarg(env);
 
     // clear moved mark
@@ -2159,7 +2196,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
 	}
 	ui++;
     }
-    enif_free(vp->order_map);
+    VARP_FREE(vp->order_map);
     vp->order_map = map;
     return ATOM(ok);
 }
@@ -2195,7 +2232,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     if (!enif_is_empty_list(env, list))
 	return enif_make_badarg(env);
 
-    if (!(map = enif_alloc(vp->vsize*sizeof(int))))
+    if (!(map = VARP_ALLOC(vp->vsize*sizeof(int))))
 	return enif_make_badarg(env);
 
     // clear moved mark
@@ -2241,7 +2278,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
 	}
 	ui++;
     }
-    enif_free(vp->order_map);
+    VARP_FREE(vp->order_map);
     vp->order_map = map;
     return ATOM(ok);
 }
@@ -2777,14 +2814,13 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	return 0;
 
     if (wi==0) {  // watch point 0
-	if ((lw = lit_value(vp, cp->lit[wp1])) == TRUE)
+	if ((lw = get_l(vp, cp->lit[wp1])) == TRUE)
 	    return 0;
 	vp->clause_eval_counter[0]++;
 	if (cp->size <= 4) vp->clause_eval_counter[cp->size]++;
 	
 	// find a new watch point
 	for (p = 1; p < (int)cp->size; p++) {
-	    // int lv = lit_value(vp, cp->lit[p]);
 	    int lv = get_l(vp, cp->lit[p]);
 	    if (lv != FALSE) {  // TRUE | UNDEF
 		if (p != wp1) {  // skip other watch point
@@ -2809,14 +2845,13 @@ static int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	}
     }
     else { // watch point 1
-	if ((lw = lit_value(vp, cp->lit[wp0])) == TRUE)
+	if ((lw = get_l(vp, cp->lit[wp0])) == TRUE)
 	    return 0;
 	vp->clause_eval_counter[0]++;
 	if (cp->size <= 4) vp->clause_eval_counter[cp->size]++;	
 
 	// find a new watch point
 	for (p = 1; p < (int)cp->size; p++) {
-	    // int lv = lit_value(vp, cp->lit[p]);
 	    int lv = get_l(vp, cp->lit[p]);	    
 	    if (lv != FALSE) {  // TRUE | UNDEF
 		if (p != wp0) {  // skip other watch point
@@ -3721,9 +3756,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(occur);
     LOAD_ATOM_STRING(plus_occur, "+occur");
     LOAD_ATOM_STRING(minus_occur,"-occur");
-    LOAD_ATOM(depth);
-    LOAD_ATOM_STRING(plus_depth, "+depth");
-    LOAD_ATOM_STRING(minus_depth, "-depth");
     
     // info
     LOAD_ATOM(max_clause_length);

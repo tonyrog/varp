@@ -208,13 +208,13 @@ or_eval_bindings() ->
     print_clauses(V),
 
     io:format("undo 2\n", []),
-    varc:undo(V, 2),
+    varc:undo_level(V, 2),
     io:format("bindings = ~w\n", [varc:get_bindings(V)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
 
     io:format("undo 1\n", []),
-    varc:undo(V, 1),
+    varc:undo_level(V, 1),
     io:format("bindings = ~w\n", [varc:get_bindings(V)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),

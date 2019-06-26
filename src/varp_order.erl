@@ -33,7 +33,7 @@ options() ->
       },
      #{ long => "display",
 	short => "d",
-	key => display_order,
+	key => display,
 	spec => {enum,[?BOOL]},
 	default => false,
 	description => "Display declared variable order."
@@ -43,8 +43,8 @@ run(Bs, Par) ->
     order_literals(Bs, Par).
 
 order_literals(Bs, Par) ->
-    Seed = maps:get(seed,Par),
-    case maps:get(order,Par) of
+    Seed = varp_formula:getopt(Bs,seed),
+    case maps:get(sort,Par) of
 	[Key1,Key2] -> 
 	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
 	[Key1] -> 

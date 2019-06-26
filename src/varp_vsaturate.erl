@@ -104,7 +104,7 @@ saturate_vec(Bs,Vec) ->
 	 [varp_formula:fmt_bind_list(Bs,
 				     varp_formula:get_bindings(Bs,1))]),
     %% remove mark but keep bindings
-    varp_formula:remove_mark(Bs, 1),
+    varp_formula:keep_level(Bs, 1),
     Res.
 
 -spec saturate_vec_(Bs::bs(),Vec::[{index(),var()}],Level::integer()) ->

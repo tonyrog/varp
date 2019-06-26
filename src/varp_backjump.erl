@@ -106,8 +106,15 @@ options() ->
 	key => restart_interval,
 	spec =>  unsigned,
 	default => 0,
-	description => "Restart interval in milliseconds"}
+	description => "Restart interval in milliseconds"},
 
+     #{ long => "display",
+	short => "d",
+	key => display,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Display statistics."
+      }
     ].
      
 
@@ -133,8 +140,14 @@ run(Bs, Param) ->
 		 end,
     Permanent = varp_formula:get_info(Bs, permanent),
     varp_formula:config(Bs, keep, KeepSize),
-    io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
-	      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]),
+
+    case maps:get(display, Param) of
+	true ->
+	    io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
+		      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]);
+	false -> ok
+    end,
+
     case maps:get(restart_counter,Param) of
 	0 -> ok;
 	_ ->
@@ -152,8 +165,7 @@ init(Bs, Param, MaxLearned) ->
     loop(Bs,Param,?TOP_LEVEL,MaxLearned,varp_formula:first_init(Bs),[]).
 
 loop(Bs,Param,Level,MaxLearned,I,Stack) ->
-    Eval = varp_formula:eval(Bs),
-    case Eval of
+    case varp_formula:eval(Bs) of
 	false ->
 	    if Level =:= 0 ->
 		    display_stat(Bs,Param),
@@ -446,8 +458,13 @@ max_learned(Bs,Param) ->
     Permanent = varp_formula:get_info(Bs, permanent),
     MaxLearnedClauses = maps:get(max_learned,Param),
     MaxLearnedFactor = maps:get(max_learned_factor,Param),
-    io:format("Permanent=~w, MaxLearnedClause=~w, MaxLearnedFactor=~w\n",
-	      [Permanent, MaxLearnedClauses, MaxLearnedFactor]),
+    case maps:get(display, Param) of
+	true ->    
+	    io:format("Permanent=~w,MaxLearnedClause=~w,MaxLearnedFactor=~w\n",
+		      [Permanent, MaxLearnedClauses, MaxLearnedFactor]);
+	false ->
+	    ok
+    end,
     if MaxLearnedFactor > 0, MaxLearnedClauses > 0 ->
 	    min(MaxLearnedClauses,trunc(MaxLearnedFactor*Permanent));
        MaxLearnedFactor > 0 ->
@@ -458,46 +475,51 @@ max_learned(Bs,Param) ->
 	    0
     end.
 
-display_stat(Bs,_Param) ->
-    io:format("num conflict clauses added: ~w\n", 
-	      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
-    io:format("num conflict ilterals: ~w\n",
-	      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS)]),
-    io:format("num ilterals removed: ~w\n",
-	      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
-    io:format("compression saved bits: ~w\n",
-	      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
-    io:format("usage stumble counter: ~w\n",
-	      [counters:get(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT)]),
-    io:format("usage olle counter: ~w\n",
-	      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
-    io:format("number of reorders: ~w\n",
-	      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]),
+display_stat(Bs,Param) ->
+    case maps:get(display, Param) of
+	true ->
+	    io:format("num conflict clauses added: ~w\n", 
+		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
+	    io:format("num conflict ilterals: ~w\n",
+		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS)]),
+	    io:format("num ilterals removed: ~w\n",
+		      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
+	    io:format("compression saved bits: ~w\n",
+		      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
+	    io:format("usage stumble counter: ~w\n",
+		      [counters:get(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT)]),
+	    io:format("usage olle counter: ~w\n",
+		      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
+	    io:format("number of reorders: ~w\n",
+		      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]),
 
-    %% delta usage histograms
-    %% back jump distances
-    io:format("Backjump deltas used\n", []),
-    lists:foreach(fun(D) ->
-			  case {counters:get(Bs#bs.d1, D+1),
-				counters:get(Bs#bs.d2, D+1)} of
-			      {0,0} -> ok;
-			      {N,M} -> 
-				  io:format("~w: d1=~w, d2=~w\n", [D,N,M])
-			  end
-		  end, lists:seq(0,1023)),
-    io:format("Conflict clauses installed\n", []),
-    lists:foreach(fun(L) ->
-			  case counters:get(Bs#bs.clen, L) of
-			      0 -> ok;
-			      N ->
-				  if L =:= 1024 ->
-					  io:format(">1024: ~w\n", [N]);
-				     true ->
-					  io:format("~w: ~w\n", [L,N])
+	    %% delta usage histograms
+	    %% back jump distances
+	    io:format("Backjump deltas used\n", []),
+	    lists:foreach(fun(D) ->
+				  case {counters:get(Bs#bs.d1, D+1),
+					counters:get(Bs#bs.d2, D+1)} of
+				      {0,0} -> ok;
+				      {N,M} -> 
+					  io:format("~w: d1=~w, d2=~w\n", [D,N,M])
 				  end
-			  end
-		  end, lists:seq(1,1024)),
-    ok.
+			  end, lists:seq(0,1023)),
+	    io:format("Conflict clauses installed\n", []),
+	    lists:foreach(fun(L) ->
+				  case counters:get(Bs#bs.clen, L) of
+				      0 -> ok;
+				      N ->
+					  if L =:= 1024 ->
+						  io:format(">1024: ~w\n", [N]);
+					     true ->
+						  io:format("~w: ~w\n", [L,N])
+					  end
+				  end
+			  end, lists:seq(1,1024)),
+	    ok;
+	false ->
+	    ok
+    end.
 
 model(Bs) ->
     varp:output_model(Bs, 1).

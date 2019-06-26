@@ -13,33 +13,36 @@ Command line tool
     --borrow     true|false|ignore	(ignore)
     --divz       true|false|ignore	(false)
     --log        level()		(none)	 
-
+    --seed       unsigned
+	--adder      plain | fast
+	
     level() = debug | info | notice | warning |
     	      error | critical | alert | emergency | none
 
 #  "order" options
    	 
-   --order      <order>		(identity)
-   --order_first "v1..vn"
-   --order_last  "v1..vn"
+    --sort      <order>		(identity)
+    --order_first "v1..vn"
+    --order_last  "v1..vn"
 
-   order() = identity | reverse | '-occur' | '+occur'
+    order() = identity | reverse | '-occur' | '+occur' | random
 
 
-# Saturation "sat" options
+# Saturation "saturate"/"sat" parameters
 
-    --timeout    timeout()              (infinity)
+    --timeout    timeout()      (infinity)
     --level      unsigned()		(0=eval)
     --pair       boolean()		(true)
     --threshold  unsigned()		(0)
+	--laps       unsigned()     (0)
 
-# Backtrack "bt" parameters
+# Backtrack "backtrack"/"bt" parameters
 
     --max unsigned()
     --method collect|count
     --partial boolean()    	     
 
-# Backjump "bj" parameters
+# Backjump "backjump"/"bj" parameters
 
     --timeout timeout()
     --max-learned         L
@@ -72,8 +75,22 @@ Command line tool
        D2 = Backstumble distance = distance from backjump to next level
 
     --restart-counter  <#eval>
-    --restart-interval <ms>    
+    --restart-interval <seconds>    
 
+# Model reduction "reduction"/"red" parameters
+
+	-size unsigned()          Number of literal reductions to add 
+	-type [both|min|pos|neg]  Type of reductions to add
+	
+# RAT remove clauses "rat" parameters
+
+	-size unsigned()          Number of liter1al reductions to add 
+	-type [both|min|pos|neg]  Type of reductions to add	
+	
+# DUMP dump CNF
+
+	-f <name>
+	
 # Binding
 
     <var> = <value>
@@ -81,6 +98,3 @@ Command line tool
 Variable (lowercase) variables are passed into varp as
 environment (meta) variables that can be used in
 formulas in quantifiers.
-
-
-

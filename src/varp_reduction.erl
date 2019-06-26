@@ -23,7 +23,7 @@ options() ->
 	key => size,
 	spec => {union,[unsigned,{enum,[{"all",all}]}]},
 	default => 0,
-	description => "Number of literal reduction clauses to add."
+	description => "Number of literal reductions to add."
       },
      #{ long => "type",
 	short => "r",

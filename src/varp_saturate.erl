@@ -23,7 +23,7 @@ options() ->
 	key   => timeout,
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	default => infinity,
-	description => "Max time to run saturation in milliseconds."
+	description => "Max time to in seconds."
       },
      #{ long => "level",
 	short => "k",
@@ -47,8 +47,8 @@ options() ->
      #{ long  => "laps",
 	short => "l",
 	key   => laps,
-	spec  => {union,[unsigned,{enum,[{"infinity",infinity}]}]},
-	default => infinity,
+	spec  => unsigned,
+	default => 0,
 	description => "Max saturation lap count"
       }
      ].
@@ -66,9 +66,9 @@ run(Bs, Param) ->
     if Order =:= undefined -> ok;
        true -> varp_formula:order_sort(Bs, Order)
     end,
-    saturate(Bs, K, Timeout, MaxLaps, Threshold).
+    saturate(Bs,K,Timeout,MaxLaps,Threshold).
 
-saturate(Bs, K, Timeout, MaxLaps, Threshold) ->
+saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
     TRef = if is_number(Timeout), Timeout > 0 ->
 		   erlang:start_timer(trunc(1000*Timeout), undefined, ok);
 	      Timeout =:= infinity ->
@@ -185,7 +185,6 @@ loop_k_next(Bs,I,_X,K,N,Level,TRef,Laps,Threshold) ->
 				stop ->
 				    {laps,Bs};
 				Laps1 ->
-				    io:format("Laps1 = ~w\n", [Laps]),
 				    init_k(Bs,K,N1,Level,TRef,Laps1,Threshold)
 			    end
 		    end
@@ -197,7 +196,7 @@ loop_k_next(Bs,I,_X,K,N,Level,TRef,Laps,Threshold) ->
 init_1(Bs,N,Level,TRef,Laps,Threshold) ->
     case varp_formula:first_unbound(Bs) of
 	false -> 
-	    {novar,Bs};
+	    loop_1_done(novar,Laps,Bs);
 	{I,X} -> 
 	    loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold)
     end.
@@ -252,16 +251,16 @@ loop_1_next(Bs,I,_X,N,Level,TRef,Laps,Threshold) ->
 	    TimeRemain = read_timer(TRef),
 	    if TimeRemain =:= 0 -> 
 		    ?dbg("timer terminated\n", []),
-		    {timeout,Bs};
+		    loop_1_done(timeout,Laps,Bs);
 	       true ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
 			    ?dbg("threshold limit\n", []),
-			    {threshold,Bs};
+			    loop_1_done(threshold,Laps,Bs);
 		       true -> 
 			    case dec(1,Laps) of
 				stop ->
-				    {laps,Bs};
+				    loop_1_done(laps,Laps,Bs);
 				Laps1 ->
 				    init_1(Bs,N1,Level,TRef,Laps1,Threshold)
 			    end
@@ -269,6 +268,12 @@ loop_1_next(Bs,I,_X,N,Level,TRef,Laps,Threshold) ->
 	    end;
 	{I1,X1} -> loop_1(Bs,I1,X1,N,Level,TRef,Laps,Threshold)
     end.
+
+loop_1_done(Reason, Laps={Ls,Ms}, Bs) ->
+    L = element(1,Ls),
+    M = element(1,Ms),
+    %% io:format("lap count=~w (~w)\n", [(M-L)+1, Laps]),
+    {Reason,Bs}.
 
 
 install_bindings(_Bs,_Level,_Var,[]) ->
@@ -335,20 +340,19 @@ eq_eval(Bs,V,Value,Level) ->
 
 indent(D) -> lists:duplicate(D, $\s).
 
-max_laps(1, L) when is_integer(L); L =:= infinity -> {{L},{L}};
+max_laps(1, L) when is_integer(L) -> {{L},{L}};
 max_laps(1, [L]) -> {{L},{L}};
-max_laps(2, L) when is_integer(L); L =:= infinity -> {{L,L},{L,L}};
+max_laps(2, L) when is_integer(L) -> {{L,L},{L,L}};
 max_laps(2, [L]) -> {{L,L},{L,L}};
 max_laps(2, [L2,L1]) -> {{L1,L2},{L1,L2}};
-max_laps(3, L) when is_integer(L); L =:= infinity -> {{L,L,L},{L,L,L}};
+max_laps(3, L) when is_integer(L) -> {{L,L,L},{L,L,L}};
 max_laps(3, [L]) -> {{L,L,L},{L,L,L}};
 max_laps(3, [L2,L1]) -> {{L1,L2,L2},{L1,L2,L2}};
 max_laps(3, [L3,L2,L1]) -> {{L1,L2,L3},{L1,L2,L3}}.
 
-dec(K, Laps={Ls,Ms}) ->
+dec(K, {Ls,Ms}) ->
     case element(K, Ls) of
 	1 when K =:= 1 -> stop;
-	infinity -> Laps;
 	E -> {setelement(K, Ls, E-1), Ms}
     end.
 

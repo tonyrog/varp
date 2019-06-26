@@ -21,7 +21,11 @@ BJ	1651
 
 n=1763 is_prime BUG!!!
 
-currently 181*173 is the first no 1-easy product
+
+
+
+
+currently 163 * 157 is the first no 1-easy product
 using commute,{red,both},{adder,fast},{assoc,none}
 
 strange 181*173 is solve with assoc,left BUT
