@@ -1,4 +1,18 @@
 
+- satdis (plugin)
+
+ Lägg till (alla) Ci v Di vid dilemma intersection
+
+- sym (plugin)
+
+ Givet två klausuler som är lite lika skapa en
+ permutation P och kolla om de klausuler som ej
+ finns i delta följer av delta. Då lägger
+ man in  V <= P(V) eller V = P(V) om en model
+
+ Spara P till konflikt klausuler.
+ 
+
 - size (atoms ?)
 
 
