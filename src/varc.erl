@@ -20,6 +20,7 @@
 -export([find_symbol/2]).
 -export([get/2]).
 -export([put/3, put/4]).
+-export([bind/2, bind/3]).
 -export([subst/3]).
 -export([key/3]).
 -export([implication_clause/2]).
@@ -171,6 +172,21 @@ put(_Vp, X, Y) when is_integer(X),
 put(_Vp, X, Y, Level) when is_integer(X),
 			   is_integer(Y),
 			   is_integer(Level) ->
+    ?nif_stub().
+
+
+%% bind literal
+-spec bind(Vp::varc(), X::literal()) -> boolean().
+
+bind(_Vp, X) when is_integer(X) ->
+    ?nif_stub().
+
+
+%% bind literal at level
+-spec bind(Vp::varc(), X::literal(), Level::integer()) -> boolean().
+
+bind(_Vp, X, Level) when is_integer(X),
+			is_integer(Level) ->
     ?nif_stub().
 
 %% X/Y substitute Y for X, replace all instances of Y with X

@@ -409,7 +409,7 @@ next(Bs,Param,Level,MaxLearned,I,Stack) ->
 	{J,Xj} ->
 	    NextLevel = Level+1,
 	    varp_formula:set_level(Bs,NextLevel),
-	    true = varp_formula:equal(Bs,Xj,?TRUE),
+	    true = varp_formula:bind(Bs,Xj),
 	    ?dbg("decision@~w = ~s\n", [NextLevel,format_lit(Bs,Xj)]),
 	    loop(Bs,Param,NextLevel,MaxLearned,J,[{J,Xj,NextLevel}|Stack])
     end.
@@ -528,7 +528,7 @@ add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,_Clause=[L]) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, _Clause)]),
-    true = varp_formula:equal(Bs,L,?TRUE,?TOP_LEVEL),
+    true = varp_formula:bind(Bs,L,?TOP_LEVEL),
     Bs;
 add_conflict_clause(Bs,Clause) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
@@ -744,13 +744,13 @@ format_bindings(Bs) ->
 
 format_bindings(Bs,Level) ->
     Bnd = lists:map(
-	    fun({V,Val}) ->
-		    {Cix,_,ImpLev} = varp_formula:implication_clause(Bs,V),
-		    {ImpLev,V,Val,Cix}
+	    fun(L) ->
+		    {Cix,_,ImpLev} = varp_formula:implication_clause(Bs,L),
+		    {ImpLev,L,Cix}
 	    end, varp_formula:get_bindings(Bs,0)),
     lists:foreach(
       fun(G) ->
-	      [{_Lev,_,_,_}|_] = G,
+	      [{_Lev,_,_}|_] = G,
 	      if Level =:= all; Level =:= _Lev ->
 		      ?dbg("bindings[~w]: ~s\n",[_Lev,format_group(Bs,G)]);
 		 true ->
@@ -758,12 +758,12 @@ format_bindings(Bs,Level) ->
 	      end
       end, key_group_list(1,Bnd)).
 
-format_group(Bs,[{_,V,Val,Cix}|G]) ->
+format_group(Bs,[{_,L,Cix}|G]) ->
     case Cix of
 	-1 ->
-	    [ [format_binding(Bs,V,Val)," "] | format_group(Bs,G)];
+	    [ [format_binding(Bs,L)," "] | format_group(Bs,G)];
 	_ ->
-	    [ [format_binding(Bs,V,Val),":",integer_to_list(Cix)," "] |
+	    [ [format_binding(Bs,L),":",integer_to_list(Cix)," "] |
 	      format_group(Bs,G)]
     end;
 format_group(_Bs,[]) ->
@@ -784,25 +784,17 @@ key_group_list(Pos,Acc,Gs,[H|T]) ->
 key_group_list(_Pos,Acc,Gs,[]) ->
     lists:reverse([lists:reverse(Acc)|Gs]).
 
-format_binding(Bs,V,Val) ->
-    [format_var(Bs,V),"=",
-     case Val of 
-	 -1 -> "0";
-	 1 -> "1";
-	 W -> integer_to_list(W)
+format_binding(Bs,L) ->
+    [format_var(Bs,abs(L)),"=",
+     if L < 0 -> "0";
+	L > 0 -> "1"
      end].
 
-
-%% get binding list as literal list
-get_bindings(Bs, Level) ->
-    [if Val < 0 -> -Var; true -> Var end || 
-	{Var,Val} <- varp_formula:get_bindings(Bs,Level)].
-
 get_literal_bindings(Bs,Level) ->
-    lists:reverse(get_bindings(Bs,Level)).
+    lists:reverse(varp_formula:get_bindings(Bs,Level)).
 
 get_literal_implications(Bs, Level) ->
-    case get_bindings(Bs, Level) of
+    case varp_formula:get_bindings(Bs,Level) of
 	[] -> [];
 	[_|L] -> L
     end.

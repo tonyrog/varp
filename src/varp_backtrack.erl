@@ -73,8 +73,6 @@ bt(Bs,Func,Acc) ->
 	    Acc
     end.
 
--define(BT_ORDER, [true,false]).
-
 %% initalise backtrack stack
 init(Bs) ->
     I0 = varp_formula:first_init(Bs),
@@ -83,27 +81,27 @@ init(Bs) ->
     %% io:format("I0=~w, next=~w, num=~w\n", [I0,Next,Num]),
     case Next  of
 	false  -> {model,[]};
-	{I,Xi} -> {true,[{I,Xi,?BT_ORDER,?LEVEL}]}
+	{I,Xi} -> {true,[{I,[Xi,-Xi],?LEVEL}]}
     end.
 
-next([{_,_Xi,[],_}|Stack1],Bs) ->
+next([{_,[],_}|Stack1],Bs) ->
     undo(Bs,Stack1),
     next(Stack1,Bs);
-next([{I,Xi,[V|Vs],Level}|Stack],Bs) ->
+next([{I,[Xi|Xs],Level}|Stack],Bs) ->
     varp_formula:set_level(Bs,Level),
-    case eq_eval(Bs,Xi,V,Level) of
+    case eq_eval(Bs,Xi,Level) of
 	false -> %% hook this?
 	    varp_formula:undo_level(Bs,Level),
-	    next([{I,Xi,Vs,Level}|Stack],Bs);
+	    next([{I,Xs,Level}|Stack],Bs);
 	true ->
 	    Next = varp_formula:next_unbound(Bs,I),
 	    %% Num = varp_formula:number_of_unbound(Bs),
 	    %% io:format("I=~w, next=~w, num=~w\n", [I,Next,Num]),
 	    case Next of
 		false ->
-		    {model,[{I,Xi,Vs,Level}|Stack]};
+		    {model,[{I,Xs,Level}|Stack]};
 		{J,Xj} ->
-		    {true,[{J,Xj,?BT_ORDER,Level+1},{I,Xi,Vs,Level}|Stack]}
+		    {true,[{J,[Xj,-Xj],Level+1},{I,Xs,Level}|Stack]}
 	    end
     end;
 next([],_Bs) ->
@@ -125,19 +123,17 @@ loop(Stack,Func,Acc,Bs) ->
 	    {false,Acc}
     end.
 
-undo(Bs,[{_,_,_,Level}|_]) ->
+undo(Bs,[{_,_,Level}|_]) ->
     varp_formula:undo_level(Bs,Level);
 undo(_Bs,[]) ->
     ok.
 
-eq_eval(Bs,V,Value,_D) ->
+eq_eval(Bs,L,_D) ->
     ?dbg("~seq_eval: ~w, ~s/~s\n", 
-	 [indent(_D), V,
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:fmt_var(Bs,Value)]),
-    eqv(Bs,V,Value).
+	 [indent(_D), V, varp_formula:fmt_literal(Bs,L)]),
+    eqv(Bs,L).
 
-eqv(Bs,V,Value) ->
-    varp_formula:equal(Bs,V,Value) andalso varp_formula:eval(Bs).
+eqv(Bs,L) ->
+    varp_formula:bind(Bs,L) andalso varp_formula:eval(Bs).
 
 indent(D) -> lists:duplicate(D, $\s).

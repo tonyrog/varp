@@ -20,7 +20,7 @@ run(Bs, _Param) ->
 	    error;
 	Main ->
 	    varp_formula:set_level(Bs,?TOP_LEVEL),
-	    case varp_formula:equal(Bs, Main, ?FALSE) of
+	    case varp_formula:bind(Bs, -Main) of
 		false -> false;
 		true ->
 		    case varp_formula:eval(Bs) of

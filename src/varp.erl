@@ -564,7 +564,7 @@ one_model(Bs) ->
     NV = varp_formula:number_of_variables(Bs),
     NB = varp_formula:number_of_bound(Bs),
     if NV =:= NB ->
-	    Model = varp:output_model(Bs,1),
+	    Model = output_model(Bs,1),
 	    case varp_formula:getopt(Bs,method) of
 		collect -> {1,[Model]};
 		count -> 1

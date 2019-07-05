@@ -14,7 +14,7 @@
 -compile(export_all).
 -import(varp_formula, [format_lit/2, format_var/2]).
 
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 -include("varp.hrl").
 
 options() ->
@@ -102,11 +102,11 @@ init_k(Bs,K,N,Level,TRef,Laps,Threshold) ->
     end.    
 
 loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
-    case push2_eq_eval(Bs,X,?FALSE,Level) of
+    case push2_eq_eval(Bs,-X,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level+1),Level+1]),
 	    pop2(Bs, Level),
-	    case eq_eval(Bs,X,?TRUE,Level) of
+	    case eq_eval(Bs,X,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
@@ -119,7 +119,7 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level+1),Level+1]),
 		    pop2(Bs, Level),
-		    case eq_eval(Bs,X,?TRUE,Level) of
+		    case eq_eval(Bs,X,Level) of
 			false ->
 			    ?dbg("~scontradiction\n", [indent(Level)]),
 			    false;
@@ -128,18 +128,18 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 		    end;
 		{_Reason,Bs1} ->
 		    %% io:format("stop reason = ~w\n", [Reason]),
-		    Xs = varp_formula:get_bindings(Bs1,Level+2),
+		    Ls = varp_formula:get_bindings(Bs1,Level+2),
 		    ?dbg("~s~s/0: => {~s}\n", 
 			 [indent(Level),
 			  varp_formula:fmt_var(Bs1,X),
-			  varp_formula:fmt_bind_list(Bs1,Xs)]),
+			  varp_formula:format_literals(Bs1,Ls)]),
 		    pop2(Bs, Level),
-		    case push2_eq_eval(Bs1,X,?TRUE,Level) of
+		    case push2_eq_eval(Bs1,X,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level+1),Level+1]),
 			    pop2(Bs, Level),
-			    eq_eval(Bs1,X,?FALSE,Level),
+			    eq_eval(Bs1,-X,Level),
 			    loop_k_next(Bs1,I,X,K,N,Level,TRef,Laps,Threshold);
 			true ->
 			    N2 = varp_formula:number_of_bound(Bs),
@@ -148,21 +148,21 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 				    ?dbg("~scontradiction, undo ~w\n", 
 					 [indent(Level),Level]),
 				    pop2(Bs, Level),
-				    eq_eval(Bs1,X,?FALSE,Level),
+				    eq_eval(Bs1,-X,Level),
 				    loop_k_next(Bs1,I,X,K,N,Level,TRef,Laps,Threshold);
 				{_Reason1,Bs2} ->
 				    io:format("stop reason = ~w\n", [_Reason1]),
 				    ?dbg("~s~s/1: => {~s}\n",
 					 [indent(Level),varp_formula:fmt_var(Bs2,X),
-					  varp_formula:fmt_bind_list(
+					  varp_formula:fmt_literals(
 					    Bs2,
 					    varp_formula:get_bindings(Bs2,Level+1))]),
-				    Ys = varp_formula:intersect(Bs2, X, Xs),
+				    Ys = varp_formula:intersect_bindings(Bs2,X,Ls),
 				    ?dbg("~sintersect = {~s}\n", 
 					 [indent(Level),
 					  varp_formula:fmt_bind_list(Bs2,Ys)]),
 				    pop2(Bs2, Level),
-				    install_bindings(Bs,Level,X,Ys),
+				    varp_formula:install_bindings(Bs,Level,Ys),
 				    true = varp_formula:eval(Bs2),
 				    loop_k_next(Bs2,I,X,K,N,Level,TRef,Laps,Threshold)
 			    end
@@ -202,43 +202,44 @@ init_1(Bs,N,Level,TRef,Laps,Threshold) ->
     end.
 
 loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
-    case push_eq_eval(Bs,X,?FALSE,Level) of
+    case push_eq_eval(Bs,-X,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    pop(Bs, Level),
-	    case eq_eval(Bs,X,?TRUE,Level+1) of
+	    case eq_eval(Bs,X,Level+1) of
 		false ->
 		    %% L+1 ?  keep bindings?
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
 		true ->
-		    Xs = varp_formula:get_bindings(Bs, Level+1),
+		    Ls = varp_formula:get_bindings(Bs, Level+1),
 		    varp_formula:move_level(Bs, Level+1, Level),
-		    varp_formula:log_bindings(Bs, X, ?TRUE, Xs),
+		    varp_formula:log_bindings(Bs, X, ?TRUE, Ls),
 		    varp_formula:set_level(Bs,Level),
 		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
 	    end;
 	true ->
-	    Xs = varp_formula:get_bindings(Bs,Level+1),
+	    Ls = varp_formula:get_bindings(Bs,Level+1),
 	    pop(Bs,Level),
-	    case push_eq_eval(Bs,X,?TRUE,Level) of
+	    case push_eq_eval(Bs,X,Level) of
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", 
 			 [indent(Level),Level]),
 		    pop(Bs,Level),
-		    eq_eval(Bs,X,?FALSE,Level),
-		    varp_formula:log_bindings(Bs, X, ?FALSE, Xs),
+		    eq_eval(Bs,-X,Level),
+		    varp_formula:log_bindings(Bs, X, ?FALSE, Ls),
 		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold);
 		true ->
 		    ?dbg("~s~s/1: => [~s]\n",
 			 [indent(Level),varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(
 			    Bs, tl(varp_formula:get_bindings(Bs,Level+1)))]),
-		    %% FIXME: if tl(Xs) = [] then do nothig...
-		    Ys = varp_formula:intersect(Bs, X, tl(Xs)),
+		    %% FIXME: if tl(Ls) = [] then do nothig...
+		    Ys = varp_formula:intersect_bindings(Bs, X, tl(Ls)),
 		    pop(Bs,Level),
 		    varp_formula:set_level(Bs,Level),
-		    install_bindings(Bs,Level,X,Ys),
+		    io:format("Ys = ~w\n", [Ys]),
+		    varp_formula:install_bindings(Bs,Level,Ys),
 		    true = varp_formula:eval(Bs),
 		    varp_formula:log_bindings(Bs, X, ?UNDEF, Ys),
 		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
@@ -276,54 +277,23 @@ loop_1_done(Reason, _Laps={_Ls,_Ms}, Bs) ->
     %% io:format("lap count=~w (~w)\n", [(M-L)+1, Laps]),
     {Reason,Bs}.
 
-
-install_bindings(_Bs,_Level,_Var,[]) ->
-    ok;
-install_bindings(Bs,Level,_Var,Bnds) ->
-    install_bindings_(Bs,Level,true,Bnds).
-
-install_bindings_(Bs,Level,Bcp,[{X,X}|Xs]) ->
-    install_bindings_(Bs,Level,Bcp,Xs);
-
-install_bindings_(Bs,Level,Bcp,[{X,Y}|Xs]) when abs(Y) =:= ?TRUE ->
-    varp_formula:equal(Bs,X,Y),
-    install_bindings_(Bs,Level,Bcp,Xs);
-install_bindings_(Bs,Level,Bcp=false,[{X,Y}|Xs]) ->
-    varp_formula:equal(Bs,X,Y),
-    install_bindings_(Bs,Level,Bcp,Xs);
-install_bindings_(Bs,Level,Bcp=true,[{X,Y}|Xs]) ->
-    if Level =:= ?TOP_LEVEL ->
-	    ?dbg("subst: ~s/~s\n", [format_lit(Bs,X), format_lit(Bs,Y)]),
-	    varp_formula:substitute(Bs, X, Y),
-	    ok;
-       true -> 
-	    ok
-    end,
-    install_bindings_(Bs,Level,Bcp,Xs);
-install_bindings_(Bs,_Level,_Bcp,[]) ->
-    Bs.
-
 %% push level, set (unbound) variable and eval
-push_eq_eval(Bs,V,Value,Level) ->
-    ?dbg("~spush_eq_eval: ~s/~s\n", 
-	 [indent(Level+1),
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:format_lit(Bs,Value)]),
+push_eq_eval(Bs,X,Level) ->
+    ?dbg("~spush_eq_eval: ~s\n", 
+	 [indent(Level+1), varp_formula:format_lit(Bs,X)]),
     varp_formula:set_level(Bs,Level+1),
-    true = varp_formula:equal(Bs,V,Value),  %% this call should never fail!
+    true = varp_formula:bind(Bs,X),  %% this call should never fail!
     varp_formula:eval(Bs).   %% but this call may return false
 
 pop(Bs, Level) ->
     varp_formula:undo_level(Bs,Level+1).
 
 %% set on one level eval on next level
-push2_eq_eval(Bs,V,Value,Level) ->
-    ?dbg("~spush2_eq_eval: ~s/~s\n", 
-	 [indent(Level+1),
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:format_lit(Bs,Value)]),
+push2_eq_eval(Bs,X,Level) ->
+    ?dbg("~spush2_eq_eval: ~s\n", 
+	 [indent(Level+1),varp_formula:fmt_lit(Bs,X)]),
     varp_formula:set_level(Bs,Level+1),
-    true = varp_formula:equal(Bs,V,Value),  %% this call should never fail!
+    true = varp_formula:bind(Bs,X),  %% this call should never fail!
     varp_formula:set_level(Bs,Level+2),
     varp_formula:eval(Bs).   %% but this call may return false
 
@@ -331,13 +301,11 @@ pop2(Bs, Level) ->
     varp_formula:undo_level(Bs,Level+2),
     varp_formula:undo_level(Bs,Level+1).
 
-eq_eval(Bs,V,Value,Level) ->
-    ?dbg("~seq_eval: ~s/~s\n", 
-	 [indent(Level),
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:format_lit(Bs,Value)]),
+eq_eval(Bs,X,Level) ->
+    ?dbg("~seq_eval: ~s\n", 
+	 [indent(Level), varp_formula:format_lit(Bs,X)]),
     varp_formula:set_level(Bs,Level),
-    true = varp_formula:equal(Bs,V,Value),
+    true = varp_formula:bind(Bs,X),
     varp_formula:eval(Bs).
 
 indent(D) -> lists:duplicate(D, $\s).

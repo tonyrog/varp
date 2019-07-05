@@ -106,8 +106,8 @@ rat_lit(Bs,L,Is,CMax) ->
 	      Cs = clauses(Bs,Js,-L,[]),
 	      %% io:format("rat_test l=~w, d=~w, cs=~w\n", [L,D,Cs]),
 	      varp_formula:set_level(Bs,1),
-	      true = varp_formula:equal(Bs,L,?FALSE),
-	      true = put_all(Bs,D,?FALSE),
+	      true = varp_formula:bind(Bs,-L),
+	      true = neg_bind_all(Bs,D),
 	      case rat_test(Bs,Cs) of
 		  true ->
 		      varp_formula:undo_level(Bs,1),
@@ -124,7 +124,7 @@ rat_lit(Bs,L,Is,CMax) ->
 rat_test(Bs, [{_Cix,C}|Cs]) ->
     Level = 2,
     varp_formula:set_level(Bs,Level),
-    case put_all(Bs,C,?FALSE) of
+    case neg_bind_all(Bs,C) of
 	false ->
 	    varp_formula:undo_level(Bs,Level),
 	    false;
@@ -141,12 +141,13 @@ rat_test(Bs, [{_Cix,C}|Cs]) ->
 rat_test(_Bs, []) ->
     true.
 
-put_all(Bs, [Xi|Xs], Value) ->
-    case varp_formula:equal(Bs,Xi,Value) of
+%% bind -Xi
+neg_bind_all(Bs, [Xi|Xs]) ->
+    case varp_formula:bind(Bs,-Xi) of
 	false -> false;
-	true -> put_all(Bs,Xs,Value)
+	true -> neg_bind_all(Bs,Xs)
     end;
-put_all(_Bs, [], _Value) ->
+neg_bind_all(_Bs, []) ->
     true.
 
 %% Extract clauses and remove the literal L while doing it 

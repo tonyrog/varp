@@ -31,12 +31,13 @@
 
 
 #define LIT_INTEGER 32
+// #define SIGNED_LITERALS
+// #define PACKED_VALUE 4
 // #define CLAUSE2_MAP          // require LIT_INTEGER & !SIGNED_LITERALS
 // #define ASSERTIONS
 // #define DEBUG
 #define DEBUG_MEM
-// #define SIGNED_LITERALS
-#define PACKED_VALUE 4
+
 // #define USE_CLAUSE_SHUFFLE
 // #define USE_CLAUSE_FIND
 
@@ -159,6 +160,8 @@ static ERL_NIF_TERM varp_get(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_put(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_is_variable(ErlNifEnv* env, int argc,
@@ -467,6 +470,8 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "get",                 2,  varp_get ),
     NIF_FUNC( "put",                 3,  varp_put ),
     NIF_FUNC( "put",                 4,  varp_put ),
+    NIF_FUNC( "bind",                2,  varp_bind ),
+    NIF_FUNC( "bind",                3,  varp_bind ),    
     NIF_FUNC( "subst",               3,  varp_subst ),
     NIF_FUNC( "key",                 3,  varp_key ),
     NIF_FUNC( "implication_clause",  2,  varp_implication_clause ),
@@ -859,7 +864,7 @@ static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
 #endif
 }
 
-// return literal match variables value
+// return literal match variables value (only when bound)
 static inline literal_t* var_literal(varp_t* vp, variable_t* var)
 {
     switch(get_vv(vp, var)) {
@@ -867,18 +872,20 @@ static inline literal_t* var_literal(varp_t* vp, variable_t* var)
     case IFALSE: return &var->lit[LIT_NEG];
     case IBOUND:
     case IUNDEF:
-    default:
-	assert(0);
-	return NULL;
+    default: assert(0); return NULL;
     }
 }
 
 // primitiv get literal value
 static inline ival_t get_ll(varp_t* vp, literal_t* lp)
 {
-    ival_t ivalue = get_vv(vp, lp->var);
-    // printf("get_ll sign=%d, ivalue=%d\r\n", lp->sign, ivalue);
-    return (lp->sign < 0) ? NEGATE(ivalue) : ivalue;
+    switch(get_vv(vp,lp->var)) {
+    case ITRUE:  return (lp->sign < 0) ? IFALSE : ITRUE;
+    case IFALSE: return (lp->sign < 0) ? ITRUE : IFALSE;
+    case IUNDEF: return IUNDEF;
+    case IBOUND: return IBOUND;
+    default: assert(0); return 0;
+    }
 }
 
 // primitive get lit value
@@ -953,6 +960,16 @@ static int vis_bound(varp_t* vp, int vix)
     return get_vv(vp, var) != IUNDEF;
 }
 
+static inline int export_vv(varp_t* vp, variable_t* var)
+{
+    switch(get_vv(vp, var)) {
+    case ITRUE:  return var->vix;
+    case IFALSE: return -var->vix;
+    case IBOUND: assert(0); return 0;
+    case IUNDEF: return 0;
+    default: return 0;
+    }
+}
 
 char* format_variable(variable_t* var)
 {
@@ -1290,25 +1307,20 @@ static void push_variable(varp_t* vp, variable_t* var, int level)
     vp->num_bound++;
 }
 
-static ERL_NIF_TERM make_binding(ErlNifEnv* env, varp_t*vp, variable_t* v)
+static ERL_NIF_TERM make_binding(ErlNifEnv* env, varp_t*vp, variable_t* var)
 {
-    int ivalue = get_variable_value(vp, v);
-    return enif_make_tuple2(env,
-			    enif_make_int(env, v->vix),
-			    enif_make_int(env, EXPORT(ivalue)));
+    assert(var->bound == NULL);
+    return enif_make_int(env,export_vv(vp, var));
 }
 
-
-static ERL_NIF_TERM make_clause_info(ErlNifEnv* env, varp_t* vp, variable_t* v)
+static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 {
-    int ivalue = get_variable_value(vp, v);
-    return enif_make_tuple4(env,
-			    enif_make_int(env, v->vix),
-			    enif_make_int(env, EXPORT(ivalue)),
-			    enif_make_int(env, v->literal_pos),
-			    enif_make_int(env, v->implication_clause));
+    assert(var->bound == NULL);
+    return enif_make_tuple3(env,
+			    enif_make_int(env,export_vv(vp, var)),
+			    enif_make_int(env, var->literal_pos),
+			    enif_make_int(env, var->implication_clause));
 }
-
 
 //
 // FIXME: log_permanent
@@ -1321,12 +1333,12 @@ static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
     if ((level == 0) && (x->var->flags & VAR_FLAG_ATOM)) {
 	subscription_t* sp;
 	if (y == NULL) {
-	    DBG("PERMANENT(ATOM) %s=%d\r\n", format_literal(x),
-		(EXPORT(get_vv(vp,x))+1)>>1);
+	    DBG("PERMANENT(ATOM) %s=%d\r\n", format_literal(vp,x),
+		(EXPORT(get_ll(vp,x))+1)>>1);
 	}
 	else if (y->var->flags & VAR_FLAG_ATOM) {
-	    DBG("PERMANENT(ATOM) %s=%s\r\n", format_literal(y),
-		format_literal(x));
+	    DBG("PERMANENT(ATOM) %s=%s\r\n", format_literal(vp,y),
+		format_literal(vp,x));
 	}
 	sp = vp->subs;
 	while(sp != NULL) {
@@ -2779,6 +2791,49 @@ static ERL_NIF_TERM varp_put(ErlNifEnv* env, int argc,
     return ATOM(true);
 }
 
+// Bind a literal to a value
+static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    lit_t xp;
+    varp_t* vp;
+    int level = -1;
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_lit(env, vp, argv[1], &xp)) {
+	return enif_make_badarg(env);
+    }
+    if (argc == 3) {
+	printf("check level\r\n");
+	if (!enif_get_int(env, argv[2], &level) || (level < 0) ||
+	    (level >= (int)vp->unum))
+	    return enif_make_badarg(env);
+    }
+    if (level < 0) level = vp->level;
+    
+    switch(get_l(vp, xp)) {
+    case ITRUE:  return ATOM(true);
+    case IFALSE: return ATOM(false);
+    case IBOUND: {
+	literal_t* lp = l2ll(vp,xp);
+	printf("lp->sign=%d\r\n", lp->sign);
+	printf("lp->var->bound=%p\r\n", lp->var->bound);
+	printf("lp->var->ivalue=%x\r\n", lp->var->ivalue);
+	printf("was bound\r\n");
+	return enif_make_badarg(env);
+    }
+    case IUNDEF:
+    default:
+	vp->caller_env = env;
+	put_literal(vp, xp, ITRUE, -1, -1, level);
+	vp->caller_env = NULL;	
+	return ATOM(true);
+    }
+}
+
+
 // insert sort literal level 'l' into la
 // while keeping track on position 'p' and literal index 'v'
 void insert_sort3(int v, int l, int p, int va[3], int la[3], int pa[3])
@@ -2999,10 +3054,14 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     y = get_l(vp, yp);
-    if (is_constant(y)) return enif_make_badarg(env);
+    if (is_constant(y)) {
+	return enif_make_badarg(env);
+    }
 
     x = get_l(vp, xp);
-    if (is_constant(x)) return enif_make_badarg(env);
+    if (is_constant(x)) {
+	return enif_make_badarg(env);
+    }
 
     xv = var_l(vp, xp);
     yv = var_l(vp, yp);

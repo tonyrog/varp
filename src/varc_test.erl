@@ -27,7 +27,6 @@ all() ->
 
     ok.
 
-
 test1() ->
     V = varc:new(),
     X2 = add_variable(V),
@@ -97,8 +96,8 @@ test3() ->
 
     true = varc:eval(V),
     true = varc:set_level(V, 1),
-    true = varc:put(V, X3, ?TRUE),
-    true = varc:put(V, X4, ?FALSE),
+    true = varc:bind(V, X3),
+    true = varc:bind(V, X4),
     {varc:get_bindings(V, 1), varc:get_number_of_clauses(V)}.
 
 %% Test all clause simplifications
@@ -195,7 +194,7 @@ or_eval_bindings() ->
     
     print_clauses(V),
     io:format("2/1\n", []),
-    varc:put(V, X2, ?TRUE),
+    varc:bind(V, X2),
     true = varc:eval(V),
     io:format("bindings 2/1 = ~w\n", [varc:get_bindings(V)]),
     io:format("watched = ~w\n", [get_watched(V)]),
@@ -205,7 +204,7 @@ or_eval_bindings() ->
     add_clause(V, [-X2,  X3,  X4, -X5]),
     io:format("watched = ~w\n", [get_watched(V)]),
     io:format("3/1\n", []),
-    varc:put(V, X3, ?TRUE),
+    varc:bind(V, X3),
     true = varc:eval(V),
     io:format("bindings 3/1 = ~w\n", [varc:get_bindings(V)]),
     io:format("watched = ~w\n", [get_watched(V)]),

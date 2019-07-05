@@ -42,9 +42,13 @@
 -export([eqk/4, gtk/4]).
 -export([equal/3, equal/4]).
 -export([substitute/3]).
+
+%% varc wrappers
 -export([is_equal/3]).
 -export([is_bound/2]).
 -export([is_unbound/2]).
+-export([bind/2, bind/3]).
+-export([put/3, put/4]).
 -export([getopt/2]).
 -export([number_of_variables/1]).
 -export([number_of_clauses/1]).
@@ -62,7 +66,8 @@
 -export([next_unbound/2, next_unbound/3]).
 -export([info/3, debug/3]).
 -export([get_bindings/2]).
--export([intersect/3]).
+-export([intersect_bindings/3]).
+-export([install_bindings/3]).
 -export([model_variables/2]).
 -export([eval/1]).
 -export([eval_meta/2]).
@@ -392,6 +397,12 @@ put(Bs,X,Y) ->
 put(Bs,X,Y,Level) ->
     varc:put(Bs#bs.vp,X,Y,Level).
 
+bind(Bs,L) ->
+    varc:bind(Bs#bs.vp,L).
+
+bind(Bs,L,Level) ->
+    varc:bind(Bs#bs.vp,L,Level).
+
 %% substitute X for Y ( X/Y ) replace all instances of Y with X
 substitute(Bs,X,Y) when is_integer(X), is_integer(Y) ->
     varc:subst(Bs#bs.vp, X, Y).
@@ -476,30 +487,30 @@ use_clause(Bs, I) ->
     varc:use_clause(Bs#bs.vp, I).
 
 %% Bs is under the assumption that Var = TRUE
-intersect(Bs, Var, B0) ->
-    intersect_(Bs, Var, B0).
+intersect_bindings(Bs, Var, Bs0) ->
+    intersect_(Bs, Var, Bs0).
 
-intersect_(Bs,Var,[{X,?TRUE}|B0]) ->
+intersect_(Bs,Var,[X|B0]) when is_integer(X), X > 0 ->
     %% !Var -> X
     case varc:get(Bs#bs.vp, X) of
 	?TRUE ->  %% Var -> X, !Var -> X   =>  X
-	    [{X,?TRUE} | intersect_(Bs,Var,B0)];
+	    [X | intersect_(Bs,Var,B0)];
 	?FALSE -> %% Var -> !X, !Var -> X  =>  Var=!X
 	    [{Var,-X} | intersect_(Bs,Var,B0)];
 	_ ->
 	    intersect_(Bs,Var,B0)
     end;
-intersect_(Bs,Var,[{X,?FALSE}|B0]) ->
+intersect_(Bs,Var,[X|B0]) when is_integer(X), X < 0 ->
     %% !Var -> !X
     case varc:get(Bs#bs.vp, X) of
 	?FALSE -> %% Var -> !X, !Var -> !X  =>  !X
-	    [{X,?FALSE} | intersect_(Bs,Var,B0)];
+	    [X | intersect_(Bs,Var,B0)];
 	?TRUE ->  %% Var -> X, !Var -> !X   =>  Var=X
 	    [{Var,X} | intersect_(Bs,Var,B0)];
 	_ ->
 	    intersect_(Bs,Var,B0)
     end;
-intersect_(Bs,Var,[{X,Y}|B0]) ->
+intersect_(Bs,Var,[{X,Y}|B0]) ->  %% not used in varp prover
     Y1 = varc:get(Bs#bs.vp, X),
     if Y =:= ?TRUE,  Y1 =:= ?FALSE -> %% !Var => X, Var => !X
 	    [{Var,-X} | intersect_(Bs,Var,B0)];
@@ -512,6 +523,27 @@ intersect_(Bs,Var,[_|B0]) ->
     intersect_(Bs,Var,B0);
 intersect_(_Bs,_Var,[]) ->
     [].
+
+install_bindings(_Bs,_Level,[]) ->
+    ok;
+install_bindings(Bs,Level,Bnds) ->
+    install_(Bs,Level,Bnds).
+
+install_(Bs,Level,[X|Xs]) when is_integer(X) ->
+    true = bind(Bs, X),
+    install_(Bs,Level,Xs);
+install_(Bs,Level,[{X,X}|Xs]) ->
+    install_(Bs,Level,Xs);
+install_(Bs,?TOP_LEVEL,[{X,Y}|Xs]) when abs(Y) =/= 1 ->
+    ?dbg("subst: ~s/~s\n", [format_lit(Bs,X), format_lit(Bs,Y)]),
+    substitute(Bs, X, Y),
+    install_(Bs,?TOP_LEVEL,Xs);
+install_(Bs,Level,[_B|Xs]) ->
+    ?dbg("install: did not handle ~p\n", [_B]),
+    install_(Bs,Level,Xs);
+install_(Bs,_Level,[]) ->
+    Bs.
+
 
 %% compact version of fmt_var
 fmt_v(_,?TRUE)  -> "1";
@@ -2702,7 +2734,7 @@ format_binding({Var,Value}) ->
 log_clause(Bs, Clause) ->
     io:format("~s\n", [format_clause(Bs,Clause)]).
 
-log_bindings(Bs, X, Value, Xs) ->
+log_bindings(_Bs, _X, _Value, _Xs) ->
     %% log_(Bs, X, Value, Xs).
     ok.
 
@@ -2828,3 +2860,4 @@ fmt_bind(Bs,X,Y) ->
 
 fmt_bind_list(Bs,Xs) ->
     lists:join(",", [fmt_bind(Bs,X,Y) || {X,Y} <- Xs]).
+    
