@@ -7,14 +7,14 @@ Command line tool
 
 # global options
     
-    --print      true|false		(false)
-    --method     collect|count		(collect)
-    --carry      true|false|ignore      (ignore)
-    --borrow     true|false|ignore	(ignore)
-    --divz       true|false|ignore	(false)
-    --log        level()		(none)	 
-    --seed       unsigned
-	--adder      plain | fast
+    --print      true|false         (false)
+    --method     collect|count      (collect)
+    --carry      true|false|ignore  (ignore)
+    --borrow     true|false|ignore  (ignore)
+    --divz       true|false|ignore  (false)
+    --log        level()            (none)	 
+    --seed       unsigned()         (0)
+	--adder      plain | fast       (plain)
 	
     level() = debug | info | notice | warning |
     	      error | critical | alert | emergency | none
@@ -26,7 +26,6 @@ Command line tool
     --order_last  "v1..vn"
 
     order() = identity | reverse | '-occur' | '+occur' | random
-
 
 # Saturation "saturate"/"sat" parameters
 

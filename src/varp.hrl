@@ -133,8 +133,14 @@
 	{"-depth",    '-depth'},
 	{"occur",     '+occur'},
 	{"+occur",    '+occur'},
-	{"-occur",    '-occur'}).
-
+	{"-occur",    '-occur'},
+	{"rank",      '+rank'},
+	{"+rank",     '+rank'},
+	{"-rank",     '-rank'},
+	{"activity",      '+activity'},
+	{"+activity",     '+activity'},
+	{"-activity",     '-activity'}
+       ).
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher
 -define(EXCEPTION(Class, Reason, Stacktrace), Class:Reason:Stacktrace).

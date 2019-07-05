@@ -37,7 +37,7 @@ dump(Bs, Opts) ->
     N = varp_formula:get_info(Bs, number_of_clauses),
     Raw = maps:get(raw, Opts, false),
     case maps:get(file, Opts, "") of
-	"" -> 
+	"" ->
 	    dump_(user, Raw, 0, N, Bs);
 	File ->
 	    case file:open(File, [write]) of

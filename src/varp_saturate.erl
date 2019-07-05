@@ -234,6 +234,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 			 [indent(Level),varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(
 			    Bs, tl(varp_formula:get_bindings(Bs,Level+1)))]),
+		    %% FIXME: if tl(Xs) = [] then do nothig...
 		    Ys = varp_formula:intersect(Bs, X, tl(Xs)),
 		    pop(Bs,Level),
 		    varp_formula:set_level(Bs,Level),
@@ -269,9 +270,9 @@ loop_1_next(Bs,I,_X,N,Level,TRef,Laps,Threshold) ->
 	{I1,X1} -> loop_1(Bs,I1,X1,N,Level,TRef,Laps,Threshold)
     end.
 
-loop_1_done(Reason, Laps={Ls,Ms}, Bs) ->
-    L = element(1,Ls),
-    M = element(1,Ms),
+loop_1_done(Reason, _Laps={_Ls,_Ms}, Bs) ->
+    %% L = element(1,Ls),
+    %% M = element(1,Ms),
     %% io:format("lap count=~w (~w)\n", [(M-L)+1, Laps]),
     {Reason,Bs}.
 
@@ -292,6 +293,7 @@ install_bindings_(Bs,Level,Bcp=false,[{X,Y}|Xs]) ->
     install_bindings_(Bs,Level,Bcp,Xs);
 install_bindings_(Bs,Level,Bcp=true,[{X,Y}|Xs]) ->
     if Level =:= ?TOP_LEVEL ->
+	    ?dbg("subst: ~s/~s\n", [format_lit(Bs,X), format_lit(Bs,Y)]),
 	    varp_formula:substitute(Bs, X, Y),
 	    ok;
        true -> 

@@ -13,7 +13,8 @@
 		    {"s",     "saturate",  varp_saturate},
 		    {"red",   "reduction", varp_reduction},
 		    {"rat",   "rat",       varp_rat},
-		    {"d",     "dump",      varp_dump}
+		    {"d",     "dump",      varp_dump},
+		    {"mon",   "monitor",   varp_monitor}
 		   ]}
 	 ]},
   {applications,[kernel,stdlib]}

@@ -35,11 +35,15 @@ test1() ->
     X4 = add_variable(V),
     Ls0 = lists:usort([X2, X3, X4]),
     C0 = add_clause(V, Ls0),
+    io:format("C0=~w\n", [C0]),
     Ls0 = get_clause(V, C0),
+    io:format("Ls0=~w\n", [Ls0]),
     
     Ls1 = lists:usort([X2,-X3,X4]),
     C1 = add_clause(V, Ls1),
+    io:format("C0=~w\n", [C1]),
     Ls1 = get_clause(V, C1),
+    io:format("Ls0=~w\n", [Ls1]),
     ok.
     
 test2() ->

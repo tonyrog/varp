@@ -62,6 +62,9 @@
 -export([order_sort/2, order_sort/3, order_sort/4]).
 -export([order_sort_first/2, order_sort_last/2]).
 -export([order_all/1]).
+-export([decay/2]).
+-export([subscribe/2]).
+
 
 -export([get_info/1]).
 -export([info_keys/0]).
@@ -103,6 +106,15 @@ init() ->
 
 new() ->
     new([]).
+
+%%
+%% options
+%%    {size, Size::unsigned()}   -- inital variable tavle size
+%%    {grow, Grow::unsigned()}   -- variable table growth step
+%%    fifo                       -- use fifo strategy in eval
+%%    lifo                       -- use lifo strategy in eval (default)
+%%    activity                   -- use activity in conflicts (false)
+%%
 
 new(Options) when is_list(Options) ->
     ?nif_stub().
@@ -257,6 +269,12 @@ get_clause(_Vp,Index,_SkipLiteral,Raw)
     ?nif_stub().
 
 use_clause(_Vp,_Index) ->
+    ?nif_stub().
+
+decay(_Vp,Decay) when is_number(Decay), Decay >= 1.0 ->
+    ?nif_stub().
+
+subscribe(_Vp,Event) when is_atom(Event) ->
     ?nif_stub().
 
 get_clause_flags(_Vp,Index)

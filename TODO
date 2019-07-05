@@ -1,3 +1,57 @@
+- map TRUE and FALSE
+
+  map TRUE to   (1 bsl 27)  =  0x8000000
+  and FALSE to -(1 bsl 27)  = -0x8000000
+  UNDEF is still = 0
+  
+  and use 1 for variables.
+
+  This makes dimacs process possible without mapping
+  of variables!
+
+- push/pop
+
+  create clause stack/heap
+
+  push (create clauses and variables ) pop ( variables and clauses are removed)
+
+
+- 2-clause implication list
+
+  2-clauses are only represented as " implication list"
+  clause (A,B), (B,C),
+
+  install triggers
+	A:
+	   !A -> [B]
+        B:
+	   !B -> [A,C]
+	C:
+	   !C -> [B]
+
+  if during eval B=0 then the list for !B is executed and
+  A=1, C=1 are set.
+
+  A cantor pair enumeration map must be install for this to
+  work, first to check for duplicates and then to generate
+  clause indices.
+
+  normal clause index is return as (cix << 1) while
+  a 2-clause index is return as ((cantor_pair(A,B) << 1)+1)
+	   
+
+- cantor pair enumeration map for all 2-clauses, marking
+  2_clauses already installed.
+
+  given (A,B) then mark
+
+  (!A -> B)  (!B -> A)
+
+  set bit number cantor_pair(!A,B)
+  and cantor_pair(!B,A)
+
+  before install of 2-clause check the cantor map
+
 
 - satdis (plugin)
 
@@ -16,12 +70,17 @@
 - size (atoms ?)
 
 
-- occure + clause length
++ order occure + clause length
 
   occure A =  1/N1 + ... + 1/Nk
 
   om A förekommer i (A ... Pn1) (A ... Pn2) + ... + (A + Pnk)
-  
+
+- order activity
+
+  activity score initialized update each variable
+  in an conflict (possibly not decision variables) with
+  1. sort according to score
 
 - continue with backtrack after backjump
   as alternative to install all models while
