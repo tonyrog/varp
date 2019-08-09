@@ -3,7 +3,7 @@
 //
 declare A:(isize(n)-1);
 declare B:((isize(n)+1)/2);
-order B, A, -occur;
+order B, A, -degree;
 
 ((A * B) == n) && (A > B) && (B > 1)
 

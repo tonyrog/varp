@@ -13,7 +13,7 @@
 		    {"s",     "saturate",  varp_saturate},
 		    {"red",   "reduction", varp_reduction},
 		    {"rat",   "rat",       varp_rat},
-		    {"d",     "dump",      varp_dump},
+		    {"cnf",   "cnf",       varp_cnf},
 		    {"mon",   "monitor",   varp_monitor}
 		   ]}
 	 ]},

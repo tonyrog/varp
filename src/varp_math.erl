@@ -11,7 +11,7 @@
 -export([binom/2]).
 -export([pow/2]).
 -export([ilog2/1]).
--export([integer_size/1]).
+-export([signed_size/1]).
 -export([unsigned_size/1]).
 
 factorial(0) -> 1;
@@ -49,16 +49,14 @@ pow_(A, B, Prod)  ->
 	    pow_(A1, B1, (A*Prod))
     end.
 
-
 ilog2(N) when is_integer(N), N>0 ->
     unsigned_size(N)-1.
     
-
 %% smallest number of bits needed to represent a
-%% signed integer X
-integer_size(X) when is_integer(X) ->
-    if X < 0 -> unsigned_size(-X + 1);
-       true -> unsigned_size(X)
+%% signed integer X (including sign bit)
+signed_size(X) when is_integer(X) ->
+    if X < 0 -> unsigned_size(-X - 1)+1;
+       true -> unsigned_size(X)+1
     end.
 
 %% smallest number of bits needed to represent an

@@ -8,13 +8,17 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
--define(UNDEF,  0).
+%% -define(UNDEF,  0).
 -define(TRUE,   1).
 -define(FALSE, -1).
--define(BOUND,  2).
--define(NBOUND, -2).
+%% -define(BOUND,  2).
+%% -define(NBOUND, -2).
+
+-define(T,   1).
+-define(F, -1).
 
 -define(dbg0(F,As), ok).
+-define(dbg1(F,A), io:format((F),(A))).
 -ifdef(DEBUG).
 -define(dbg(F,A), io:format((F),(A))).
 -define(dcall(Fun), Fun()).
@@ -128,18 +132,15 @@
 	{"undefined", undefined},
 	{"identity",  identity},
 	{"random",    random},
-	{"depth",     '+depth'},
-	{"+depth",    '+depth'},
-	{"-depth",    '-depth'},
-	{"occur",     '+occur'},
-	{"+occur",    '+occur'},
-	{"-occur",    '-occur'},
-	{"rank",      '+rank'},
-	{"+rank",     '+rank'},
-	{"-rank",     '-rank'},
-	{"activity",      '+activity'},
-	{"+activity",     '+activity'},
-	{"-activity",     '-activity'}
+	{"degree",     '+degree'},
+	{"+degree",    '+degree'},
+	{"-degree",    '-degree'},
+	{"rank",       '+rank'},
+	{"+rank",      '+rank'},
+	{"-rank",      '-rank'},
+	{"activity",   '+activity'},
+	{"+activity",  '+activity'},
+	{"-activity",  '-activity'}
        ).
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher

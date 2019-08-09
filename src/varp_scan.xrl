@@ -6,7 +6,7 @@ Definitions.
 
 B	= [0-1]
 D	= [0-9]
-L       = [a-zA-Z_]
+L       = [a-zA-Z_\$]
 A       = ({L}|{U})
 H	= [a-fA-F0-9]
 E	= [Ee][+-]?{D}+
@@ -35,8 +35,8 @@ declare             : {token,{'declare',TokenLine}}.
 literals            : {token,{'literals',TokenLine}}.
 define              : {token,{'define',TokenLine}}.
 order               : {token,{'order',TokenLine}}.
-depth               : {token,{'depth',TokenLine}}.
-occur               : {token,{'occur',TokenLine}}.
+rank                : {token,{'rank',TokenLine}}.
+degree              : {token,{'degree',TokenLine}}.
 random              : {token,{'random',TokenLine}}.
 identity            : {token,{'identity',TokenLine}}.
 true                : {token,{'true',TokenLine}}.
@@ -70,7 +70,7 @@ PROD                : {token,{'PROD',TokenLine}}.
 %% C identifier (varp tokens are added in the grammar)
 
 {L}({L}|{D})*	    :	case TokenChars of
-			    [C|_] when C >= $A, C =< $Z; C =:= $_ ->
+			    [C|_] when C >= $A, C =< $Z; C =:= $_; C =:= $$ ->
 				{token,{symbol,TokenLine,TokenChars}};
 			    _ ->
 				{token,{identifier,TokenLine,
@@ -93,8 +93,6 @@ PROD                : {token,{'PROD',TokenLine}}.
 <->                 : {token,{'<->',TokenLine}}.
 >>>		    : {token,{'>>>',TokenLine}}.
 <<<		    : {token,{'<<<',TokenLine}}.
-\$		    : {token,{'$',TokenLine}}.
-
 >>		    : {token,{'>>',TokenLine}}.
 <<		    : {token,{'<<',TokenLine}}.
 ->		    : {token,{'->',TokenLine}}.

@@ -1,3 +1,5 @@
+- move varc wrapper api into varp module!
+
 - map TRUE and FALSE
 
   map TRUE to   (1 bsl 27)  =  0x8000000

@@ -1,0 +1,18 @@
+//
+// Test various arithmetic
+//
+declare A:5;
+declare B:5;
+declare C:6/signed;
+declare D:6/signed;
+
+(A == 11) &&
+(B == 13) &&
+(C == -11) &&
+(D == -13) &&
+
+(A_PLUS_B:6/signed == A+B) &&
+(A_MINUS_B:6/signed == A-B) &&
+(A_TIMES_B:12/signed == A*B)
+
+

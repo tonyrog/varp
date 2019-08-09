@@ -22,6 +22,8 @@ all() ->
     or_simplify(),
     or_eval(),
 
+    watch1(),
+
     subst1(),
     subst2(),
 
@@ -138,10 +140,10 @@ or_eval() ->
     X4 = add_variable(V),
     X5 = add_variable(V),
 
-    0 = varc:get(V, X2),
-    0 = varc:get(V, X3),
-    0 = varc:get(V, X4),
-    0 = varc:get(V, X5),
+    0 = varc:value(V, X2),
+    0 = varc:value(V, X3),
+    0 = varc:value(V, X4),
+    0 = varc:value(V, X5),
 
     varc:set_level(V, 1),
     C0 = add_clause(V, [X2, ?FALSE, ?FALSE]),
@@ -154,23 +156,24 @@ or_eval() ->
     io:format("queue=~p\n", [varc:get_queue(V)]),
     true = varc:eval(V),
 
-    V2 = varc:get(V, X2),
+    V2 = varc:value(V, X2),
     io:format("X2 = ~w\n", [V2]),
     true = V2 =:= ?TRUE,
 
-    V3 = varc:get(V, X3),
+    V3 = varc:value(V, X3),
     io:format("X3 = ~w\n", [V3]),
     true = V3 =:= 0,
 
-    V4 = varc:get(V, X4),
+    V4 = varc:value(V, X4),
     io:format("X4 = ~w\n", [V4]),
     true = V4 =:= ?FALSE,
 
-    V5 = varc:get(V, X5),
+    V5 = varc:value(V, X5),
     io:format("X5 = ~w\n", [V5]),
     true = V5 =:= 0,
 
-    io:format("Bindings = ~w\n", [varc:get_bindings(V,1)]),
+    io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
+    io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
 
     true.
 
@@ -189,14 +192,15 @@ or_eval_bindings() ->
     add_clause(V, [-X2, -X3,  X5]),
     add_clause(V, [-X2,  X3, -X4]),
     add_clause(V, [-X2,  X3,  X4]),
-    io:format("bindings 0 = ~w\n", [varc:get_bindings(V)]),
+    io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
+    io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     
     print_clauses(V),
     io:format("2/1\n", []),
     varc:bind(V, X2),
     true = varc:eval(V),
-    io:format("bindings 2/1 = ~w\n", [varc:get_bindings(V)]),
+    io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
 
@@ -206,19 +210,25 @@ or_eval_bindings() ->
     io:format("3/1\n", []),
     varc:bind(V, X3),
     true = varc:eval(V),
-    io:format("bindings 3/1 = ~w\n", [varc:get_bindings(V)]),
+    io:format("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
+    io:format("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
+    io:format("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
 
     io:format("undo 2\n", []),
     varc:undo_level(V, 2),
-    io:format("bindings = ~w\n", [varc:get_bindings(V)]),
+    io:format("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
+    io:format("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
+    io:format("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
 
     io:format("undo 1\n", []),
     varc:undo_level(V, 1),
-    io:format("bindings = ~w\n", [varc:get_bindings(V)]),
+    io:format("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
+    io:format("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
+    io:format("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
     ok.
@@ -262,27 +272,27 @@ order() ->
     Sort2 = varc:order_all(V),
     io:format("random,1003, Vs = ~p\n", [Sort2]),
 
-    ok = varc:order_sort(V, '+occur', undefined, 0),
-    io:format("+occur, Vs = ~p\n", [varc:order_all(V)]),
+    ok = varc:order_sort(V, '+degree', undefined, 0),
+    io:format("+degree, Vs = ~p\n", [varc:order_all(V)]),
     
-    ok = varc:order_sort(V, '-occur', undefined, 0),
-    io:format("-occur, Vs = ~p\n", [varc:order_all(V)]),
+    ok = varc:order_sort(V, '-degree', undefined, 0),
+    io:format("-degreer, Vs = ~p\n", [varc:order_all(V)]),
 
-%%    ok = varc:order_sort(V, '+depth', undefined, 0),
-%%    io:format("depth>0, Vs = ~p\n", [varc:order_all(V)]),
+    ok = varc:order_sort(V, '+rank', undefined, 0),
+    io:format("rank>0, Vs = ~p\n", [varc:order_all(V)]),
 
-%%    ok = varc:order_sort(V, '-depth', undefined, 0),
-%%    io:format("depth<0, Vs = ~p\n", [varc:order_all(V)]),
+    ok = varc:order_sort(V, '-rank', undefined, 0),
+    io:format("rank<0, Vs = ~p\n", [varc:order_all(V)]),
 
-%%    ok = varc:order_sort(V, '+occur', '+depth', 0),
+%%    ok = varc:order_sort(V, '+degree', '+rank', 0),
 %%    io:format("occur,depth>0, Vs = ~p\n", [varc:order_all(V)]),
-%%    ok = varc:order_sort(V, '-occur', '-depth, 0),
+%%    ok = varc:order_sort(V, '-degree', '-rank, 0),
 %%    io:format("occur,depth<0, Vs = ~p\n", [varc:order_all(V)]),
 
-%%    ok = varc:order_sort(V, '+depth', '+occur', 0),
+%%    ok = varc:order_sort(V, '+rank', '+degree', 0),
 %%    io:format("depth,occur>0, Vs = ~p\n", [varc:order_all(V)]),
 
-%%    ok = varc:order_sort(V, '-depth', '-occur', 0),
+%%    ok = varc:order_sort(V, '-rank', '-degree', 0),
 %%    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
     ok.
  
@@ -317,8 +327,6 @@ subst1() ->
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
 
-
-
 subst2() ->
     V = varc:new(),
     X2 = varc:add_variable(V),
@@ -348,6 +356,70 @@ subst2() ->
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
 
+watch1() ->
+    V = varc:new(),
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    X5 = varc:add_variable(V),
+    X6 = varc:add_variable(V),
+
+    C1 = add_clause(V, [X6,X5,X4,X3,X2]),
+    [X6,X5,X4,X3,X2] = varc:get_clause(V, C1),
+
+    %% initial watch points are set in the end!
+    4 = varc:get_clause_info(V, C1, watch0),
+    3 = varc:get_clause_info(V, C1, watch1),
+
+    %% bind X3, move wp 0
+    varc:set_level(V, 1),
+    varc:bind(V, -X3),
+    true = varc:eval(V),
+
+    4 = varc:get_clause_info(V, C1, watch0),
+    0 = varc:get_clause_info(V, C1, watch1),
+
+    %% bind -X5, not watched, watch points should stay the same
+    varc:set_level(V, 2),
+    varc:bind(V, -X5),
+    true = varc:eval(V),
+
+    4 = varc:get_clause_info(V, C1, watch0),
+    0 = varc:get_clause_info(V, C1, watch1),
+
+    varc:set_level(V, 3),
+    varc:bind(V, -X2),
+    true = varc:eval(V),
+
+    2 = varc:get_clause_info(V, C1, watch0),
+    0 = varc:get_clause_info(V, C1, watch1),
+
+    varc:set_level(V, 4),
+    varc:bind(V, -X6),
+    true = varc:eval(V),
+
+    2 = varc:get_clause_info(V, C1, watch0),
+    0 = varc:get_clause_info(V, C1, watch1),
+    ?TRUE = varc:value(V, X4),
+
+    {C1,_Pos=2,_Lev=4} = varc:implication_clause(V, X4),
+
+    %% add clauses under the above bindings
+    Y3 = -X6, Y2 = -X5, Y1 = -X3, 
+    C2 = add_clause(V, [Y3, Y2, Y1]),
+    [Y3, Y2, Y1] = varc:get_clause(V, C2),
+
+    0 = varc:get_clause_info(V, C2, watch0),
+    1 = varc:get_clause_info(V, C2, watch1),
+
+    Z3 = X5, Z2 = X4, Z1 = -X2,
+    C3 = add_clause(V, [Z3,Z2,Z1]),
+    [Z3,Z2,Z1] = varc:get_clause(V, C3),
+
+    1 = varc:get_clause_info(V, C3, watch0),
+    2 = varc:get_clause_info(V, C3, watch1),
+
+    ok.
 
 %% Utils
 
@@ -365,9 +437,10 @@ print_clauses(V) ->
     print_clauses(V,false).
 print_clauses(V,Raw) ->
     lists:foreach(fun(I) ->
-			  F = varc:get_clause_flags(V, I),
-			  io:format("~w: ~w ~w\n",
-				    [I, F, varc:get_clause(V,I,undefined,Raw)])
+			  Fs = varc:get_clause_info(V, I),
+			  io:format("~w: ~s ~w\n",
+				    [I, format_clause_flags(Fs),
+				     varc:get_clause(V,I,undefined,Raw)])
 		  end, lists:seq(0, varc:info(V, number_of_clauses)-1)).
 
 add_variable(V) ->
@@ -382,3 +455,12 @@ add_clause(V, Literals) ->
 get_clause(V, ClauseIndex) ->
     Literals = varc:get_clause(V, ClauseIndex),
     lists:sort(Literals).
+
+format_clause_flags(Fs) ->
+    lists:join(",", [format_clause_flag(F) || F <- Fs]).
+
+format_clause_flag({watch,{P1,P2}}) -> io_lib:format("w:(~w,~w)",[P1,P2]);
+format_clause_flag({status,inqueue}) -> "s:inqueue";
+format_clause_flag({status,dead}) -> "s:dead";
+format_clause_flag({status,ok}) -> "s:ok".
+    

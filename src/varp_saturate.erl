@@ -14,7 +14,7 @@
 -compile(export_all).
 -import(varp_formula, [format_lit/2, format_var/2]).
 
--define(DEBUG, true).
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
 options() ->
@@ -238,10 +238,10 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		    Ys = varp_formula:intersect_bindings(Bs, X, tl(Ls)),
 		    pop(Bs,Level),
 		    varp_formula:set_level(Bs,Level),
-		    io:format("Ys = ~w\n", [Ys]),
+		    %% io:format("Ys = ~w\n", [Ys]),
 		    varp_formula:install_bindings(Bs,Level,Ys),
 		    true = varp_formula:eval(Bs),
-		    varp_formula:log_bindings(Bs, X, ?UNDEF, Ys),
+		    varp_formula:log_bindings(Bs, X, undefined, Ys),
 		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
 	    end
     end.

@@ -2,11 +2,11 @@
 
 Terminals
 	symbol true false define declare literals assert input output
-        order depth occur random identity
+        order rank degree random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
         'SUM' 'PROD'
-        '<->' '>>>' '<<<' '$' '..'
+        '<->' '>>>' '<<<' '..'
         hexnum octnum binnum decnum flonum chrnum identifier
 	'->' '<<' '>>' '<' '>' '>=' '<=' '==' '!=' ':='
 	'&&' '||'
@@ -28,7 +28,7 @@ Nonterminals
 	file 
         integer sexpr
         qtype quantifier psymbol pexpr oexpr odecl odecls ldecl ldecls
-        lexpr_prim
+        lexpr_const lexpr_var
         lexpr0 lexpr10 lexpr20 lexpr30 lexpr40 lexpr41 lexpr43 lexpr45 lexpr47 
         lexpr50 lexpr60 lexpr70 lexpr80 lexpr90
         lexpr lexprs
@@ -230,12 +230,12 @@ ldecl -> identifier : name('$1').
 odecls -> odecl : ['$1'].
 odecls -> odecls ',' odecl : '$1'++['$3'].
 
-odecl -> depth      : '+depth'.
-odecl -> '+' depth  : '+depth'.
-odecl -> '-' depth  : '-depth'.
-odecl -> occur      : '+occur'.
-odecl -> '+' occur  : '+occur'.
-odecl -> '-' occur  : '-occur'.
+odecl -> rank       : '+rank'.
+odecl -> '+' rank   : '+rank'.
+odecl -> '-' rank   : '-rank'.
+odecl -> degree     : '+degree'.
+odecl -> '+' degree : '+degree'.
+odecl -> '-' degree : '-degree'.
 odecl -> random     : '$1'.
 odecl -> identity   : '$1'.
 odecl -> oexpr      : '$1'.
@@ -253,14 +253,20 @@ oexpr -> '!' pexpr                      : {'!', '$2'}.
 %%
 %% Logic expression
 %%
-lexpr_prim -> integer               : constant(value('$1')).
-lexpr_prim -> pexpr                 : '$1'.
-lexpr_prim -> identifier            : name('$1').  %% meta/env variable
-lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
+lexpr_var -> pexpr                          : '$1'.
+lexpr_var -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
+lexpr_var -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
+lexpr_var -> pexpr ':' sexpr                : {uint,'$3','$1'}.
+    
+lexpr_const -> integer               : constant(value('$1')).
+lexpr_const -> identifier            : name('$1').  %% meta/env variable
+%%lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
 
-lexpr0 -> lexpr_prim                : '$1'.
 lexpr0 -> true                      : true.
 lexpr0 -> false                     : false.
+lexpr0 -> lexpr_var                 : '$1'.
+lexpr0 -> lexpr_const               : '$1'.
+%% lexpr0 -> lexpr_var '=' lexpr       : { op('$2'), '$1', '$3' }.
 lexpr0 -> '-' lexpr0                : {'-', '$2'}.
 lexpr0 -> 'not' lexpr0              : { op('$1'), '$2' }.
 lexpr0 -> '!' lexpr0                : { op('$1'), '$2' }.
@@ -270,10 +276,6 @@ lexpr0 -> '{' lexprs '}'            : {vec,'$2'}.
 lexpr0 -> identifier '(' lexprs ')' : { name('$1'), '$3'}. %% meta function
 lexpr0 -> quantifier '(' lexprs ')' : {'$1','$3'}.
 lexpr0 -> quantifier lexpr0         : {'$1','$2'}.
-
-lexpr0 -> lexpr_prim ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
-lexpr0 -> lexpr_prim ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
-lexpr0 -> lexpr_prim ':' sexpr                : {uint,'$3','$1'}.
 lexpr0 -> lexpr0 '[' expr ']'           : { bit_index, '$1', '$3'}.
 lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bit_range,'$1','$3','$5', 1}.
 lexpr0 -> lexpr0 '[' expr ':' expr ':' expr ']' :
@@ -403,8 +405,8 @@ op({Op,_Ln})     -> Op.
 line([H|_]) -> line(H);
 line(T) when is_tuple(T) -> element(2,T).
 
-constant(N) when N >= 0   -> {uint,varp_math:integer_size(N),N};
-constant(N) when N < 0   -> {int,varp_math:integer_size(N),N}.
+constant(N) when N >= 0   -> {uint,varp_math:unsigned_size(N),N};
+constant(N) when N < 0   -> {int,varp_math:signed_size(N),N}.
 
 name({symbol,_,Name})       -> list_to_atom(Name);
 name({identifier,_,Name})   -> list_to_atom(Name).

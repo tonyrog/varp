@@ -1,0 +1,68 @@
+//
+// Formulation of strassen
+//
+// varp --carry=0 --log=info
+//   satisfy
+//   order -sort='-degree'
+//   saturate
+//   monitor
+//   bj --max-learned=2000 --keep-factor=0.9
+//   strassen0.varp
+//
+
+// input and output
+declare C(i,j):16/signed;
+declare SA(i):7/signed;	   // all sum/diff of A(i,j)
+declare SB(i):7/signed;	   // all sum/diff of B(i,j)
+declare M(i,j):14/signed;  // prodct of element sums
+declare NP(i,j):1;        // control number of products
+
+// M selections
+declare CM(a,b,i,j):2/signed;
+
+// declare multiplies
+//     | 3 5  |     | 13 17 |
+// A = |      | B = |       |
+//     | 7 11 |     | 19 23 |
+//
+
+define A(1,1) 3;
+define A(1,2) 5;
+define A(2,1) 7;
+define A(2,2) 11;
+define B(1,1) 13;
+define B(1,2) 17;
+define B(2,1) 19;
+define B(2,2) 23;
+
+(C(1,1) == (A(1,1)*B(1,1) + A(1,2)*B(2,1))) &&
+(C(1,2) == (A(1,1)*B(1,2) + A(1,2)*B(2,2))) &&
+(C(2,1) == (A(2,1)*B(1,1) + A(2,2)*B(2,1))) &&
+(C(2,2) == (A(2,1)*B(1,2) + A(2,2)*B(2,2))) &&
+
+// All sums of A
+(SA(1) == (A(1,1))) &&
+(SA(2) == (A(2,2))) &&
+(SA(3) == (A(1,1) + A(2,2))) &&
+(SA(4) == (A(2,1) + A(2,2))) &&
+(SA(5) == (A(1,1) + A(1,2))) &&
+(SA(6) == (A(2,1) - A(1,1))) &&
+(SA(7) == (A(1,2) - A(2,2))) &&
+
+// All sums of B
+(SB(1) == (B(1,1))) &&
+(SB(2) == (B(2,2))) &&
+(SB(3) == (B(1,1) + B(2,2))) &&
+(SB(4) == (B(1,2) - B(2,2))) &&
+(SB(5) == (B(2,1) - B(1,1))) &&
+(SB(6) == (B(1,1) + B(1,2))) &&
+(SB(7) == (B(2,1) + B(2,2))) &&
+
+([A i=1..7,j=1..7](M(i,j) == NP(i,j)*(SA(i)*SB(j)))) && 
+
+([A a=1..2,b=1..2,i=1..7,j=1..7] (CM(a,b,i,j) != -2)) &&
+
+([A a=1..2,b=1..2]
+    (C(a,b) == ([SUM i=1..7,j=1..7] (CM(a,b,i,j)*M(i,j))))) &&
+
+([EQ 2,i=1..7,j=1..7](NP(i,j) != 0))

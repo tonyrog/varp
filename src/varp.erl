@@ -35,6 +35,7 @@
 	 clause_count,
 	 clause_count_2,
 	 clause_count_3,
+	 clause_count_dead,
 	 eval_count,
 	 bound,
 	 clauses
@@ -125,6 +126,12 @@ global_options() ->
 	 default => ignore,
 	 description => "How to handle borrow in subtraction."
        },
+      #{ long => "overflow",
+	 key => overflow,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => ignore,
+	 description => "How to handle overflow in addition."
+       },
       #{ long => "divz",
 	 key => divz,
 	 spec => {enum,[?BOOL,{"ignore",ignore}]},
@@ -159,6 +166,12 @@ global_options() ->
 	 spec => {multiple,string},
 	 default => [],
 	 description => "Command line formula."
+       },
+      #{ long => "qtype",
+	 key => qtype,
+	 spec => {enum,[{"fifo",fifo},{"lifo",lifo}]},
+	 default => lifo,
+	 description => "lifo or fifo variable queue type."
        },
       #{ long => "version",
 	 short => "V", 
@@ -470,11 +483,12 @@ do([], _Bs) ->
     undefined.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | eval: ~w, clause:~w,~w(2),~w(3), #clauses = ~w time=~.2fs\n",
+    varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead)\n    | #clauses = ~w\n    | time=~.2fs\n",
 		      [S1#stat.eval_count-S0#stat.eval_count,
 		       S1#stat.clause_count - S0#stat.clause_count,
 		       S1#stat.clause_count_2 - S0#stat.clause_count_2,
 		       S1#stat.clause_count_3 - S0#stat.clause_count_3,
+		       S1#stat.clause_count_dead - S0#stat.clause_count_dead,
 		       S1#stat.clauses,
 		       Ts]),
     varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
@@ -487,6 +501,7 @@ stat(Bs) ->
     #stat { clause_count   = varp_formula:clause_eval_counter(Bs,0),
 	    clause_count_2 = varp_formula:clause_eval_counter(Bs,2),
 	    clause_count_3 = varp_formula:clause_eval_counter(Bs,3),
+	    clause_count_dead = varp_formula:clause_eval_counter(Bs,dead),
 	    eval_count     = varp_formula:eval_counter(Bs),
 	    bound          = varp_formula:number_of_bound(Bs),
 	    clauses        = varp_formula:number_of_clauses(Bs)

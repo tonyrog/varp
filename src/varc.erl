@@ -18,8 +18,7 @@
 -export([add_symbol/3]).
 -export([get_symbol/2]).
 -export([find_symbol/2]).
--export([get/2]).
--export([put/3, put/4]).
+-export([value/2]).
 -export([bind/2, bind/3]).
 -export([subst/3]).
 -export([key/3]).
@@ -43,7 +42,7 @@
 -export([get_clause/2]).
 -export([get_clause/3]).
 -export([get_clause/4]).
--export([get_clause_flags/2]).
+-export([get_clause_info/2,get_clause_info/3]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([get_clauses/2]).
@@ -112,9 +111,8 @@ new() ->
 %% options
 %%    {size, Size::unsigned()}   -- inital variable tavle size
 %%    {grow, Grow::unsigned()}   -- variable table growth step
-%%    fifo                       -- use fifo strategy in eval
-%%    lifo                       -- use lifo strategy in eval (default)
-%%    activity                   -- use activity in conflicts (false)
+%%    {qtype,lifo|fifo}          -- use lifo/fifo strategy in eval
+%%    {activity,boolean()}       -- use activity in conflicts (false)
 %%
 
 new(Options) when is_list(Options) ->
@@ -153,27 +151,10 @@ find_symbol(_Vp, _Name) ->
 %%
 %% Get literal value 
 %%
--spec get(Vp::varc(), Lit::literal()) -> integer().
+-spec value(Vp::varc(), Lit::literal()) -> integer().
 
-get(_Vp, Lit) when is_integer(Lit) ->
+value(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
-
-%% put literal value
--spec put(Vp::varc(), X::literal(), Y::literal()) -> boolean().
-
-put(_Vp, X, Y) when is_integer(X),
-		    is_integer(Y) ->
-    ?nif_stub().
-
-
-%% put literal value at level
--spec put(Vp::varc(), X::literal(), Y::literal(), Level::integer()) -> boolean().
-
-put(_Vp, X, Y, Level) when is_integer(X),
-			   is_integer(Y),
-			   is_integer(Level) ->
-    ?nif_stub().
-
 
 %% bind literal
 -spec bind(Vp::varc(), X::literal()) -> boolean().
@@ -293,9 +274,12 @@ decay(_Vp,Decay) when is_number(Decay), Decay >= 1.0 ->
 subscribe(_Vp,Event) when is_atom(Event) ->
     ?nif_stub().
 
-get_clause_flags(_Vp,Index)
+get_clause_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
+
+get_clause_info(Vp,Index) ->
+    [{What,get_clause_info(Vp,Index,What)}||What<-[status,watch]].
 
 del_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
@@ -461,8 +445,9 @@ get_clause_eval_counter(Vp,0) ->
 get_clause_eval_counter(Vp,2) ->
     info(Vp, clause2_eval_counter);
 get_clause_eval_counter(Vp,3) ->
-    info(Vp, clause3_eval_counter).
-
+    info(Vp, clause3_eval_counter);
+get_clause_eval_counter(Vp,dead) ->
+    info(Vp, dead_eval_counter).
 
 get_eval_counter(Vp) ->
     info(Vp, eval_counter).
