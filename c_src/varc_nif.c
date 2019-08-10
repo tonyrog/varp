@@ -38,7 +38,32 @@
 #define DEBUG_MEM
 // #define CLAUSE_EVAL_COUNT(vp, cnt)
 #define CLAUSE_EVAL_COUNT(vp, cnt) vp->clause_eval_counter[(cnt)]++
-// #define TWL_CIRCULAR
+
+//#define TWL_CIRCULAR
+
+#ifdef TWL_CIRCULAR
+#define TWL_WP0_DIR        1
+#define TWL_WP0_INIT       wp0+TWL_WP0_DIR
+#define TWL_WP0_NEXT(x)    (x)+TWL_WP0_DIR
+#define TWL_WP0_WRAP(x,sz) (((x)>=(sz))?(0):(x))
+
+#define TWL_WP1_DIR        -1
+#define TWL_WP1_INIT       wp1+TWL_WP1_DIR
+#define TWL_WP1_NEXT(x)    (x)+TWL_WP1_DIR
+#define TWL_WP1_WRAP(x,sz) (((x)<0)?((sz)-1):(x))
+#else
+
+#define TWL_WP0_DIR     1
+#define TWL_WP0_INIT    0
+#define TWL_WP0_NEXT(x) (x)+TWL_WP0_DIR
+#define TWL_WP0_WRAP(x,sz) (x)
+
+#define TWL_WP1_DIR     1
+#define TWL_WP1_INIT    0
+#define TWL_WP1_NEXT(x) (x)+TWL_WP1_DIR
+#define TWL_WP1_WRAP(x,sz) (x)
+
+#endif
 
 // #define USE_CLAUSE_SHUFFLE
 // #define USE_CLAUSE_FIND
@@ -3217,7 +3242,8 @@ static inline int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 //    }
 
     if (wi==0) {  // watch point 0
-	size_t cnt;
+	size_t csize;
+	long   cnt;
 	long   p;
 	ival_t lw;
 	
@@ -3226,14 +3252,13 @@ static inline int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	    return 0;
 	}
 	CLAUSE_EVAL_COUNT(vp, ALL_CLAUSE);
-	if (cp->size <= 3) CLAUSE_EVAL_COUNT(vp, cp->size);
-	cnt = 0;
-#ifdef TWL_CIRCULAR
-	p = wp0;
-	do {
-	    p++;
-	    cnt++;
-	    if (p >= (long)cp->size) p = 0;
+	csize = cp->size;
+	if (csize <= 3) CLAUSE_EVAL_COUNT(vp, csize);
+	cnt = csize;
+	
+	p = TWL_WP0_INIT;
+	while(cnt--) {
+	    p = TWL_WP0_WRAP(p,csize);
 	    if (p != wp1) {
 		lit_t l;
 		if ((l = cp->lit[p]) != LIT_NONE) {
@@ -3245,27 +3270,11 @@ static inline int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 		    }
 		}
 	    }
-	} while(p != wp0);
-#else
-	// find a new watch point
-	for (p = 0; p < (int)cp->size; p++) {
-	    cnt++;	    
-	    if (p != wp1) {  // skip other watch point	    
-		lit_t l;
-		if ((l = cp->lit[p]) != LIT_NONE) {
-		    ival_t lv = get_l(vp, l);
-		    if (lv != IFALSE) {  // ITRUE | IUNDEF
-			if (lv == ITRUE)
-			    return 0;
-			break;  // new watch point found
-		    }
-		}
-	    }
+	    p = TWL_WP0_NEXT(p);
 	}
-#endif
-	
+
 	DBG("  wp0: %s %d=>%ld\r\n", format_lit(vp, cp->lit[wp0]), wp0, p);
-	if (cnt == cp->size) {  // no new watch point found
+	if (cnt < 0) {  // no new watch point found
 	    if (lw == IFALSE)
 		return -1; // all are false
 	    else {
@@ -3279,7 +3288,8 @@ static inline int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	}
     }
     else { // watch point 1
-	size_t cnt;
+	size_t csize;	
+	long   cnt;
 	long   p;
 	ival_t lw;
 	
@@ -3288,15 +3298,13 @@ static inline int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 	    return 0;
 	}
 	CLAUSE_EVAL_COUNT(vp, ALL_CLAUSE);
-	if (cp->size <= 3) CLAUSE_EVAL_COUNT(vp, cp->size);
-
-	cnt = 0;
-#ifdef TWL_CIRCULAR
-	p = wp1;
-	do {
-	    p--;
-	    cnt++;
-	    if (p < 0) p = (long)cp->size - 1;
+	csize = cp->size;
+	if (csize <= 3) CLAUSE_EVAL_COUNT(vp, csize);
+	cnt = csize;
+	
+	p = TWL_WP1_INIT;
+	while(cnt--) {
+	    p = TWL_WP1_WRAP(p,csize);
 	    if (p != wp0) {
 		lit_t l;
 		if ((l = cp->lit[p]) != LIT_NONE) {
@@ -3306,29 +3314,12 @@ static inline int eval_clause(varp_t* vp, clause_t* cp, int wi, wlink_t** wlp)
 			    return 0;
 			break;  // new watch point found
 		    }
-		}		
-	    }
-	} while(p != wp1);
-#else
-        // find a new watch point
-	for (p = 0; p < (int)cp->size; p++) {
-	    cnt++;
-	    if (p != wp0) { // skip other watch point
-		lit_t l = cp->lit[p];
-		if (l != LIT_NONE) {
-		    ival_t lv = get_l(vp, l);
-		    if (lv != IFALSE) {  // ITRUE | IUNDEF
-			if (lv == ITRUE)
-			    return 0;
-			break;  // new watch point found
-		    }
 		}
 	    }
+	    p = TWL_WP1_NEXT(p);
 	}
-#endif
-	
 	DBG("  wp1: %s %d=>%ld\r\n", format_lit(vp, cp->lit[wp1]), wp1, p);
-	if (cnt == cp->size) {  // no new watch point found
+	if (cnt < 0) {  // no new watch point found
 	    if (lw == IFALSE) // contradiction
 		return -1;
 	    else {
