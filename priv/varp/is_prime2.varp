@@ -7,7 +7,7 @@ declare C:(isize(n)-1);
 declare D:((isize(n)+1)/2);
 declare E:(2*isize(n));
 declare F:(isize(n)+1);
-order D, -occur, C;
+order D, -degree, C;
 
 // A*B = n        E    F
 // (c-d)(c+d) == c^2 - d^2 = n

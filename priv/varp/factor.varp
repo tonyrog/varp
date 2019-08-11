@@ -15,7 +15,7 @@ declare Y:(isize(n)-1);
 declare A:(2*(isize(n)-1));
 declare B:(2*(isize(n)-1));
 
-order Y,X,A,B,-occur;
+order Y,X,A,B,-degree;
 
 (n + B == A)
 && (X*X == A) && (X > 0)

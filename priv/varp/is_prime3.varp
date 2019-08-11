@@ -5,7 +5,7 @@ declare C:(isize(p)-1);
 declare D:((isize(p)+1)/2);
 declare E:(isize(p));
 
-order C,B,-occur;
+order C,B,-degree;
 
 ((A * B) == E) &&
 ((A > B) && (B > 1)) &&
