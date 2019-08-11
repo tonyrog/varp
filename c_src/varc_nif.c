@@ -39,7 +39,7 @@
 // #define CLAUSE_EVAL_COUNT(vp, cnt)
 #define CLAUSE_EVAL_COUNT(vp, cnt) vp->clause_eval_counter[(cnt)]++
 
-//#define TWL_CIRCULAR
+// #define TWL_CIRCULAR
 
 #ifdef TWL_CIRCULAR
 #define TWL_WP0_DIR        1
@@ -2776,16 +2776,13 @@ static ERL_NIF_TERM varp_conflicting_clause(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int i, cix;
-    clause_t* cp;
+
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &i) || (i<0) || (i>vp->num_conflicting))
 	return enif_make_badarg(env);
     if ((cix = vp->conflicting_clauses[i]) >= (int)vp->cnext)
 	return enif_make_badarg(env);
-    // maybe clear all conflicting flags in one call?
-    cp = vp->clause_map[cix];
-    cp->flags &= ~CLAUSE_FLAG_CONFLICT;
     return enif_make_int(env, cix);
 }
 
@@ -3386,11 +3383,17 @@ done_conflict:
     vp->caller_env = NULL;
     
     if (ci) {
+	int i;
 	lqueue_clear(&vp->q);
 	vp->num_conflicting = ci;
 	DBG("num conflicts = %d\n", ci);
 	if (vp->activity)
 	    activate_levels(vp, 1.0);
+	for (i = 0; i < ci; i++) {
+	    int cix = vp->conflicting_clauses[i];
+	    clause_t* cp = vp->clause_map[cix];
+	    cp->flags &= ~CLAUSE_FLAG_CONFLICT;
+	}
 	return ATOM(false);
     }
     return ATOM(true);
