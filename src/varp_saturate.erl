@@ -239,6 +239,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		    pop(Bs,Level),
 		    varp_formula:set_level(Bs,Level),
 		    %% io:format("Ys = ~w\n", [Ys]),
+		    %% fixme no need to install+eval when Ys=[]!
 		    varp_formula:install_bindings(Bs,Level,Ys),
 		    true = varp_formula:eval(Bs),
 		    varp_formula:log_bindings(Bs, X, undefined, Ys),

@@ -1,6 +1,8 @@
 
 PIGEON n=10 benchmark
 
+TWO_CLAUSES is coding or (x,y) as  -x -> y  and -y -> x
+
 varp satisfy bt n=10 pigeon.varp
 eval: 9825028
 clause: 70025291
@@ -12,5 +14,5 @@ LIT_INTEGER=32,PACKED_VALUE=1		6.74
 LIT_INTEGER=32,SIGNED_LITERALS		6.22
 LIT_INTEGER=32,SIGNED_LITERALS,PACKED_VALUE=1	6.32
 
-
-
+TWO_CLAUSES,LIT_INTEGER=32,qtype=recursive	4.78
+TWO_CLAUSES,qtype=recursive			4.26  (lit=pointers)

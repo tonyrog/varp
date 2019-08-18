@@ -202,6 +202,7 @@ gate(Bs, 'xor',X, Xs) when abs(X) =/= 1 -> %% or n-gate
     gate_tree(Bs,'xor',X,Xs).
 
 add_clause(Bs,Ls) ->
+    ?dbg("add clause: ~s\n", [format_clause(Bs,Ls)]),
     case varc:add_clause(Bs#bs.vp,Ls) of
 	{false,_I} ->
 	    error(conflict_clause_error);

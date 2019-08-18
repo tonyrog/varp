@@ -169,9 +169,9 @@ global_options() ->
        },
       #{ long => "qtype",
 	 key => qtype,
-	 spec => {enum,[{"fifo",fifo},{"lifo",lifo}]},
+	 spec => {enum,[{"fifo",fifo},{"lifo",lifo},{"recursive",recursive}]},
 	 default => lifo,
-	 description => "lifo or fifo variable queue type."
+	 description => "lifo, fifo or depth first queue type."
        },
       #{ long => "version",
 	 short => "V", 
