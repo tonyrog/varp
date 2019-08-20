@@ -85,6 +85,7 @@ test3() ->
     [X6,X7,X8] = get_clause(V, C3),
 
     true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X2)),
+
     true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
     true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_clauses(V, X4)),
     true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X5)),

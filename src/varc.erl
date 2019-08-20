@@ -64,7 +64,7 @@
 -export([order_all/1]).
 -export([decay/2]).
 -export([subscribe/2]).
-
+-export([get_clause_first/1, get_clause_next/2]).
 
 -export([get_info/1]).
 -export([info_keys/0]).

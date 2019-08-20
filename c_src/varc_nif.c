@@ -252,6 +252,10 @@ static ERL_NIF_TERM varp_decay(ErlNifEnv* env, int argc,
 			       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
 				   const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_clause_first(ErlNifEnv* env, int argc,
+					  const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_clause_next(ErlNifEnv* env, int argc,
+					 const ERL_NIF_TERM argv[]);
 
 
 #define MAX_UINT32 0xffffffff
@@ -568,6 +572,8 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "use_clause",          2,  varp_use_clause ),
     NIF_FUNC( "decay",               2,  varp_decay ),
     NIF_FUNC( "subscribe",           2,  varp_subscribe ),
+    NIF_FUNC( "clause_first",        1,  varp_clause_first ),
+    NIF_FUNC( "clause_next",         2,  varp_clause_next ), 
 };
 
 // Atom macros
@@ -1636,7 +1642,7 @@ static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
 
 // a -> b will trigger like a=1 -> b=1
 
-cix_t make_2clause(lit_t a, lit_t b)
+cix_t make_2_clause(lit_t a, lit_t b)
 {
     uint64_t vix;
     cix_t index2;
@@ -3188,6 +3194,56 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
     vp->num_bound++;    
 }
 
+//  2-clause coding...
+//  (Y,A) (Y,B) (Y,C), (X,D) (X,A)
+//  !X -> D, A
+//  !Y -> A, B, C
+//  !A -> Y, X
+//  !B -> Y
+//  !C -> Y
+//  !D -> X
+//  [X/Y]  -> each L in !Y do in !L find Y and replace with X done
+//            move all pairs in !Y to !X
+//
+//  (X,A) (X,B) (X,C), (X,D) (X,A)
+//  !A -> X, X (ignore?)
+//  !B -> X
+//  !C -> X
+//  !X -> D, A, A, B, C
+//  !D -> X
+//
+
+static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
+{
+    literal_t* xp = l2ll(vp, xl);
+    literal_t* yp = l2ll(vp, yl);
+    literal_t* nyp = neg_ll(yp);   // !Y
+    literal_t* nxp = neg_ll(xp);   // !X
+    plink_t* pl;
+
+    for (pl = nyp->plist; pl != NULL; pl = pl->next) {
+	literal_t* lp = l2ll(vp, pl->l);  // each L in !Y
+	literal_t* nlp = neg_ll(lp);
+	plink_t* ql;
+
+	for (ql = nlp->plist; ql != NULL; ql = ql->next) {
+	    if (ql->l == yl)
+		ql->l = xl;
+	    // detect X, !X ?
+	}
+    }
+
+    pl = nyp->plist;
+    while(pl) {
+	plink_t* pl1 = pl->next;
+	
+	pl->next = nxp->plist;
+	nxp->plist = pl;
+
+	pl = pl1;
+    }
+}
+
 static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
 {
@@ -3220,10 +3276,18 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 
     vp->caller_env = env;
     if (xv != yv) {
-	if (!(xv->flags & VAR_FLAG_ATOM) && (yv->flags & VAR_FLAG_ATOM))
+	if (!(xv->flags & VAR_FLAG_ATOM) && (yv->flags & VAR_FLAG_ATOM)) {
 	    subst(vp, yp, xp);
-	else
+#ifdef TWO_CLAUSES
+	    subst_2_clause(vp, yp, xp);
+#endif
+	}
+	else {
 	    subst(vp, xp, yp);
+#ifdef TWO_CLAUSES
+	    subst_2_clause(vp, xp, yp);
+#endif	    
+	}
     }
     vp->caller_env = NULL;    
     return ATOM(true);
@@ -3512,18 +3576,18 @@ static int eval_2_clauses(varp_t* vp, literal_t* lp)
 	case IFALSE:
 	    if (vp->max_conflicting == 1) {
 		vp->conflicting_clauses[vp->num_conflicting++] =
-		    make_2clause(l, pl->l);
+		    make_2_clause(l, pl->l);
 		return -1;
 	    }
 	    else if (vp->num_conflicting < vp->max_conflicting) {
 		vp->conflicting_clauses[vp->num_conflicting++] =
-		    make_2clause(l, pl->l);
+		    make_2_clause(l, pl->l);
 	    }
 	    else
 		return -1;
 	    break;
 	case IUNDEF:
-	    put_nq_ll(vp, lp1, ITRUE, 1, make_2clause(l, pl->l), vp->level);
+	    put_nq_ll(vp, lp1, ITRUE, 1, make_2_clause(l, pl->l), vp->level);
 	    if (vp->qtype == recursive) {
 		if (eval1(vp, neg_ll(lp1)) < 0)
 		    return -1;
@@ -3992,7 +4056,7 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
 
 #ifdef TWO_CLAUSES
     if (size == 2) {
-	cix = make_2clause(lit[0], lit[1]);
+	cix = make_2_clause(lit[0], lit[1]);
 	edge_insert(vp, neg_l(lit[0]), lit[1]);
 	edge_insert(vp, neg_l(lit[1]), lit[0]);
 	return enif_make_tuple2(env, ATOM(true),
@@ -4092,18 +4156,24 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int i;
+    cix_t cix;
     clause_t* cp;
     long p;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &i) || (i < 0) || (i >= (int)vp->cnext))
+	return enif_make_badarg(env);    
+    if (!vif_get_clause_index(env, argv[1], &cix))
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_make_badarg(env);
-    cp = vp->clause_map[i];
-    vp->clause_map[i] = NULL;
+    if (IS_PAIR(cix))  // try remove?
+	return ATOM(ok);
+    cix = GET_CLAUSE(cix);
+    if (cix >= (cix_t)vp->cnext)
+	return enif_make_badarg(env);	
+    
+    cp = vp->clause_map[cix];
+    vp->clause_map[cix] = NULL;
 
     unwatch_clause(vp, cp);      // remove watched literals
 
@@ -4196,6 +4266,116 @@ lit_t* extract_clause(varp_t* vp, cix_t cix, size_t* csizep, lit_t lit2[2])
     cp = vp->clause_map[cix];
     *csizep = cp->size;
     return cp->lit;
+}
+
+
+#ifdef TWO_CLAUSES
+static plink_t* first_plink(literal_t* lp)
+{
+    return lp->plist;
+}
+    
+static plink_t* next_plink(literal_t* lp, lit_t a)
+{
+    plink_t* pl = lp->plist;
+    while(pl) {
+	if (pl->l == a)
+	    return pl->next;
+	pl = pl->next;
+    }
+    return NULL;
+}
+
+#endif
+
+static ERL_NIF_TERM varp_clause_first(ErlNifEnv* env, int argc,
+				      const ERL_NIF_TERM argv[])
+{
+    varp_t* vp;
+    int i;
+    cix_t cix;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    
+    for (i = 0; i < (int)vp->cnext; i++) {
+	if (vp->clause_map[i] != NULL) {
+	    cix = SET_CLAUSE((cix_t)i);
+	    return enif_make_uint64(env, cix);
+	}
+    }
+    // no clauses found check first 2-clause
+#ifdef TWO_CLAUSE
+    for (i = 0; i < (int)vp->vnext; i++) {
+	variable_t* var = vp->var_map[i];
+	plink_t* pl;
+	if ((pl = var->lit[0].plist) != NULL) {
+	    cix = make_2_clause(ll2l(vp, &var->lit[1]), pl->l);
+	    return enif_make_uint64(env, cix);
+	}
+	else if ((pl = var->lit[1].plist) != NULL) {
+	    cix = make_2_clause(ll2l(vp, &var->lit[0]), pl->l);
+	    return enif_make_uint64(env, cix);
+	}
+    }
+#endif
+    return ATOM(false);
+}
+
+static ERL_NIF_TERM varp_clause_next(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[])
+{
+    varp_t* vp;
+    cix_t cix;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+
+    if (!vif_get_clause_index(env, argv[1], &cix))
+	return enif_make_badarg(env);
+    if (!IS_PAIR(cix)) {
+	int i = GET_CLAUSE(cix);
+	while (i < (int)vp->cnext) {
+	    if (vp->clause_map[i] != NULL) {
+		cix = SET_CLAUSE((cix_t)i);
+		return enif_make_uint64(env, cix);
+	    }
+	    i++;
+	}
+#ifdef TWO_CLAUSE
+	for (i = 0; i < (int)vp->vnext; i++) {
+	    variable_t* var = vp->var_map[i];
+	    plink_t* pl;
+	    if ((pl = var->lit[0].plist) != NULL) {
+		cix = make_2_clause(ll2l(vp, &var->lit[1]), pl->l);
+		return enif_make_uint64(env, cix);
+	    }
+	    else if ((pl = var->lit[1].plist) != NULL) {
+		cix = make_2_clause(ll2l(vp, &var->lit[0]), pl->l);
+		return enif_make_uint64(env, cix);
+	    }
+	}
+#endif
+    }
+
+#ifdef TWO_CLAUSE
+    if (IS_PAIR(cix)) {
+	lit_t a, b;
+	literal_t* ap;
+	plink_t* pl;
+	
+	decode_pair(vp, cix, &a, &b);
+	ap = l2ll(vp, a);
+	if ((pl = next_plink(ap, b)) != NULL) {
+	    cix = make_2_clause(a, pl->l);
+	    return enif_make_uint64(env, cix);
+	}
+	else {
+	    // if a == positive then check negative
+	    // else check next variable
+	}
+    }
+#endif
 }
 
 //
@@ -4399,6 +4579,22 @@ static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
     return enif_make_badarg(env);
 }
 
+#ifdef TWO_CLAUSES
+static ERL_NIF_TERM get_2_clauses(ErlNifEnv* env, varp_t* vp,
+				  lit_t l, literal_t* lp, ERL_NIF_TERM list)
+{
+    UNUSED(vp);
+    plink_t* pl = lp->plist;
+    while(pl) {
+	cix_t cix = make_2_clause(l, pl->l);
+	ERL_NIF_TERM elem = enif_make_uint64(env, cix);
+	list = enif_make_list_cell(env, elem, list);
+	pl = pl->next;
+    }
+    return list;
+}
+#endif
+
 static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
@@ -4420,34 +4616,42 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	wlink_t* wl = lp->wlist;
 	while(wl != NULL) {
 	    clause_t* cp = clause_pointer(wl);
-	    ERL_NIF_TERM elem = enif_make_uint(env, cp->cix);
+	    ERL_NIF_TERM elem = enif_make_uint64(env, cp->cix);
 	    list = enif_make_list_cell(env, elem, list);
 	    wl = wl->next;
 	}
-	// FIXME: probably list all TWO_CLAUSES
+#ifdef TWO_CLAUSES
+	list = get_2_clauses(env, vp, neg_l(l), neg_ll(lp), list);
+	list = get_2_clauses(env, vp, l, lp, list);
+#endif
     }
     else if (argv[2] == ATOM(literal)) {
 	variable_t* var = lp->var;
 	xref_t* xp = var->xfirst;
 	while(xp) {
-	    clause_t* cp = vp->clause_map[xp->cix];
+	    clause_t* cp = vp->clause_map[GET_CLAUSE(xp->cix)];
 	    if (l == cp->lit[xp->p]) {
-		ERL_NIF_TERM elem = enif_make_uint(env, xp->cix);
+		ERL_NIF_TERM elem = enif_make_uint64(env, xp->cix);
 		list = enif_make_list_cell(env, elem, list);
 	    }
 	    xp = xp->next;
 	}
-	// FIXME: list all TWO_CLAUSES
+#ifdef TWO_CLAUSES
+	list = get_2_clauses(env, vp, neg_l(l), neg_ll(lp), list);
+#endif
     }
     else if (argv[2] == ATOM(variable)) {
 	variable_t* var = lp->var;
 	xref_t* xp = var->xfirst;
 	while(xp) {
-	    ERL_NIF_TERM elem = enif_make_uint(env, xp->cix);
+	    ERL_NIF_TERM elem = enif_make_uint64(env, xp->cix);
 	    list = enif_make_list_cell(env, elem, list);
 	    xp = xp->next;
 	}
-	// FIXME: list all TWO_CLAUSES	
+#ifdef TWO_CLAUSES
+	list = get_2_clauses(env, vp, neg_l(l), neg_ll(lp), list);
+	list = get_2_clauses(env, vp, l, lp, list);	
+#endif	
     }
     else
 	return enif_make_badarg(env);
