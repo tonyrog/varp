@@ -337,14 +337,8 @@ typedef literal_t *lit_t;
 
 #endif
 
-#ifdef TWO_CLAUSES
-typedef uint64_t cix_t;    // clause index type
+typedef int32_t cix_t;             // clause index type
 #define CLAUSE_ERROR ((cix_t) -1)
-#else
-typedef uint32_t cix_t;    // clause index type
-#define CLAUSE_ERROR ((cix_t) -1)
-#endif
-
 
 typedef struct _xref_t // :object_t
 {
@@ -356,6 +350,7 @@ typedef struct _xref_t // :object_t
 typedef struct _plink_t // :object
 {
     struct _plink_t* next;
+    cix_t cix;               // if pair refer to real clause
     lit_t l;
 } plink_t;
 
@@ -1269,13 +1264,12 @@ static void unwatch(varp_t* vp, clause_t* cp, lit_t l)
 }
 
 // remove the TWO watch points
-static void unwatch_clause(varp_t* vp, clause_t* cp)
+static void unwatch_2_clause(varp_t* vp, clause_t* cp)
 {
     long p;
     if ((p = cp->wl[0].p) >= 0) unwatch(vp, cp, cp->lit[p]);
     if ((p = cp->wl[1].p) >= 0) unwatch(vp, cp, cp->lit[p]);
 }
-
 
 static void lqueue_init(lqueue_t* q)
 {
@@ -1308,7 +1302,6 @@ static inline void lqueue_put_ll(varp_t* vp, literal_t* lp)
     }
     q->size++;
 }
-
 
 static inline void lqueue_put(varp_t* vp, lit_t l)
 {
@@ -1343,6 +1336,11 @@ static inline void push_variable(varp_t* vp, variable_t* var, int level)
     vp->num_bound++;
 }
 
+static ERL_NIF_TERM make_cix(ErlNifEnv* env,cix_t cix)
+{
+    return enif_make_int(env, (int)cix);
+}
+
 static ERL_NIF_TERM make_binding(ErlNifEnv* env, varp_t*vp, variable_t* var)
 {
     assert(var->bound == NULL);
@@ -1353,16 +1351,10 @@ static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 {
     assert(var->bound == NULL);
 
-    if (var->implication_clause == CLAUSE_ERROR)
-	return enif_make_tuple3(env,
-				enif_make_int(env,export_vv(vp, var)),
-				enif_make_int(env, var->literal_pos),
-				enif_make_int(env, -1));
-    else
-	return enif_make_tuple3(env,
-				enif_make_int(env,export_vv(vp, var)),
-				enif_make_int(env, var->literal_pos),
-				enif_make_uint64(env, var->implication_clause));
+    return enif_make_tuple3(env,
+			    enif_make_int(env,export_vv(vp, var)),
+			    enif_make_int(env, var->literal_pos),
+			    make_cix(env, var->implication_clause));
 }
 
 //
@@ -1633,61 +1625,21 @@ static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
 
 #ifdef TWO_CLAUSES
 
-#define SET_CLAUSE(cix) ((cix) << 1)
-#define GET_CLAUSE(cix) ((cix) >> 1)
-#define SET_PAIR(cix)   (((cix) << 1)|1)
-#define GET_PAIR(cix)   ((cix) >> 1)
-#define IS_PAIR(cix)    (((cix) & 1) == 1)
-#define IS_CLAUSE(cix)  (((cix) & 1) == 0)
-
-// a -> b will trigger like a=1 -> b=1
-
-cix_t make_2_clause(lit_t a, lit_t b)
-{
-    uint64_t vix;
-    cix_t index2;
-    
-    vix = (export_l(a) & 0xffffffff);
-    index2 = (vix << 33);
-    vix = (export_l(b) & 0xffffffff);
-    index2 |= ((vix << 1)|1);
-    return index2;
-}
-
-void decode_pair(varp_t* vp, cix_t cix, lit_t* ap, lit_t* bp)
-{
-    int32_t vix;
-
-    vix = (cix >> 32);
-    *ap = vindex_l(vp, vix >> 1);
-    vix = cix;
-    *bp = vindex_l(vp, vix >> 1);	
-}
-
 // insert implication edge a -> b, this will trigger
 // when a=1 and yield b=1
-static void edge_insert(varp_t* vp, lit_t a, lit_t b)
+static void edge_insert(varp_t* vp, lit_t a, lit_t b, cix_t cix)
 {
     plink_t* pp;
     literal_t* ap = l2ll(vp, a);
     
     pp = varp_alloc(&vp->plink_allocator);
     pp->l = b;
+    pp->cix = cix;
     pp->next = ap->plist;
     ap->plist = pp;
 }
 
-#else
-
-#define SET_CLAUSE(cix) (cix)
-#define GET_CLAUSE(cix) (cix)
-#define SET_PAIR(cix)   (cix)
-#define GET_PAIR(cix)   (cix)
-#define IS_PAIR(cix)    0
-#define IS_CLAUSE(cix)  1
-
 #endif
-
 
 // FIXME clauses should really be heap allocated?
 // except we need to garbage collect in that case when
@@ -1717,9 +1669,8 @@ static clause_t* clause_alloc(varp_t* vp, int size)
 
 static void clause_free(varp_t* vp, clause_t* cp)
 {
-    int i = GET_CLAUSE(cp->cix);
-    if (i >= 0) {
-	vp->clause_map[i] = NULL;
+    if (cp->cix >= 0) {
+	vp->clause_map[cp->cix] = NULL;
 	vp->cnum--;
     }
     free(cp);
@@ -1778,7 +1729,7 @@ static cix_t clause_insert(varp_t* vp, clause_t* cp)
 {
     int i = vp->cnext++;
 
-    cp->cix = SET_CLAUSE(i);
+    cp->cix = i;
     cp->stamp = vp->eval_counter;
     
     if (vp->cnext == vp->csize) {
@@ -1898,13 +1849,15 @@ static int vif_get_variable(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg,
     return 1;
 }
 
-static int vif_get_clause_index(ErlNifEnv* env,ERL_NIF_TERM term,cix_t* cix)
+static int vif_get_cix(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM term,cix_t* cix)
 {
-#ifdef TWO_CLAUSES
-    return enif_get_uint64(env, term, cix);
-#else
-    return enif_get_uint(env, term, cix);
-#endif
+    int ix;
+    if (!enif_get_int(env, term, &ix))
+	return 0;
+    if ((ix < 0) || (ix >= (int)vp->cnext))
+	return 0;
+    *cix = ix;
+    return 1;
 }
 
 static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
@@ -2877,16 +2830,10 @@ static ERL_NIF_TERM varp_implication_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_v(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    if (var->implication_clause == CLAUSE_ERROR)
-	return enif_make_tuple3(env,
-				enif_make_int(env, -1),
-				enif_make_int(env, var->literal_pos),
-				enif_make_int(env, var->level));
-    else
-	return enif_make_tuple3(env,
-				enif_make_uint64(env, var->implication_clause),
-				enif_make_int(env, var->literal_pos),
-				enif_make_int(env, var->level));
+    return enif_make_tuple3(env,
+			    make_cix(env, var->implication_clause),
+			    enif_make_int(env, var->literal_pos),
+			    enif_make_int(env, var->level));
 }
 
 static ERL_NIF_TERM varp_is_variable(ErlNifEnv* env, int argc,
@@ -2915,7 +2862,7 @@ static ERL_NIF_TERM varp_conflicting_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &i) || (i<0) || (i>vp->num_conflicting))
 	return enif_make_badarg(env);
-    return enif_make_uint64(env, vp->conflicting_clauses[i]);
+    return make_cix(env, vp->conflicting_clauses[i]);
 }
 
 static ERL_NIF_TERM varp_is_bound(ErlNifEnv* env, int argc,
@@ -3015,7 +2962,7 @@ void insert_sort3(int v, int l, int p, int va[3], int la[3], long pa[3])
 // (lp0,level0)
 // setup TWL structure for a clause
 
-static int watch_clause(varp_t* vp, clause_t* cp)
+static int watch_2_clause(varp_t* vp, clause_t* cp)
 {
     int va[3], la[3];
     long pa[3];
@@ -3077,122 +3024,6 @@ static int watch_clause(varp_t* vp, clause_t* cp)
     return 1;
 }
 
-//
-// Substitute one literal for an other
-// subst(Vp, X, Y)   apply [X/Y]
-// Y is removed and replaced by X
-//
-//  [X/Y]    (A Y B)  =>  (A X B)
-//  [!X/Y]   (A Y B)  =>  (A !X B)
-//  [X/!Y]   (A Y B)  =>  (A !X B)
-//  [!X/!Y]  (A Y B)  =>  (A X B)
-//
-//  [X/Y]    (A X Y B)  =>  (A X X B)    => (A X f B)
-//  [!X/Y]   (A X Y B)  =>  (A X !X B)   => (A X t B)
-//  [X/!Y]   (A X Y B)  =>  (A X !X B)   => (A X t B)
-//  [!X/!Y]  (A X Y B)  =>  (A X X B)    => (A X f B)
-//
-//
-
-static void subst(varp_t* vp, lit_t xl, lit_t yl)
-{
-    literal_t* xp = l2ll(vp, xl);
-    literal_t* yp = l2ll(vp, yl);
-    variable_t* x = xp->var;
-    variable_t* y = yp->var;
-    xref_t** xpp  = &x->xfirst;
-    xref_t* yptr = y->xfirst;
-
-    assert (yp != xp);
-    assert(get_vv(vp, y) == IUNDEF);
-
-    log_permanent(vp, xp, yp, 0);
-
-    // reset y xref
-    y->xfirst = NULL;
-    y->xlast  = &y->xfirst;
-
-    // scan and rewrite all y's into x's
-    while(yptr) {
-	xref_t* xptr = *xpp;
-
-	if ((xptr==NULL) || (yptr->cix < xptr->cix)) { // Y only
-	    xref_t* yptr1 = yptr->next;
-	    clause_t* cp = vp->clause_map[GET_CLAUSE(yptr->cix)];
-	    lit_t yyl = cp->lit[yptr->p];
-	    int rewatch = 0;
-
-	    // check if Y was TWL then update
-	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
-		unwatch_clause(vp, cp);
-		rewatch = 1;
-	    }
-	    
-	    if (yl == yyl)  // same sign as x
-		cp->lit[yptr->p] = xl;
-	    else
-		cp->lit[yptr->p] = neg_l(xl);
-
-	    if (rewatch) {
-		if (watch_clause(vp, cp) <= 0)
-		    assert(0);
-	    }
-	    
-	    *xpp = yptr;
-	    yptr->next = xptr;
-	    xpp = &(yptr->next);
-	    yptr = yptr1;
-	}
-	else if (yptr->cix == xptr->cix) { // X and Y case
-	    xref_t* yptr1 = yptr->next;
-	    clause_t* cp = vp->clause_map[GET_CLAUSE(yptr->cix)];
-	    lit_t yyl = cp->lit[yptr->p];
-	    lit_t xxl = cp->lit[xptr->p];
-	    int rewatch = 0;
-	
-	    // check if Y was TWL then update
-	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
-		unwatch_clause(vp, cp);
-		rewatch = 1;
-	    }
-
-	    // ((a=b)&&(c!=d))||((a!=b)&&(c=d)) -> !((a=b)=(c=d))
-	    if ((yl == yyl) == (xl == xxl))
-		cp->lit[yptr->p] = VARP_FALSE(vp);
-	    else {
-		cp->lit[yptr->p] = VARP_TRUE(vp);
-		cp->flags |= CLAUSE_FLAG_DEAD;
-		rewatch = 0;
-	    }
-
-	    if (rewatch) {
-		if (watch_clause(vp, cp) <= 0)
-		    assert(0);
-	    }
-	    varp_free(&vp->xref_allocator, yptr);
-	    yptr = yptr1;
-	}
-	else { // X only
-	    xpp = &(xptr->next);
-	}
-    }
-
-    // all the way and update xlast just in case
-    while(*xpp != NULL) {
-	xref_t* xptr = *xpp;	
-	xpp = &(xptr->next);
-    }
-    // the new last x
-    x->xlast = xpp;
-    
-    // mark Y as bound (to X)
-    set_vv(vp, y, IBOUND);
-    if (is_neg_l(yl))
-	y->bound = l2ll(vp, neg_l(xl));
-    else
-	y->bound = xp;
-    vp->num_bound++;    
-}
 
 //  2-clause coding...
 //  (Y,A) (Y,B) (Y,C), (X,D) (X,A)
@@ -3244,6 +3075,124 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
     }
 }
 
+//
+// Substitute one literal for an other
+// subst(Vp, X, Y)   apply [X/Y]
+// Y is removed and replaced by X
+//
+//  [X/Y]    (A Y B)  =>  (A X B)
+//  [!X/Y]   (A Y B)  =>  (A !X B)
+//  [X/!Y]   (A Y B)  =>  (A !X B)
+//  [!X/!Y]  (A Y B)  =>  (A X B)
+//
+//  [X/Y]    (A X Y B)  =>  (A X X B)    => (A X f B)
+//  [!X/Y]   (A X Y B)  =>  (A X !X B)   => (A X t B)
+//  [X/!Y]   (A X Y B)  =>  (A X !X B)   => (A X t B)
+//  [!X/!Y]  (A X Y B)  =>  (A X X B)    => (A X f B)
+//
+//
+
+static void subst(varp_t* vp, lit_t xl, lit_t yl)
+{
+    literal_t* xp = l2ll(vp, xl);
+    literal_t* yp = l2ll(vp, yl);
+    variable_t* x = xp->var;
+    variable_t* y = yp->var;
+    xref_t** xpp  = &x->xfirst;
+    xref_t* yptr = y->xfirst;
+
+    assert (yp != xp);
+    assert(get_vv(vp, y) == IUNDEF);
+
+    log_permanent(vp, xp, yp, 0);
+
+    // reset y xref
+    y->xfirst = NULL;
+    y->xlast  = &y->xfirst;
+
+    // scan and rewrite all y's into x's
+    while(yptr) {
+	xref_t* xptr = *xpp;
+
+	if ((xptr==NULL) || (yptr->cix < xptr->cix)) { // Y only
+	    xref_t* yptr1 = yptr->next;
+	    clause_t* cp = vp->clause_map[yptr->cix];
+	    lit_t yyl = cp->lit[yptr->p];
+	    int rewatch = 0;
+
+	    // check if Y was TWL then update
+	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
+		unwatch_2_clause(vp, cp);
+		rewatch = 1;
+	    }
+	    
+	    if (yl == yyl)  // same sign as x
+		cp->lit[yptr->p] = xl;
+	    else
+		cp->lit[yptr->p] = neg_l(xl);
+
+	    if (rewatch) {
+		if (watch_2_clause(vp, cp) <= 0)
+		    assert(0);
+	    }
+	    
+	    *xpp = yptr;
+	    yptr->next = xptr;
+	    xpp = &(yptr->next);
+	    yptr = yptr1;
+	}
+	else if (yptr->cix == xptr->cix) { // X and Y case
+	    xref_t* yptr1 = yptr->next;
+	    clause_t* cp = vp->clause_map[yptr->cix];
+	    lit_t yyl = cp->lit[yptr->p];
+	    lit_t xxl = cp->lit[xptr->p];
+	    int rewatch = 0;
+	
+	    // check if Y was TWL then update
+	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
+		unwatch_2_clause(vp, cp);
+		rewatch = 1;
+	    }
+
+	    // ((a=b)&&(c!=d))||((a!=b)&&(c=d)) -> !((a=b)=(c=d))
+	    if ((yl == yyl) == (xl == xxl))
+		cp->lit[yptr->p] = VARP_FALSE(vp);
+	    else {
+		cp->lit[yptr->p] = VARP_TRUE(vp);
+		cp->flags |= CLAUSE_FLAG_DEAD;
+		rewatch = 0;
+	    }
+
+	    if (rewatch) {
+		if (watch_2_clause(vp, cp) <= 0)
+		    assert(0);
+	    }
+	    varp_free(&vp->xref_allocator, yptr);
+	    yptr = yptr1;
+	}
+	else { // X only
+	    xpp = &(xptr->next);
+	}
+    }
+
+    // all the way and update xlast just in case
+    while(*xpp != NULL) {
+	xref_t* xptr = *xpp;	
+	xpp = &(xptr->next);
+    }
+    // the new last x
+    x->xlast = xpp;
+    
+    // mark Y as bound (to X)
+    set_vv(vp, y, IBOUND);
+    if (is_neg_l(yl))
+	y->bound = l2ll(vp, neg_l(xl));
+    else
+	y->bound = xp;
+    vp->num_bound++;    
+}
+
+
 static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
 {
@@ -3278,21 +3227,14 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     if (xv != yv) {
 	if (!(xv->flags & VAR_FLAG_ATOM) && (yv->flags & VAR_FLAG_ATOM)) {
 	    subst(vp, yp, xp);
-#ifdef TWO_CLAUSES
-	    subst_2_clause(vp, yp, xp);
-#endif
 	}
 	else {
 	    subst(vp, xp, yp);
-#ifdef TWO_CLAUSES
-	    subst_2_clause(vp, xp, yp);
-#endif	    
 	}
     }
     vp->caller_env = NULL;    
     return ATOM(true);
 }
-
 
 static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
 				   const ERL_NIF_TERM argv[])
@@ -3401,8 +3343,8 @@ void print_lit_array(char* label, lit_t* lit, size_t size)
 static void print_clause(varp_t* vp, char* label, clause_t* cp)
 {
     unsigned k;
-    printf("%s id=%lu,[%ld:%ld] [%d/%d",
-	   label, GET_CLAUSE(cp->cix), cp->wl[0].p, cp->wl[1].p,
+    printf("%s id=%d,[%ld:%ld] [%d/%d",
+	   label, cp->cix, cp->wl[0].p, cp->wl[1].p,
 	   export_l(cp->lit[0]),lit_value(vp,cp->lit[0]));
     for (k=1; k<cp->size; k++)
 	printf(",%d/%d", export_l(cp->lit[k]),lit_value(vp,cp->lit[k]));
@@ -3413,8 +3355,8 @@ static void print_clause(varp_t* vp, char* label, clause_t* cp)
 static void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
 {
     unsigned k;
-    printf("%s id=%lu,[%ld:%ld] [%s",
-	   label, GET_CLAUSE(cp->cix), cp->wl[0].p, cp->wl[1].p,
+    printf("%s id=%d,[%ld:%ld] [%s",
+	   label, cp->cix, cp->wl[0].p, cp->wl[1].p,
 	   format_lit(vp, cp->lit[0]));
     for (k=1; k<cp->size; k++)
 	printf(",%s", format_lit(vp, cp->lit[k]));
@@ -3553,7 +3495,7 @@ static int eval1(varp_t* vp, literal_t* lp);
 static int eval_2_clauses(varp_t* vp, literal_t* lp)
 {
     plink_t* pl;
-    lit_t l = ll2l(vp, lp); 
+    // lit_t l = ll2l(vp, lp); 
 	
     lp = neg_ll(lp);
     pl = lp->plist;
@@ -3575,19 +3517,17 @@ static int eval_2_clauses(varp_t* vp, literal_t* lp)
 	    break; // noop
 	case IFALSE:
 	    if (vp->max_conflicting == 1) {
-		vp->conflicting_clauses[vp->num_conflicting++] =
-		    make_2_clause(l, pl->l);
+		vp->conflicting_clauses[vp->num_conflicting++] = pl->cix;
 		return -1;
 	    }
 	    else if (vp->num_conflicting < vp->max_conflicting) {
-		vp->conflicting_clauses[vp->num_conflicting++] =
-		    make_2_clause(l, pl->l);
+		vp->conflicting_clauses[vp->num_conflicting++] = pl->cix;
 	    }
 	    else
 		return -1;
 	    break;
 	case IUNDEF:
-	    put_nq_ll(vp, lp1, ITRUE, 1, make_2_clause(l, pl->l), vp->level);
+	    put_nq_ll(vp, lp1, ITRUE, 1, pl->cix, vp->level);
 	    if (vp->qtype == recursive) {
 		if (eval1(vp, neg_ll(lp1)) < 0)
 		    return -1;
@@ -3637,8 +3577,10 @@ static int eval_clauses(varp_t* vp, literal_t* lp)
 		else
 		    return -1;
 	    }
-	    else if (lp == (literal_t*) 1)
+	    else if (lp == (literal_t*) 1) {
+		// FIXME: unlink this clause on level = 0!
 		;
+	    }
 	    else {
 		if (vp->qtype == recursive) {
 		    if (eval1(vp, neg_ll(lp)) < 0)
@@ -3700,17 +3642,14 @@ static ERL_NIF_TERM varp_eval(ErlNifEnv* env, int argc,
 
     if (vp->num_conflicting) {
 	int i;
-
 	lqueue_clear(&vp->q);
 	DBG("num conflicts = %d\n", vp->num_conflicting);
 	if (vp->activity)
 	    activate_levels(vp, 1.0);
 	for (i = 0; i < vp->num_conflicting; i++) {
 	    cix_t cix = vp->conflicting_clauses[i];
-	    if (!IS_PAIR(cix)) {
-		clause_t* cp = vp->clause_map[GET_CLAUSE(cix)];
-		cp->flags &= ~CLAUSE_FLAG_CONFLICT;
-	    }
+	    clause_t* cp = vp->clause_map[cix];
+	    cp->flags &= ~CLAUSE_FLAG_CONFLICT;
 	}
 	return ATOM(false);
     }
@@ -4053,16 +3992,6 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
 	// return index index2!!!
     }
 #endif
-
-#ifdef TWO_CLAUSES
-    if (size == 2) {
-	cix = make_2_clause(lit[0], lit[1]);
-	edge_insert(vp, neg_l(lit[0]), lit[1]);
-	edge_insert(vp, neg_l(lit[1]), lit[0]);
-	return enif_make_tuple2(env, ATOM(true),
-				enif_make_uint64(env,cix));
-    }
-#endif
     
     if ((cp = clause_alloc(vp, size)) == NULL)
 	goto error;
@@ -4073,16 +4002,25 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
 
     for (p = 0; p < (int)size; p++)
 	add_xref(vp, cp, p);
+
+#ifdef TWO_CLAUSES
+    if (size == 2) {
+	edge_insert(vp, neg_l(lit[0]), lit[1], cix);
+	edge_insert(vp, neg_l(lit[1]), lit[0], cix);
+	// this clause is NOT watched, but we pretende we do
+	cp->wl[0].p = 1;
+	cp->wl[1].p = 0;
+	return enif_make_tuple2(env, ATOM(true), make_cix(env, cix));
+    }
+#endif
     
-    switch (watch_clause(vp, cp)) {
+    switch (watch_2_clause(vp, cp)) {
     case -1:
 	goto error;
     case 0:
-	return enif_make_tuple2(env, ATOM(false),
-				enif_make_uint64(env, cix));
+	return enif_make_tuple2(env, ATOM(false), make_cix(env, cix));
     case 1:
-	return enif_make_tuple2(env, ATOM(true),
-				enif_make_uint64(env, cix));
+	return enif_make_tuple2(env, ATOM(true), make_cix(env, cix));
     default:
 	goto error;
     }
@@ -4162,20 +4100,14 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);    
-    if (!vif_get_clause_index(env, argv[1], &cix))
+    if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_make_badarg(env);
-    if (IS_PAIR(cix))  // try remove?
-	return ATOM(ok);
-    cix = GET_CLAUSE(cix);
-    if (cix >= (cix_t)vp->cnext)
-	return enif_make_badarg(env);	
-    
     cp = vp->clause_map[cix];
     vp->clause_map[cix] = NULL;
 
-    unwatch_clause(vp, cp);      // remove watched literals
+    unwatch_2_clause(vp, cp);      // remove watched literals
 
     // remove xref
     for (p = 0; p < (int)cp->size; p++)
@@ -4238,144 +4170,53 @@ static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
 
     // update all cix after sort
     for (i = vp->cpermanent; i < (int)vp->cnext; i++)
-	vp->clause_map[i]->cix = SET_CLAUSE(i);
+	vp->clause_map[i]->cix = i;
 
     // remove all clauses from vp->cpermanent+vp->keep
     for (i = vp->cpermanent+vp->keep; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
-	unwatch_clause(vp, cp);      // remove watched literals
+	unwatch_2_clause(vp, cp);      // remove watched literals
 	clause_free(vp, cp);
     }
     vp->cnext = vp->cpermanent+vp->keep;
     return ATOM(ok);
 }
 
-
-lit_t* extract_clause(varp_t* vp, cix_t cix, size_t* csizep, lit_t lit2[2])
-{
-    clause_t* cp;
-#ifdef TWO_CLAUSES
-    if (IS_PAIR(cix)) { // is pair (L0|0|L1|1)
-	decode_pair(vp, cix, &lit2[0], &lit2[1]);
-	*csizep = 2;
-	return lit2;
-    }
-#endif
-    cix = GET_CLAUSE(cix);
-    if (cix >= vp->cnext) return NULL;
-    cp = vp->clause_map[cix];
-    *csizep = cp->size;
-    return cp->lit;
-}
-
-
-#ifdef TWO_CLAUSES
-static plink_t* first_plink(literal_t* lp)
-{
-    return lp->plist;
-}
-    
-static plink_t* next_plink(literal_t* lp, lit_t a)
-{
-    plink_t* pl = lp->plist;
-    while(pl) {
-	if (pl->l == a)
-	    return pl->next;
-	pl = pl->next;
-    }
-    return NULL;
-}
-
-#endif
-
 static ERL_NIF_TERM varp_clause_first(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
 {
+    UNUSED(argc);
     varp_t* vp;
     int i;
-    cix_t cix;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     
     for (i = 0; i < (int)vp->cnext; i++) {
-	if (vp->clause_map[i] != NULL) {
-	    cix = SET_CLAUSE((cix_t)i);
-	    return enif_make_uint64(env, cix);
-	}
+	if (vp->clause_map[i] != NULL)
+	    return make_cix(env, (cix_t)i);
     }
-    // no clauses found check first 2-clause
-#ifdef TWO_CLAUSE
-    for (i = 0; i < (int)vp->vnext; i++) {
-	variable_t* var = vp->var_map[i];
-	plink_t* pl;
-	if ((pl = var->lit[0].plist) != NULL) {
-	    cix = make_2_clause(ll2l(vp, &var->lit[1]), pl->l);
-	    return enif_make_uint64(env, cix);
-	}
-	else if ((pl = var->lit[1].plist) != NULL) {
-	    cix = make_2_clause(ll2l(vp, &var->lit[0]), pl->l);
-	    return enif_make_uint64(env, cix);
-	}
-    }
-#endif
     return ATOM(false);
 }
 
 static ERL_NIF_TERM varp_clause_next(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
+    UNUSED(argc);    
     varp_t* vp;
     cix_t cix;
+    int i;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-
-    if (!vif_get_clause_index(env, argv[1], &cix))
+    if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
-    if (!IS_PAIR(cix)) {
-	int i = GET_CLAUSE(cix);
-	while (i < (int)vp->cnext) {
-	    if (vp->clause_map[i] != NULL) {
-		cix = SET_CLAUSE((cix_t)i);
-		return enif_make_uint64(env, cix);
-	    }
-	    i++;
-	}
-#ifdef TWO_CLAUSE
-	for (i = 0; i < (int)vp->vnext; i++) {
-	    variable_t* var = vp->var_map[i];
-	    plink_t* pl;
-	    if ((pl = var->lit[0].plist) != NULL) {
-		cix = make_2_clause(ll2l(vp, &var->lit[1]), pl->l);
-		return enif_make_uint64(env, cix);
-	    }
-	    else if ((pl = var->lit[1].plist) != NULL) {
-		cix = make_2_clause(ll2l(vp, &var->lit[0]), pl->l);
-		return enif_make_uint64(env, cix);
-	    }
-	}
-#endif
+    
+    for (i=cix+1; i < (int)vp->cnext; i++) {
+	if (vp->clause_map[i] != NULL)
+	    return make_cix(env, (cix_t)i);
     }
-
-#ifdef TWO_CLAUSE
-    if (IS_PAIR(cix)) {
-	lit_t a, b;
-	literal_t* ap;
-	plink_t* pl;
-	
-	decode_pair(vp, cix, &a, &b);
-	ap = l2ll(vp, a);
-	if ((pl = next_plink(ap, b)) != NULL) {
-	    cix = make_2_clause(a, pl->l);
-	    return enif_make_uint64(env, cix);
-	}
-	else {
-	    // if a == positive then check negative
-	    // else check next variable
-	}
-    }
-#endif
+    return ATOM(false);
 }
 
 //
@@ -4393,14 +4234,14 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
     literal_t* lp;
     int skip_lit;
     cix_t  cix;
-    lit_t  lit2[2];
     lit_t* lit;
     size_t csize;
+    clause_t* cp;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
 
-    if (!vif_get_clause_index(env, argv[1], &cix))
+    if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
     
     if (argv[2] == ATOM(undefined))
@@ -4412,9 +4253,9 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
     if (!vif_get_boolean(env, argv[3], &raw))
 	return enif_make_badarg(env);
 
-    if ((lit = extract_clause(vp, cix, &csize, lit2)) == NULL)
-	return enif_make_badarg(env);
-
+    cp = vp->clause_map[cix];
+    lit = cp->lit;
+    csize = cp->size;
 
     list = enif_make_list(env, 0);
     for (i = csize-1; i >= 0; i--) {
@@ -4465,22 +4306,7 @@ static ERL_NIF_TERM varp_get_clause_info(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!vif_get_clause_index(env, argv[1], &cix))
-	return enif_make_badarg(env);
-#ifdef TWO_CLAUSES
-    if (IS_PAIR(cix)) {
-	if (argv[2] == ATOM(status)) return ATOM(ok);
-	if (argv[2] == ATOM(watch0)) return enif_make_long(env,0);
-	if (argv[2] == ATOM(watch1)) return enif_make_long(env,1);
-	if (argv[2] == ATOM(watch))
-	    return enif_make_tuple2(env,
-				    enif_make_long(env,0),
-				    enif_make_long(env,1));
-	return enif_make_badarg(env);
-    }
-#endif
-    cix = GET_CLAUSE(cix);
-    if (cix >= vp->cnext)
+    if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
     cp = vp->clause_map[cix];
 
@@ -4512,19 +4338,14 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
     UNUSED(argc);
     clause_t* cp;
     varp_t* vp;
-    cix_t cix;    
+    cix_t cix;   
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!vif_get_clause_index(env, argv[1], &cix))
+    if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
-#ifdef TWO_CLAUSES
-    if (IS_PAIR(cix))
-        return ATOM(ok);
-#endif
-    cix = GET_CLAUSE(cix);
     cp = vp->clause_map[cix];
-    if (cix >= vp->cpermanent) // WTF
+    if (cix >= (int)vp->cpermanent) // WTF
 	cp->stamp = vp->eval_counter;
     return ATOM(ok);
 }
@@ -4581,13 +4402,12 @@ static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
 
 #ifdef TWO_CLAUSES
 static ERL_NIF_TERM get_2_clauses(ErlNifEnv* env, varp_t* vp,
-				  lit_t l, literal_t* lp, ERL_NIF_TERM list)
+				  literal_t* lp, ERL_NIF_TERM list)
 {
     UNUSED(vp);
     plink_t* pl = lp->plist;
     while(pl) {
-	cix_t cix = make_2_clause(l, pl->l);
-	ERL_NIF_TERM elem = enif_make_uint64(env, cix);
+	ERL_NIF_TERM elem = make_cix(env, pl->cix);
 	list = enif_make_list_cell(env, elem, list);
 	pl = pl->next;
     }
@@ -4616,42 +4436,35 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	wlink_t* wl = lp->wlist;
 	while(wl != NULL) {
 	    clause_t* cp = clause_pointer(wl);
-	    ERL_NIF_TERM elem = enif_make_uint64(env, cp->cix);
+	    ERL_NIF_TERM elem = make_cix(env, cp->cix);
 	    list = enif_make_list_cell(env, elem, list);
 	    wl = wl->next;
 	}
 #ifdef TWO_CLAUSES
-	list = get_2_clauses(env, vp, neg_l(l), neg_ll(lp), list);
-	list = get_2_clauses(env, vp, l, lp, list);
+	list = get_2_clauses(env, vp, neg_ll(lp), list);
+	list = get_2_clauses(env, vp, lp, list);
 #endif
     }
     else if (argv[2] == ATOM(literal)) {
 	variable_t* var = lp->var;
 	xref_t* xp = var->xfirst;
 	while(xp) {
-	    clause_t* cp = vp->clause_map[GET_CLAUSE(xp->cix)];
+	    clause_t* cp = vp->clause_map[xp->cix];
 	    if (l == cp->lit[xp->p]) {
-		ERL_NIF_TERM elem = enif_make_uint64(env, xp->cix);
+		ERL_NIF_TERM elem = make_cix(env, xp->cix);
 		list = enif_make_list_cell(env, elem, list);
 	    }
 	    xp = xp->next;
 	}
-#ifdef TWO_CLAUSES
-	list = get_2_clauses(env, vp, neg_l(l), neg_ll(lp), list);
-#endif
     }
     else if (argv[2] == ATOM(variable)) {
 	variable_t* var = lp->var;
 	xref_t* xp = var->xfirst;
 	while(xp) {
-	    ERL_NIF_TERM elem = enif_make_uint64(env, xp->cix);
+	    ERL_NIF_TERM elem = make_cix(env, xp->cix);
 	    list = enif_make_list_cell(env, elem, list);
 	    xp = xp->next;
 	}
-#ifdef TWO_CLAUSES
-	list = get_2_clauses(env, vp, neg_l(l), neg_ll(lp), list);
-	list = get_2_clauses(env, vp, l, lp, list);	
-#endif	
     }
     else
 	return enif_make_badarg(env);

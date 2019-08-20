@@ -64,7 +64,7 @@
 -export([order_all/1]).
 -export([decay/2]).
 -export([subscribe/2]).
--export([get_clause_first/1, get_clause_next/2]).
+-export([clause_first/1, clause_next/2]).
 
 -export([get_info/1]).
 -export([info_keys/0]).
@@ -368,6 +368,14 @@ order_sort_first(_Vp, _VarList) ->
 
 -spec order_sort_last(Vp::varc(), [literal()]) -> ok.
 order_sort_last(_Vp, _VarList) ->
+    ?nif_stub().
+
+%% return index to first clause | false
+clause_first(_Vp) ->
+    ?nif_stub().
+
+%% return index to next clause | false
+clause_next(_Vp, _Ix) ->
     ?nif_stub().
 
 %% Get all clauses in queue

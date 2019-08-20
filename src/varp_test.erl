@@ -11,7 +11,6 @@
 -include("varp.hrl").
 
 all() ->
-    application:start(varp),
     test_constants(),
     test_inc(),
     test_add(),
@@ -73,18 +72,12 @@ test_add() ->
 		[{X,0},{Y,2}],
 		[{X,0},{Y,1}],
 		[{X,0},{Y,0}]]),
-    true = sat({'<', {'+',{int,2,X},{int,2,Y}}, {int,3,-1}},
-	       [[{X,-1},{Y,-1}],
-		[{X,-1},{Y,-2}],
-		[{X,-2},{Y,-1}],
-		[{X,-2},{Y,-2}],
-		[{X,-2},{Y,0}],
-		[{X,0},{Y,-2}]]),
     true = sat({'==',{'+',{uint,2,X},{uint,3,Y}},{uint,3,5}},
-		    [[{X,3},{Y,2}],
-		     [{X,2},{Y,3}],
-		     [{X,1},{Y,4}],
-		     [{X,0},{Y,5}]]),
+	       [[{X,Xi},{Y,Yi}] || 
+		   Xi <- [0,1,2,3], Yi <- [0,1,2,3,4,5,6,7], Xi+Yi == 5]),
+    true = sat({'<', {'+',{int,2,X},{int,2,Y}}, {int,3,-1}},
+	       [[{X,Xi},{Y,Yi}] || 
+		   Xi <- [-2,-1,0,1], Yi <- [-2,-1,0,1], Xi+Yi< -1]),
     ok.
 
 test_sub() ->
@@ -243,6 +236,7 @@ test_equation2() ->
         
 
 sat(Formula, ExpectedModels) ->
+    application:start(varp),
     N = length(ExpectedModels),
     Options = [{print,false}],
     Do = [{satisfy,[]}, {backtrack,[]}],

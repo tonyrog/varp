@@ -437,12 +437,16 @@ get_watched(_V, []) ->
 print_clauses(V) ->
     print_clauses(V,false).
 print_clauses(V,Raw) ->
-    lists:foreach(fun(I) ->
-			  Fs = varc:get_clause_info(V, I),
-			  io:format("~w: ~s ~w\n",
-				    [I, format_clause_flags(Fs),
-				     varc:get_clause(V,I,undefined,Raw)])
-		  end, lists:seq(0, varc:info(V, number_of_clauses)-1)).
+    print_clauses_(V, Raw, varc:clause_first(V)).
+
+print_clauses_(_V, _Raw, false) ->
+    ok;
+print_clauses_(V, Raw, I) ->
+    Fs = varc:get_clause_info(V, I),
+    io:format("~w: ~s ~w\n",
+	      [I, format_clause_flags(Fs),
+	       varc:get_clause(V,I,undefined,Raw)]),
+    print_clauses_(V, Raw, varc:clause_next(V, I)).
 
 add_variable(V) ->
     varc:add_variable(V).
