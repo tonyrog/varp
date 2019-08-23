@@ -38,7 +38,8 @@
 	 clause_count_dead,
 	 eval_count,
 	 bound,
-	 clauses
+	 clauses,
+	 dead_clauses
 	}).
 
 global_options() ->
@@ -483,13 +484,14 @@ do([], _Bs) ->
     undefined.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead)\n    | #clauses = ~w\n    | time=~.2fs\n",
+    varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead)\n    | #clauses = ~w, #dead = ~w\n    | time=~.2fs\n",
 		      [S1#stat.eval_count-S0#stat.eval_count,
 		       S1#stat.clause_count - S0#stat.clause_count,
 		       S1#stat.clause_count_2 - S0#stat.clause_count_2,
 		       S1#stat.clause_count_3 - S0#stat.clause_count_3,
 		       S1#stat.clause_count_dead - S0#stat.clause_count_dead,
 		       S1#stat.clauses,
+		       S1#stat.dead_clauses,
 		       Ts]),
     varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
 		      [S1#stat.bound-S0#stat.bound,
@@ -504,7 +506,8 @@ stat(Bs) ->
 	    clause_count_dead = varp_formula:clause_eval_counter(Bs,dead),
 	    eval_count     = varp_formula:eval_counter(Bs),
 	    bound          = varp_formula:number_of_bound(Bs),
-	    clauses        = varp_formula:number_of_clauses(Bs)
+	    clauses        = varp_formula:number_of_clauses(Bs),
+	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs)
 	  }.
 
 %% extract "method" form Do list

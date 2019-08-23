@@ -15,9 +15,12 @@
 -export([config/3]).
 -export([add_variable/1]).
 -export([add_variable/2]).
+-export([del_variable/2]).
 -export([add_symbol/3]).
 -export([get_symbol/2]).
 -export([find_symbol/2]).
+-export([variable_info/3]).
+-export([literal_info/3]).
 -export([value/2]).
 -export([bind/2, bind/3]).
 -export([subst/3]).
@@ -42,12 +45,13 @@
 -export([get_clause/2]).
 -export([get_clause/3]).
 -export([get_clause/4]).
--export([get_clause_info/2,get_clause_info/3]).
 -export([del_clause/2]).
+-export([clean_clause/2]).
 -export([del_unused_clauses/1]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
 -export([use_clause/2]).
+-export([clause_info/2,clause_info/3]).
 -export([get_queue/1]).
 -export([get_queue_first/1]).
 -export([get_queue_next/2]).
@@ -71,6 +75,7 @@
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
+-export([get_number_of_dead_clauses/1]).
 -export([get_number_of_conflicting_clauses/1]).
 -export([get_number_of_bound_variables/1]).
 -export([get_number_of_unbound_variables/1]).
@@ -135,17 +140,33 @@ add_variable(Vp) ->
 add_variable(_Vp, IsAtom) when is_boolean(IsAtom) ->
     ?nif_stub().
 
+del_variable(_Vp, _Index) when is_integer(_Index) ->
+    ?nif_stub().
+
 -spec add_symbol(Vp::varc(), Lit::literal(), Name::term()) -> ok.
 add_symbol(_Vp, Lit, _Name)  when is_integer(Lit) ->
     ?nif_stub().
 
 -spec get_symbol(Vp::varc(), Lit::literal()) -> [term()]. %% aliases
-get_symbol(_Vp, Lit) when is_integer(Lit) ->
-    ?nif_stub().
+get_symbol(Vp, Lit) when is_integer(Lit) ->
+    variable_info(Vp, Lit, symbol).
 
 %% find variable index from variable name (term or binary)
 -spec find_symbol(Vp::varc(), Name::term()) -> false | literal().
 find_symbol(_Vp, _Name) ->
+    ?nif_stub().
+
+%%
+%% What::implication|implication_clause|implication_pos|
+%%       activity|level|degree|is_atom|symbol
+%%
+
+variable_info(_Vp,Index,_What)
+  when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+literal_info(_Vp,Index,_What)
+  when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
 %%
@@ -274,14 +295,18 @@ decay(_Vp,Decay) when is_number(Decay), Decay >= 1.0 ->
 subscribe(_Vp,Event) when is_atom(Event) ->
     ?nif_stub().
 
-get_clause_info(_Vp,Index,_What)
+clause_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-get_clause_info(Vp,Index) ->
-    [{What,get_clause_info(Vp,Index,What)}||What<-[status,watch]].
+clause_info(Vp,Index) ->
+    [{What,clause_info(Vp,Index,What)}||What<-[status,watch]].
 
 del_clause(_Vp,Index)
+  when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+clean_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
@@ -412,6 +437,7 @@ info_keys() ->
     [
      max_clause_length,
      number_of_clauses,
+     number_of_dead_clauses,
      number_of_conflicting_clauses,
      number_of_variables,
      number_of_bound_variables,
@@ -438,6 +464,9 @@ get_number_of_unbound_variables(Vp) ->
 
 get_number_of_clauses(Vp) ->
     info(Vp, number_of_clauses).
+
+get_number_of_dead_clauses(Vp) ->
+    info(Vp, number_of_dead_clauses).
 
 get_number_of_conflicting_clauses(Vp) ->
     info(Vp, number_of_conflicting_clauses).

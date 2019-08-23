@@ -120,6 +120,3 @@ count_number_of_clauses_(Bs, I, N) ->
 	_CL ->    
 	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N+1)
     end.
-
-
-    

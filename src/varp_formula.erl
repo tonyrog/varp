@@ -50,6 +50,7 @@
 -export([getopt/2]).
 -export([number_of_variables/1]).
 -export([number_of_clauses/1]).
+-export([number_of_dead_clauses/1]).
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
@@ -84,6 +85,7 @@
 -export([use_clause/2]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
+-export([clean_clauses/1]).
 -export([set_var/3, add_var/4]).
 -export([config/3]).
 -export([const_vector/2, const_vector/3]).
@@ -211,7 +213,7 @@ add_clause(Bs,Ls) ->
 	{true,I} -> %% non conflict
 	    ?dcall(fun() ->
 			   CL = varc:get_clause(Bs#bs.vp, I),
-			   Flags = varc:get_clause_info(Bs#bs.vp, I),
+			   Flags = varc:clause_info(Bs#bs.vp, I),
 			   {W0,W1} = proplists:get_value(watch, Flags, {-1,-1}),
 			   io:format("~w:(~w,~w) ~s\n",
 				     [I,W0,W1,format_clause(Bs,CL)])
@@ -237,6 +239,15 @@ del_clause(Bs, Cix) ->
 
 del_unused_clauses(Bs) ->
     varc:del_unused_clauses(Bs#bs.vp).
+
+clean_clauses(Bs) ->
+    clean_clauses_(Bs, varc:clause_first(Bs#bs.vp)).
+
+clean_clauses_(Bs, false) ->
+    Bs;
+clean_clauses_(Bs, I) ->
+    varc:clean_clause(Bs#bs.vp, I),
+    clean_clauses_(Bs, varc:clause_next(Bs#bs.vp, I)).
 
 %% "balanced tree"
 gate_tree(Bs,Op,X,Xs) ->
@@ -415,6 +426,9 @@ number_of_variables(Bs) ->
 
 number_of_clauses(Bs) ->
     varc:get_number_of_clauses(Bs#bs.vp).
+
+number_of_dead_clauses(Bs) ->
+    varc:get_number_of_dead_clauses(Bs#bs.vp).
     
 number_of_bound(Bs) ->
     varc:get_number_of_bound_variables(Bs#bs.vp).
@@ -474,10 +488,10 @@ get_clauses(Bs, L, How) ->
     varc:get_clauses(Bs#bs.vp, L, How).
 
 get_clause_info(Bs, I) ->
-    varc:get_clause_info(Bs#bs.vp, I).
+    varc:clause_info(Bs#bs.vp, I).
 
 get_clause_info(Bs, I, What) ->
-    varc:get_clause_info(Bs#bs.vp, I, What).
+    varc:clause_info(Bs#bs.vp, I, What).
 
 use_clause(Bs, I) ->
     varc:use_clause(Bs#bs.vp, I).

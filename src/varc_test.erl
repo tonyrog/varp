@@ -369,38 +369,38 @@ watch1() ->
     [X6,X5,X4,X3,X2] = varc:get_clause(V, C1),
 
     %% initial watch points are set in the end!
-    4 = varc:get_clause_info(V, C1, watch0),
-    3 = varc:get_clause_info(V, C1, watch1),
+    4 = varc:clause_info(V, C1, watch0),
+    3 = varc:clause_info(V, C1, watch1),
 
     %% bind X3, move wp 0
     varc:set_level(V, 1),
     varc:bind(V, -X3),
     true = varc:eval(V),
 
-    4 = varc:get_clause_info(V, C1, watch0),
-    0 = varc:get_clause_info(V, C1, watch1),
+    4 = varc:clause_info(V, C1, watch0),
+    0 = varc:clause_info(V, C1, watch1),
 
     %% bind -X5, not watched, watch points should stay the same
     varc:set_level(V, 2),
     varc:bind(V, -X5),
     true = varc:eval(V),
 
-    4 = varc:get_clause_info(V, C1, watch0),
-    0 = varc:get_clause_info(V, C1, watch1),
+    4 = varc:clause_info(V, C1, watch0),
+    0 = varc:clause_info(V, C1, watch1),
 
     varc:set_level(V, 3),
     varc:bind(V, -X2),
     true = varc:eval(V),
 
-    2 = varc:get_clause_info(V, C1, watch0),
-    0 = varc:get_clause_info(V, C1, watch1),
+    2 = varc:clause_info(V, C1, watch0),
+    0 = varc:clause_info(V, C1, watch1),
 
     varc:set_level(V, 4),
     varc:bind(V, -X6),
     true = varc:eval(V),
 
-    2 = varc:get_clause_info(V, C1, watch0),
-    0 = varc:get_clause_info(V, C1, watch1),
+    2 = varc:clause_info(V, C1, watch0),
+    0 = varc:clause_info(V, C1, watch1),
     ?TRUE = varc:value(V, X4),
 
     {C1,_Pos=2,_Lev=4} = varc:implication_clause(V, X4),
@@ -410,15 +410,15 @@ watch1() ->
     C2 = add_clause(V, [Y3, Y2, Y1]),
     [Y3, Y2, Y1] = varc:get_clause(V, C2),
 
-    0 = varc:get_clause_info(V, C2, watch0),
-    1 = varc:get_clause_info(V, C2, watch1),
+    0 = varc:clause_info(V, C2, watch0),
+    1 = varc:clause_info(V, C2, watch1),
 
     Z3 = X5, Z2 = X4, Z1 = -X2,
     C3 = add_clause(V, [Z3,Z2,Z1]),
     [Z3,Z2,Z1] = varc:get_clause(V, C3),
 
-    1 = varc:get_clause_info(V, C3, watch0),
-    2 = varc:get_clause_info(V, C3, watch1),
+    1 = varc:clause_info(V, C3, watch0),
+    2 = varc:clause_info(V, C3, watch1),
 
     ok.
 
@@ -442,7 +442,7 @@ print_clauses(V,Raw) ->
 print_clauses_(_V, _Raw, false) ->
     ok;
 print_clauses_(V, Raw, I) ->
-    Fs = varc:get_clause_info(V, I),
+    Fs = varc:clause_info(V, I),
     io:format("~w: ~s ~w\n",
 	      [I, format_clause_flags(Fs),
 	       varc:get_clause(V,I,undefined,Raw)]),
