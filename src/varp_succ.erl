@@ -73,18 +73,68 @@ succ_(Fd,Type,I,Bs) ->
 	[] ->
 	    succ_(Fd,Type,varc:clause_next(Bs#bs.vp,I),Bs);
 	CL ->
-	    Fmt = case Type of
-		      cnf -> format_cnf_clause(Bs,CL); 
-		      snf -> format_snf_clause(Bs,CL)
-		  end,
-	    io:put_chars(Fd,[Fmt,"\n"]),
+	    Bn = clause_bn(Bs,CL),
+	    Gn = group_bn(Bn),
+	    io:put_chars(Fd,[lists:reverse(Bn), 
+			     " //", 
+			     io_lib:format("~w",[lists:reverse(Gn)]), 
+			     "\n"]),
+
+%%	    Fmt = case Type of
+%%		      cnf -> format_succ_cnf_clause(Bs,Bn); 
+%%		      snf -> format_succ_snf_clause(Bs,Bn)
+%%		  end,
+%%	    io:put_chars(Fd,[Fmt,"\n"]),
 	    succ_(Fd,Type,varc:clause_next(Bs#bs.vp,I),Bs)
     end.
 
-format_cnf_clause(_Bs,CL) ->
+%% generate succesor covering from grouped "binary" number
+succ_gn([{$*,K},{$0,N}|Bn]) ->
+    %% bi=*, 1 <= i <= k-1, bk=0
+    if N > 1 -> [{$0,K},{$1,1},{$*,N-1}|Bn];
+       true -> [{$0,K},{$1,1}|Bn]
+    end;
+succ_gn([]) ->
+    [].
+
+
+group_bn([B|Bn]) ->
+    group_bn_(Bn,B,1).
+
+group_bn_([B|Bn],B,N) ->
+    group_bn_(Bn,B,N+1);
+group_bn_([C|Bn],B,N) ->
+    [{B,N}|group_bn_(Bn,C,1)];
+group_bn_([],B,N) ->
+    [{B,N}].
+
+%% return b1b2..bn!
+clause_bn(Bs, CL) ->
+    clause_bn_(Bs, varp_formula:first_unbound(Bs), CL, []).
+
+clause_bn_(_Bs, false, _CL, Acc) -> 
+    lists:reverse(Acc);
+clause_bn_(Bs, {I,Xi}, CL, Acc) ->
+    Bi = case lists:member(Xi, CL) of
+	     true -> if Xi < 0 -> $1;
+			Xi > 0 -> $0
+		     end;
+	     false ->
+		 case lists:member(-Xi, CL) of
+		     true ->
+			 if Xi > 0 -> $1;
+			    Xi < 0 -> $0
+			 end;
+		     false ->
+			 $*
+		 end
+	 end,
+    clause_bn_(Bs, varp_formula:next_unbound(Bs, I), CL, [Bi | Acc]).
+
+format_succ_cnf_clause(_Bs,CL) ->
     [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].
 
-format_snf_clause(Bs,CL) ->
+format_succ_snf_clause(Bs,CL) ->
     [lists:join(" ", [varp_formula:format_lit(Bs,L,false)||L<-CL]), "."].
 
 %% count number of active clauses

@@ -1,3 +1,4 @@
+%% -*- erlang -*-
 {application, varp,
  [{description, "VARP"},
   {vsn, git},
@@ -15,7 +16,8 @@
 		    {"rat",   "rat",       varp_rat},
 		    {"cnf",   "cnf",       varp_cnf},
 		    {"mon",   "monitor",   varp_monitor},
-		    {"clean", "clean",     varp_clean}
+		    {"clean", "clean",     varp_clean},
+		    {"succ",  "succ",      varp_succ}
 		   ]}
 	 ]},
   {applications,[kernel,stdlib]}
