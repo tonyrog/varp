@@ -199,6 +199,8 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_clean_literal(ErlNifEnv* env, int argc,
+				       const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_del_unused_clauses(ErlNifEnv* env, int argc,
 					    const ERL_NIF_TERM argv[]);
 
@@ -564,6 +566,7 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "literal_info",        3,  varp_literal_info ),
     NIF_FUNC( "del_clause",          2,  varp_del_clause ),
     NIF_FUNC( "clean_clause",        2,  varp_clean_clause ),
+    NIF_FUNC( "clean_literal",       2,  varp_clean_literal ),
     NIF_FUNC( "del_unused_clauses",  1,  varp_del_unused_clauses ),
     NIF_FUNC( "get_clauses",         3,  varp_get_clauses ),
     NIF_FUNC( "get_queue_first",     1,  varp_get_queue_first ),
@@ -2666,14 +2669,18 @@ static void order_k_rank(varp_t* vp, int k)
     for (i = 0; i < (int)vp->cnext; i++) {
 	clause_t* cp = vp->clause_map[i];
 	int j;
-	int n = cp->size;
-	float r = 1/(float)n;
-	for (j = 0; j < n; j++) {
-	    int x = export_l(cp->lit[j]);
-	    if (x < 1)
-		vp->var_map[-x]->nkey[k] += r;
-	    else if (x > 1)
-		vp->var_map[x]->pkey[k] += r;
+	if (cp != NULL) {
+	    int n = cp->size;
+	    if (n > 0) {
+		float r = 1/(float)n;
+		for (j = 0; j < n; j++) {
+		    int x = export_l(cp->lit[j]);
+		    if (x < 1)
+			vp->var_map[-x]->nkey[k] += r;
+		    else if (x > 1)
+			vp->var_map[x]->pkey[k] += r;
+		}
+	    }
 	}
     }
 }
@@ -3880,6 +3887,11 @@ static ERL_NIF_TERM varp_eval(ErlNifEnv* env, int argc,
 	while(cp != NULL) {
 #ifdef TWO_CLAUSES
 	    if (cp->flags & CLAUSE_FLAG_TWO) {
+		lit_t a = cp->lit[cp->wl[0].p];
+		lit_t b = cp->lit[cp->wl[1].p];
+		edge_insert(vp, neg_l(a), b, cp->cix);
+		edge_insert(vp, neg_l(b), a, cp->cix);		
+#if 0    
 		if ((cp->wl[0].p >= 0) && (cp->wl[1].p >= 0)) {
 		    lit_t a = cp->lit[cp->wl[0].p];
 		    lit_t b = cp->lit[cp->wl[1].p];
@@ -3888,6 +3900,7 @@ static ERL_NIF_TERM varp_eval(ErlNifEnv* env, int argc,
 			edge_insert(vp, neg_l(b), a, cp->cix);
 		    }
 		}
+#endif
 	    }
 #endif
 	    unwatch_clause(vp, cp);
@@ -4377,7 +4390,15 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_make_badarg(env);
-    cp = vp->clause_map[cix];
+    if ((cp = vp->clause_map[cix]) == NULL)
+	return enif_make_badarg(env);	
+
+#ifdef TWO_CLAUSES
+    if (cp->size == 2) {
+	edge_remove(vp, neg_l(cp->lit[0]), cp->lit[1], cix);
+	edge_remove(vp, neg_l(cp->lit[1]), cp->lit[0], cix);
+    }
+#endif
 
     unwatch_clause(vp, cp);      // remove watched literals
 
@@ -4469,12 +4490,42 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
     return ATOM(ok);
     
 remove:
-    DBG("  %lu-removed\r\n", size);    
+    DBG("  %lu-removed\r\n", size);
+    vp->clause_map[cix] = NULL;    
     clause_free(vp, cp);
     return ATOM(ok);
 
 error:
     return enif_make_badarg(env);    
+}
+
+// may only clean literal on level 0!
+static ERL_NIF_TERM varp_clean_literal(ErlNifEnv* env, int argc,
+				       const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    literal_t* lp;
+    edge_t* ep;
+    edge_t** epp;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_ll(env, vp, argv[1], &lp))
+	return enif_make_badarg(env);
+
+    epp = &lp->elist;
+    while((ep = *epp) != NULL) {
+	if (get_l(vp, ep->l) != IUNDEF) {
+	    enif_fprintf(stdout, "remove 2-clause cix=%d, lit=%d\r\n",
+			 ep->cix, export_l(ep->l));
+	    *epp = ep->next;
+	    varp_free(&vp->edge_allocator, ep);
+	}
+	else
+	    epp = &(ep->next);
+    }
+    return ATOM(ok);
 }
 
 // del unused clauses is used for garbage collection and may
@@ -4568,7 +4619,7 @@ static ERL_NIF_TERM varp_clause_next(ErlNifEnv* env, int argc,
 
 //
 // get_clause(vp,ClauseIndex::integer(),SkipLiteral::literl(),Raw::boolean())->
-//  {Type, Clause}
+//  [literal()] | true.
 //
 static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
@@ -4600,11 +4651,13 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
     if (!vif_get_boolean(env, argv[3], &raw))
 	return enif_make_badarg(env);
 
-    cp = vp->clause_map[cix];
+    if ((cp = vp->clause_map[cix]) == NULL)
+	return enif_make_list(env, 0);	
+    
     lit = cp->lit;
     csize = cp->size;
-
     list = enif_make_list(env, 0);
+
     for (i = csize-1; i >= 0; i--) {
 	int x = export_l(lit[i]);
 	ERL_NIF_TERM elem;
@@ -4618,8 +4671,7 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 		if (lp->var->level <= 0) {  // constant level
 		    switch(get_ll(vp,lp)) {
 		    case ITRUE:
-			list = enif_make_list(env, 0);
-			goto done;
+			return enif_make_list(env, 0);
 		    case IFALSE:  // skip FALSE constants
 			break;
 		    case IUNDEF:
@@ -4637,7 +4689,6 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 	    }
 	}
     }
-done:
     return list;
 }
 
@@ -4655,11 +4706,11 @@ static ERL_NIF_TERM varp_clause_info(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
-    cp = vp->clause_map[cix];
+    if ((cp = vp->clause_map[cix]) == NULL)
+	return enif_make_badarg(env);	
 
     if (argv[2] == ATOM(status)) {
-	if ((cp->flags & CLAUSE_FLAG_DEAD) ||
-	    ((cp->wl[0].p == -1) || (cp->wl[1].p == -1)))
+	if (cp->flags & CLAUSE_FLAG_DEAD)
 	    return ATOM(dead);
 	else if (cp->flags & CLAUSE_FLAG_CONFLICT)
 	    return ATOM(conflict);
@@ -4691,7 +4742,9 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
-    cp = vp->clause_map[cix];
+    if ((cp = vp->clause_map[cix]) == NULL)
+	return enif_make_badarg(env);	
+    
     if (cix >= (int)vp->cpermanent) // WTF
 	cp->stamp = vp->eval_counter;
     return ATOM(ok);

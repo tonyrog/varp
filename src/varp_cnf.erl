@@ -30,47 +30,45 @@ options() ->
       #{ long => "raw",
 	 short => "r",
 	 key   => raw,
-	 spec => {enum,[?BOOL]},
+	 spec => {enum,[?BOOL,{"debug",debug}]},
 	 default => false,
-	 description => "Dump 'raw' clauses."
+	 description => "output 'raw' clauses."
        }
     ].
 
 run(Bs, Opts) ->
-    dump(Bs, Opts).
+    cnf(Bs, Opts).
 
-%% dump clauses
-dump(Bs, Opts) ->
+%% output cnf clauses
+cnf(Bs, Opts) ->
     Raw = maps:get(raw, Opts),
     Type = maps:get(type, Opts),
     case maps:get(file, Opts) of
 	"" ->
-	    dump(user, Type, Raw, Bs);
+	    cnf(user, Type, Raw, Bs);
 	File ->
 	    case file:open(File, [write]) of
 		{ok,Fd} ->
-		    try dump(Fd, Type, Raw, Bs) of
+		    try cnf(Fd, Type, Raw, Bs) of
 			R -> R
 		    after
 			file:close(Fd)
 		    end;
 		Error={error,Reason} ->
-		    io:format("dump error: unable to open file ~s (~w)\n",
+		    io:format("cnf error: unable to open file ~s (~w)\n",
 			      [File, Reason]),
 		    Error
 	    end
     end.
 
-dump(Fd, Type, Raw, Bs) ->
-    N = if Raw ->
-		varp_formula:get_info(Bs, number_of_clauses);
-	   true ->
-		count_number_of_clauses(Bs)
+cnf(Fd, Type, Raw, Bs) ->
+    N = if Raw =:= false -> count_number_of_clauses(Bs);
+	   true -> varp_formula:get_info(Bs, number_of_clauses)
 	end,	   
-    M = if Raw ->
-		varp_formula:get_info(Bs, number_of_variables);
+    M = if Raw =:= false -> 
+		varp_formula:get_info(Bs, number_of_unbound_variables);
 	   true ->
-		varp_formula:get_info(Bs, number_of_unbound_variables)
+		varp_formula:get_info(Bs, number_of_variables)
 	end,
     case Type of
 	cnf ->
@@ -79,31 +77,32 @@ dump(Fd, Type, Raw, Bs) ->
 	    io:format(Fd, "p snf ~w ~w\n", [M, N])
     end,
     I = varc:clause_first(Bs#bs.vp),
-    dump_(Fd, Type, Raw, I, Bs).
+    cnf_(Fd, Type, Raw, I, Bs).
 
-dump_(_Fd,_Type,_Raw,false,Bs) ->
+cnf_(_Fd,_Type,_Raw,false,Bs) ->
     Bs;
-dump_(Fd,Type,Raw,I,Bs) ->
-    case varc:get_clause(Bs#bs.vp, I, undefined, Raw) of
+cnf_(Fd,Type,Raw,I,Bs) ->
+    case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
 	true ->
-	    dump_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs);
+	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs);
 	[] ->
-	    dump_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs);
+	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs);
 	CL ->
 	    Fmt = case Type of
-		      cnf -> format_cnf_clause(Bs,CL); 
-		      snf -> format_snf_clause(Bs,CL)
+		      cnf -> format_cnf_clause(Bs,CL,Raw); 
+		      snf -> format_snf_clause(Bs,CL,Raw)
 		  end,
 	    io:put_chars(Fd,[Fmt,"\n"]),
-	    dump_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs)
+	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs)
     end.
 
-format_cnf_clause(_Bs,CL) ->
+format_cnf_clause(_Bs,CL,_) ->
     [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].
 
-format_snf_clause(Bs,CL) ->
+format_snf_clause(Bs,CL,debug) ->
+    [lists:join(" ", [varp_formula:format_lit(Bs,L,true)||L<-CL]), "."];
+format_snf_clause(Bs,CL,_) ->
     [lists:join(" ", [varp_formula:format_lit(Bs,L,false)||L<-CL]), "."].
-
 
 %% count number of active clauses
 count_number_of_clauses(Bs) ->

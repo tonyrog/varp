@@ -86,6 +86,7 @@
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([clean_clauses/1]).
+-export([clean_literals/1]).
 -export([set_var/3, add_var/4]).
 -export([config/3]).
 -export([const_vector/2, const_vector/3]).
@@ -248,6 +249,16 @@ clean_clauses_(Bs, false) ->
 clean_clauses_(Bs, I) ->
     varc:clean_clause(Bs#bs.vp, I),
     clean_clauses_(Bs, varc:clause_next(Bs#bs.vp, I)).
+
+clean_literals(Bs) ->
+    clean_literals_(Bs, first_unbound(Bs)).
+
+clean_literals_(Bs, false) ->
+    Bs;
+clean_literals_(Bs, {I,Xi}) ->
+    varc:clean_literal(Bs#bs.vp, Xi),
+    varc:clean_literal(Bs#bs.vp, -Xi),
+    clean_literals_(Bs, next_unbound(Bs, I)).
 
 %% "balanced tree"
 gate_tree(Bs,Op,X,Xs) ->
@@ -2958,7 +2969,14 @@ format_var(Bs,X,Bound) ->
 
 format_bnd(_Bs, _X, Var, false) ->
     format_symbol(Var);
-format_bnd(Bs, X, Var, _Bound) ->
+format_bnd(Bs, X, Var, true) ->
+    Value = case value(Bs, X) of
+		true -> "/1";
+		false -> "/0";
+		_ -> ""
+	    end,
+    format_symbol(Var) ++ Value;
+format_bnd(Bs, X, Var, level) ->
     L = implication_level(Bs, X), 
     Value = case value(Bs, X) of
 		true -> "=1@"++integer_to_list(L);

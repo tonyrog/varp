@@ -47,6 +47,7 @@
 -export([get_clause/4]).
 -export([del_clause/2]).
 -export([clean_clause/2]).
+-export([clean_literal/2]).
 -export([del_unused_clauses/1]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
@@ -280,7 +281,7 @@ get_clause(Vp,Index,Skip) ->
 
 -spec get_clause(Vp::varc(), ClauseIndex::integer(),
 		 SkipLiteral::literal(),Raw::boolean()) ->
-			{Type::'or', Clause::[literal()]}.
+			[literal()] | true.
 
 get_clause(_Vp,Index,_SkipLiteral,Raw)
   when is_boolean(Raw), is_integer(Index), Index >= 0 ->
@@ -308,6 +309,10 @@ del_clause(_Vp,Index)
 
 clean_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+clean_literal(_Vp,Lit)
+  when is_integer(Lit), Lit >= 1 ->
     ?nif_stub().
 
 del_unused_clauses(_Vp) ->
