@@ -10,6 +10,8 @@
 -export([run/2]).
 -export([options/0]).
 
+-compile(export_all).
+
 -include("varp.hrl").
 
 options() ->
@@ -54,6 +56,8 @@ succ(Bs, Opts) ->
 
 succ(Fd, Type, Bs) ->
     N = count_number_of_clauses(Bs),
+    VarMap = get_var_map(Bs),
+
     M = varp_formula:get_info(Bs, number_of_unbound_variables),
     case Type of
 	cnf ->
@@ -79,6 +83,16 @@ succ_(Fd,Type,I,Bs) ->
 			     " //", 
 			     io_lib:format("~w",[lists:reverse(Gn)]), 
 			     "\n"]),
+	    case succ_gn(Gn) of
+		false ->
+		    ok;
+		Succ ->
+		    lists:foreach(
+		      fun(Gi) ->
+			      Bi = ungroup_bn(Gi),
+			      io:format("~s\n", [lists:reverse(Bi)])
+		      end, Succ)
+	    end,
 
 %%	    Fmt = case Type of
 %%		      cnf -> format_succ_cnf_clause(Bs,Bn); 
@@ -91,11 +105,38 @@ succ_(Fd,Type,I,Bs) ->
 %% generate succesor covering from grouped "binary" number
 succ_gn([{$*,K},{$0,N}|Bn]) ->
     %% bi=*, 1 <= i <= k-1, bk=0
-    if N > 1 -> [{$0,K},{$1,1},{$*,N-1}|Bn];
-       true -> [{$0,K},{$1,1}|Bn]
+    if N > 1 -> [ [{$0,K},{$1,1},{$*,N-1}|Bn] ];
+       true ->  [ [{$0,K},{$1,1}|Bn] ]
     end;
-succ_gn([]) ->
-    [].
+succ_gn(Bn) ->
+    succ_gn_(Bn).
+
+succ_gn_([{$1,K},{$*,N}|Bn]) ->
+    case succ_gn_(Bn) of
+	false ->
+	    [ [{$0,K},{$*,N}|Bn] ];
+	BLs ->
+	    [ [{$0,K},{$*,N}|Bn] | [ [{$0,K+N} | Bn1 ] || Bn1 <- BLs ] ]
+    end;
+succ_gn_([{$1,K},{$0,N}|Bn]) ->
+    [ [{$0,K+N}|Bn] ];
+succ_gn_([{$*,K}|Bn]) ->
+    case succ_gn_(Bn) of
+	false ->
+	    [ [{$*,K}] ];
+	BLs ->
+	    [ [{$0,K}|Bn] | [ [{$0,K} | Bn1 ] || Bn1 <- BLs ] ]
+    end;
+succ_gn_([{$0,K}|Bn]) ->
+    if K =:= 1 ->
+	    [ [{$1,1}|Bn] ];
+       true ->
+	    [ [{$0,K-1},{$1,1}|Bn] ]
+    end;
+succ_gn_([]) ->
+    [];
+succ_gn_([{$1,_K}]) ->
+    false.
 
 
 group_bn([B|Bn]) ->
@@ -107,6 +148,16 @@ group_bn_([C|Bn],B,N) ->
     [{B,N}|group_bn_(Bn,C,1)];
 group_bn_([],B,N) ->
     [{B,N}].
+
+%% ungroup and reverse a grouped Binary number
+ungroup_bn([{C,N}|Gn]) ->
+    cat(C,N, ungroup_bn(Gn));
+ungroup_bn([]) ->
+    [].
+
+cat(_C,0,L) -> L;
+cat(C,I,L) -> [C|cat(C,I-1,L)].
+
 
 %% return b1b2..bn!
 clause_bn(Bs, CL) ->
@@ -130,6 +181,18 @@ clause_bn_(Bs, {I,Xi}, CL, Acc) ->
 		 end
 	 end,
     clause_bn_(Bs, varp_formula:next_unbound(Bs, I), CL, [Bi | Acc]).
+
+%% get unbound mapped to "bit number"
+get_var_map(Bs) ->
+    get_var_map_(Bs, #{}).
+
+get_var_map_(Bs, Map) ->
+    get_var_map_(Bs, varp_formula:first_unbound(Bs), Map, 1).
+
+get_var_map_(_Bs, false, Map, _N) ->
+    Map;
+get_var_map_(Bs, {I,Xi}, Map, J) ->
+    get_var_map_(Bs,varp_formula:next_unbound(Bs,I),maps:put(Xi,J,Map), J+1).
 
 format_succ_cnf_clause(_Bs,CL) ->
     [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].

@@ -26,6 +26,9 @@ all() ->
 
     subst1(),
     subst2(),
+    subst3(),
+    subst4(),
+    subst5(),
 
     ok.
 
@@ -296,9 +299,59 @@ order() ->
 %%    ok = varc:order_sort(V, '-rank', '-degree', 0),
 %%    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
     ok.
- 
 
+%% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
+    V = varc:new(), 
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    NX4 = -X4,
+    C0 = add_clause(V, [X2,X3]),
+    C1 = add_clause(V, [X2,-X3]),
+    io:format("subst0: Clause before\n"),
+    print_clauses(V),
+    varc:subst(V, X4, X3),
+    io:format("subst1: Clause after\n"),    
+    print_clauses(V),
+    [X2,X4] = lists:sort(varc:get_clause(V, C0)),
+    [NX4,X2] = lists:sort(varc:get_clause(V, C1)),
+    ok.
+
+%% simply substitute {X2,X3} [X2/X3] => {X2}
+subst2() ->
+    V = varc:new(), 
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    C0 = add_clause(V, [X2,X3]),
+    io:format("subst0: Clause before\n"),
+    print_clauses(V),
+    varc:subst(V, X2, X3),
+    io:format("subst1: Clause after\n"),
+    print_clauses(V),
+    io:format("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
+    [] = lists:sort(varc:get_clause(V, C0)),
+    ?TRUE = varc:value(V, X2),
+    ok.
+
+subst3() ->
+    V = varc:new(), 
+    X2 = varc:add_variable(V),
+    X3 = varc:add_variable(V),
+    X4 = varc:add_variable(V),
+    C0 = add_clause(V, [-X2,X3]),
+    io:format("subst0: Clause before\n"),
+    print_clauses(V),
+    varc:subst(V, -X2, X3),
+    io:format("subst1: Clause after\n"),
+    print_clauses(V),
+    io:format("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
+    [] = lists:sort(varc:get_clause(V, C0)),
+    ?FALSE = varc:value(V, X2),
+    ok.
+    
+subst4() ->
     V = varc:new(),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
@@ -328,7 +381,7 @@ subst1() ->
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
 
-subst2() ->
+subst5() ->
     V = varc:new(),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
@@ -353,7 +406,7 @@ subst2() ->
     io:format("subst2: Clause after\n"),
     print_clauses(V,true),
     true = varc:eval(V),
-    Bs = varc:get_bindings(V,0),
+    Bs = [X3,X4,X6] = lists:sort(varc:get_bindings(V,0)),
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
 

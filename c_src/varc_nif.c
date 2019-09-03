@@ -665,6 +665,8 @@ DECL_ATOM(atom);
 DECL_ATOM(varp);
 DECL_ATOM(symbol);
 DECL_ATOM(is_atom);
+DECL_ATOM(edge_list);
+DECL_ATOM(exclamation_mark);
 
 // exceptions
 DECL_ATOM(system_limit);
@@ -2529,6 +2531,42 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
     if (argv[2] == ATOM(degree)) {
 	return enif_make_uint(env, lp->degree);
     }
+    if (argv[2] == ATOM(edge_list)) {
+	ERL_NIF_TERM list = enif_make_list(env, 0);
+	edge_t* ep = lp->elist;
+	
+	while(ep) {
+	    ERL_NIF_TERM elem;
+	    elem = enif_make_tuple2(env,
+				    enif_make_int(env, ep->cix),
+				    enif_make_int(env, export_l(ep->l)));
+	    list = enif_make_list_cell(env, elem, list);
+	    ep = ep->next;
+	}
+	return list;	
+    }
+    if (argv[2] == ATOM(symbol)) {
+	symbol_t* sp = lp->var->names;
+	ERL_NIF_TERM list = enif_make_list(env, 0);
+	while(sp != NULL) {
+	    ERL_NIF_TERM term;
+	    if (sp->is_term) {
+		enif_binary_to_term(env,sp->data,sp->size,&term,0);
+		if (lp->sign < 0)
+		    term = enif_make_tuple2(env, ATOM(exclamation_mark), term);
+	    }
+	    else {
+		size_t size = sp->size + (lp->sign < 0);
+		uint8_t* data = enif_make_new_binary(env, size, &term);
+		if (lp->sign < 0)
+		    *data++ = '!';
+		memcpy(data, sp->data, sp->size);
+	    }
+	    list = enif_make_list_cell(env, term, list);
+	    sp = sp->anext;
+	}
+	return list;	
+    }
     return enif_make_badarg(env);    
 }
 
@@ -3164,6 +3202,34 @@ void insert_sort3(int v, int l, int p, int va[3], int la[3], long pa[3])
     }
 }
 
+static int is_unit_clause(varp_t* vp, clause_t* cp)
+{
+    long p;
+    int  unbound = 0;
+    
+    for (p = 0; p < (long)cp->size; p++) {
+	lit_t l = cp->lit[p];
+	switch(lit_value(vp,l)) {
+	case ITRUE:
+	    return 0;
+	case IFALSE:
+	    break;
+	case IUNDEF:
+	    if (unbound) return 0;
+	    unbound++;
+	    break;
+	case IBOUND:
+	    DBG("is_unit_clause: error literal %d bound\r\n",
+		export_l(cp->lit[p]));
+	    return 0;
+	default:
+	    break;
+	}
+    }
+    return 1;
+}
+
+
 // (lp0,level0) track the literal that is bounded
 // on the latest level, (lp1,level1) the next highest after
 // (lp0,level0)
@@ -3221,7 +3287,7 @@ static int watch_clause(varp_t* vp, clause_t* cp)
     
     if ((la[0] == INT_MAX) && (la[1] != INT_MAX)) {
 	if (!dead) {
-	    // printf("Set UNIT\r\n");
+	    printf("Set UNIT\r\n");
 	    put_l(vp, cp->lit[pa[0]], ITRUE, pa[0], cp->cix, vp->level);
 	}
 	return 1;
@@ -3233,9 +3299,9 @@ static int watch_clause(varp_t* vp, clause_t* cp)
 
 
 //  2-clause coding...
-//  (Y,A) (Y,B) (Y,C), (X,D) (X,A)
-//  !X -> D, A
-//  !Y -> A, B, C
+//  (Y,A) (Y,B) (Y,C), (X,D) (X,A), (X, Y)
+//  !X -> D, A, Y
+//  !Y -> A, B, C, X
 //  !A -> Y, X
 //  !B -> Y
 //  !C -> Y
@@ -3243,11 +3309,11 @@ static int watch_clause(varp_t* vp, clause_t* cp)
 //  [X/Y]  -> each L in !Y do in !L find Y and replace with X done
 //            move all pairs in !Y to !X
 //
-//  (X,A) (X,B) (X,C), (X,D) (X,A)
+//  (X,A) (X,B) (X,C), (X,D) (X,A), (X,X)
 //  !A -> X, X (ignore?)
 //  !B -> X
 //  !C -> X
-//  !X -> D, A, A, B, C
+//  !X -> D, A, X, A, B, C, X
 //  !D -> X
 //
 
@@ -3267,7 +3333,7 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
 	for (ql = nlp->elist; ql != NULL; ql = ql->next) {
 	    if (ql->l == yl)
 		ql->l = xl;
-	    // detect X, !X ?
+	    // detect X, !X ? FIXME! MUST
 	}
     }
 
@@ -3320,13 +3386,16 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	xref_t* xptr = *xpp;
 	xref_t* nxptr = *nxpp;
 
-	if (((xptr==NULL) || (yptr->cix < xptr->cix)) &&
-	    ((nxptr==NULL) || (yptr->cix < nxptr->cix))) { // Y only
+	if (((xptr == NULL) || (yptr->cix < xptr->cix)) &&
+	    ((nxptr == NULL) || (yptr->cix < nxptr->cix))) { // Y only
 	    xref_t* yptr1 = yptr->next;
 	    clause_t* cp  = vp->clause_map[yptr->cix];
 	    lit_t yyl     = cp->lit[yptr->p];
 	    int rewatch = 0;
 
+	    enif_fprintf(stdout, "subst cix=%d, Y [%d/%d]\r\n",
+			 cp->cix, export_l(xl), export_l(yyl));
+	    
 	    // check if Y was TWL then update
 	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
 		unwatch_clause(vp, cp);
@@ -3357,6 +3426,9 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    lit_t yyl = cp->lit[yptr->p];
 	    lit_t xxl = cp->lit[xptr->p];
 	    int rewatch = 0;
+
+	    enif_fprintf(stdout, "subst cix=%d, X,Y [%d/%d]\r\n",
+			 cp->cix, export_l(xxl), export_l(yyl));
 	
 	    // check if Y was TWL then update
 	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
@@ -3367,9 +3439,13 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    // ((a=b)&&(c!=d))||((a!=b)&&(c=d)) -> !((a=b)=(c=d))
 	    if ((yl == yyl) == (xl == xxl)) {
 		cp->lit[yptr->p] = VARP_FALSE(vp);
+		if (!rewatch && is_unit_clause(vp, cp)) {
+		    put_l(vp, xxl, ITRUE, xptr->p, cp->cix, vp->level);
+		}
 	    }
 	    else {
 		cp->lit[yptr->p] = VARP_TRUE(vp);
+		enif_fprintf(stdout, "DEAD\r\n");
 		if (!(cp->flags & CLAUSE_FLAG_DEAD)) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
 		    vp->cdead++;
@@ -3390,6 +3466,9 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    lit_t yyl = cp->lit[yptr->p];
 	    lit_t xxl = cp->lit[nxptr->p];
 	    int rewatch = 0;
+
+	    enif_fprintf(stdout, "subst cix=%d, !X,Y [%d/%d]\r\n",
+			 cp->cix, export_l(xxl), export_l(yyl));
 	
 	    // check if Y was TWL then update
 	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
@@ -3398,11 +3477,15 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    }
 
 	    // ((a=b)&&(c!=d))||((a!=b)&&(c=d)) -> !((a=b)=(c=d))
-	    if ((yl == yyl) != (xl == xxl)) {  // reversed!
+	    if ((yl == yyl) == (xl == xxl)) {
 		cp->lit[yptr->p] = VARP_FALSE(vp);
+		if (!rewatch && is_unit_clause(vp, cp)) {
+		    put_l(vp, xxl, ITRUE, nxptr->p, cp->cix, vp->level);
+		}
 	    }
 	    else {
 		cp->lit[yptr->p] = VARP_TRUE(vp);
+		enif_fprintf(stdout, "DEAD\r\n");
 		if (!(cp->flags & CLAUSE_FLAG_DEAD)) {
 		    cp->flags |= CLAUSE_FLAG_DEAD;
 		    vp->cdead++;
@@ -3459,6 +3542,10 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
     subst_ll(vp, xl, yl);
     subst_ll(vp, neg_l(xl), neg_l(yl));
 
+#ifdef TWO_CLAUSES
+    subst_2_clause(vp, xl, yl);
+#endif
+    
     // mark Y as bound (to X)
     set_vv(vp, y, IBOUND);
     if (is_neg_l(yl))
@@ -3500,14 +3587,7 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     yv = var_l(vp, yp);
 
     vp->caller_env = env;
-    if (xv != yv) {
-	if (!(xv->flags & VAR_FLAG_ATOM) && (yv->flags & VAR_FLAG_ATOM)) {
-	    subst(vp, yp, xp);
-	}
-	else {
-	    subst(vp, xp, yp);
-	}
-    }
+    if (xv != yv) subst(vp, xp, yp);
     vp->caller_env = NULL;    
     return ATOM(true);
 }
@@ -3616,6 +3696,9 @@ static inline literal_t* eval_clause(varp_t* vp, clause_t* cp,
 
     assert(wp0 >= 0);
     assert(wp1 >= 0);
+#ifdef TWO_CLAUSES
+    assert(cp->size > 2);
+#endif
     
     if (wi==0) {  // watch point 0
 	size_t csize;
@@ -5048,6 +5131,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(implication_clause);
     LOAD_ATOM(implication_pos);
     LOAD_ATOM(is_atom);
+    LOAD_ATOM(edge_list);
+    LOAD_ATOM_STRING(exclamation_mark, "!");
 // misc
     LOAD_ATOM(qtype);    
     LOAD_ATOM(fifo);

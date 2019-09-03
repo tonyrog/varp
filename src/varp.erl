@@ -530,14 +530,14 @@ display_result({N,_Models}, Method, Bs) ->
 display_result(0, satisfy, Bs) ->
     case varp_formula:getopt(Bs, starexec) of
 	true ->
-	    io:format("starexec-result: unsat\n");
+	    io:format("s UNSATISFIABLE\n");
 	false ->
 	    io:format("% 0\n", [])
     end;
 display_result(N, satisfy, Bs) when is_integer(N) ->
     case varp_formula:getopt(Bs, starexec) of
 	true ->
-	    io:format("starexec-result: sat\n"),
+	    io:format("s SATISFIABLE\n"),
 	    io:format("num-models: ~w\n", [N]);
 	false ->
 	    io:format("% ~w\n", [N])

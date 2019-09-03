@@ -546,15 +546,21 @@ install_(Bs,Level,[X|Xs]) when is_integer(X) ->
 install_(Bs,Level,[{X,X}|Xs]) ->
     install_(Bs,Level,Xs);
 install_(Bs,?TOP_LEVEL,[{X,Y}|Xs]) when abs(Y) =/= 1 ->
-    ?dbg("subst: ~s/~s\n", [format_lit(Bs,X), format_lit(Bs,Y)]),
-    subst(Bs, X, Y),
+    Xa = varc:variable_info(Bs#bs.vp, X, is_atom),
+    Ya = varc:variable_info(Bs#bs.vp, Y, is_atom),
+    if Ya, not Xa ->
+	    ?dbg("subst: ~s/~s\n", [format_lit(Bs,Y), format_lit(Bs,X)]),
+	    subst(Bs, Y, X);
+       true ->
+	    ?dbg("subst: ~s/~s\n", [format_lit(Bs,X), format_lit(Bs,Y)]),
+	    subst(Bs, X, Y)
+    end,
     install_(Bs,?TOP_LEVEL,Xs);
 install_(Bs,Level,[_B|Xs]) ->
     ?dbg("install: did not handle ~p\n", [_B]),
     install_(Bs,Level,Xs);
 install_(Bs,_Level,[]) ->
     Bs.
-
 
 %% compact version of fmt_var
 fmt_v(_,?TRUE)  -> "1";

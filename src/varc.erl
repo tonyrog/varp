@@ -18,6 +18,7 @@
 -export([del_variable/2]).
 -export([add_symbol/3]).
 -export([get_symbol/2]).
+-export([is_atom/2]).
 -export([find_symbol/2]).
 -export([variable_info/3]).
 -export([literal_info/3]).
@@ -152,6 +153,10 @@ add_symbol(_Vp, Lit, _Name)  when is_integer(Lit) ->
 get_symbol(Vp, Lit) when is_integer(Lit) ->
     variable_info(Vp, Lit, symbol).
 
+-spec is_atom(Vp::varc(), Lit::literal()) -> [term()]. %% aliases
+is_atom(Vp, Lit) when is_integer(Lit) ->
+    variable_info(Vp, Lit, is_atom).
+
 %% find variable index from variable name (term or binary)
 -spec find_symbol(Vp::varc(), Name::term()) -> false | literal().
 find_symbol(_Vp, _Name) ->
@@ -161,6 +166,10 @@ find_symbol(_Vp, _Name) ->
 %% What::implication|implication_clause|implication_pos|
 %%       activity|level|degree|is_atom|symbol
 %%
+variable_info(Vp, Index) ->
+    [{What,variable_info(Vp, Index, What)} ||
+	What <- [implication, implication_clause, implication_pos,
+		 activity, level, degree, is_atom, symbol]].
 
 variable_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
