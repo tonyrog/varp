@@ -7,6 +7,7 @@
 
 -module(varp).
 
+-export([start/0, start0/0]).
 -export([main/1]).
 -export([do_run/3]).
 
@@ -50,6 +51,12 @@ global_options() ->
 	default => false,
 	description => "Report result in starexec format"
       },
+     #{ long => "outdir",
+	key => outdir,
+	spec =>  string,
+	default => "",
+	description => "Output directory for various output files"
+      },
      #{ long => "method",
 	key => method,
 	spec => {enum,
@@ -65,7 +72,9 @@ global_options() ->
 		 [?BOOL,
 		  {"literal",literal},
 		  {"erlang",erlang},
-		  {"model",model}]},
+		  {"model",model},
+		  {"dimacs",dimacs}
+		 ]},
 	default => model,
 	description => "Print models when found."
       },
@@ -229,18 +238,29 @@ vsn() ->
 	undefined -> "undefined"
     end.
 
+%% call with erl ... -extra "$@"
+start() ->
+    main(init:get_plain_arguments()).
+
+start0() ->
+    io:format("varp dummy start\n"),
+    %% dummy start for servator when generating application
+    application:start(varp),
+    ok.
+
 main(Args) ->
+    io:format("main: arguments = ~p\n", [Args]),
     application:start(varp),
 
     Plugins = load_plugins(),
-    %% io:format("plugins = ~p\n", [Plugins]),
+    io:format("main: plugins = ~p\n", [Plugins]),
 
     GlobalOptionSpec = global_option_spec(),
     GOpts0 = default_options(),
 
     %% io:format("options0 = ~p\n", [GOpts0]),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
-    %% io:format("options1 = ~p\n", [GOpts1]),
+    io:format("main: options1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
 
     {Do1,Files,GOpts2,Bound} =
@@ -249,7 +269,7 @@ main(Args) ->
     Do = if Do1 =/= [] -> Do1;
 	    true -> Do0
 	 end,
-    %% io:format("do = ~p\n", [Do]),
+    io:format("main: do = ~p\n", [Do]),
     %% io:format("files = ~p\n", [Files]),
     %% io:format("options2 = ~p\n", [GOpts2]),
     %% io:format("bound = ~p\n", [Bound]),
@@ -534,48 +554,20 @@ display_result(0, satisfy, Bs) ->
 	false ->
 	    io:format("% 0\n", [])
     end;
-display_result(N, satisfy, Bs) when is_integer(N) ->
-    case varp_formula:getopt(Bs, starexec) of
-	true ->
-	    io:format("s SATISFIABLE\n"),
-	    io:format("num-models: ~w\n", [N]);
-	false ->
-	    io:format("% ~w\n", [N])
-    end;
-display_result(0, falsify, Bs) ->
-    case varp_formula:getopt(Bs, starexec) of
-	true ->
-	    io:format("starexec-valid: true\n");
-	false ->
-	    io:format("% 0\n", [])
-    end;
-display_result(N, falsify, Bs) when is_integer(N) ->
-    case varp_formula:getopt(Bs, starexec) of
-	true ->
-	    io:format("starexec-valid: false\n"),
-	    io:format("num-counter-models: ~w\n", [N]);
-	false ->
-	    io:format("% ~w\n", [N])
-    end;
-display_result(0,prove,Bs) ->
-    case varp_formula:getopt(Bs, starexec) of
-	true ->
-	    io:format("starexec-valid: true\n");
-	false ->
-	    io:format("% TRUE\n", [])
-    end;
-display_result(_N,prove,Bs) ->
-    case varp_formula:getopt(Bs, starexec) of
-	true ->
-	    io:format("starexec-valid: false\n");
-	false ->
-	    io:format("% FALSE\n", [])
-    end;
+display_result(N, satisfy, _Bs) when is_integer(N) ->
+    io:format("% ~w\n", [N]);
+display_result(0, falsify, _Bs) ->
+    io:format("% 0\n", []);
+display_result(N, falsify, _Bs) when is_integer(N) ->
+    io:format("% ~w\n", [N]);
+display_result(0,prove,_Bs) ->
+    io:format("% TRUE\n", []);
+display_result(_N,prove,_Bs) ->
+    io:format("% FALSE\n", []);
 display_result(undefined,prove,_Bs) ->
     io:format("% UNKNOWN\n", []);
 display_result(undefined,_,_Bs) ->
     io:format("\n", []).
-
 
 %% check if there is already a "unique" model
 one_model(Bs) ->
@@ -730,17 +722,33 @@ varp_output([], _Fd, _Model) ->
 %% possibly emit a model
 
 output_model(Bs,I) ->
+    output_model_header(Bs, I),
     Model = varp_formula:model(Bs),
     case varp_formula:getopt(Bs,print) of
-	false -> Model;
-	Print ->
+	false ->
+	    Model;
+	Flavour ->
 	    case varp_output(Bs#bs.output, user, Model) of
 		{error, no_output} ->
-		    varp_formula:print(Print,I,Model),
+		    varp_formula:print_model(Flavour,I,Model),
 		    Model;
 		_ ->
 		    Model
 	    end
+    end.
+
+output_model_header(Bs,_I) ->
+    case varp_formula:getopt(Bs,starexec) of
+	true ->
+	    case get(answer) of
+		true -> 
+		    ok;
+		_ ->
+		    io:format("s SATISFIABLE\n"),
+		    put(answer, true)
+	    end;
+	false ->
+	    ok
     end.
 
 %% fixme analyze the path to see if there are 

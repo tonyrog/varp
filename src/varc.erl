@@ -47,6 +47,7 @@
 -export([get_clause/3]).
 -export([get_clause/4]).
 -export([del_clause/2]).
+-export([compress_clause/2]).
 -export([clean_clause/2]).
 -export([clean_literal/2]).
 -export([del_unused_clauses/1]).
@@ -294,6 +295,13 @@ get_clause(Vp,Index,Skip) ->
 
 get_clause(_Vp,Index,_SkipLiteral,Raw)
   when is_boolean(Raw), is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+
+-spec compress_clause(Vp::varc(), ClauseIndex::integer()) -> binary().
+
+compress_clause(_Vp,Index)
+  when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
 use_clause(_Vp,_Index) ->

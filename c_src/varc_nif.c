@@ -179,6 +179,8 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[]);
+static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
+					 const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_clause_info(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[]);
 static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
@@ -561,6 +563,7 @@ ErlNifFunc varp_funcs[] =
     NIF_FUNC( "add_clause",          6,  varp_add_clause ),
     NIF_FUNC( "add_clause",          7,  varp_add_clause ),
     NIF_FUNC( "get_clause",          4,  varp_get_clause ),
+    NIF_FUNC( "compress_clause",     2,  varp_compress_clause ),
     NIF_FUNC( "clause_info",         3,  varp_clause_info ),
     NIF_FUNC( "variable_info",       3,  varp_variable_info ),
     NIF_FUNC( "literal_info",        3,  varp_literal_info ),
@@ -723,60 +726,50 @@ void debug_free(void* ptr)
 }
 
 #define EXT  0x80
-#define SIGN 0x40
-#define MASK0 0x3f
 #define MASK  0x7f
 
-// NB  MAXLEN
-// 1   6  |0|s| b6..b0|
-// 2   13 |1|s| b6..b0||0|b7..b0|
-// 3   20 |1|s| b6..b0||1|b7..b0||0|b7..b0|
-// 4   27 |1|s| b6..b0||1|b7..b0||1|b7..b0||0|b7..b0|
-// 5   34 |1|s| b6..b0||1|b7..b0||1|b7..b0||1|b7..b0||0|b7..b0|
-#ifdef NOT_USED
+//
+// li is converted into a unsigned representation of
+// li < 0 :  2*-li + 1
+// li >=0 :  2*li
+//
+// then li is written as b0...bl
+// 
+
+
 static int compress_int(int li, uint8_t* ptr)
 {
-    uint8_t sign = 0;
-    uint8_t ext  = 0;
     int len, nb;
-    
-    if (li < 0) {
-	sign = SIGN;
-	li = -li;
-    }
-    
-    if (li <= MASK0) {
-	len = 6;
-	nb  = 1;
-    }
-    else {
-	len = sizeof(int)*8 - __builtin_clz(li);
-	nb = 1 + (((len - 6) + 6) / 7);
-    }
-    ptr = ptr + nb;
-    while(len > 6) {
-	*--ptr = (li & MASK) | ext;
-	ext = EXT;
+
+    li = (li < 0) ? ((-li)<<1)+1 : li << 1;
+    len = sizeof(int)*8 - __builtin_clz(li);
+    nb = 1 + (((len - 6) + 6) / 7);
+    while(len > 7) {
+	*ptr++ = (li & MASK) + EXT;
 	li >>= 7;
 	len -= 7;
     }
-    *--ptr = (li & MASK0) | ext | sign;
+    *ptr++ = (li & MASK);
     return nb;
 }
 
+#if 0
 static int decompress_int(uint8_t* ptr)
 {
-    uint8_t code = *ptr++;
-    int li = code & MASK0;
-    int sign = code & SIGN;
+    int li = 0;
+    int i = 0;
+    uint8_t code;
 
-    while(code & EXT) {
+    do {
 	code = *ptr++;
-	li = (li << 7) | (code & MASK);
-    }
-    if (sign)
-	li = -li;
-    return li;
+	li |= ((code & MASK) << i);
+	i += 7;
+    } while(code & EXT);
+
+    if (li & 1)
+	return -(li>>1);
+    return
+	li >> 1;
 }
 #endif
 
@@ -2383,7 +2376,7 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     if (is_term) {
 	sp->data = VARP_ALLOC(bin.size);
 	memcpy(sp->data, bin.data, bin.size);
-	sp->size = bin.size;	
+	sp->size = bin.size;
     }
     else {
 	sp->data = VARP_ALLOC(bin.size+1);
@@ -4456,6 +4449,50 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
     vp->caller_env = NULL;
     return ret;
 }
+
+
+//
+// compress_clause(vp,ClauseIndex::integer()[,Raw::boolean()]) ->
+//  binary().
+//
+static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
+					 const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    cix_t  cix;
+    clause_t* cp;
+    ERL_NIF_TERM bin;
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+
+    if (!vif_get_cix(env, vp, argv[1], &cix))
+	return enif_make_badarg(env);
+
+    if ((cp = vp->clause_map[cix]) == NULL) {
+	enif_make_new_binary(env, 0, &bin);
+    }
+    else {
+	lit_t* lit = cp->lit;
+	size_t csize = cp->size;
+	uint8_t buffer[5*csize];
+	unsigned char* binptr;
+	ERL_NIF_TERM bin;
+	int n = 0;
+	int i;
+	
+	for (i = 0; i < (int)csize; i++) {
+	    int x = export_l(lit[i]);
+	    n += compress_int(x, &buffer[n]);
+	}
+	buffer[n++] = 0;
+	binptr = enif_make_new_binary(env, n, &bin);
+	memcpy(binptr, buffer, n);
+    }
+    return bin;
+}
+
 
 // may only delete clauses on level 0!
 static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,

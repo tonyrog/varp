@@ -97,3 +97,9 @@ Command line tool
 Variable (lowercase) variables are passed into varp as
 environment (meta) variables that can be used in
 formulas in quantifiers.
+
+# build starexec varp version
+
+    erl -config default.config -config bj.config -s varp start0 -s servator make_starexec varp
+	
+	

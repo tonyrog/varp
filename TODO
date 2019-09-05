@@ -166,7 +166,7 @@ input(Line,Acc) ->
 	--rat <unsigned>|'all'
       	--rat-type=pos|neg|both|min
 
-    dump
+    cnf
 	--file <filename>
 
 

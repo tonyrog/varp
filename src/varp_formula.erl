@@ -20,7 +20,7 @@
 -export([fmt_bind/4]).
 -export([fmt_bind/3]).
 -export([fmt_bind_list/2]).
--export([print/3]).
+-export([print_model/3]).
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 -export([format_p/1]).
@@ -2841,31 +2841,69 @@ model_bor({X,Bit}, Ms) ->
 	    [{X,Bit} | Ms]
     end.
 
-print(true,I,Bindings) ->
+print_model(true,I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
 	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
-print(literal,I,Bindings) ->
+print_model(literal,I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
 	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
-print(model,I,Bindings) ->
+print_model(model,I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
 	      [I,lists:join(",",
 			    [ format_binding(Bound) || 
 				Bound <- Bindings1,
 				element(2,Bound) =/= false ])]);
-print(umodel,I,Bindings) ->
+print_model(umodel,I,Bindings) ->
     io:format("~w: ~s\n",
 	      [I,lists:join(",",[ format_binding(Bound) || 
 				    Bound <- Bindings,
 				    element(2,Bound) =/= false ])]);
-print(erlang,_I,Bindings) ->
+print_model(erlang,_I,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w.\n", [Bindings1]);
-print(false,_I,_Bindings) ->
+
+print_model(dimacs,_I,Bindings) ->
+    print_dimacs_rows(Bindings, 78);
+
+print_model(false,_I,_Bindings) ->
     ok.
+
+%% output model in DIMACS format
+%% "v" L(1) ... L(i) "\n"
+%% "v" L(i+1)...L(j) "\n"
+%% "v" L(j+1).. 0\n"
+%%
+print_dimacs_rows(Bindings, LineLength) ->
+    print_dimacs_rows_(Bindings, LineLength, LineLength, []).
+
+print_dimacs_rows_([{{p,x,[J]},Value}|Bs], Remain, N, Acc) when is_integer(J) ->
+    K  = if Value -> J; true -> -J end,
+    Xi = [$\s | erlang:integer_to_list(K)],
+    Len = length(Xi),
+    Remain1 = Remain - Len,
+    if Remain1 < 0 ->
+	    io:format("v~s\n", [Acc]),
+	    print_dimacs_rows_(Bs, N-Len, N, [Xi]);
+       true ->
+	    print_dimacs_rows_(Bs, Remain1, N, [Xi|Acc])
+    end;
+print_dimacs_rows_([B|Bs], Remain, N, Acc) ->
+    Xi = [$\s | lists:flatten(format_binding(B))],
+    Len = length(Xi),
+    Remain1 = Remain - Len,
+    if Remain1 < 0 ->
+	    io:format("v~s\n", [Acc]),
+	    print_dimacs_rows_(Bs, N-Len, N, [Xi]);
+       true ->
+	    print_dimacs_rows_(Bs, Remain1, N, [Xi|Acc])
+    end;
+print_dimacs_rows_([], _I, _N, []) ->
+    ok;
+print_dimacs_rows_([], _I, _N, Acc) ->
+    io:format("v~s 0\n", [Acc]).
 
 filter_bindings([B={{p,V,_},_}|Bs]) when is_atom(V) ->
     case hd(atom_to_list(V)) of
