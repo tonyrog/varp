@@ -739,18 +739,18 @@ void debug_free(void* ptr)
 
 static int compress_int(int li, uint8_t* ptr)
 {
-    int len, nb;
+    int len;
+    uint8_t* ptr0 = ptr;
 
     li = (li < 0) ? ((-li)<<1)+1 : li << 1;
     len = sizeof(int)*8 - __builtin_clz(li);
-    nb = 1 + (((len - 6) + 6) / 7);
     while(len > 7) {
 	*ptr++ = (li & MASK) + EXT;
 	li >>= 7;
 	len -= 7;
     }
     *ptr++ = (li & MASK);
-    return nb;
+    return (ptr-ptr0);
 }
 
 #if 0
@@ -4452,7 +4452,7 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 
 
 //
-// compress_clause(vp,ClauseIndex::integer()[,Raw::boolean()]) ->
+// compress_clause(vp,ClauseIndex::integer()|[integer()]) ->
 //  binary().
 //
 static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
@@ -4466,29 +4466,56 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
+    if (!vif_get_cix(env, vp, argv[1], &cix)) {
+	ERL_NIF_TERM list;
+	ERL_NIF_TERM head, tail;
+	int csize = 0;
+	int x;
 
-    if (!vif_get_cix(env, vp, argv[1], &cix))
-	return enif_make_badarg(env);
+	list = argv[1];
+	while(enif_get_list_cell(env, list, &head, &tail)) {
+	    if (!enif_get_int(env, head, &x))
+		return enif_make_badarg(env);
+	    csize++;
+	    list = tail;
+	}
+	if (!enif_is_empty_list(env, list))
+	    return enif_make_badarg(env);
+	else {
+	    uint8_t buffer[5*csize];
+	    unsigned char* binptr;
+	    int n = 0;
 
-    if ((cp = vp->clause_map[cix]) == NULL) {
-	enif_make_new_binary(env, 0, &bin);
+	    list = argv[1];
+	    while(enif_get_list_cell(env, list, &head, &tail)) {
+		enif_get_int(env, head, &x);
+		n += compress_int(x, &buffer[n]);
+		list = tail;
+	    }
+	    binptr = enif_make_new_binary(env, n, &bin);
+	    memcpy(binptr, buffer, n);
+	}
     }
     else {
-	lit_t* lit = cp->lit;
-	size_t csize = cp->size;
-	uint8_t buffer[5*csize];
-	unsigned char* binptr;
-	ERL_NIF_TERM bin;
-	int n = 0;
-	int i;
-	
-	for (i = 0; i < (int)csize; i++) {
-	    int x = export_l(lit[i]);
-	    n += compress_int(x, &buffer[n]);
+	if ((cp = vp->clause_map[cix]) == NULL) {
+	    enif_make_new_binary(env, 0, &bin);
 	}
-	buffer[n++] = 0;
-	binptr = enif_make_new_binary(env, n, &bin);
-	memcpy(binptr, buffer, n);
+	else {
+	    lit_t* lit = cp->lit;
+	    size_t csize = cp->size;
+	    uint8_t buffer[5*csize];
+	    unsigned char* binptr;
+	    int n = 0;
+	    int i;
+	    
+	    for (i = 0; i < (int)csize; i++) {
+		int x = export_l(lit[i]);
+		n += compress_int(x, &buffer[n]);
+	    }
+	    buffer[n++] = 0;
+	    binptr = enif_make_new_binary(env, n, &bin);
+	    memcpy(binptr, buffer, n);
+	}
     }
     return bin;
 }
