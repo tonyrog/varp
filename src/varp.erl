@@ -55,7 +55,23 @@ global_options() ->
 	key => outdir,
 	spec =>  string,
 	default => "",
-	description => "Output directory for various output files"
+	description => "Output directory for various output files."
+      },
+     #{ long => "proof-output",
+	key => proof_output,
+	spec =>  {enum,
+		  [{"none", none},
+		   {"user", user},
+		   {"text", text},
+		   {"binary", binary}]},
+	default => none,
+	description => "Proof output type."
+      },
+     #{ long => "proof-file",
+	key => proof_file,
+	spec => string,
+	default => "proof.out",
+	description => "Proof output file name."
       },
      #{ long => "method",
 	key => method,
@@ -249,18 +265,18 @@ start0() ->
     ok.
 
 main(Args) ->
-    io:format("main: arguments = ~p\n", [Args]),
+    %% io:format("main: arguments = ~p\n", [Args]),
     application:start(varp),
 
     Plugins = load_plugins(),
-    io:format("main: plugins = ~p\n", [Plugins]),
+    %% io:format("main: plugins = ~p\n", [Plugins]),
 
     GlobalOptionSpec = global_option_spec(),
     GOpts0 = default_options(),
 
     %% io:format("options0 = ~p\n", [GOpts0]),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
-    io:format("main: options1 = ~p\n", [GOpts1]),
+    %% io:format("main: options1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
 
     {Do1,Files,GOpts2,Bound} =
@@ -269,7 +285,7 @@ main(Args) ->
     Do = if Do1 =/= [] -> Do1;
 	    true -> Do0
 	 end,
-    io:format("main: do = ~p\n", [Do]),
+    %% io:format("main: do = ~p\n", [Do]),
     %% io:format("files = ~p\n", [Files]),
     %% io:format("options2 = ~p\n", [GOpts2]),
     %% io:format("bound = ~p\n", [Bound]),
@@ -467,6 +483,11 @@ do_run_(Do, Formula, GOpts) ->
     Bs1 = Bs#bs { main = Main },
     R = do(Do, Bs1),
     Method = method(Do),
+    case Bs#bs.proof_fd of
+	undefined -> ok;
+	user -> ok;
+	Fd -> file:close(Fd)
+    end,
     case varp_formula:getopt(Bs1, print) of
 	false -> R;
 	_ -> display_result(R, Method, Bs1), R
@@ -562,12 +583,16 @@ display_result(N, falsify, _Bs) when is_integer(N) ->
     io:format("% ~w\n", [N]);
 display_result(0,prove,_Bs) ->
     io:format("% TRUE\n", []);
+display_result(0,none,_Bs) ->
+    ok; %% io:format("\n", []);
 display_result(_N,prove,_Bs) ->
     io:format("% FALSE\n", []);
 display_result(undefined,prove,_Bs) ->
     io:format("% UNKNOWN\n", []);
 display_result(undefined,_,_Bs) ->
-    io:format("\n", []).
+    ok; %% io:format("\n", []);
+display_result(error,_,_Bs) ->
+    io:format("% ERROR\n", []).
 
 %% check if there is already a "unique" model
 one_model(Bs) ->

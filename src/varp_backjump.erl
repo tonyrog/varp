@@ -10,6 +10,7 @@
 -export([run/2]).
 -export([options/0]).
 
+-export([minimize/2]).
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
@@ -168,6 +169,7 @@ loop(Bs,Param,Level,MaxLearned,I,Stack) ->
     case varp_formula:eval(Bs) of
 	false ->
 	    if Level =:= 0 ->
+		    varp_formula:proof_output(Bs,$a,[]),
 		    display_stat(Bs,Param),
 		    0;
 	       true ->
@@ -180,8 +182,12 @@ loop(Bs,Param,Level,MaxLearned,I,Stack) ->
 contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
     ClauseList0 = conflict_analysis(Bs,Param,Level),
     ClauseList1 = 
-	lists:usort([ minimize(Bs,Param,Clause) || Clause <- ClauseList0]),
-
+	case maps:get(minimize,Param) of
+	    true ->
+		lists:usort([ minimize(Bs,Clause) || Clause <- ClauseList0]);
+	    false ->
+		ClauseList0
+	end,
     LClauseList1 = [{length(Clause),Clause} || Clause <- ClauseList1],
 
     LClauseList2 = lists:keysort(1, LClauseList1),
@@ -526,9 +532,10 @@ model(Bs) ->
 
 add_conflict_clause(Bs,[]) ->
     Bs;
-add_conflict_clause(Bs,_Clause=[L]) ->
+add_conflict_clause(Bs,Clause=[L]) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, _Clause)]),
     true = varp_formula:bind(Bs,L,?TOP_LEVEL),
+    varp_formula:proof_output(Bs,$a,Clause),
     Bs;
 add_conflict_clause(Bs,Clause) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
@@ -546,6 +553,7 @@ add_conflict_clause(Bs,Clause) ->
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,
 			 length(Clause)),
+	    varp_formula:proof_output(Bs,$a,Clause),
 	    Bs
     end.
 
@@ -576,25 +584,20 @@ compress(Bs,Param,Clause) ->
 compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
 compress_([_Ln]) -> [].
 
-minimize(_Bs,_Param,[]) -> [];
-minimize(_Bs,_Param,Clause=[_]) -> Clause;
-minimize(Bs,Param,Clause0) ->
-    case maps:get(minimize,Param) of
-	true ->
-	    Clause = sort_abs_clause(Clause0),
-	    %% io:format("minimize: ~p\n", [Clause]),
-	    case minimize_(Bs, Clause, Clause, [], 0, 0) of
-		{0,_,_} -> 
-		    %% io:format("  no change\n", []),
-		    Clause;
-		{NumRemoved,_InputClauseLength,Clause1} ->
-		    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
-				 NumRemoved),
-		    %% io:format("minimize: saved ~.2f%\n", [(NumRemoved / _InputClauseLength)*100]),
-		    Clause1
-	    end;
-	false ->
-	    sort_abs_clause(Clause0)
+minimize(_Bs,[]) -> [];
+minimize(_Bs,Clause=[_]) -> Clause;
+minimize(Bs,Clause0) ->
+    Clause = sort_abs_clause(Clause0),
+    %% io:format("minimize: ~p\n", [Clause]),
+    case minimize_(Bs, Clause, Clause, [], 0, 0) of
+	{0,_,_} -> 
+	    %% io:format("  no change\n", []),
+	    Clause;
+	{NumRemoved,_InputClauseLength,Clause1} ->
+	    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
+			 NumRemoved),
+	    %% io:format("minimize: saved ~.2f%\n", [(NumRemoved / _InputClauseLength)*100]),
+	    Clause1
     end.
 
 minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
@@ -603,7 +606,8 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
 	    A = get_clause(Bs,I),
-	    %% io:format("implication clause of ~w = ~w\n", [-Li, A]),
+	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
+	    %%    [-Li, A, Clause]),
 	    %% if A-{Li} is a subset of Clause then remove Li from clause
 	    case is_subclause_abs(A, -Li, Clause) of
 		true ->
@@ -635,7 +639,6 @@ conflict_analysis(Bs,Param,Level) ->
 	  conflict_reason(Bs,Ri,Trail,Level,Seen0,1,[])
       end || {I,_Cix} <- lists:sublist(CList, L)].
 
-	  
 conflict_reason(Bs,[Q|Qs],Trail,Level,Seen,C,CL) ->
     AbsQ = abs(Q),
     case Seen of
@@ -715,13 +718,13 @@ is_subclause_abs([],_Li,_Bs) ->
 is_subclause_abs(_As,_Li,[]) ->
     false.
 
-implication_clause(Bs,Imp) ->
-    {Cix,_,_} = varp_formula:implication_clause(Bs,Imp),
+implication_clause(Bs,Li) ->
+    {Cix,_,_} = varp_formula:implication_clause(Bs,Li),
     Cix.
 
-implication_level(Bs,Imp) ->
-    {_,_,ImpLev} = varp_formula:implication_clause(Bs,Imp),
-    ImpLev.
+implication_level(Bs,Li) ->
+    {_,_,Lev} = varp_formula:implication_clause(Bs,Li),
+    Lev.
 
 get_clause(Bs, I) ->
     varp_formula:get_clause(Bs,I).

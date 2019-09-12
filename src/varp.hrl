@@ -8,14 +8,11 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
-%% -define(UNDEF,  0).
--define(TRUE,   1).
--define(FALSE, -1).
-%% -define(BOUND,  2).
-%% -define(NBOUND, -2).
+-define(TRUE,  67108864).
+-define(FALSE, -67108864).
 
--define(T,   1).
--define(F, -1).
+-define(T,  67108864).
+-define(F, -67108864).
 
 -define(dbg0(F,As), ok).
 -define(dbg1(F,A), io:format((F),(A))).
@@ -119,7 +116,8 @@
 	 literals=[],        %% declared literals [atom()]
 	 assert=[],          %% list of assertions [A1,...An]
 	 input=[],           %% list of input modules [I1,...In]
-	 output=[]           %% list of output modules [I1,...In]
+	 output=[],          %% list of output modules [I1,...In]
+	 proof_fd            %% proof output file
 	}).
 
 -define(BOOL,

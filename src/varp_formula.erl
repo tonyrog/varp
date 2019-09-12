@@ -35,6 +35,7 @@
 -export([format_clause/2, format_clause/3]).
 -export([log_bindings/4]).
 -export([log_clause/2]).
+-export([proof_output/3]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -129,6 +130,26 @@ new(OptMap) when is_map(OptMap) ->
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
     CLen     = counters:new(1024, []),
+    Proof_Output = maps:get(proof_output, OptMap),
+    Proof_Filename = maps:get(proof_file, OptMap),
+    Proof_Dirname  = maps:get(outdir, OptMap),
+    Filename = if Proof_Dirname =:= "" -> Proof_Filename;
+		  true -> filename:join(Proof_Dirname,Proof_Filename)
+	       end,
+    Proof_Fd = case Proof_Output of
+		   none -> 
+		       undefined;
+		   user ->
+		       user;
+		   text ->
+		       {ok,Fd} = 
+			   file:open(Filename, [raw,write,delayed_write]),
+		       Fd;
+		   binary ->
+		       {ok,Fd} = 
+			   file:open(Filename, [raw,write,delayed_write]),
+		       Fd
+	       end,
     #bs {
        option = OptMap,
        vs = #{ true => ?TRUE, ?TRUE => true,
@@ -144,7 +165,8 @@ new(OptMap) when is_map(OptMap) ->
        d1       = Delta1,
        d2       = Delta2,
        clen     = CLen,
-       vp    = Vp
+       vp       = Vp,
+       proof_fd = Proof_Fd
       }.
 
 add_variable(Bs) ->
@@ -1014,6 +1036,7 @@ build_({cnf,{[],[],_Sections}},Bs) ->
 build_({cnf,{_Vars,_Clauses,_Sections,Units,Cs}},Bs) 
   when is_list(Cs), is_list(Units) ->
     %% fixme bind all literals in Ls = TRUE
+    %% io:format("Units = ~p\n", [Units]),
     Bs1 = build_cnf(Cs, Bs),
     {{bool,?TRUE}, Bs1};
 %%    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
@@ -2924,6 +2947,36 @@ format_binding({Var,Value}) ->
 
 log_clause(Bs, Clause) ->
     io:format("~s\n", [format_clause(Bs,Clause)]).
+
+proof_output(Bs, Prefix, Clause) ->
+    case varp_formula:getopt(Bs, proof_output) of
+	none ->
+	    ok;
+	binary ->
+	    Bin = varc:compress_clause(Bs#bs.vp, Clause),
+	    file:write(Bs#bs.proof_fd, <<Prefix, Bin/binary, 0>>);
+	user ->
+	    Chars = [ [[proof_literal(Bs,Li),$\s] || Li <- Clause], "0\n"],
+	    io:put_chars(user, Chars);
+	_ -> %% text/user
+	    Chars = [ [[proof_literal(Bs,Li),$\s] || Li <- Clause], "0\n"],
+	    file:write(Bs#bs.proof_fd, Chars)
+    end.
+
+proof_literal(Bs,Li) ->
+    if Li < 0 ->
+	    case maps:find(-Li, Bs#bs.vs) of
+		error -> [$-,$$|integer_to_list(-Li)];
+		{ok,[{p,x,[I]}]} -> integer_to_list(-I);
+		{ok,[P|_]} -> [$-|format_symbol(P)]
+	    end;
+       Li > 0 ->
+	    case maps:find(Li, Bs#bs.vs) of
+		error -> [$$|integer_to_list(Li)];
+		{ok,[{p,x,[I]}]} -> integer_to_list(I);
+		{ok,[P|_]} -> format_symbol(P)
+	    end
+    end.
 
 log_bindings(_Bs, _X, _Value, _Xs) ->
     %% log_(Bs, X, Value, Xs).

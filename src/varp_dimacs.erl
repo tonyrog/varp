@@ -230,6 +230,7 @@ from_cnf_([L|Ls], Acc1, Cs, Acc, D) ->
 from_cnf_([], Acc1, Cs, Acc, D) ->
     from_cnf_(Cs, [reverse(Acc1)|Acc], D).
 
+%% Fixme: allow blank last lines?
 binary_line(Bin) ->
     case binary:split(Bin,<<"\n">>) of
 	[<<>>] -> eof;

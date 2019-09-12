@@ -17,7 +17,8 @@
 		    {"cnf",   "cnf",       varp_cnf},
 		    {"mon",   "monitor",   varp_monitor},
 		    {"clean", "clean",     varp_clean},
-		    {"succ",  "succ",      varp_succ}
+		    {"succ",  "succ",      varp_succ},
+		    {"validate", "validate", varp_validate}
 		   ]}
 	 ]},
   {applications,[kernel,stdlib]}

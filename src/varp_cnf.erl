@@ -18,14 +18,14 @@ options() ->
 	 key   => type,
 	 spec => {enum,[{"cnf",cnf}, {"snf", snf}]},
 	 default => cnf,
-	 description => "Dump cnf or symbolc snf format."
+	 description => "Write cnf or symbolic snf format."
        },
       #{ long => "file",
 	 short => "f",
 	 key  => file,
 	 spec => string,
 	 default => "",
-	 description => "Filename of file to dumped clauses to."
+	 description => "Filename of file to write clauses to."
        },
       #{ long => "raw",
 	 short => "r",

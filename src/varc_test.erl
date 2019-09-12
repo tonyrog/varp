@@ -11,8 +11,7 @@
 
 -export([all/0]).
 
--define(TRUE,   1).
--define(FALSE, -1). %% 0 also works, mapped to -1 internally
+-include("varp.hrl").
 
 all() ->
     test1(),
@@ -34,16 +33,16 @@ all() ->
 
 test1() ->
     V = varc:new(),
+    X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
-    X4 = add_variable(V),
-    Ls0 = lists:usort([X2, X3, X4]),
+    Ls0 = lists:usort([X1, X2, X3]),
     C0 = add_clause(V, Ls0),
     io:format("C0=~w\n", [C0]),
     Ls0 = get_clause(V, C0),
     io:format("Ls0=~w\n", [Ls0]),
     
-    Ls1 = lists:usort([X2,-X3,X4]),
+    Ls1 = lists:usort([X1,-X2,X3]),
     C1 = add_clause(V, Ls1),
     io:format("C0=~w\n", [C1]),
     Ls1 = get_clause(V, C1),
@@ -52,16 +51,16 @@ test1() ->
     
 test2() ->
     V = varc:new(),
+    X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
     X4 = add_variable(V),
-    X5 = add_variable(V),
     
-    C0 = add_clause(V, [X2, X3, X4]),
-    C1 = add_clause(V, [X3, X4, X5]),
+    C0 = add_clause(V, [X1, X2, X3]),
+    C1 = add_clause(V, [X2, X3, X4]),
 
-    [X2, X3, X4] = get_clause(V, C0),
-    [X3, X4, X5] = get_clause(V, C1),
+    [X1, X2, X3] = get_clause(V, C0),
+    [X2, X3, X4] = get_clause(V, C1),
     ok.
 
 %%
@@ -69,54 +68,54 @@ test2() ->
 %%    
 test3() ->
     V = varc:new(),
+    X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
     X4 = add_variable(V),
     X5 = add_variable(V),
     X6 = add_variable(V),
     X7 = add_variable(V),
-    X8 = add_variable(V),
 
-    C0 = add_clause(V, [X2, X3, X4]),
-    C1 = add_clause(V, [X3, X4, X5]),
-    C2 = add_clause(V, [X4, X5, X6, X7]),
-    C3 = add_clause(V, [X6, X7, X8]),
+    C0 = add_clause(V, [X1, X2, X3]),
+    C1 = add_clause(V, [X2, X3, X4]),
+    C2 = add_clause(V, [X3, X4, X5, X6]),
+    C3 = add_clause(V, [X5, X6, X7]),
 
-    [X2,X3,X4] = get_clause(V, C0),
-    [X3,X4,X5] = get_clause(V, C1),
-    [X4,X5,X6,X7] = get_clause(V, C2),
-    [X6,X7,X8] = get_clause(V, C3),
+    [X1,X2,X3] = get_clause(V, C0),
+    [X2,X3,X4] = get_clause(V, C1),
+    [X3,X4,X5,X6] = get_clause(V, C2),
+    [X5,X6,X7] = get_clause(V, C3),
 
-    true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X2)),
+    true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X1)),
 
-    true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X3)),
-    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_clauses(V, X4)),
-    true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X5)),
+    true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X2)),
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_clauses(V, X3)),
+    true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X4)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X5)),
     true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X6)),
-    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X7)),
-    true = lists:sort([C3]) =:= lists:sort(varc:get_clauses(V, X8)),
+    true = lists:sort([C3]) =:= lists:sort(varc:get_clauses(V, X7)),
 
+    io:format("X5 clauses = ~p\n", [varc:get_clauses(V, X5)]),
     io:format("X6 clauses = ~p\n", [varc:get_clauses(V, X6)]),
     io:format("X7 clauses = ~p\n", [varc:get_clauses(V, X7)]),
-    io:format("X8 clauses = ~p\n", [varc:get_clauses(V, X8)]),
 
     true = varc:eval(V),
     true = varc:set_level(V, 1),
+    true = varc:bind(V, X2),
     true = varc:bind(V, X3),
-    true = varc:bind(V, X4),
     {varc:get_bindings(V, 1), varc:get_number_of_clauses(V)}.
 
 %% Test all clause simplifications
 or_simplify() ->
     V = varc:new(),
-    X20 = add_variable(V),
+    X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
     X4 = add_variable(V),
     X5 = add_variable(V),
     C0 = add_clause(V, [X2,X3,X4,X5]),
     C1 = add_clause(V, [X5,X4,X3,X2]),
-    C20 = add_clause(V, [X20,X20,X20,X20,X20]),
+    C20 = add_clause(V, [X1,X1,X1,X1,X1]),
     C23 =add_clause(V, [X2,X3,X3,X3,X2]),
     C3 = add_clause(V, [X2,X3,X2,X3,X4,?FALSE]),
     C4 = add_clause(V, [X2,X3,X2,X3,X4]),
@@ -139,42 +138,42 @@ or_simplify() ->
 %% Test eval
 or_eval() ->
     V = varc:new(),
+    X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
     X4 = add_variable(V),
-    X5 = add_variable(V),
 
+    0 = varc:value(V, X1),
     0 = varc:value(V, X2),
     0 = varc:value(V, X3),
     0 = varc:value(V, X4),
-    0 = varc:value(V, X5),
 
     varc:set_level(V, 1),
-    C0 = add_clause(V, [X2, ?FALSE, ?FALSE]),
-    C1 = add_clause(V, [X3, ?TRUE, ?TRUE, ?TRUE]),
-    C2 = add_clause(V, [-X4, ?FALSE, ?FALSE, ?FALSE]),
-    C3 = add_clause(V, [X5, ?FALSE, ?TRUE, ?FALSE, ?TRUE]),
+    C0 = add_clause(V, [X1, ?FALSE, ?FALSE]),
+    C1 = add_clause(V, [X2, ?TRUE, ?TRUE, ?TRUE]),
+    C2 = add_clause(V, [-X3, ?FALSE, ?FALSE, ?FALSE]),
+    C3 = add_clause(V, [X4, ?FALSE, ?TRUE, ?FALSE, ?TRUE]),
     io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     print_clauses(V),
 
     io:format("queue=~p\n", [varc:get_queue(V)]),
     true = varc:eval(V),
 
+    V1 = varc:value(V, X1),
+    io:format("X1 = ~w\n", [V1]),
+    true = V1 =:= ?TRUE,
+
     V2 = varc:value(V, X2),
     io:format("X2 = ~w\n", [V2]),
-    true = V2 =:= ?TRUE,
+    true = V2 =:= 0,
 
     V3 = varc:value(V, X3),
     io:format("X3 = ~w\n", [V3]),
-    true = V3 =:= 0,
+    true = V3 =:= ?FALSE,
 
     V4 = varc:value(V, X4),
     io:format("X4 = ~w\n", [V4]),
-    true = V4 =:= ?FALSE,
-
-    V5 = varc:value(V, X5),
-    io:format("X5 = ~w\n", [V5]),
-    true = V5 =:= 0,
+    true = V4 =:= 0,
 
     io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
@@ -303,19 +302,19 @@ order() ->
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
     V = varc:new(), 
+    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    NX4 = -X4,
-    C0 = add_clause(V, [X2,X3]),
-    C1 = add_clause(V, [X2,-X3]),
+    NX3 = -X3,
+    C0 = add_clause(V, [X1,X2]),
+    C1 = add_clause(V, [X1,-X2]),
     io:format("subst0: Clause before\n"),
     print_clauses(V),
-    varc:subst(V, X4, X3),
+    varc:subst(V, X3, X2),
     io:format("subst1: Clause after\n"),    
     print_clauses(V),
-    [X2,X4] = lists:sort(varc:get_clause(V, C0)),
-    [NX4,X2] = lists:sort(varc:get_clause(V, C1)),
+    [X1,X3] = lists:sort(varc:get_clause(V, C0)),
+    [NX3,X1] = lists:sort(varc:get_clause(V, C1)),
     ok.
 
 %% simply substitute {X2,X3} [X2/X3] => {X2}
@@ -412,66 +411,67 @@ subst5() ->
 
 watch1() ->
     V = varc:new(),
+    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
     X5 = varc:add_variable(V),
-    X6 = varc:add_variable(V),
 
-    C1 = add_clause(V, [X6,X5,X4,X3,X2]),
-    [X6,X5,X4,X3,X2] = varc:get_clause(V, C1),
-
+    C1 = add_clause(V, [X5,X4,X3,X2,X1]),
+       [X1,X2,X3,X4,X5] = varc:get_clause(V, C1),
+    %%  0  A   0  0  0
     %% initial watch points are set in the end!
     4 = varc:clause_info(V, C1, watch0),
     3 = varc:clause_info(V, C1, watch1),
 
-    %% bind X3, move wp 0
+    %% bind X4, move wp 0
     varc:set_level(V, 1),
+    varc:bind(V, -X4),
+    true = varc:eval(V),
+
+    4 = varc:clause_info(V, C1, watch0),
+    0 = varc:clause_info(V, C1, watch1),
+
+    %% bind -X3, not watched, watch points should stay the same
+    varc:set_level(V, 2),
     varc:bind(V, -X3),
     true = varc:eval(V),
 
     4 = varc:clause_info(V, C1, watch0),
     0 = varc:clause_info(V, C1, watch1),
 
-    %% bind -X5, not watched, watch points should stay the same
-    varc:set_level(V, 2),
+    varc:set_level(V, 3),
+    varc:bind(V, -X1),
+    true = varc:eval(V),
+
+    4 = varc:clause_info(V, C1, watch0),
+    1 = varc:clause_info(V, C1, watch1),
+
+    varc:set_level(V, 4),
     varc:bind(V, -X5),
     true = varc:eval(V),
 
     4 = varc:clause_info(V, C1, watch0),
-    0 = varc:clause_info(V, C1, watch1),
+    1 = varc:clause_info(V, C1, watch1),
 
-    varc:set_level(V, 3),
-    varc:bind(V, -X2),
-    true = varc:eval(V),
+    ?TRUE = varc:value(V, X2),
 
-    2 = varc:clause_info(V, C1, watch0),
-    0 = varc:clause_info(V, C1, watch1),
-
-    varc:set_level(V, 4),
-    varc:bind(V, -X6),
-    true = varc:eval(V),
-
-    2 = varc:clause_info(V, C1, watch0),
-    0 = varc:clause_info(V, C1, watch1),
-    ?TRUE = varc:value(V, X4),
-
-    {C1,_Pos=2,_Lev=4} = varc:implication_clause(V, X4),
+    {C1,_Pos=1,_Lev=4} = varc:implication_clause(V, X2),
 
     %% add clauses under the above bindings
-    Y3 = -X6, Y2 = -X5, Y1 = -X3, 
+    Y3 = -X5, Y2 = -X4, Y1 = -X2, 
     C2 = add_clause(V, [Y3, Y2, Y1]),
-    [Y3, Y2, Y1] = varc:get_clause(V, C2),
+    [Y1, Y2, Y3] = varc:get_clause(V, C2),
 
-    0 = varc:clause_info(V, C2, watch0),
-    1 = varc:clause_info(V, C2, watch1),
+    2 = varc:clause_info(V, C2, watch0),
+    0 = varc:clause_info(V, C2, watch1),
 
-    Z3 = X5, Z2 = X4, Z1 = -X2,
+    Z3 = X4, Z2 = X3, Z1 = -X1,
     C3 = add_clause(V, [Z3,Z2,Z1]),
-    [Z3,Z2,Z1] = varc:get_clause(V, C3),
+    [Z1,Z2,Z3] = varc:get_clause(V, C3),
 
-    1 = varc:clause_info(V, C3, watch0),
-    2 = varc:clause_info(V, C3, watch1),
+    0 = varc:clause_info(V, C3, watch0),
+    1 = varc:clause_info(V, C3, watch1),
 
     ok.
 

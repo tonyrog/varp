@@ -42,7 +42,7 @@ run(Bs, Param) ->
 			   {Continue,{Count,[Model|Acc]}}
 		   end, {0,[]});
 	count ->
-	    bt(Bs, fun(Count0,Bs1) -> 
+	    bt(Bs, fun(Count0,Bs1) ->
 			   Count = Count0+1,
 			   if Print =:= false -> ok;
 			      true -> varp:output_model(Bs1,Count)
@@ -81,27 +81,29 @@ init(Bs) ->
     %% io:format("I0=~w, next=~w, num=~w\n", [I0,Next,Num]),
     case Next  of
 	false  -> {model,[]};
-	{I,Xi} -> {true,[{I,[Xi,-Xi],?LEVEL}]}
+	{I,Xi} -> {true,[{I,0,[Xi,-Xi],?LEVEL}]}
     end.
 
-next([{_,[],_}|Stack1],Bs) ->
+next([{_,_,[],_}|Stack1],Bs) ->
     undo(Bs,Stack1),
     next(Stack1,Bs);
-next([{I,[Xi|Xs],Level}|Stack],Bs) ->
+next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
     varp_formula:set_level(Bs,Level),
     case eq_eval(Bs,Xi,Level) of
 	false -> %% hook this?
+	    Stack1 = [{I,Xi,Xs,Level}|Stack],
+	    proof_output(Bs, Stack1),
 	    varp_formula:undo_level(Bs,Level),
-	    next([{I,Xs,Level}|Stack],Bs);
+	    next(Stack1,Bs);
 	true ->
 	    Next = varp_formula:next_unbound(Bs,I),
 	    %% Num = varp_formula:number_of_unbound(Bs),
 	    %% io:format("I=~w, next=~w, num=~w\n", [I,Next,Num]),
 	    case Next of
 		false ->
-		    {model,[{I,Xs,Level}|Stack]};
+		    {model,[{I,Xi,Xs,Level}|Stack]};
 		{J,Xj} ->
-		    {true,[{J,[Xj,-Xj],Level+1},{I,Xs,Level}|Stack]}
+		    {true,[{J,0,[Xj,-Xj],Level+1},{I,Xi,Xs,Level}|Stack]}
 	    end
     end;
 next([],_Bs) ->
@@ -123,10 +125,23 @@ loop(Stack,Func,Acc,Bs) ->
 	    {false,Acc}
     end.
 
-undo(Bs,[{_,_,Level}|_]) ->
+undo(Bs,[{_,_,_,Level}|_]) ->
     varp_formula:undo_level(Bs,Level);
 undo(_Bs,[]) ->
     ok.
+
+%% Xi is the current decision, that failed, 
+%% Stack contains the negated previous decisions
+proof_output(Bs, Stack) ->
+    case varp_formula:getopt(Bs, proof_output) of
+	none ->
+	    ok;
+	_ ->
+	    Stack1 = lists:dropwhile(fun({_,_,Xs,_}) -> Xs =:= [] end, Stack),
+	    Clause = [-Xj || {_,Xj,_,_} <- Stack1], %% decision clause
+	    %% Clause = [-Xj || {_,Xj,_,_} <- Stack], %% decision clause
+	    varp_formula:proof_output(Bs,$a,Clause)
+    end.
 
 eq_eval(Bs,L,_D) ->
     ?dbg("~seq_eval: ~w, ~s/~s\n", 

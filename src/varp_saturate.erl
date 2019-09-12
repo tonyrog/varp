@@ -208,10 +208,13 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 	    pop(Bs, Level),
 	    case eq_eval(Bs,X,Level+1) of
 		false ->
+		    varp_formula:proof_output(Bs,$a,[X]),
+		    varp_formula:proof_output(Bs,$a,[]),
 		    %% L+1 ?  keep bindings?
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
 		true ->
+		    varp_formula:proof_output(Bs,$a,[X]),
 		    Ls = varp_formula:get_bindings(Bs, Level+1),
 		    varp_formula:move_level(Bs, Level+1, Level),
 		    varp_formula:log_bindings(Bs, X, ?TRUE, Ls),
@@ -223,6 +226,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 	    pop(Bs,Level),
 	    case push_eq_eval(Bs,X,Level) of
 		false ->
+		    varp_formula:proof_output(Bs,$a,[-X]),
 		    ?dbg("~scontradiction, undo ~w\n", 
 			 [indent(Level),Level]),
 		    pop(Bs,Level),
@@ -234,8 +238,19 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 			 [indent(Level),varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(
 			    Bs, tl(varp_formula:get_bindings(Bs,Level+1)))]),
-		    %% FIXME: if tl(Ls) = [] then do nothig...
+		    %% FIXME: if tl(Ys) = [] then do nothig...
 		    Ys = varp_formula:intersect_bindings(Bs, X, tl(Ls)),
+		    lists:foreach(
+		      fun({A,B}) ->
+			      %% A -> B, B -> A  (-A,B), (-B,A)
+			      varp_formula:proof_output(Bs,$a,[-A,B]),
+			      varp_formula:proof_output(Bs,$a,[-B,A]);
+			 (A) ->
+			      %% X -> A, ~X -> A  (-X,A) (X, A)
+			      varp_formula:proof_output(Bs,$a,[-X,A]),
+			      varp_formula:proof_output(Bs,$a,[ X,A]),
+			      varp_formula:proof_output(Bs,$a,[A])
+		      end, Ys),
 		    pop(Bs,Level),
 		    varp_formula:set_level(Bs,Level),
 		    %% io:format("Ys = ~w\n", [Ys]),

@@ -24,7 +24,8 @@ run(Bs, _Param) ->
 		false -> false;
 		true ->
 		    case varp_formula:eval(Bs) of
-			false -> false;
+			false ->
+			    false;
 			true -> Bs
 		    end
 	    end

@@ -36,7 +36,7 @@
 #define SIGNED_LITERALS
 // #define PACKED_VALUE 4
 // #define CLAUSE2_MAP          // require LIT_INTEGER & !SIGNED_LITERALS
-#define TWO_CLAUSES
+// #define TWO_CLAUSES
 // #define ASSERTIONS
 // #define DEBUG
 // #define DEBUG_MEM
@@ -138,6 +138,10 @@ typedef enum {
 #define PACK(x)   ((x)&0x3)
 #define IS_CONSTANT(x) ((x)>1)   // true=2, false=3 
 #endif
+
+// FIXME should vary according sizeof(lit_t)!
+#define TRUE   67108864
+#define FALSE  -67108864
 
 #define PACKED_BYTES(x) (((x)+PACKED_VALUE-1)/PACKED_VALUE)
 
@@ -810,8 +814,10 @@ static inline literal_t* neg_ll(literal_t* lp)
 
 static inline literal_t* vindex_ll(varp_t* vp, int vix)
 {
-    return (vix < 0) ? &vp->var_map[-vix]->lit[LIT_NEG] :
-	&vp->var_map[vix]->lit[LIT_POS];
+    if (vix == TRUE) return LL_TRUE(vp);
+    else if (vix == FALSE)  return LL_FALSE(vp);
+    else if (vix < 0) return &vp->var_map[-vix]->lit[LIT_NEG];
+    else return &vp->var_map[vix]->lit[LIT_POS];
 }
 
 static inline lit_t vindex_l(varp_t* vp, int vix)
@@ -900,15 +906,15 @@ static inline ival_t get_vv(varp_t* vp, variable_t* var)
 {
 #ifdef PACKED_VALUE
     ival_t ivalue;
-#if PACKED_VALUE == 1
     int i = var->vix;
+#if PACKED_VALUE == 1
     ivalue = UNPACK(vp->var_value[i]);
 //    printf("get vix=%d, value[%d]=%02x, value=%d\r\n",
 //	   var->vix, i, vp->var_value[i], ivalue);
     return ivalue;
 #elif PACKED_VALUE == 4
-    int i = var->vix >> 2;
-    int j = ((var->vix) & 0x3) << 1;  // shift 0,2,4,6
+    int j = (i & 0x3) << 1;  // shift 0,2,4,6    
+    i >>= 2;
     ivalue = UNPACK(vp->var_value[i] >> j);
 //    printf("get vix=%d, value[%d:%d]=%02x, value=%d\r\n",
 //	   var->vix, i, j, vp->var_value[i], ivalue);    
@@ -924,15 +930,14 @@ static inline ival_t get_vv(varp_t* vp, variable_t* var)
 static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
 {
 #ifdef PACKED_VALUE
-    
-#if PACKED_VALUE == 1
     int i = var->vix;
+#if PACKED_VALUE == 1
     vp->var_value[i] = PACK(ivalue);
 //    printf("set vix=%d, vallue=%d, packed[%d]=%02x\r\n",
 //	   var->vix, ivalue, i, vp->var_value[i]);
 #elif PACKED_VALUE == 4
-    int i = var->vix >> 2;
-    int j = ((var->vix)&0x3) << 1;  // shift 0,2,4,6
+    int j = (i&0x3) << 1;  // shift 0,2,4,6    
+    i >>= 2;
     vp->var_value[i] = (vp->var_value[i] & ~(0x3<<j)) | (PACK(ivalue) << j);
 //    printf("set vix=%d, ivalue=%d, packed[%d]=%02x\r\n",
 //	   var->vix, ivalue, i, vp->var_value[i]);    
@@ -1742,7 +1747,7 @@ static void activate_levels(varp_t* vp, float delta)
 static void activity_decay(varp_t* vp, float decay)
 {
     int i;
-    for (i = 2; i < (int)vp->vnext; i++)
+    for (i = 1; i < (int)vp->vnext; i++)
 	vp->var_map[i]->activity /= decay;
 }
 
@@ -1758,7 +1763,7 @@ static void init_literal(literal_t* lp, variable_t* var, int sign)
     lp->xlast  = &lp->xfirst;
 }
 
-static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
+static void init_variable(varp_t* vp, variable_t* var, ival_t value, int vix)
 {
     var->vix       = vix;
     var->next      = NULL;    
@@ -1774,7 +1779,8 @@ static void init_variable(varp_t* vp, variable_t* var, int value, int vix)
     var->strname = NULL;
     var->names = NULL;
 
-    set_vv(vp, var, value);  // may use var->vix!!!
+    if (vix != TRUE)
+	set_vv(vp, var, value);  // may use var->vix!!!
 
     init_literal(&var->lit[LIT_POS], var, 1);
     init_literal(&var->lit[LIT_NEG], var, -1);
@@ -1917,7 +1923,6 @@ static int vif_get_number(ErlNifEnv* env,ERL_NIF_TERM arg,double* dp)
     return 1;
 }
 
-
 // get primitive literal value
 static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
 		      literal_t** lpp)
@@ -1925,7 +1930,14 @@ static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
     int x;
     if (!enif_get_int(env, arg, &x))
 	return 0;
-    if (x == 0) x = -1;  // external 0 is alias for -1 (false)
+    if (x == TRUE) {
+	*lpp = LL_TRUE(vp);
+	return 1;
+    }
+    else if ((x == FALSE) || (x == 0)) {
+	*lpp = LL_FALSE(vp);
+	return 1;
+    }
     else if (ABS(x) >= (int)vp->vnext) {
 	DBG("literal %d out of range\r\n", x);
 	return 0;
@@ -1940,7 +1952,14 @@ static int vif_get_l(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg, lit_t* l)
     int x;
     if (!enif_get_int(env, arg, &x))
 	return 0;
-    if (x == 0) x = -1;  // external 0 is alias for -1 (false)
+    if (x == TRUE) {
+	*l = VARP_TRUE(vp);
+	return 1;
+    }
+    else if ((x == FALSE) || (x == 0)) {
+	*l = VARP_FALSE(vp);
+	return 1;
+    }    
     else if (ABS(x) >= (int)vp->vnext) {
 	DBG("literal %d out of range\r\n", x);
 	return 0;
@@ -2081,6 +2100,8 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     ERL_NIF_TERM head, tail;
     qtype_t qtype = lifo;
     bool_t activity = false;
+
+    DBG("new varc instance\r\n");
     
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	const ERL_NIF_TERM* elem;
@@ -2132,7 +2153,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 
     vp->qtype = qtype;
     vp->activity = activity;
-    vp->vnext = 2;
+    vp->vnext = 1;
     vp->vsize = vsize;
     vp->vnum  = 0;
 
@@ -2200,12 +2221,10 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     vp->order_map[0] = 0;
     init_variable(vp, &vp->undef, IUNDEF, 0);
     vp->var_map[0] = &vp->undef;
-    vp->order_map[1] = 1;
-    init_variable(vp, &vp->constant, ITRUE, 1);
-    vp->var_map[1] = &vp->constant;
+    init_variable(vp, &vp->constant, ITRUE, TRUE);
 #ifdef LIT_INTEGER
-    vp->ltrue  = ITRUE;
-    vp->lfalse = IFALSE;
+    vp->ltrue  = IMPORT(TRUE);
+    vp->lfalse = IMPORT(FALSE);
 #else
     vp->ltrue = &vp->constant.lit[LIT_POS];
     vp->lfalse = &vp->constant.lit[LIT_NEG];
@@ -2574,7 +2593,7 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	int vix = vp->order_map[i];
 	if (!vis_bound(vp, vix))
 	    return enif_make_tuple2(env,enif_make_int(env, i),
@@ -2624,12 +2643,10 @@ static int order_reset(varp_t* vp)
 
     vp->order_map[0] = 0;
     vp->var_map[0]->map_index = 0;
-    vp->order_map[1] = 1;
-    vp->var_map[1]->map_index = 1;
     b = 1;
     u = vp->vnext;
 
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	if (vis_bound(vp, i)) {
 	    b++;
 	    vp->order_map[b] = i;
@@ -2644,11 +2661,10 @@ static int order_reset(varp_t* vp)
     return u;
 }
 
-
 static void order_k_identity(varp_t* vp, int k)
 {
     int i;
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	vp->var_map[i]->pkey[k] = (float) i;
 	vp->var_map[i]->nkey[k] = (float) i;	
     }
@@ -2657,7 +2673,7 @@ static void order_k_identity(varp_t* vp, int k)
 static void order_k_random(varp_t* vp, int k)
 {
     int i;
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	int v1 = arc4_random_uniform(&vp->as, 0x7fffff);
 	int v2 = arc4_random_uniform(&vp->as, 0x7fffff);
 	vp->var_map[i]->pkey[k] = v1 / (float)0x7fffff;
@@ -2668,7 +2684,7 @@ static void order_k_random(varp_t* vp, int k)
 static void order_k_undefined(varp_t* vp, int k)
 {
     int i;
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	vp->var_map[i]->pkey[k] = 0.0f;
 	vp->var_map[i]->nkey[k] = 0.0f;
     }
@@ -2678,7 +2694,7 @@ static void order_k_undefined(varp_t* vp, int k)
 static void order_k_degree(varp_t* vp, int k)
 {
     int i;
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->lit[LIT_POS].degree;
 	var->nkey[k] = var->lit[LIT_NEG].degree;
@@ -2692,7 +2708,7 @@ static void order_k_rank(varp_t* vp, int k)
 {
     int i;
     
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	vp->var_map[i]->pkey[k] = 0.0f;
 	vp->var_map[i]->nkey[k] = 0.0f;
     }
@@ -2724,7 +2740,7 @@ static void order_k_activity(varp_t* vp, int k)
 {
     int i;
     
-    for (i = 2; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnext; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->activity;
 	var->nkey[k] = var->activity;
@@ -2745,9 +2761,11 @@ static void order_k_activity(varp_t* vp, int k)
 
 static int cmpk(variable_t* ap, variable_t* bp, int k)
 {
-    int a = (ap->pkey[k] >= ap->nkey[k]) ? ap->pkey[k] : ap->nkey[k];
-    int b = (bp->pkey[k] >= bp->nkey[k]) ? bp->pkey[k] : bp->nkey[k];
-    return a - b;
+    float a = (ap->pkey[k] >= ap->nkey[k]) ? ap->pkey[k] : ap->nkey[k];
+    float b = (bp->pkey[k] >= bp->nkey[k]) ? bp->pkey[k] : bp->nkey[k];
+    if (a < b) return -1;
+    else if (a > b) return 1;
+    return 0;
 }
 
 static int cmp_keys QSORT_R_ARGS(const void* a, const void* b,void* arg)
@@ -2805,7 +2823,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	if (argv[i] == ATOM(identity))
 	    order_k_identity(vp, k);
 	else if (argv[i] == ATOM(undefined))
-	    order_k_undefined(vp, k);	
+	    order_k_undefined(vp, k);
 	else if (argv[i] == ATOM(random))
 	    order_k_random(vp, k);
 	else if ((argv[i] == ATOM(degree)) || (argv[i] == ATOM(plus_degree))) {
@@ -2836,8 +2854,15 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     }
     // install identity order
     u = order_reset(vp);
+
+//    for (i = u; i < (int)vp->vnext; i++)
+//	printf("order_map[%d] = %d\r\n", i, vp->order_map[i]);
+    
     // sort unbound variables according to sort_keys
     QSORT_R(vp->order_map+u, vp->vnext-u, sizeof(int), cmp_keys, vp);
+
+//    for (i = u; i < (int)vp->vnext; i++)
+//	printf("order_map[%d] = %d\r\n", i, vp->order_map[i]);
 
     k1 = ABS(vp->sort_key[0]);
     k2 = ABS(vp->sort_key[1]);
@@ -2845,12 +2870,12 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     for (i = u; i < (int)vp->vnext; i++) {
 	int v = vp->order_map[i];
 	variable_t* var = vp->var_map[v];
-	int r;
+	float r;
 
 	var->map_index = i;
-	if ((r = (var->pkey[k1] - var->nkey[k1])) == 0)
+	if ((r = (var->pkey[k1] - var->nkey[k1])) == 0.0)
 	    r = (var->pkey[k2] - var->nkey[k2]);
-	if (r < 0)
+	if (r < 0.0)
 	    vp->order_map[i] = -v;
     }
     return ATOM(ok);
@@ -2974,9 +2999,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
 
     map[0] = 0;
     vp->var_map[0]->flags |= VAR_FLAG_MARK;
-    map[1] = 1;
-    vp->var_map[1]->flags |= VAR_FLAG_MARK;
-    mi = 2;
+    mi = 1;
     // copy all bound variables
     while ((mi < vp->vnext) && vis_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
@@ -3026,14 +3049,18 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     UNUSED(argc);
     literal_t* lp;
     varp_t* vp;
-    ival_t ivalue;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_literal(env, vp, argv[1], &lp))
 	return enif_make_badarg(env);
-    ivalue = get_ll(vp, lp);
-    return enif_make_int(env, EXPORT(ivalue));
+    switch(get_ll(vp, lp)) {
+    case ITRUE:  return enif_make_int(env, TRUE);
+    case IFALSE: return enif_make_int(env, FALSE);
+    case IUNDEF: return enif_make_int(env, 0);
+    case IBOUND: return enif_make_int(env, 0);
+    default: return enif_make_int(env, 0);
+    }
 }
 
 static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
@@ -3280,7 +3307,7 @@ static int watch_clause(varp_t* vp, clause_t* cp)
     
     if ((la[0] == INT_MAX) && (la[1] != INT_MAX)) {
 	if (!dead) {
-	    printf("Set UNIT\r\n");
+	    // printf("Set UNIT\r\n");
 	    put_l(vp, cp->lit[pa[0]], ITRUE, pa[0], cp->cix, vp->level);
 	}
 	return 1;
@@ -3386,8 +3413,8 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    lit_t yyl     = cp->lit[yptr->p];
 	    int rewatch = 0;
 
-	    enif_fprintf(stdout, "subst cix=%d, Y [%d/%d]\r\n",
-			 cp->cix, export_l(xl), export_l(yyl));
+//	    enif_fprintf(stdout, "subst cix=%d, Y [%d/%d]\r\n",
+//			 cp->cix, export_l(xl), export_l(yyl));
 	    
 	    // check if Y was TWL then update
 	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
@@ -3420,8 +3447,8 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    lit_t xxl = cp->lit[xptr->p];
 	    int rewatch = 0;
 
-	    enif_fprintf(stdout, "subst cix=%d, X,Y [%d/%d]\r\n",
-			 cp->cix, export_l(xxl), export_l(yyl));
+//	    enif_fprintf(stdout, "subst cix=%d, X,Y [%d/%d]\r\n",
+//			 cp->cix, export_l(xxl), export_l(yyl));
 	
 	    // check if Y was TWL then update
 	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
@@ -3460,8 +3487,8 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    lit_t xxl = cp->lit[nxptr->p];
 	    int rewatch = 0;
 
-	    enif_fprintf(stdout, "subst cix=%d, !X,Y [%d/%d]\r\n",
-			 cp->cix, export_l(xxl), export_l(yyl));
+//	    enif_fprintf(stdout, "subst cix=%d, !X,Y [%d/%d]\r\n",
+//			 cp->cix, export_l(xxl), export_l(yyl));
 	
 	    // check if Y was TWL then update
 	    if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
@@ -4126,6 +4153,28 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 //
 // add clause (and normalize, remove literals)
 //
+static int cmp_abs_lit QSORT_R_ARGS(const void* ap,const void* bp,void* arg)
+{
+    (void) arg;
+    lit_t a = *((lit_t*) ap);
+    lit_t b = *((lit_t*) bp);
+
+    if (a == b) return 0;
+#ifdef LIT_INTEGER
+    if (INDEX(a) == INDEX(b)) {
+	if (IS_NEGATED(a)) return -1;
+	return 1;
+    }
+    return INDEX(a) - INDEX(b);
+#else
+    if (a->var == b->var) {
+	if (a->sign < 0) return -1;
+	else return 1;
+    }
+    return a->var->vix - b->var->vix;
+#endif
+}
+
 static int cmp_rev_abs_lit QSORT_R_ARGS(const void* ap,const void* bp,void* arg)
 {
     (void) arg;
@@ -4249,7 +4298,7 @@ static size_t sort_clause_array(varp_t* vp, lit_t* lit, size_t size)
 		case ITRUE:  lit[i] = VARP_TRUE(vp); break;
 		case IFALSE: lit[i] = VARP_FALSE(vp); break;
 		case IBOUND:
-		case IUNDEF:		    
+		case IUNDEF:	    
 		default: break;
 		}
 	    }
@@ -4258,7 +4307,7 @@ static size_t sort_clause_array(varp_t* vp, lit_t* lit, size_t size)
     PRINT_LIT_ARRAY("   filt0", lit, size);
     
     // sort all literals by absolute value
-    QSORT_R(lit, size, sizeof(lit_t), cmp_rev_abs_lit, vp);
+    QSORT_R(lit, size, sizeof(lit_t), cmp_abs_lit, vp);
 
     PRINT_LIT_ARRAY(" sorted", lit, size);
 
