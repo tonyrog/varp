@@ -20,7 +20,7 @@
 -export([get_symbol/2]).
 -export([is_atom/2]).
 -export([find_symbol/2]).
--export([variable_info/3]).
+-export([variable_info/2, variable_info/3]).
 -export([literal_info/3]).
 -export([value/2]).
 -export([bind/2, bind/3]).
@@ -73,7 +73,7 @@
 -export([subscribe/2]).
 -export([clause_first/1, clause_next/2]).
 
--export([get_info/1]).
+-export([info/1]).
 -export([info_keys/0]).
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
@@ -452,7 +452,7 @@ order_all_(V, I, Acc) ->
 	{I1,Var} -> order_all_(V, I1, [Var|Acc])
     end.
 
-get_info(Vp) ->
+info(Vp) ->
     [ {Key,info(Vp, Key)} || Key <- info_keys()].
 
 info_keys() ->
@@ -470,9 +470,14 @@ info_keys() ->
      value_stack_size,
      grow,
      size,
-     permanent,
+     permanent,        %% index of first permanent clause
      keep,
-     level
+     level,
+     literal_size,     %% 8,16,32,64 (sizeof literal)
+     literal_integer,  %% true,false (integer or pointer)
+     literal_signed,   %% true,false (when literal_integer)
+     value_packing,    %% 1,4,undefined (variable value packing)
+     edge_list         %% true,false (edge_list is enabled or not)
     ].
 
 get_number_of_variables(Vp) ->

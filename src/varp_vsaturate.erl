@@ -127,7 +127,7 @@ saturate_vec__(Bs,X,V,Level) ->
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    varp_formula:undo_level(Bs,Level),
-	    case eq_eval(Bs,X,?TRUE,Level) of
+	    case eq_eval(Bs,X,?T,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
@@ -139,7 +139,7 @@ saturate_vec__(Bs,X,V,Level) ->
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 		    varp_formula:undo_level(Bs,Level),
-		    eq_eval(Bs,X,?TRUE,Level);
+		    eq_eval(Bs,X,?T,Level);
 		true ->
 		    Xs = varp_formula:get_bindings(Bs,Level+1), %% + X=false!
 		    ?dbg("~s~s/false: => {~s}\n", 
@@ -148,7 +148,7 @@ saturate_vec__(Bs,X,V,Level) ->
 			  varp_formula:fmt_bind_list(Bs,Xs)]),
 		    varp_formula:undo_level(Bs,Level), %% (X=false)
 		    
-		    case mark_eq_eval(Bs,X,?TRUE,Level) of
+		    case mark_eq_eval(Bs,X,?T,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level),Level]),
@@ -177,7 +177,7 @@ install_bindings(Bs, Bnds) ->
     Bcp = varp_option:getopt(bcp,Bs#bs.option),
     install_bindings(Bs, Bcp, Bnds).
 
-install_bindings(Bs,Bcp,[{Y,W}|Xs]) when abs(W) =:= ?TRUE ->
+install_bindings(Bs,Bcp,[{Y,W}|Xs]) when abs(W) =:= ?T ->
     varp_formula:equal(Bs,Y,W),
     install_bindings(Bs,Bcp,Xs);
 install_bindings(Bs,Bcp=false,[{Y,W}|Xs]) ->

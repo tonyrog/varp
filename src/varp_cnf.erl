@@ -63,12 +63,12 @@ cnf(Bs, Opts) ->
 
 cnf(Fd, Type, Raw, Bs) ->
     N = if Raw =:= false -> count_number_of_clauses(Bs);
-	   true -> varp_formula:get_info(Bs, number_of_clauses)
+	   true -> varp_formula:info(Bs, number_of_clauses)
 	end,	   
     M = if Raw =:= false -> 
-		varp_formula:get_info(Bs, number_of_unbound_variables);
+		varp_formula:info(Bs, number_of_unbound_variables);
 	   true ->
-		varp_formula:get_info(Bs, number_of_variables)
+		varp_formula:info(Bs, number_of_variables)
 	end,
     case Type of
 	cnf ->

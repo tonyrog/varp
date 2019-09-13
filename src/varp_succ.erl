@@ -56,9 +56,9 @@ succ(Bs, Opts) ->
 
 succ(Fd, Type, Bs) ->
     N = count_number_of_clauses(Bs),
-    VarMap = get_var_map(Bs),
+    %% VarMap = get_var_map(Bs),
 
-    M = varp_formula:get_info(Bs, number_of_unbound_variables),
+    M = varp_formula:info(Bs, number_of_unbound_variables),
     case Type of
 	cnf ->
 	    io:format(Fd, "p cnf ~w ~w\n", [M, N]);

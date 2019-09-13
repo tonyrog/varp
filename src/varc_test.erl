@@ -116,11 +116,13 @@ or_simplify() ->
     C0 = add_clause(V, [X2,X3,X4,X5]),
     C1 = add_clause(V, [X5,X4,X3,X2]),
     C20 = add_clause(V, [X1,X1,X1,X1,X1]),
-    C23 =add_clause(V, [X2,X3,X3,X3,X2]),
-    C3 = add_clause(V, [X2,X3,X2,X3,X4,?FALSE]),
+    C23 = add_clause(V, [X2,X3,X3,X3,X2]),
+    C3 = add_clause(V, [X2,X3,X2,X3,X4,?F]),
     C4 = add_clause(V, [X2,X3,X2,X3,X4]),
-    C5 = add_clause(V, [X2,?TRUE,X3,?FALSE,X4,?TRUE,X4,?TRUE, X5,?FALSE]),
-    C6 = add_clause(V, [X2,?TRUE,X3,?FALSE,-X3,?TRUE,X3,?TRUE,-X3,?FALSE,X4]),
+    C5 = add_clause(V, [X2,?T,X3,?F,X4,?T,X4,?T, X5,?F]),
+    C6 = add_clause(V, [X2,?T,X3,?F,-X3,?T,X3,?T,-X3,?F,X4]),
+
+    io:format("C3=~w, C4=~w\n", [C3,C4]),
 
     [X2,X3,X4,X5] = get_clause(V, C0),
     [X2,X3,X4,X5] = get_clause(V, C1),
@@ -131,8 +133,6 @@ or_simplify() ->
     [X2,X3,X4] = get_clause(V, C4),
     C5 = true,
     C6 = true,
-    %% [?TRUE,X2,X3,X4,X5] = get_clause(V, C5),
-    %% [?TRUE,X2,X4] = get_clause(V, C6),
     ok.
 
 %% Test eval
@@ -143,16 +143,16 @@ or_eval() ->
     X3 = add_variable(V),
     X4 = add_variable(V),
 
-    0 = varc:value(V, X1),
-    0 = varc:value(V, X2),
-    0 = varc:value(V, X3),
-    0 = varc:value(V, X4),
+    undefined = varc:value(V, X1),
+    undefined = varc:value(V, X2),
+    undefined = varc:value(V, X3),
+    undefined = varc:value(V, X4),
 
     varc:set_level(V, 1),
-    C0 = add_clause(V, [X1, ?FALSE, ?FALSE]),
-    C1 = add_clause(V, [X2, ?TRUE, ?TRUE, ?TRUE]),
-    C2 = add_clause(V, [-X3, ?FALSE, ?FALSE, ?FALSE]),
-    C3 = add_clause(V, [X4, ?FALSE, ?TRUE, ?FALSE, ?TRUE]),
+    C0 = add_clause(V, [X1, ?F, ?F]),
+    C1 = add_clause(V, [X2, ?T, ?T, ?T]),
+    C2 = add_clause(V, [-X3, ?F, ?F, ?F]),
+    C3 = add_clause(V, [X4, ?F, ?T, ?F, ?T]),
     io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     print_clauses(V),
 
@@ -161,19 +161,19 @@ or_eval() ->
 
     V1 = varc:value(V, X1),
     io:format("X1 = ~w\n", [V1]),
-    true = V1 =:= ?TRUE,
+    true = V1 =:= ?T,
 
     V2 = varc:value(V, X2),
     io:format("X2 = ~w\n", [V2]),
-    true = V2 =:= 0,
+    true = V2 =:= undefined,
 
     V3 = varc:value(V, X3),
     io:format("X3 = ~w\n", [V3]),
-    true = V3 =:= ?FALSE,
+    true = V3 =:= ?F,
 
     V4 = varc:value(V, X4),
     io:format("X4 = ~w\n", [V4]),
-    true = V4 =:= 0,
+    true = V4 =:= undefined,
 
     io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
@@ -308,7 +308,7 @@ subst1() ->
     NX3 = -X3,
     C0 = add_clause(V, [X1,X2]),
     C1 = add_clause(V, [X1,-X2]),
-    io:format("subst0: Clause before\n"),
+    io:format("subst1: Clause before\n"),
     print_clauses(V),
     varc:subst(V, X3, X2),
     io:format("subst1: Clause after\n"),    
@@ -320,34 +320,32 @@ subst1() ->
 %% simply substitute {X2,X3} [X2/X3] => {X2}
 subst2() ->
     V = varc:new(), 
+    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    C0 = add_clause(V, [X2,X3]),
-    io:format("subst0: Clause before\n"),
+    C0 = add_clause(V, [X1,X2]),
+    io:format("subst2: Clause before\n"),
     print_clauses(V),
-    varc:subst(V, X2, X3),
-    io:format("subst1: Clause after\n"),
+    varc:subst(V, X1, X2),
+    io:format("subst2: Clause after\n"),
     print_clauses(V),
     io:format("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
     [] = lists:sort(varc:get_clause(V, C0)),
-    ?TRUE = varc:value(V, X2),
+    ?T = varc:value(V, X1),
     ok.
 
 subst3() ->
     V = varc:new(), 
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
     C0 = add_clause(V, [-X2,X3]),
-    io:format("subst0: Clause before\n"),
+    io:format("subst3: Clause before\n"),
     print_clauses(V),
     varc:subst(V, -X2, X3),
-    io:format("subst1: Clause after\n"),
+    io:format("subst3: Clause after\n"),
     print_clauses(V),
     io:format("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
     [] = lists:sort(varc:get_clause(V, C0)),
-    ?FALSE = varc:value(V, X2),
+    ?F = varc:value(V, X2),
     ok.
     
 subst4() ->
@@ -454,7 +452,7 @@ watch1() ->
     4 = varc:clause_info(V, C1, watch0),
     1 = varc:clause_info(V, C1, watch1),
 
-    ?TRUE = varc:value(V, X2),
+    ?T = varc:value(V, X2),
 
     {C1,_Pos=1,_Lev=4} = varc:implication_clause(V, X2),
 

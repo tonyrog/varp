@@ -77,7 +77,7 @@ saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
     case saturate_(Bs,K,TRef,MaxLaps,Threshold) of
 	false -> false;
 	{_Reason,Bs} -> 
-	    %% io:format("level = ~w\n", [varp_formula:get_info(Bs, level)]),
+	    %% io:format("level = ~w\n", [varp_formula:info(Bs, level)]),
 	    ?dbg("saturate limit ~w\n", [_Reason]),
 	    Bs
     end.
@@ -217,7 +217,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		    varp_formula:proof_output(Bs,$a,[X]),
 		    Ls = varp_formula:get_bindings(Bs, Level+1),
 		    varp_formula:move_level(Bs, Level+1, Level),
-		    varp_formula:log_bindings(Bs, X, ?TRUE, Ls),
+		    varp_formula:log_bindings(Bs, X, ?T, Ls),
 		    varp_formula:set_level(Bs,Level),
 		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
 	    end;

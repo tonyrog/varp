@@ -8,11 +8,11 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
--define(TRUE,  67108864).
--define(FALSE, -67108864).
+-define(TRUE,  t).
+-define(FALSE, f).
 
--define(T,  67108864).
--define(F, -67108864).
+-define(T,  t).
+-define(F,  f).
 
 -define(dbg0(F,As), ok).
 -define(dbg1(F,A), io:format((F),(A))).

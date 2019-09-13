@@ -139,7 +139,7 @@ run(Bs, Param) ->
 		    true ->
 			 0
 		 end,
-    Permanent = varp_formula:get_info(Bs, permanent),
+    Permanent = varp_formula:info(Bs, permanent),
     varp_formula:config(Bs, keep, KeepSize),
 
     case maps:get(display, Param) of
@@ -152,7 +152,7 @@ run(Bs, Param) ->
     case maps:get(restart_counter,Param) of
 	0 -> ok;
 	_ ->
-	    EvalCounter = varp_formula:get_info(Bs, eval_counter),
+	    EvalCounter = varp_formula:info(Bs, eval_counter),
 	    counters:put(Bs#bs.counters,?COUNTER_EVAL_COUNTER, EvalCounter)
     end,
     case maps:get(restart_interval,Param) of
@@ -303,17 +303,17 @@ contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
 		  add_conflict_clause(Bs1,Clause)
 	  end,
 
-    Learned0 = varp_formula:get_info(Bs2, number_of_learned_clauses),
+    Learned0 = varp_formula:info(Bs2, number_of_learned_clauses),
     NewLearnedClauses = length(LClauseList7) +
 	if JClause =:= undefined -> 0; true -> 1 end,
     Learned = Learned0 + NewLearnedClauses,
-    DoPurge = varp_formula:get_info(Bs2, keep) > 0,
+    DoPurge = varp_formula:info(Bs2, keep) > 0,
 
     DoRestartCount =
 	case maps:get(restart_counter,Param) of
 	    0 -> false;
 	    RestartCounter ->
-		EvalCounter = varp_formula:get_info(Bs, eval_counter),
+		EvalCounter = varp_formula:info(Bs, eval_counter),
 		PrevCounter = counters:get(Bs#bs.counters,
 					   ?COUNTER_EVAL_COUNTER),
 		if (EvalCounter - PrevCounter) >= RestartCounter ->
@@ -344,7 +344,7 @@ contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
 		    %% but we can re-order literals?
 		    ok
 	    end,
-	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
+	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
 	    NU = varp_formula:number_of_unbound(Bs2),
 	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", 
 		      [Learned, MaxLearned,Learned1,NU]),
@@ -357,7 +357,7 @@ contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
 	    varp_formula:set_level(Bs, ?TOP_LEVEL),
 	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
 	    varp_formula:del_unused_clauses(Bs),
-	    Learned1 = varp_formula:get_info(Bs2, number_of_learned_clauses),
+	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
 	    reorder(Bs),
@@ -461,7 +461,7 @@ do_stat(Bs, D1, D2) ->
 
 
 max_learned(Bs,Param) ->
-    Permanent = varp_formula:get_info(Bs, permanent),
+    Permanent = varp_formula:info(Bs, permanent),
     MaxLearnedClauses = maps:get(max_learned,Param),
     MaxLearnedFactor = maps:get(max_learned_factor,Param),
     case maps:get(display, Param) of
@@ -539,7 +539,7 @@ add_conflict_clause(Bs,Clause=[L]) ->
     Bs;
 add_conflict_clause(Bs,Clause) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
-    Max = varp_formula:get_info(Bs, max_clause_length),
+    Max = varp_formula:info(Bs, max_clause_length),
     L = length(Clause),
     if L >= Max ->
 	    L2 = L div 2,
@@ -623,7 +623,7 @@ conflict_analysis(Bs,Param,Level) ->
     Trail= [P|_] = get_literal_bindings(Bs,Level),
     ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
     Seen0 = #{ abs(P) => true }, %% a set of traversed literals
-    N = varp_formula:get_info(Bs,num_conflicting),
+    N = varp_formula:info(Bs, number_of_conflicting_clauses),
     CList = [ {I,varp_formula:conflicting_clause(Bs,I)} || 
 		I <- lists:seq(0, N-1)],
     M = maps:get(num_conflicts,Param),
