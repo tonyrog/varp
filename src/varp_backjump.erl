@@ -337,7 +337,7 @@ contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
     DoRestart = DoRestartCount orelse DoRestartTime,
 
     if DoPurge, JLevel =:= ?TOP_LEVEL ->
-	    if Learned >= MaxLearned ->
+	    if Learned > MaxLearned ->
 		    varp_formula:del_unused_clauses(Bs),
 		    reorder(Bs);
 	       true ->
@@ -350,7 +350,7 @@ contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
 		      [Learned, MaxLearned,Learned1,NU]),
 	    %%
 	    init(Bs,Param,MaxLearned);
-       DoPurge, Learned >= MaxLearned ->
+       DoPurge, Learned > MaxLearned ->
 	    %% restart and purge!
 
 	    undo_until(Bs, Level, ?TOP_LEVEL),
@@ -378,15 +378,15 @@ reorder(Bs) ->
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
     case N rem 2 of
 	0 ->
-	    io:format("OCCUR\n"),
-	    varp_formula:order_sort(Bs,'-occur',undefined,-1);
+	    io:format("degree\n"),
+	    varp_formula:order_sort(Bs,'-degree',undefined,-1);
 	1 ->
-	    io:format("RANDOM\n"),
+	    io:format("random\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,random,undefined,Seed);
 	2 ->
 	    %% enable when 2-klauses works again
-	    io:format("SATURATE\n"),
+	    io:format("saturate\n"),
 	    varp_saturate:saturate(Bs, 1, infinity, {{1},{1}}, 0)
     end.
 
@@ -533,7 +533,7 @@ model(Bs) ->
 add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,Clause=[L]) ->
-    ?dbg("conflict clause: ~s\n", [format_clause(Bs, _Clause)]),
+    ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
     true = varp_formula:bind(Bs,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     Bs;
@@ -549,13 +549,16 @@ add_conflict_clause(Bs,Clause) ->
 	    Bs2 = add_conflict_clause(Bs1,[Vi|CL1]),
 	    add_conflict_clause(Bs2,[-Vi|CL2]);
        true ->
-	    varp_formula:add_clause(Bs, Clause),
+	    ClauseIndex = varp_formula:add_clause(Bs, Clause),
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
 	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,
 			 length(Clause)),
-	    varp_formula:proof_output(Bs,$a,Clause),
+	    varp_formula:proof_output(Bs,$a,ClauseIndex),
 	    Bs
     end.
+
+abs_sort(Clause) ->
+    lists:sort(fun(A,B) -> abs(A) < abs(B) end, Clause).
 
 compress(Bs,Param,Clause) ->
     case maps:get(compress,Param) of

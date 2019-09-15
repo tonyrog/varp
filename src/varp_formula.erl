@@ -125,7 +125,8 @@ new() ->
 new(Options) when is_list(Options) ->
     new(maps:from_list(Options));  %% fixme validate?
 new(OptMap) when is_map(OptMap) ->
-    Vp  = varc:new([{qtype,maps:get(qtype,OptMap)}]),
+    Vp  = varc:new([{qtype,maps:get(qtype,OptMap)},
+		    {clause_hash,maps:get(clause_hash,OptMap)}]),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
@@ -257,11 +258,32 @@ or_clause(Bs,Xs) ->
     add_clause(Bs, Xs),
     Bs.
 
-del_clause(Bs, Cix) ->
-    varc:del_clause(Bs#bs.vp, Cix).
+%% delete clause by index or list of literals
+del_clause(Bs, IndexOrClause) ->
+    varc:del_clause(Bs#bs.vp, IndexOrClause).
 
 del_unused_clauses(Bs) ->
-    varc:del_unused_clauses(Bs#bs.vp).
+    V = Bs#bs.vp,
+    varc:sort_none_permanent_clauses(V),
+    case varp_formula:getopt(Bs, proof_output) of
+	none ->
+	    del_clauses(V, varc:clause_first_none_keep(V));
+	_ ->
+	    del_proof_clauses(Bs, V, varc:clause_first_none_keep(V))
+    end.
+
+del_clauses(_V, false) ->
+    ok;
+del_clauses(V, I) ->
+    varc:del_clause(V, I),
+    del_clauses(V, varc:clause_next(V, I)).
+
+del_proof_clauses(_Bs, _V, false) ->
+    ok;
+del_proof_clauses(Bs, V, I) ->
+    proof_output(Bs, $d, I),    
+    varc:del_clause(V, I),
+    del_proof_clauses(Bs, V, varc:clause_next(V, I)).
 
 clean_clauses(Bs) ->
     clean_clauses_(Bs, varc:clause_first(Bs#bs.vp)).
@@ -1165,6 +1187,9 @@ build_({{'PROD',Qs}, F}, Bs) ->
 
 %%
 %% Special build of cnf/snf
+%% in the cnf case assume that the clause are the
+%% literal integers
+%% in the snf case the literals are symbols
 %%
 build_cnf([CL|CLs], Bs) ->
     {Xs,Bs1} = args(CL,Bs),
@@ -2965,15 +2990,32 @@ proof_output(Bs, Prefix, Clause) ->
 	none ->
 	    ok;
 	binary ->
-	    Bin = varc:compress_clause(Bs#bs.vp, Clause),
+	    Clause1 = lookup_clause(Bs, Clause),
+	    %% fixme: lookup literals!
+	    Bin = varc:compress_clause(Bs#bs.vp, Clause1),
 	    file:write(Bs#bs.proof_fd, <<Prefix, Bin/binary, 0>>);
 	user ->
-	    Chars = [ [[proof_literal(Bs,Li),$\s] || Li <- Clause], "0\n"],
-	    io:put_chars(user, Chars);
-	_ -> %% text/user
-	    Chars = [ [[proof_literal(Bs,Li),$\s] || Li <- Clause], "0\n"],
-	    file:write(Bs#bs.proof_fd, Chars)
+	    Clause1 = lookup_clause(Bs, Clause),
+	    proof_output_text(user, Bs, Prefix, Clause1);
+	_ ->
+	    Clause1 = lookup_clause(Bs, Clause),
+	    proof_output_text(Bs#bs.proof_fd, Bs, Prefix, Clause1)
     end.
+
+lookup_clause(Bs, ClauseIndex) when is_integer(ClauseIndex) ->
+    varc:get_clause(Bs#bs.vp, ClauseIndex, undefined, true);
+lookup_clause(_Bs, Clause) when is_list(Clause) ->
+    Clause.
+
+proof_output_text(Fd, Bs, Prefix, Clause) ->
+    P = if Prefix =:= $a -> ""; true -> [Prefix,$\s] end,
+    Chars = [P,[[proof_literal(Bs,Li),$\s] || Li <- Clause], "0\n"],
+    if is_atom(Fd) ->
+	    io:put_chars(Fd, Chars);
+       true ->       
+	    file:write(Fd, Chars)
+    end.
+    
 
 proof_literal(Bs,Li) ->
     if Li < 0 ->
@@ -2989,6 +3031,22 @@ proof_literal(Bs,Li) ->
 		{ok,[P|_]} -> format_symbol(P)
 	    end
     end.
+
+lookup_literal(Bs,Li) when is_integer(Li) ->
+    if Bs#bs.vs =:= undefined ->
+	    Li;
+       Li < 0 ->
+	    case maps:find(-Li, Bs#bs.vs) of
+		error -> Li;
+		{ok,[{p,x,[I]}]} -> -I
+	    end;
+       Li > 0 ->
+	    case maps:find(Li, Bs#bs.vs) of
+		error -> Li;
+		{ok,[{p,x,[I]}]} -> I
+	    end
+    end.
+
 
 log_bindings(_Bs, _X, _Value, _Xs) ->
     %% log_(Bs, X, Value, Xs).

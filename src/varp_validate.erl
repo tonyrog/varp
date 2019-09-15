@@ -70,12 +70,12 @@ validate_loop(Fd,Type,Bs, I) ->
     end,
     case read_clause(Fd,Type,Bs) of
 	eof ->
-	    io:format("VALIDATED\n"),
+	    io:format("\nVALIDATED\n"),
 	    Bs;
 	error ->
-	    io:format("READ ERROR\n"),
+	    io:format("\nREAD ERROR\n"),
 	    error;
-	Clause ->
+	{a,Clause} ->
 	    %% io:format("check clause ~w\n", [Clause]),
 	    varp_formula:set_level(Bs,1),
 	    Res = eval_neg_literal_list(Bs, Clause),
@@ -87,10 +87,10 @@ validate_loop(Fd,Type,Bs, I) ->
 		    case varp_formula:eval(Bs) of
 			false ->
 			    case read_clause(Fd,Type,Bs) of
-				[] ->
-				    io:format("UNSATISFIABLE\n");
+				{a,[]} ->
+				    io:format("\nUNSATISFIABLE\n");
 				EClause ->
-				    io:format("UNSATISFIABLE, INVALID ~w\n",
+				    io:format("\nUNSATISFIABLE, INVALID ~w\n",
 					      [EClause])
 			    end,
 			    false;
@@ -98,9 +98,13 @@ validate_loop(Fd,Type,Bs, I) ->
 			    validate_loop(Fd,Type,Bs,I1)
 		    end;
 		true ->
-		    io:format("INVALID\n"),
+		    io:format("\nINVALID\n"),
 		    error
-	    end
+	    end;
+	{d,Clause} ->
+	    %% what tests must be done?
+	    ok = varp_formula:del_clause(Bs, Clause),
+	    validate_loop(Fd,Type,Bs,I1)	    
     end.
 
 eval_neg_literal_list(Bs, [Li|Ls]) ->
@@ -111,7 +115,6 @@ eval_neg_literal_list(Bs, [Li|Ls]) ->
 eval_neg_literal_list(Bs, []) ->
     varp_formula:eval(Bs).
 
-
 read_clause(_Fd, binary,_Bs) ->
     %% read compressed clause
     eof;
@@ -120,29 +123,50 @@ read_clause(Fd, _, Bs) ->  %% text/user
 
 read_text_clause(Fd, Bs, Acc) ->
     case file:read_line(Fd) of
-	eof -> if Acc =:= [] -> eof;
-		  true -> Acc
-	       end;
+	eof -> 
+	    if Acc =:= [] -> eof;
+	       true -> Acc
+	    end;
 	{ok,Line} ->
-	    Ts = string:tokens(binary_to_list(Line), " \n"),
-	    case add_literals(Ts, Bs, Acc) of
-		{true, Clause} -> 
-		    Clause;
-		{false, Acc1} ->
-		    read_text_clause(Fd, Bs, Acc1);
-		error ->
-		    error
+	    case string:tokens(binary_to_list(Line), " \n") of
+		["d" | Ts] ->
+		    case scan_clause(Ts, Bs, Acc) of
+			{true, Clause} -> 
+			    {d, Clause};
+			{false, Acc1} ->
+			    read_text_clause(Fd, Bs, Acc1);
+			error ->
+			    error
+		    end;
+		["a" | Ts] ->
+		    case scan_clause(Ts, Bs, Acc) of
+			{true, Clause} -> 
+			    {a, Clause};
+			{false, Acc1} ->
+			    read_text_clause(Fd, Bs, Acc1);
+			error ->
+			    error
+		    end;
+		Ts ->
+		    case scan_clause(Ts, Bs, Acc) of
+			{true, Clause} -> 
+			    {a, Clause};
+			{false, Acc1} ->
+			    read_text_clause(Fd, Bs, Acc1);
+			error ->
+			    error
+		    end
 	    end
     end.
 
-add_literals([L|Ls], Bs, Acc) ->
+scan_clause([L|Ls], Bs, Acc) ->
     case list_to_integer(L) of
 	0 ->
 	    {true, lists:reverse(Acc)};
 	Li -> 
-	    add_literals(Ls, Bs, [dimacs_literal(Li,Bs)|Acc])
+	    scan_clause(Ls, Bs, [dimacs_literal(Li,Bs)|Acc])
     end;
-add_literals([], _Bs, Acc) ->
+scan_clause([], _Bs, Acc) ->
     {false, Acc}.
 
 dimacs_literal(Li,Bs) when Li < 0 ->

@@ -38,11 +38,7 @@
 -export([move_level/3]).
 -export([eval/1]).
 -export([add_clause/2]).
--export([add_clause/3]).
--export([add_clause/4]).
--export([add_clause/5]).
--export([add_clause/6]).
--export([add_clause/7]).
+-export([find_clause/2]).
 -export([get_clause/2]).
 -export([get_clause/3]).
 -export([get_clause/4]).
@@ -50,7 +46,7 @@
 -export([compress_clause/2]).
 -export([clean_clause/2]).
 -export([clean_literal/2]).
--export([del_unused_clauses/1]).
+-export([sort_none_permanent_clauses/1]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
 -export([use_clause/2]).
@@ -71,7 +67,9 @@
 -export([order_all/1]).
 -export([decay/2]).
 -export([subscribe/2]).
--export([clause_first/1, clause_next/2]).
+-export([clause_first/1]).
+-export([clause_first_none_keep/1]).
+-export([clause_next/2]).
 
 -export([info/1]).
 -export([info_keys/0]).
@@ -262,25 +260,12 @@ eval(_Vp) ->
 
 -spec add_clause(Vp::varc(),Ls::[literal()]) ->
 			false | error | integer().
-			    
-
 add_clause(_Vp,Ls) when is_list(Ls) ->
     ?nif_stub().
 
--spec add_clause(Vp::varc(),X1::literal(),X2::literal()) -> ok.
-add_clause(_Vp,_X1,_X2) ->
-    ?nif_stub().
-
-add_clause(_Vp,_X1,_X2,_X3) ->
-    ?nif_stub().
-
-add_clause(_Vp,_X1,_X2,_X3,_X4) ->
-    ?nif_stub().
-
-add_clause(_Vp,_X1,_X2,_X3,_X4,_X5) ->
-    ?nif_stub().
-
-add_clause(_Vp,_X1,_X2,_X3,_X4,_X5,_X6) ->
+-spec find_clause(Vp::varc(),Ls::[literal()]) ->
+			 false | integer().
+find_clause(_Vp,Ls) when is_list(Ls) ->
     ?nif_stub().
 
 get_clause(Vp,Index) ->
@@ -320,6 +305,7 @@ clause_info(_Vp,Index,_What)
 clause_info(Vp,Index) ->
     [{What,clause_info(Vp,Index,What)}||What<-[status,watch]].
 
+-spec del_clause(Vp::varc(), integer()|[literal()]) -> ok.
 del_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
@@ -332,7 +318,7 @@ clean_literal(_Vp,Lit)
   when is_integer(Lit), Lit >= 1 ->
     ?nif_stub().
 
-del_unused_clauses(_Vp) ->
+sort_none_permanent_clauses(_Vp) ->
     ?nif_stub().
 
 get_clauses(Vp,Var) ->
@@ -419,6 +405,10 @@ order_sort_last(_Vp, _VarList) ->
 
 %% return index to first clause | false
 clause_first(_Vp) ->
+    ?nif_stub().
+
+%% return index to first clause in the none! keep area | false
+clause_first_none_keep(_Vp) ->
     ?nif_stub().
 
 %% return index to next clause | false
