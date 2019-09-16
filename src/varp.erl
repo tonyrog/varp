@@ -11,13 +11,15 @@
 -export([main/1]).
 -export([do_run/3]).
 
+-export([tokens/1]).
 -export([parse/1, parse/2]).
 -export([scan_file/1]).
 -export([file/1, string/1]).
 -export([archive_path/1]).
 -export([output_model/2]).
 -export([empty_sections/0]).
-
+-export([split_sections/1]).
+-export([section_opts/2]).
 -export([load_plugins/0]).
 -export([load_do/0, load_do/1]).
 -export([parse_do/1, parse_do/2]).
