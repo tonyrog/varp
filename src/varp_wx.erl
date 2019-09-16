@@ -18,7 +18,8 @@
 	 formula,
 	 model,
 	 satisfy,
-	 falsify
+	 falsify,
+	 dir = ""
 	}).
 
 start() ->
@@ -87,13 +88,29 @@ create_window(Wx) ->
 
     Formula = wxStyledTextCtrl:new(Frame),
     wxStyledTextCtrl:styleSetFont(Formula, ?wxSTC_STYLE_DEFAULT, FixedFont),
-    wxStyledTextCtrl:setLexer(Formula, ?wxSTC_LEX_NULL), %% maybe CPP will color nice?
+    wxStyledTextCtrl:setLexer(Formula, ?wxSTC_LEX_CPP),
     wxStyledTextCtrl:setMarginType(Formula, 0, ?wxSTC_MARGIN_NUMBER),
     LW = wxStyledTextCtrl:textWidth(Formula, ?wxSTC_STYLE_LINENUMBER, "999"),
     wxStyledTextCtrl:setMarginWidth(Formula, 0, LW),
     wxStyledTextCtrl:setMarginWidth(Formula, 1, 0),
     wxStyledTextCtrl:setSelectionMode(Formula, ?wxSTC_SEL_LINES),
-    wxStyledTextCtrl:setKeyWords(Formula, 0, keyWords()),
+
+    Styles =  [{?wxSTC_C_DEFAULT,     {0,0,0}},
+	       {?wxSTC_C_COMMENT,     {160,53,35}},
+	       {?wxSTC_C_COMMENTLINE, {160,53,35}},
+	       {?wxSTC_C_IDENTIFIER,  {150,100,40}},
+	       {?wxSTC_C_NUMBER,      {5,5,100}},
+	       {?wxSTC_C_STRING,      {170,45,132}},
+	       {?wxSTC_C_OPERATOR,    {30,0,0}}
+	      ],
+    SetStyle = fun({Style, Color}) ->
+		       wxStyledTextCtrl:styleSetFont(Formula, Style, FixedFont),
+		       wxStyledTextCtrl:styleSetForeground(Formula, Style, Color)
+	       end,
+    [SetStyle(Style) || Style <- Styles],
+
+    wxStyledTextCtrl:setKeyWords(Formula, 1, keyWords()),
+
     Policy = ?wxSTC_CARET_SLOP bor ?wxSTC_CARET_JUMPS bor ?wxSTC_CARET_EVEN, 
     wxStyledTextCtrl:setYCaretPolicy(Formula, Policy, 3),
     wxStyledTextCtrl:setVisiblePolicy(Formula, Policy, 3),
@@ -136,12 +153,13 @@ create_window(Wx) ->
     wxSizer:add(MainSizer, Model,  [{flag, ?wxEXPAND}, {proportion, 1}]),
 
     wxFrame:setSizer(Frame, MainSizer),
+    {ok, DefaultDir} = file:get_cwd(),  %% fixme: save dir?
     #s { frame = Frame, meta = Meta, formula = Formula, model = Model,
-	 falsify = Falsify, satisfy = Satisfy }.
+	 falsify = Falsify, satisfy = Satisfy,
+	 dir = DefaultDir }.
 
 
 loop(S) ->
-    io:format("Loop\n"),
     receive 
         #wx{event=#wxClose{}} ->
             io:format("~p Closing window ~n",[self()]),
@@ -151,7 +169,10 @@ loop(S) ->
             wxWindow:destroy(S#s.frame),
             ok;
         #wx{id=?wxID_OPEN, event=#wxCommand{type=command_menu_selected}} ->
-	    Dialog = wxFileDialog:new(S#s.frame, []),
+	    Dialog = wxFileDialog:new(S#s.frame,
+				      [{defaultDir,S#s.dir},
+				       {wildCard, 
+					"*.varp;*.cnf;*.snf;*.txt"}]),
 	    case wxFileDialog:showModal(Dialog) of
 		?wxID_OK ->
 		    Path = wxFileDialog:getPath(Dialog),
@@ -164,7 +185,8 @@ loop(S) ->
 			    %% load formula text
 			    %%  wxStyledTextCtrl:clearAll(S#s.formula),
 			    wxStyledTextCtrl:setTextRaw(S#s.formula, <<Bin/binary,0>>),
-			    loop(S);
+			    Dir = wxFileDialog:getDirectory(Dialog),
+			    loop(S#s { dir = Dir });
 			{error,Reason} ->
 			    ok = wxFrame:setStatusText(S#s.frame, io_lib:format("file error: ~s ~p", [Path,Reason])),
 			    loop(S)
@@ -200,6 +222,7 @@ satisfy(S) ->
 falsify(S) ->
     run(falsify, S).
 
+%% FIXME block interface while running
 run(Mode, S) ->
     Meta    = wxTextCtrl:getValue(S#s.meta),
     Bound   = case varp_scan:string(Meta) of
@@ -220,16 +243,17 @@ run(Mode, S) ->
 	    GDo = varp:parse_do(Do),
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts#{ meta => Bound }),
+	    wxStyledTextCtrl:setReadOnly(S#s.model, false),
+	    wxStyledTextCtrl:clearAll(S#s.model),
+	    wxStyledTextCtrl:setReadOnly(S#s.model, true),
 	    try varp:do_run(GDo,Form,GOpts1) of
 		{0,[]} ->
 		    wxStyledTextCtrl:setReadOnly(S#s.model, false),
-		    wxStyledTextCtrl:clearAll(S#s.model),
 		    wxStyledTextCtrl:addText(S#s.model, "UNSATISFIABLE\n"),
 		    wxStyledTextCtrl:setReadOnly(S#s.model, true),
 		    S;
 		{_N,Ms} ->
 		    wxStyledTextCtrl:setReadOnly(S#s.model, false),
-		    wxStyledTextCtrl:clearAll(S#s.model),
 		    lists:foreach(
 		      fun(M) ->
 			      M1 = varp_formula:filter_bindings(M),
@@ -350,6 +374,6 @@ keyWords() ->
 	 "symbol", "true", "false", "define", "declare", "literals",
 	 "assert", "input", "output", "order", "rank", "degree", 
 	 "random", "identity",
-	 "and", "or", "xor", "not", "imp" "equ" "A" "E" "ALL" "ANY"
-	 "SUM" "PROD"],
+	 "and", "or", "xor", "not", "imp", "equ", "A", "E", "ALL", "ANY",
+	 "SUM", "PROD"],
     lists:flatten([K ++ " " || K <- L] ++ [0]).

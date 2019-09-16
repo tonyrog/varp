@@ -12,9 +12,9 @@
 
 -compile(export_all).
 
-%% -define(DEBUG, true).
 -include("varp.hrl").
 
+%% -define(DEBUG, true).
 -define(LEVEL, 1).
 
 options() ->
@@ -97,8 +97,8 @@ next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
 	    next(Stack1,Bs);
 	true ->
 	    Next = varp_formula:next_unbound(Bs,I),
-	    %% Num = varp_formula:number_of_unbound(Bs),
-	    %% io:format("I=~w, next=~w, num=~w\n", [I,Next,Num]),
+	    ?dbg("I=~w, next=~w, num=~w\n", 
+		 [I,Next,varp_formula:number_of_unbound(Bs)]),
 	    case Next of
 		false ->
 		    {model,[{I,Xi,Xs,Level}|Stack]};
@@ -144,8 +144,8 @@ proof_output(Bs, Stack) ->
     end.
 
 eq_eval(Bs,L,_D) ->
-    ?dbg("~seq_eval: ~w, ~s/~s\n", 
-	 [indent(_D), V, varp_formula:fmt_literal(Bs,L)]),
+    ?dbg("~seq_eval: ~w ~s\n", 
+	 [indent(_D), L, varp_formula:fmt_var(Bs,L)]),
     eqv(Bs,L).
 
 eqv(Bs,L) ->

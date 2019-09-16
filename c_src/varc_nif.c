@@ -2808,7 +2808,7 @@ static ERL_NIF_TERM varp_order_next(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &i) || (i < 1))
+    if (!enif_get_int(env, argv[1], &i) || (i < 0))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[2], &skip) || (skip < 0))
 	return enif_make_badarg(env);

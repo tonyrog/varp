@@ -364,7 +364,7 @@ get_bindings(_Vp, Mark, _ClauseInfo)
 
 %% initial index to use if using order_next, instead of order_first
 order_init(_Vp) -> 
-    1.
+    0.
 
 %% return {Ix,Var} | false
 order_first(_Vp) ->
