@@ -1,0 +1,5 @@
+// Hansen jager 3
+([A x=1..n] !R(x,x)) &&
+([A x=1..n][E y=1..n][A z=1..n] (R(x,y) && (R(z,x) -> R(z,y))))
+
+
