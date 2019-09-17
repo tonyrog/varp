@@ -714,17 +714,17 @@ load_files([],Formula,Sections,_JoinOp,_GOpts) ->
 
 
 %% special input format
-varp_input([#cid{name=ModuleName} | InputList], FileName, Meta) ->
-    Module = list_to_atom(ModuleName),
-    case code:ensure_loaded(Module) of
-	{module,M} ->
-	    case erlang:function_exported(M, file, 2) of
+varp_input([Input | InputList], FileName, Meta) ->
+    {M,F,A} = mfa_arg(Input, file),
+    case code:ensure_loaded(M) of
+	{module,Mod} ->
+	    case erlang:function_exported(M, F, length(A)+2) of
 		true ->
-		    apply(M, file, [FileName, Meta]);
+		    apply(Mod, F, [FileName, Meta]++A);
 		false ->
-		    case erlang:function_exported(M, file, 1) of
+		    case erlang:function_exported(M, F, length(A)+1) of
 			true ->
-			    apply(M, file, [FileName]);
+			    apply(Mod, F, [FileName]++A);
 			false ->
 			    varp_input(InputList, FileName, Meta)
 		    end
@@ -735,22 +735,30 @@ varp_input([#cid{name=ModuleName} | InputList], FileName, Meta) ->
 varp_input([], _FileName, _Meta) ->
     {error, no_input}.
 
-%% special input format
-varp_output([#cid{name=ModuleName} | OutputList], Fd, Model) ->
-    Module = list_to_atom(ModuleName),
-    case code:ensure_loaded(Module) of
-	{module,M} ->
-	    case erlang:function_exported(M, output, 2) of
+%% special output format
+varp_output([Out | OutputList], Fd, Model) ->
+    {M,F,A} = mfa_arg(Out, output),
+    case code:ensure_loaded(M) of
+	{module,Mod} ->
+	    case erlang:function_exported(Mod, F, length(A)+2) of
 		true ->
-		    apply(M, output, [Fd, Model]);
+		    apply(Mod, F, [Fd, Model]++A);
 		false ->
 		    varp_output(OutputList, Fd, Model)
 	    end;
-	{error,_} ->
+	{error,Err} ->
+	    io:format("varp_output module error ~p\n", [Err]),
 	    varp_output(OutputList, Fd, Model)
     end;
 varp_output([], _Fd, _Model) ->
     {error, no_output}.
+
+mfa_arg(#cid{name=Name},Func) ->
+    {list_to_atom(Name),Func,[]};
+mfa_arg(M,Func) when is_atom(M) ->
+    {list_to_atom(M),Func,[]};
+mfa_arg({M,F,A},_Func) when is_atom(M), is_atom(F), is_list(A) -> 
+    {M,F,A}.
 
 %% possibly emit a model
 
@@ -774,7 +782,7 @@ output_model_header(Bs,_I) ->
     case varp_formula:getopt(Bs,starexec) of
 	true ->
 	    case get(answer) of
-		true -> 
+		true ->
 		    ok;
 		_ ->
 		    io:format("s SATISFIABLE\n"),
@@ -897,7 +905,7 @@ section_opts(#{ decls := Decls,
 	   literals => Literals,
 	   assert => Assert,
 	   input => Input,
-	   output => Output}.
+	   output => Output }.
     
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;

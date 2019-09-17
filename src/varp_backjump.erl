@@ -26,7 +26,15 @@ options() ->
 	key   => timeout,
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	default => infinity,
-	description => "Max time to run saturation in milliseconds"
+	description => "Max time to run backjump in milliseconds"
+      },
+
+     #{ long => "max",
+	short => "n",
+	key => max,
+	spec => unsigned,
+	default => 0,
+	description => "Max number of models to count or collect, 0=all."
       },
      
      #{ long => "minimize",

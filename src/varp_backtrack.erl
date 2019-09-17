@@ -18,7 +18,14 @@
 -define(LEVEL, 1).
 
 options() ->
-    [#{ long => "max",
+    [#{ long  => "timeout",
+	short => "t",
+	key   => timeout,
+	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
+	default => infinity,
+	description => "Max time to run backtrack in milliseconds"
+      },
+     #{ long => "max",
 	short => "n",
 	key => max,
 	spec => unsigned,
