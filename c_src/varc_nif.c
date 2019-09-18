@@ -2946,7 +2946,7 @@ static void order_k_activity(varp_t* vp, int k)
     qsort_r((base),(nmemb),(size),(compar),(arg))
 #define QSORT_R_ARGS(a,b,arg) (a, b, arg)
  
-#elif defined(__APPLE__)
+#elif defined(__APPLE__) || defined(__WIN32__)
 #define QSORT_R(base,nmemb,size,compar,arg) \
     qsort_r((base),(nmemb),(size),(arg),(compar))
 #define QSORT_R_ARGS(a,b,arg) (arg, a, b)
