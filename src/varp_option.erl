@@ -316,29 +316,47 @@ vsn() ->
 	undefined -> "undefined"
     end.
 
+print_help({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
+		      default:=Def, description:=Desc }}) ->
+    ShortOpt = maps:get(short,I,undefined),
+    Names = [["--",LongOpt],"|",["-",LongOpt],
+	     if ShortOpt =:= undefined -> "";
+		true -> ["|","-",ShortOpt]
+	     end],
+    if TypeSpec =:= undefined ->
+	    io:format("  ~s\n    ~s\n\n", 
+		      [Names,Desc]);
+       true ->
+	    io:format("  ~s = ~s (~s)\n    ~s\n\n", 
+		      [Names,format_spec(TypeSpec),
+		       format_value(Def),
+		       Desc])
+    end;
+print_help(#{ key := _Key }) -> %% ignore internal options
+    ok.
+
 usage(Spec) ->
     io:format("varp: usage: varp [<plugin> [Options]]* <bindings>* <files>*\n"),
-    io:format("Options\n"),
-    lists:foreach(
-      fun({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
-		     default:=Def, description:=Desc }}) ->
-	      ShortOpt = maps:get(short,I,undefined),
-	      Names = [["--",LongOpt],"|",["-",LongOpt],
-		       if ShortOpt =:= undefined -> "";
-			  true -> ["|","-",ShortOpt]
-		       end],
-	      if TypeSpec =:= undefined ->
-		      io:format("  ~s\n    ~s\n\n", 
-				[Names,Desc]);
-		 true ->
-		      io:format("  ~s = ~s (~s)\n    ~s\n\n", 
-				[Names,format_spec(TypeSpec),
-				 format_value(Def),
-				 Desc])
-	      end;
-	 (#{ key := _Key }) -> %% ignore internal options
-	      ok
-      end, key_options(Spec)),
+    io:format("OPTIONS\n"),
+
+    lists:foreach(fun(Opt) -> 
+			  print_help(Opt) end,
+		  key_options(Spec)),
+    case application:get_env(varp, plugins) of
+	undefined -> 
+	    ok;
+	{ok,Ps} -> 
+	    lists:foreach(
+	      fun({_,PluginName,Plugin}) ->
+		      io:format("PLUGIN ~s OPTIONS\n", [PluginName]),
+		      OptionList =Plugin:options(),
+		      Spec1 = varp_option:options_spec(OptionList),
+		      lists:foreach(
+			fun(Opt) -> 
+				print_help(Opt) 
+			end, key_options(Spec1))
+	      end, Ps)
+    end,
     halt(1).
 
 usage(Opt,_Spec) when is_list(Opt) ->
