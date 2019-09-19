@@ -6,6 +6,10 @@
 #define _GNU_SOURCE
 #endif
 
+#ifdef __WIN32__
+#include <windows.h>
+#endif
+
 #include <stdio.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -1889,15 +1893,21 @@ static clause_t* clause_alloc(varp_t* vp, int size)
     UNUSED(vp);
     clause_t* cp;
     int r;
+    size_t nbytes;
     
     if (size < 1)
 	return NULL;
-
-    if ((r=posix_memalign((void**)&cp, CLAUSE_ALIGNMENT,
-			  sizeof(clause_t) + sizeof(lit_t)*size)) != 0) {
+    nbytes = sizeof(clause_t) + sizeof(lit_t)*size;
+#if defined(__WIN32__)
+    if ((cp = _aligned_malloc(nbytes, CLAUSE_ALIGNMENT)) == NULL) {
+      return NULL;
+    }
+#else
+    if ((r=posix_memalign((void**)&cp, CLAUSE_ALIGNMENT, nbytes)) != 0) {
 	errno = r;
 	return NULL;
     }
+#endif
     clear_wlink(&cp->wl[0]);
     clear_wlink(&cp->wl[1]);
     cp->next = NULL;
@@ -2945,8 +2955,11 @@ static void order_k_activity(varp_t* vp, int k)
 #define QSORT_R(base,nmemb,size,compar,arg) \
     qsort_r((base),(nmemb),(size),(compar),(arg))
 #define QSORT_R_ARGS(a,b,arg) (a, b, arg)
- 
-#elif defined(__APPLE__) || defined(__WIN32__)
+#elif defined(__WIN32__)
+#define QSORT_R(base,nmemb,size,compar,arg) \
+    qsort_s((base),(nmemb),(size),(compar),(arg))
+#define QSORT_R_ARGS(a,b,arg) (arg, a, b)
+#elif defined(__APPLE__)
 #define QSORT_R(base,nmemb,size,compar,arg) \
     qsort_r((base),(nmemb),(size),(arg),(compar))
 #define QSORT_R_ARGS(a,b,arg) (arg, a, b)
