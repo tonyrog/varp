@@ -20,7 +20,7 @@
 #include <shellapi.h>
 #include <direct.h>
 
-static void install(void);
+static void install(wchar_t* dir);
 static int  need_install(wchar_t* dir);
 static int  get_install_dir(wchar_t* dir);
 static void print_path(FILE* fp, wchar_t* path);
@@ -95,7 +95,8 @@ WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
 static int get_install_dir(wchar_t* dir)
 {
   HANDLE module = GetModuleHandle(NULL);
-
+  int i;
+  
   if (module == NULL) {
     MessageBox(NULL, "Fatal: Failed to get module handle", NULL, MB_OK);
     exit(1);
@@ -119,7 +120,7 @@ static int need_install(wchar_t* dir)
     FILE* fp;
     
     _snwprintf(inifile, MAX_PATH,  L"%s/bin/erl.ini", dir);    
-    if ((fp = fopen("bin/erl.ini", "r")) == NULL)
+    if ((fp = _wfopen(inifile, L"r")) == NULL)
 	return 1;
     fclose(fp);
     return 0;
@@ -134,7 +135,7 @@ static void install(wchar_t* dir)
     // _wgetcwd(curdir, MAX_PATH);
     _snwprintf(inifile, MAX_PATH,  L"%s/bin/erl.ini", dir);
 
-    if ((fp = _wfopen(inifile, "w")) == NULL) {
+    if ((fp = _wfopen(inifile, L"w")) == NULL) {
 	MessageBox(NULL, "Failed to install Erlang/OTP components", NULL, MB_OK);
 	exit(1);
     }
