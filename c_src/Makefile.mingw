@@ -13,21 +13,27 @@ CFLAGS += -Wall -Wextra -Wswitch-default -Wswitch-enum -D_THREAD_SAFE -D_REENTRA
 CFLAGS += -I$(ERL_C_INCLUDE_DIR)
 #LDFLAGS += -Wl--enable-stdcall-fixup
 
-EXT = dll
 LD_SHARED	:= $(CC) -shared
+LIBS = -lkernel32 -luser32 -ladvapi32
 
 debug: CFLAGS += -g
 debug: LDFLAGS += -g
 
-VARP_NIF = $(PRIVDIR)/varc_nif.$(EXT)
-
+VARP_NIF = $(PRIVDIR)/varc_nif.dll
+VARP_EXE = $(PRIVDIR)/Varp.exe
 
 VARP_NIF_OBJS = varc_nif.obj
 
-debug release all: $(VARP_NIF)
+debug release all: $(VARP_NIF) $(VARP_EXE)
 
 $(VARP_NIF): $(VARP_NIF_OBJS) 
 	$(LD_SHARED) -o $@ $(VARP_NIF_OBJS) $(LDFLAGS)
+
+$(VARP_EXE): varp.c varp_res.o
+	$(CC) -o $(VARP_EXE) varp.c varp_res.o -mwindows $(LIBS)
+
+varp_res.o: varp.rc
+	windres -i varp.rc -o varp_res.o
 
 %.obj: %.c
 	$(CC) -c -o $@ $(CFLAGS) $<
