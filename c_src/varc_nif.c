@@ -1941,7 +1941,11 @@ static void clause_free(varp_t* vp, clause_t* cp)
 	    vp->clause_map[cp->cix] = NULL;
 	    vp->cnum--;
 	}
+#if defined(__WIN32__)
+	_aligned_free(cp);
+#else
 	free(cp);
+#endif
     }
 }
 
