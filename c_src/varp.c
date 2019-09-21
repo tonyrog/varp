@@ -70,10 +70,10 @@ WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
   i=0;
   if ((argc > 1 && wcscmp(argv[1], L"--debug") == 0)) {
       i++;
-      _snwprintf(cmd_line+wcslen(cmd_line), 3*MAX_PATH,  L" -run varp start_wx");
+      _snwprintf(cmd_line+wcslen(cmd_line), 3*MAX_PATH,  L" -run varp_wx start");
   } else {
       _snwprintf(cmd_line+wcslen(cmd_line), 3*MAX_PATH,  L" -detached");
-      _snwprintf(cmd_line+wcslen(cmd_line), 3*MAX_PATH,  L" -run varp start_wx");
+      _snwprintf(cmd_line+wcslen(cmd_line), 3*MAX_PATH,  L" -run varp_wx start");
   }
 
   if (argc > (1+i)) {
