@@ -1,15 +1,13 @@
 /*
- *  wings3d.c --
+ *  varp.c --
  *
- *     Wrapper to start Wings3D on Windows.
+ *     Wrapper to start Varp on Windows.
  *
  *  Copyright (c) 2002-2011 Bjorn Gustavsson
  *  Copyright (c) 2013 Dan Gudmundsson
  *
  *  See the file "license.terms" for information on usage and redistribution
  *  of this file, and for a DISCLAIMER OF ALL WARRANTIES.
- *
- *     $Id: wings3d.c,v 1.7 2004/10/29 15:52:23 bjorng Exp $
  *
  */
 
@@ -23,7 +21,9 @@
 #include <direct.h>
 
 static void install(void);
-static void print_path(FILE* fp, char* path);
+static int  need_install(wchar_t* dir);
+static int  get_install_dir(wchar_t* dir);
+static void print_path(FILE* fp, wchar_t* path);
 
 int
 WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
@@ -41,30 +41,20 @@ WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
   int err;
   HKEY hkey;
   DWORD type;
-  HANDLE module = GetModuleHandle(NULL);
 
   argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-
+  get_install_dir(install_dir);
+  
   if (argc > 1 && wcscmp(argv[1], L"--install") == 0) {
-    install();
+      install(install_dir);
+      exit(0);      
   }
-
-  if (module == NULL) {
-    MessageBox(NULL, "Fatal: Failed to get module handle", NULL, MB_OK);
-    exit(1);
+  else if (need_install(install_dir)) {
+      install(install_dir);
   }
-  if (GetModuleFileNameW(module, install_dir, MAX_PATH) == 0) {
-    MessageBox(NULL, "Fatal: Failed to get module file name", NULL, MB_OK);
-    exit(1);
-  }
-  i = wcslen(install_dir) - 1;
-  while (i >= 0 && install_dir[i] != L'\\') {
-    --i;
-  }
-  install_dir[i] = L'\0';
 
   pref_dir[0] = L'\0';
-  SHGetFolderPathW(NULL,	CSIDL_APPDATA|CSIDL_FLAG_CREATE, NULL, 0, pref_dir);
+  SHGetFolderPathW(NULL,CSIDL_APPDATA|CSIDL_FLAG_CREATE, NULL, 0, pref_dir);
 
   _snwprintf(cmd_line, 3*MAX_PATH, L"\"%s\\bin\\werl.exe\" -smp enable", install_dir);
   i=0;
@@ -102,41 +92,74 @@ WINAPI WinMain(HINSTANCE hInst, HINSTANCE hPrev, LPSTR szCmdLine, int sw)
   exit(0);
 }
 
-static void
-install(void)
+static int get_install_dir(wchar_t* dir)
 {
-  FILE* fp = fopen("bin/erl.ini", "w");
-  char dir[MAX_PATH];
+  HANDLE module = GetModuleHandle(NULL);
 
-  _getcwd(dir, MAX_PATH);
-  if (fp == NULL) {
-    MessageBox(NULL, "Failed to install Erlang/OTP components", NULL, MB_OK);
+  if (module == NULL) {
+    MessageBox(NULL, "Fatal: Failed to get module handle", NULL, MB_OK);
     exit(1);
   }
-  fprintf(fp, "[erlang]\n");
-  fprintf(fp, "Bindir=");
-  print_path(fp, dir);
-  fprintf(fp, "\\\\bin\n");
-  fprintf(fp, "Progname=erl\n");
-  fprintf(fp, "Rootdir=");
-  print_path(fp, dir);
-  putc('\n', fp);
-  fclose(fp);
-  exit(0);
+  if (GetModuleFileNameW(module, dir, MAX_PATH) == 0) {
+    MessageBox(NULL, "Fatal: Failed to get module file name", NULL, MB_OK);
+    exit(1);
+  }
+
+  i = wcslen(dir) - 1;
+  while (i >= 0 && dir[i] != L'\\') {
+    --i;
+  }
+  dir[i] = L'\0';
+  return 1;
+}
+    
+static int need_install(wchar_t* dir)
+{
+    wchar_t inifile[MAX_PATH];
+    FILE* fp;
+    
+    _snwprintf(inifile, MAX_PATH,  L"%s/bin/erl.ini", dir);    
+    if ((fp = fopen("bin/erl.ini", "r")) == NULL)
+	return 1;
+    fclose(fp);
+    return 0;
 }
 
-static void
-print_path(FILE* fp, char* path)
+static void install(wchar_t* dir)
 {
-  int c;
+    // wchar_t curdir[MAX_PATH];
+    wchar_t inifile[MAX_PATH];    
+    FILE* fp;
 
-  while ((c = *path) != 0) {
-    if (c != '\\') {
-      putc(c, fp);
-    } else {
-      putc('\\', fp);
-      putc('\\', fp);
+    // _wgetcwd(curdir, MAX_PATH);
+    _snwprintf(inifile, MAX_PATH,  L"%s/bin/erl.ini", dir);
+
+    if ((fp = _wfopen(inifile, "w")) == NULL) {
+	MessageBox(NULL, "Failed to install Erlang/OTP components", NULL, MB_OK);
+	exit(1);
     }
-    path++;
-  }
+    fprintf(fp, "[erlang]\n");
+    fprintf(fp, "Bindir=");
+    print_path(fp, dir);
+    fprintf(fp, "\\\\bin\n");
+    fprintf(fp, "Progname=erl\n");
+    fprintf(fp, "Rootdir=");
+    print_path(fp, dir);
+    putc('\n', fp);
+    fclose(fp);
+}
+
+static void print_path(FILE* fp, wchar_t* path)
+{
+    int c;
+
+    while ((c = *path) != 0) {
+	if (c != '\\') {
+	    fputwc(c, fp);
+	} else {
+	    fputwc('\\', fp);
+	    fputwc('\\', fp);
+	}
+	path++;
+    }
 }
