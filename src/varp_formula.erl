@@ -1474,7 +1474,10 @@ eval_meta(#cunary{op=Op,arg=A},Bs) ->
 	{'+',A1} -> +A1;
 	{'~',A1} ->  bnot A1;
 	{'!',A1} -> not A1
-    end.
+    end;
+eval_meta({vec,Ls}, Bs) -> %% literal vector
+    eval_meta_list(Ls, Bs).
+
 
 eval_meta_list(As,Bs) ->
     map(fun(A) -> eval_meta(A,Bs) end, As).
