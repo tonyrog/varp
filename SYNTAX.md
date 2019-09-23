@@ -80,19 +80,85 @@ vectors of length 1.
 
 # Quantifiers
 
-[<quatifiers> var=domain...] <formula>
+    '['<quatifiers> [expr] [var=domain...] ']' <formula>
 
-[ALL i=1..5] P(i)
-[ANY j=2..7] Q(i)
-[ONE x=1..6,y=x+1..10,x+y<15] R(x,y)
-[EQ 1,a=1..10] S(a)
-[EQ 2,a=1..10] S(a)
-[GT 2,b=1..10] T(b)
+The quantifiers are
+
+    A  | ALL        all quantification
+	E  | ANY        existence quantification
+	E! | ONE        exist one quantification
+	NONE            exist none
+	EQ n            exactly n true
+	NEQ n           exactly n false
+	GT n            more than n true
+	GTE n           more than or equal to n true
+	LT n            less than n true
+	LTE n           less than or equal to n true
+
+## Meta expression used in predicate arguments and quatifier expressions
+
+    arithmetic unary operators
+	   +, -
+	arithmetic binary operators
+	   +, -, *, /, %
+	comparison operators
+	   <, <=, >, >=, ==, !=
+	logical unary operators
+       !
+	logical binary operators
+       &&, ||
+	bitwise binary operators
+	   &, |, ^, <<, >>
+	bitwise unary operators
+	   ~
+
+    builin meta function
+	
+	factorial(Integer A)
+	binom(Integer A, Integer B)
+	sqrt(Number A)
+	isqrt(Integer A)
+	sqr(Number A)
+	nroot(Number A, Integer N)
+	ln(Number A)
+	log(Number A)
+	log2(Number A)
+	log10(Number A)
+	ilog2(Integer A)
+	isize(Integer A)
+	usize(Integer A)
+	pi()
+	e()
+	pow(Integer A, Integer B)
+	pow(Number A, Number B)	
+	sin(Number A)
+	cos(Number A)
+	trunc(Number A)
+	round(Number A)
+	abs(Number A)
+	max(Number A, Number B)
+	min(Number A, Number B)
+	sum(Number X1,...Numner Xn)
+	union(Set A, Set B)
+	subtract(Set A, Set B)
+	intersect(Set A, Set B)
+	product(Set A, Set B)
+
+
+## Examples of quantifier use
+
+
+    [ALL i=1..5] P(i)
+    [ANY j=2..7] Q(i)
+    [ONE x=1..6,y=x+1..10,x+y<15] R(x,y)
+    [EQ 1,a=1..10] S(a)
+    [EQ 2,a=1..10] S(a)
+    [GT 2,b=1..10] T(b)
 
 # Integer quantifiers
 
-[SUM i=1..5] X(i)
-[PROD j=1..5] Y(i)
+    [SUM i=1..5] X(i)
+    [PROD j=1..5] Y(i)
 
 # Bit selection
 
