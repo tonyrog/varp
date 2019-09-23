@@ -165,11 +165,10 @@ emit_def(Bs, Yj, Cs) ->
     
 %% return list on form [{Y,[Xi]}]
 clauses(Bs,[I|Cs],L,Acc) ->
-    Fs = varc:get_clause_flags(Bs#bs.vp,I),
-    case lists:member(dead, Fs) of
-	true ->
+    case varc:clause_info(Bs#bs.vp,I,status) of
+	dead ->
 	    clauses(Bs, Cs, L, Acc);
-	false ->
+	_ ->
 	    Clause = get_clause(Bs,I, L),
 	    Y = varp_formula:add_variable(Bs),
 	    clauses(Bs,Cs,L,[{Y,Clause}|Acc])

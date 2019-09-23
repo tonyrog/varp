@@ -740,13 +740,6 @@ implication_level(Bs,Li) ->
 get_clause(Bs, I) ->
     varp_formula:get_clause(Bs,I).
 
-check_dead(Bs, I) ->
-    Fs = varc:get_clause_flags(Bs#bs.vp,I),
-    case lists:member(dead, Fs) of
-	true -> erlang:error(dead);
-	false -> ok
-    end.
-
 %% -1 - 1 => 0 1
 neg01(Val) -> (Val+1) div 2. 
     
