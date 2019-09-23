@@ -4,7 +4,7 @@
 A propositional variables always start with a big letter
 like A,B,C, Foo ... A propositional variable name can also include a 
 list of arguments like A(1,2) B(3) an empty list like D() is equivalent with D.
-This is can also be view as instances of perdicates.
+This can also be viewed as instances of predicates.
 
 A propositional variable argument can be an integer, declared literal,
 an ordered set of integers or a function application ( f(1,2) )
@@ -21,7 +21,7 @@ syntax
 Boolean connectives in priority order are
 
 	not  !
-	and  &&	
+	and  &&
 	xor
 	or   ||	
     imp  ->       implication	
