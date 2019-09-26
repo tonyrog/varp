@@ -111,6 +111,7 @@ The quantifiers are
 	   &, |, ^, <<, >>
 	bitwise unary operators
 	   ~
+    a..b -> Sequence (a,a+1..b)
 
     builin meta function
 	
@@ -139,10 +140,12 @@ The quantifiers are
 	max(Number A, Number B)
 	min(Number A, Number B)
 	sum(Number X1,...Numner Xn)
-	union(Set A, Set B)
-	subtract(Set A, Set B)
-	intersect(Set A, Set B)
-	product(Set A, Set B)
+	union(OrdSet A, OrdSet B) -> OrdSet
+	subtract(OrdSet A, OrdSet B) -> OrdSet
+	intersect(OrdSet A, OrdSet B) -> OrdSet
+	product(OrdSet A, OrdSet B) -> Sequence(Ai,Bj)
+	permutation(Sequence A) -> Set(Sequence)
+	zip(Sequence A,Sequence B) -> Sequence(Ai,Bi)
 
 
 ## Examples of quantifier use

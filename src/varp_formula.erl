@@ -8,7 +8,7 @@
 -module(varp_formula).
 
 %% -define(DEBUG, true).
-
+-compile(export_all).
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([add_variable/1, add_variable/2]).
@@ -662,7 +662,7 @@ fmt_index(I) when is_integer(I) ->
 fmt_index(A) when is_atom(A) ->
     atom_to_list(A);
 fmt_index(Set) when is_list(Set) ->
-    ["{",fmt_ordset(Set),"}"];
+    ["{",fmt_set(Set),"}"];
 fmt_index({f,F,Is}) ->
     fmt_func(F,Is).
 
@@ -675,11 +675,11 @@ fmt_fargs([]) -> [];
 fmt_fargs(Is) ->
     ["(",fmt_index_list(Is),")"].
 
-fmt_ordset([]) -> [];
-fmt_ordset([I]) when is_integer(I) ->
+fmt_set([]) -> [];
+fmt_set([I]) when is_integer(I) ->
     integer_to_list(I);
-fmt_ordset([I|Is=[J|_]]) when is_integer(I), is_integer(J), I < J ->
-    [integer_to_list(I),","|fmt_ordset(Is)].
+fmt_set([I|Is=[J|_]]) when is_integer(I), is_integer(J) ->
+    [integer_to_list(I),","|fmt_set(Is)].
     
 fmt_var_list(Bs,Xs) ->
     lists:join(",", [fmt_var(Bs,X)||X<-Xs]).
@@ -1254,6 +1254,7 @@ build_quant_(F, [], Bs) ->
     end.
 
 build_quant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
+    %% io:format("build Vn=~p Y=~w\n", [Vn,Y]),
     Bs1 = push_meta(Vn, Y, Bs),
     {Zs1,Bs2} = build_quant_(F, Xs, Bs1),
     Bs3 = pop_meta(Bs2),
@@ -1347,6 +1348,13 @@ eval_domain(#ccall{func=#cid{name="subsets"},args=[K,A]}, Bs) ->
     K1 = eval_meta(K,Bs),
     A1 = eval_domain(A,Bs),
     subsets(K1,A1);
+eval_domain(#ccall{func=#cid{name="permutations"},args=[A]}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    permute(A1);
+eval_domain(#ccall{func=#cid{name="zip"},args=[A,B]}, Bs) ->
+    A1 = eval_domain(A,Bs),
+    B1 = eval_domain(B,Bs),
+    [{vec,[Ai,Bi]} || {Ai,Bi} <- lists:zip(A1,B1)];
 eval_domain(Expr, Bs) ->
     D = eval_meta(Expr,Bs),
     case D of
@@ -1499,6 +1507,29 @@ subsets(K, As0=[A|As]) ->
 	    Bs = subsets(K-1,As),
 	    subsets(K, As) ++ [[A|B] || B <- Bs]
     end.
+
+permute(List) ->
+    permute_(lists:sort(List), []).
+
+permute_([], Acc) ->
+    lists:reverse(Acc);
+permute_(P, Acc) ->
+    permute_(next(P), [P|Acc]).
+
+next(List) ->
+    next(reverse(List), []).
+
+next([Aj1 | List=[Aj|_]], Acc) when Aj1 =< Aj ->
+    next(List, [Aj1|Acc]);
+next([Aj1,Aj|List],Acc) ->
+    {A1,[Al|A2]} = lists:splitwith(fun(Ai) -> 
+					   Ai =< Aj 
+				   end, 
+				   lists:reverse([Aj1|Acc])),
+    lists:reverse(List)++[Al|A1]++[Aj|A2];
+next([_Aj], _Acc) -> [].
+    
+
 
 -define(MAX_PRIO, 0).
 

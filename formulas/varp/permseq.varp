@@ -1,0 +1,10 @@
+//
+// General permutation sequence of k symbols of length n
+//
+//
+[A x=1..n][E! y=1..k] P(x,y) &&
+[A p=permutations(1..k)][E x=1..(n-k+1)][A {z,q}=zip(x..(x+k-1),p)]P(z,q) &&
+
+[A i=1..k] P(i,i) &&                                  // init permutation
+[A x=1..(n-1)][A y=1..k][LTE 1](P(x,y),P(x+1,y)) &&
+[A x=1..(n-2)][A y=2..k][LTE 1](P(x,y),P(x+1,y),P(x+2,y))
