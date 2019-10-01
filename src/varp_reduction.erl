@@ -41,7 +41,7 @@ run(Bs, Param) ->
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
-	    Bs;
+	    {?CONTINUE,[],Bs};
 	all ->
 	    red(Bs,N,CMax,Type);
 	M ->
@@ -50,15 +50,16 @@ run(Bs, Param) ->
 
 red(Bs,N,CMax,Type) ->
     case varp_formula:first_unbound(Bs) of
-	false -> Bs;
+	false -> {?CONTINUE,[],Bs};
 	{I,X} -> red(Bs,I,X,N,CMax,Type)
     end.
 
-red(Bs,_I,_X,0,_CMax,_Type) -> Bs;
+red(Bs,_I,_X,0,_CMax,_Type) -> 
+    {?CONTINUE,[],Bs};
 red(Bs, I, X,N,CMax,Type) ->
     Bs1 = add_var(Bs,X,CMax,Type),
     case varp_formula:next_unbound(Bs1,I) of
-	false -> Bs1;
+	false -> {?CONTINUE,[],Bs1};
 	{I1,X1} -> red(Bs1,I1,X1,N-1,CMax,Type)
     end.
 
@@ -146,7 +147,6 @@ or_clause(Bs, CL) ->
     %% add option to add the new clauses?
     %% io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
     varp_formula:or_clause(Bs, CL).
-
 
 emit_def(Bs, Yj, Cs) ->
     io:format("~s == ", [varp_formula:format_lit(Bs,Yj)]),

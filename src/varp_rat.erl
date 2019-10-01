@@ -32,14 +32,14 @@ options() ->
 	description => "Type of rat clauses to try."
       }].
 
-run(Bs, Param) ->
+run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
     N = varp_formula:number_of_unbound(Bs),
     varp_formula:config(Bs, permanent, 0),
     CMax = varp_formula:info(Bs, permanent),
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
-	    Bs;
+	    {?CONTINUE,[],Bs};
 	all ->
 	    rat(Bs,N,CMax,Type);
 	M ->
@@ -48,15 +48,16 @@ run(Bs, Param) ->
 
 rat(Bs,N,CMax,Type) ->
     case varp_formula:first_unbound(Bs) of
-	false -> Bs;
+	false -> {?CONTINUE,[],Bs};
 	{I,X} -> rat(Bs,I,X,N,CMax,Type)
     end.
 
-rat(Bs,_I,_X,0,_CMax,_Type) -> Bs;
+rat(Bs,_I,_X,0,_CMax,_Type) -> 
+    {?CONTINUE,[],Bs};
 rat(Bs, I, X,N,CMax,Type) ->
     Bs1 = rat_var(Bs,X,CMax,Type),
     case varp_formula:next_unbound(Bs1,I) of
-	false -> Bs1;
+	false -> {?CONTINUE,[],Bs1};
 	{I1,X1} -> rat(Bs1,I1,X1,N-1,CMax,Type)
     end.
 

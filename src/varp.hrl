@@ -24,7 +24,6 @@
 -define(dcall(Fun), ok).
 -endif.
 
-
 -define(TOP_LEVEL, 0).
 
 -define(NUM_COUNTERS, 9).
@@ -37,6 +36,20 @@
 -define(COUNTER_STUMBLE_OLLE_COUNT, 7).
 -define(COUNTER_EVAL_COUNTER,       8).
 -define(COUNTER_REORDER_COUNTER,    9).
+
+%% plugin results
+-define(INCONSISTENT, inconsistent).
+-define(CONTINUE,     continue).
+-define(DONE,         done).
+-define(ABORT(X),     {abort,(X)}).
+-define(TIMEOUT,      ?ABORT(timeout)).
+-define(ITERATIONS,   ?ABORT(iterations)).
+-define(NOVAR,        ?ABORT(novar)).
+-define(THRESHOLD,    ?ABORT(threshold)).
+%% none resumable
+-define(CANCEL,       ?ABORT(user)).
+-define(ERROR,        ?ABORT(error)).
+
 
 -record(cid,
 	{ 
@@ -101,6 +114,7 @@
 
 -record(bs,
 	{
+	 state  = ok :: ok|cancel|timeout,
 	 option = #{} :: map(), %% the options
 	 counters :: reference(), %% counters(?NUM_COUNTERS)
 	 d1 :: reference(),   %% histogram delta1 counters(1024)
@@ -108,6 +122,8 @@
 	 clen :: reference(), %% histogram clause len counters(1024)
 	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
+	 t_global :: reference(), %% global timer 
+	 t_local :: reference(),  %% local timer
 	 main,                %% main formula variable
 	 meta=[],            %% meta variable bindings during build
 	 defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]

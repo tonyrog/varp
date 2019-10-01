@@ -127,11 +127,10 @@ options() ->
     ].
      
 
-run(false, _Param) ->
-    false;
-run(Bs, Param) ->
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_formula:config(Bs, max_conflicting, 0),
     varp_formula:config(Bs, permanent, 0),
+    Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     %% Calculate size of lru cache
     KeepFactor = maps:get(keep_factor, Param),
@@ -168,7 +167,8 @@ run(Bs, Param) ->
 	RestartInterval ->
 	    erlang:start_timer(RestartInterval, self(), restart)
     end,
-    init(Bs, Param, MaxLearned).
+    Bs1 = varp:set_local_timeout(Bs, Timeout),
+    init(Bs1, Param, MaxLearned).
 
 init(Bs, Param, MaxLearned) ->
     loop(Bs,Param,?TOP_LEVEL,MaxLearned,varp_formula:first_init(Bs),[]).
@@ -179,7 +179,7 @@ loop(Bs,Param,Level,MaxLearned,I,Stack) ->
 	    if Level =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
 		    display_stat(Bs,Param),
-		    0;
+		    {?INCONSISTENT,[],Bs};
 	       true ->
 		    contradiction(Bs,Param,Level,MaxLearned,I,Stack)
 	    end;
@@ -344,7 +344,16 @@ contradiction(Bs,Param,Level,MaxLearned,_I,Stack) ->
 
     DoRestart = DoRestartCount orelse DoRestartTime,
 
-    if DoPurge, JLevel =:= ?TOP_LEVEL ->
+    {DoStop,StopReason} 
+	= case varp:is_timeout_or_was_canceled(Bs) of
+	      false -> {false, none};
+	      YY -> YY
+	  end,
+
+    if DoStop ->
+	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    {StopReason,0,Bs};
+       DoPurge, JLevel =:= ?TOP_LEVEL ->
 	    if Learned > MaxLearned ->
 		    varp_formula:del_unused_clauses(Bs),
 		    reorder(Bs);
@@ -417,9 +426,14 @@ pop_until(Bs,[],_JLevel) ->
 next(Bs,Param,Level,MaxLearned,I,Stack) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
-	    model(Bs),
+	    Model = varp:output_model(Bs, 1),
 	    display_stat(Bs,Param),
-	    1;
+	    case varp_formula:getopt(Bs,method) of
+		collect ->
+		    {?CONTINUE,[Model],Bs};
+		count ->
+		    {?CONTINUE,1,Bs}
+	    end;
 	{J,Xj} ->
 	    NextLevel = Level+1,
 	    varp_formula:set_level(Bs,NextLevel),
@@ -534,9 +548,6 @@ display_stat(Bs,Param) ->
 	false ->
 	    ok
     end.
-
-model(Bs) ->
-    varp:output_model(Bs, 1).
 
 add_conflict_clause(Bs,[]) ->
     Bs;

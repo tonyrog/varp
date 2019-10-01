@@ -30,13 +30,12 @@ options() ->
 	 description => "Filename of file to dumped clauses to."
        }].
 
-run(Bs, Opts) ->
-    succ(Bs, Opts).
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
+    succ(Bs, Param).
 
-%% dump clauses
-succ(Bs, Opts) ->
-    Type = maps:get(type, Opts),
-    case maps:get(file, Opts) of
+succ(Bs, Param) ->
+    Type = maps:get(type, Param),
+    case maps:get(file, Param) of
 	"" ->
 	    succ(user, Type, Bs);
 	File ->
@@ -69,7 +68,7 @@ succ(Fd, Type, Bs) ->
     succ_(Fd, Type, I, Bs).
 
 succ_(_Fd,_Type,false,Bs) ->
-    Bs;
+    {?CONTINUE,[],Bs};
 succ_(Fd,Type,I,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, false) of
 	true ->

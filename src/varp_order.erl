@@ -39,30 +39,30 @@ options() ->
 	description => "Display declared variable order."
       }].
 
-run(Bs, Par) ->
-    order_literals(Bs, Par).
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
+    order_literals(Bs, Param).
 
-order_literals(Bs, Par) ->
+order_literals(Bs, Param) ->
     Seed = varp_formula:getopt(Bs,seed),
-    case maps:get(sort,Par) of
-	[Key1,Key2] -> 
+    case maps:get(sort,Param) of
+	[Key1,Key2] ->
 	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
-	[Key1] -> 
+	[Key1] ->
 	    varp_formula:order_sort(Bs,Key1,undefined,Seed)
     end,
-    Bs1 = case maps:get(first,Par) of
+    Bs1 = case maps:get(first,Param) of
 	      [] -> Bs;
 	      First -> varp_formula:order_sort_first(Bs,First)
 	  end,
-    Bs2 = case maps:get(last,Par) of
+    Bs2 = case maps:get(last,Param) of
 	      [] -> Bs1;
 	      Last -> varp_formula:order_sort_last(Bs1,Last)
 	  end,
-    display_order(Bs2,Par),
-    Bs2.
+    display_order(Bs2,Param),
+    {?CONTINUE,[],Bs2}.
     
-display_order(Bs,Par) ->
-    case maps:get(display,Par) of
+display_order(Bs,Param) ->
+    case maps:get(display,Param) of
 	false ->
 	    ok;
 	true ->

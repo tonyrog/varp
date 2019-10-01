@@ -16,7 +16,7 @@
 
 %% -define(DEBUG, true).
 -define(LEVEL, 1).
-
+-define(CHECK_INTERVAL, 1000).
 options() ->
     [#{ long  => "timeout",
 	short => "t",
@@ -34,59 +34,53 @@ options() ->
       }
     ].
 
-run(false, _Param) ->
-    false;
-run(Bs, Param) ->
-    N     = maps:get(max, Param),
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
+    N = maps:get(max, Param),
     Print = varp_formula:getopt(Bs,print),
+    Timeout = maps:get(timeout, Param, infinity),
     varp_formula:config(Bs, max_conflicting, 1),
-    case varp_formula:getopt(Bs,method) of
+    Bs1 = varp:set_local_timeout(Bs, Timeout),
+    case varp_formula:getopt(Bs1,method) of
 	collect ->
-	    bt(Bs, fun({Count0,Acc},Bs1) ->
-			   Count = Count0+1,
-			   Model = varp:output_model(Bs1,Count),
-			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,{Count,[Model|Acc]}}
-		   end, {0,[]});
+	    bt(Bs1, fun(Count,Acc,Bs2) ->
+			    Model = varp:output_model(Bs2,Count),
+			    Continue = (N =:= 0) orelse (Count < N),
+			    {Continue,[Model|Acc]}
+		    end, []);
 	count ->
-	    bt(Bs, fun(Count0,Bs1) ->
-			   Count = Count0+1,
-			   if Print =:= false -> ok;
-			      true -> varp:output_model(Bs1,Count)
-			   end,
-			   if Count rem 1000 =:= 0 ->
-				   io:format("~w\n", [Count]);
-			      true -> 
-				   ok
-			   end,
-			   Continue = (N =:= 0) orelse (Count < N),
-			   {Continue,Count} 
-		   end, 0)
+	    bt(Bs1, fun(Count,_Acc,Bs2) ->
+			    if Print =:= false -> ok;
+			       true -> varp:output_model(Bs2,Count)
+			    end,
+			    if Count rem 1000 =:= 0 ->
+				    io:format("~w\n", [Count]);
+			       true -> 
+				    ok
+			    end,
+			    Continue = (N =:= 0) orelse (Count < N),
+			    {Continue,Count}
+		    end, 0)
     end.
 
 %%
-%% Explicit recursion version, allow times backtracking
+%% Explicit recursion version, allow timed backtracking
 %% mix algorithms etc.
 %%
 bt(Bs,Func,Acc) ->
     case init(Bs) of
 	{model,_Stack} ->
-	    {_,Acc1} = Func(Acc,Bs),
-	    Acc1;
+	    {_,Acc1} = Func(1,Acc,Bs), 
+	    {?DONE, Acc1, Bs};  %% no more models!
 	{true,Stack} ->
-	    {_,Acc1} = loop(Stack,Func,Acc,Bs),
-	    Acc1;
+	    loop(Stack,Func,0,0,Acc,Bs);
 	false ->
-	    Acc
+	    {?INCONSISTENT, Acc, Bs}
     end.
 
 %% initalise backtrack stack
 init(Bs) ->
     I0 = varp_formula:first_init(Bs),
-    Next = varp_formula:next_unbound(Bs,I0),
-    %% Num = varp_formula:number_of_unbound(Bs),
-    %% io:format("I0=~w, next=~w, num=~w\n", [I0,Next,Num]),
-    case Next  of
+    case varp_formula:next_unbound(Bs,I0) of
 	false  -> {model,[]};
 	{I,Xi} -> {true,[{I,0,[Xi,-Xi],?LEVEL}]}
     end.
@@ -97,15 +91,13 @@ next([{_,_,[],_}|Stack1],Bs) ->
 next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
     varp_formula:set_level(Bs,Level),
     case eq_eval(Bs,Xi,Level) of
-	false -> %% hook this?
+	false ->
 	    Stack1 = [{I,Xi,Xs,Level}|Stack],
 	    proof_output(Bs, Stack1),
 	    varp_formula:undo_level(Bs,Level),
 	    next(Stack1,Bs);
 	true ->
 	    Next = varp_formula:next_unbound(Bs,I),
-	    ?dbg("I=~w, next=~w, num=~w\n", 
-		 [I,Next,varp_formula:number_of_unbound(Bs)]),
 	    case Next of
 		false ->
 		    {model,[{I,Xi,Xs,Level}|Stack]};
@@ -116,25 +108,44 @@ next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
 next([],_Bs) ->
     false.
 
-loop(Stack,Func,Acc,Bs) ->
+loop(Stack,Func,?CHECK_INTERVAL,Count,Acc,Bs) ->
+    case varp:is_timeout_or_was_canceled(Bs) of
+	{true,What} ->
+	    undo_all(Bs, Stack), %% make environment useful
+	    {What,Acc,Bs};
+	false ->
+	    loop(Stack,Func,0,Count,Acc,Bs)
+    end;
+loop(Stack,Func,I,Count,Acc,Bs) ->
     case next(Stack,Bs) of
 	{model,Stack1} ->
-	    case Func(Acc,Bs) of
+	    Count1 = Count+1,
+	    case Func(Count1,Acc,Bs) of
 		{true,Acc1} ->
 		    undo(Bs,Stack1),
-		    loop(Stack1,Func,Acc1,Bs);
+		    loop(Stack1,Func,I+1,Count1,Acc1,Bs);
 		{false,Acc1} ->
-		    {false,Acc1}
+		    {?CONTINUE,Acc1,Bs}
 	    end;
 	{true,Stack1} ->
-	    loop(Stack1,Func,Acc,Bs);
+	    loop(Stack1,Func,I+1,Count,Acc,Bs);
 	false ->
-	    {false,Acc}
+	    if Count =:= 0 ->
+		    {?INCONSISTENT,Acc,Bs};
+	       true ->
+		    {?DONE,Acc,Bs}
+	    end
     end.
 
 undo(Bs,[{_,_,_,Level}|_]) ->
     varp_formula:undo_level(Bs,Level);
 undo(_Bs,[]) ->
+    ok.
+
+undo_all(Bs,[{_,_,_,Level}|Stack]) ->
+    varp_formula:undo_level(Bs,Level),
+    undo_all(Bs, Stack);
+undo_all(_Bs, []) ->
     ok.
 
 %% Xi is the current decision, that failed, 

@@ -13,19 +13,22 @@
 options() ->
     [].
 
-run(Bs, _Param) ->
+run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
     case Bs#bs.main of
 	undefined ->
 	    io:format("error: missing main variable\n"),
-	    error;
+	    {?ERROR,"missing main variable",Bs};
 	Main ->
 	    varp_formula:set_level(Bs,?TOP_LEVEL),
 	    case varp_formula:bind(Bs, -Main) of
-		false -> false;
+		false -> 
+		    {?INCONSISTENT,[],Bs};
 		true ->
 		    case varp_formula:eval(Bs) of
-			false -> false;
-			true -> Bs
+			false -> 
+			    {?INCONSISTENT,[],Bs};
+			true -> 
+			    {?CONTINUE,[],Bs}
 		    end
 	    end
     end.

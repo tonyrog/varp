@@ -40,7 +40,7 @@ run(Bs, Opts) ->
     cnf(Bs, Opts).
 
 %% output cnf clauses
-cnf(Bs, Opts) ->
+cnf(Bs, Opts) when is_record(Bs,bs), is_map(Opts) ->
     Raw = maps:get(raw, Opts),
     Type = maps:get(type, Opts),
     case maps:get(file, Opts) of
@@ -54,10 +54,10 @@ cnf(Bs, Opts) ->
 		    after
 			file:close(Fd)
 		    end;
-		Error={error,Reason} ->
+		{error,Reason} ->
 		    io:format("cnf error: unable to open file ~s (~w)\n",
 			      [File, Reason]),
-		    Error
+		    {?ERROR,Reason,Bs}
 	    end
     end.
 
@@ -80,7 +80,7 @@ cnf(Fd, Type, Raw, Bs) ->
     cnf_(Fd, Type, Raw, I, Bs).
 
 cnf_(_Fd,_Type,_Raw,false,Bs) ->
-    Bs;
+    {?CONTINUE,[],Bs};
 cnf_(Fd,Type,Raw,I,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
 	true ->

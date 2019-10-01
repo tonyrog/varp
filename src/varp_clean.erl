@@ -27,7 +27,7 @@ options() ->
       }
     ].
 
-run(Bs, Param) ->
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Bs1 = 
 	case maps:get(clauses, Param, false) of
 	    false -> Bs;
@@ -38,4 +38,5 @@ run(Bs, Param) ->
 	    false -> Bs1;
 	    true -> varp_formula:clean_literals(Bs1)
 	end,
-    Bs2.
+    {?CONTINUE, [], Bs2}.
+

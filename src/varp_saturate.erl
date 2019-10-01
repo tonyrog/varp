@@ -54,7 +54,7 @@ options() ->
      ].
 
 
-run(Bs, Param) ->
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_formula:config(Bs, max_conflicting, 1),
     K = maps:get(level, Param, 1),
     _Pair = maps:get(pair, Param, false),
@@ -69,39 +69,36 @@ run(Bs, Param) ->
     saturate(Bs,K,Timeout,MaxLaps,Threshold).
 
 saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
-    TRef = if is_number(Timeout), Timeout > 0 ->
-		   erlang:start_timer(trunc(1000*Timeout), undefined, ok);
-	      Timeout =:= infinity ->
-		   undefined
-	   end,
-    case saturate_(Bs,K,TRef,MaxLaps,Threshold) of
-	false -> false;
-	{_Reason,Bs} -> 
+    Bs1 = varp:set_local_timeout(Bs, Timeout),
+    case saturate_(Bs1,K,MaxLaps,Threshold) of
+	false ->
+	    {?INCONSISTENT,[],Bs1};
+	{Reason,Bs1} -> 
 	    %% io:format("level = ~w\n", [varp_formula:info(Bs, level)]),
 	    ?dbg("saturate limit ~w\n", [_Reason]),
-	    Bs
+	    {Reason,[],Bs1#bs{ t_local = undefined }}
     end.
 
-saturate_(Bs,_K,_TRef,0,_Threshold) ->
-    {laps,Bs};
-saturate_(Bs,K,TRef,Laps,Threshold) ->
+saturate_(Bs,_K,0,_Threshold) ->
+    {?ITERATIONS,Bs};
+saturate_(Bs,K,Laps,Threshold) ->
     Level = ?TOP_LEVEL,
     N = varp_formula:number_of_bound(Bs),
     if  K =:= 1 ->
-	    init_1(Bs,N,Level,TRef,Laps,Threshold);
+	    init_1(Bs,N,Level,Laps,Threshold);
 	K > 0 -> 
-	    init_k(Bs,K,N,Level,TRef,Laps,Threshold)
+	    init_k(Bs,K,N,Level,Laps,Threshold)
     end.
 
-init_k(Bs,K,N,Level,TRef,Laps,Threshold) ->
+init_k(Bs,K,N,Level,Laps,Threshold) ->
     case varp_formula:first_unbound(Bs) of
 	false ->
-	    {novar,Bs};
-	{I,X} -> 
-	    loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold)
-    end.    
+	    {?NOVAR,Bs};
+	{I,X} ->
+	    loop_k(Bs,I,X,K,N,Level,Laps,Threshold)
+    end.
 
-loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
+loop_k(Bs,I,X,K,N,Level,Laps,Threshold) ->
     case push2_eq_eval(Bs,-X,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level+1),Level+1]),
@@ -111,11 +108,11 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
 		true  -> 
-		    loop_k_next(Bs,I,X,K,N,Level,TRef,Laps,Threshold)
+		    loop_k_next(Bs,I,X,K,N,Level,Laps,Threshold)
 	    end;
 	true ->
 	    N1 = varp_formula:number_of_bound(Bs),
-	    case loop_k_next(Bs,I,X,K-1,N1,Level+2,TRef,Laps,Threshold) of
+	    case loop_k_next(Bs,I,X,K-1,N1,Level+2,Laps,Threshold) of
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level+1),Level+1]),
 		    pop2(Bs, Level),
@@ -124,7 +121,7 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 			    ?dbg("~scontradiction\n", [indent(Level)]),
 			    false;
 			true  -> 
-			    loop_k_next(Bs,I,X,K,N,Level,TRef,Laps,Threshold)
+			    loop_k_next(Bs,I,X,K,N,Level,Laps,Threshold)
 		    end;
 		{_Reason,Bs1} ->
 		    %% io:format("stop reason = ~w\n", [Reason]),
@@ -140,16 +137,16 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 				 [indent(Level+1),Level+1]),
 			    pop2(Bs, Level),
 			    eq_eval(Bs1,-X,Level),
-			    loop_k_next(Bs1,I,X,K,N,Level,TRef,Laps,Threshold);
+			    loop_k_next(Bs1,I,X,K,N,Level,Laps,Threshold);
 			true ->
 			    N2 = varp_formula:number_of_bound(Bs),
-			    case loop_k_next(Bs1,I,X,K-1,N2,Level+2,TRef,Laps,Threshold) of
+			    case loop_k_next(Bs1,I,X,K-1,N2,Level+2,Laps,Threshold) of
 				false ->
 				    ?dbg("~scontradiction, undo ~w\n", 
 					 [indent(Level),Level]),
 				    pop2(Bs, Level),
 				    eq_eval(Bs1,-X,Level),
-				    loop_k_next(Bs1,I,X,K,N,Level,TRef,Laps,Threshold);
+				    loop_k_next(Bs1,I,X,K,N,Level,Laps,Threshold);
 				{_Reason1,Bs2} ->
 				    io:format("stop reason = ~w\n", [_Reason1]),
 				    ?dbg("~s~s/1: => {~s}\n",
@@ -164,19 +161,19 @@ loop_k(Bs,I,X,K,N,Level,TRef,Laps,Threshold) ->
 				    pop2(Bs2, Level),
 				    varp_formula:install_bindings(Bs,Level,Ys),
 				    true = varp_formula:eval(Bs2),
-				    loop_k_next(Bs2,I,X,K,N,Level,TRef,Laps,Threshold)
+				    loop_k_next(Bs2,I,X,K,N,Level,Laps,Threshold)
 			    end
 		    end
 	    end
     end.
 
-loop_k_next(Bs,I,_X,K,N,Level,TRef,Laps,Threshold) ->
+loop_k_next(Bs,I,_X,K,N,Level,Laps,Threshold) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
-	    TimeRemain = read_timer(TRef),
-	    if TimeRemain =:= 0 -> 
-		    {timeout,Bs};
-	       true ->
+	    case varp:is_timeout_or_was_canceled(Bs) of	    
+		{true,What} ->
+		    {What,Bs};
+		false ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
 			    {threshold,Bs};
@@ -185,23 +182,23 @@ loop_k_next(Bs,I,_X,K,N,Level,TRef,Laps,Threshold) ->
 				stop ->
 				    {laps,Bs};
 				Laps1 ->
-				    init_k(Bs,K,N1,Level,TRef,Laps1,Threshold)
+				    init_k(Bs,K,N1,Level,Laps1,Threshold)
 			    end
 		    end
 	    end;
-	{I1,X1} when K>1   -> loop_k(Bs,I1,X1,K,N,Level,TRef,Laps,Threshold);
-	{I1,X1} when K=:=1 -> loop_1(Bs,I1,X1,N,Level,TRef,Laps,Threshold)
+	{I1,X1} when K>1   -> loop_k(Bs,I1,X1,K,N,Level,Laps,Threshold);
+	{I1,X1} when K=:=1 -> loop_1(Bs,I1,X1,N,Level,Laps,Threshold)
     end.
 
-init_1(Bs,N,Level,TRef,Laps,Threshold) ->
+init_1(Bs,N,Level,Laps,Threshold) ->
     case varp_formula:first_unbound(Bs) of
 	false -> 
-	    loop_1_done(novar,Laps,Bs);
+	    loop_1_done(?NOVAR,Laps,Bs);
 	{I,X} -> 
-	    loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold)
+	    loop_1(Bs,I,X,N,Level,Laps,Threshold)
     end.
 
-loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
+loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
     case push_eq_eval(Bs,-X,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
@@ -219,7 +216,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		    varp_formula:move_level(Bs, Level+1, Level),
 		    varp_formula:log_bindings(Bs, X, ?T, Ls),
 		    varp_formula:set_level(Bs,Level),
-		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
+		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold)
 	    end;
 	true ->
 	    Ls = varp_formula:get_bindings(Bs,Level+1),
@@ -232,7 +229,7 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		    pop(Bs,Level),
 		    eq_eval(Bs,-X,Level),
 		    varp_formula:log_bindings(Bs, X, ?FALSE, Ls),
-		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold);
+		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold);
 		true ->
 		    ?dbg("~s~s/1: => [~s]\n",
 			 [indent(Level),varp_formula:fmt_var(Bs,X),
@@ -258,33 +255,32 @@ loop_1(Bs,I,X,N,Level,TRef,Laps,Threshold) ->
 		    varp_formula:install_bindings(Bs,Level,Ys),
 		    true = varp_formula:eval(Bs),
 		    varp_formula:log_bindings(Bs, X, undefined, Ys),
-		    loop_1_next(Bs,I,X,N,Level,TRef,Laps,Threshold)
+		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold)
 	    end
     end.
 
-loop_1_next(Bs,I,_X,N,Level,TRef,Laps,Threshold) ->
+loop_1_next(Bs,I,_X,N,Level,Laps,Threshold) ->
     case varp_formula:next_unbound(Bs,I) of
 	false ->
-	    %% fixme: check timeout more often
-	    TimeRemain = read_timer(TRef),
-	    if TimeRemain =:= 0 -> 
-		    ?dbg("timer terminated\n", []),
-		    loop_1_done(timeout,Laps,Bs);
-	       true ->
+	    case varp:is_timeout_or_was_canceled(Bs) of
+		{true,What} ->
+		    ?dbg("terminate reaon=~w\n", [What]),
+		    loop_1_done(What,Laps,Bs);
+		false ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
 			    ?dbg("threshold limit\n", []),
-			    loop_1_done(threshold,Laps,Bs);
+			    loop_1_done(?THRESHOLD,Laps,Bs);
 		       true -> 
 			    case dec(1,Laps) of
 				stop ->
-				    loop_1_done(laps,Laps,Bs);
+				    loop_1_done(?ITERATIONS,Laps,Bs);
 				Laps1 ->
-				    init_1(Bs,N1,Level,TRef,Laps1,Threshold)
+				    init_1(Bs,N1,Level,Laps1,Threshold)
 			    end
 		    end
 	    end;
-	{I1,X1} -> loop_1(Bs,I1,X1,N,Level,TRef,Laps,Threshold)
+	{I1,X1} -> loop_1(Bs,I1,X1,N,Level,Laps,Threshold)
     end.
 
 loop_1_done(Reason, _Laps={_Ls,_Ms}, Bs) ->
@@ -340,12 +336,4 @@ dec(K, {Ls,Ms}) ->
     case element(K, Ls) of
 	1 when K =:= 1 -> stop;
 	E -> {setelement(K, Ls, E-1), Ms}
-    end.
-
-read_timer(undefined) -> 
-    infinity;
-read_timer(TRef) when is_reference(TRef) ->
-    case erlang:read_timer(TRef) of
-	false -> 0;
-	Remain -> Remain
     end.

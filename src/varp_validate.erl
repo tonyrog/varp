@@ -32,7 +32,7 @@ options() ->
       }
     ].
 
-run(Bs, Param) ->
+run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     T = case maps:get(type, Param) of
 	    undefined -> varp_formula:getopt(Bs, proof_output);
 	    Type -> Type
@@ -56,7 +56,7 @@ run(Bs, Param) ->
 	    Res;
 	{error,Reason} ->
 	    io:format("error: file error ~p\n", [Reason]),
-	    error
+	    {?ERROR, "file error", Bs}
     end.
 
 validate_loop(Fd,Type,Bs, I) ->
@@ -71,10 +71,10 @@ validate_loop(Fd,Type,Bs, I) ->
     case read_clause(Fd,Type,Bs) of
 	eof ->
 	    io:format("\nVALIDATED\n"),
-	    Bs;
+	    {?CONTINUE,[],Bs};
 	error ->
 	    io:format("\nREAD ERROR\n"),
-	    error;
+	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
 	    %% io:format("check clause ~w\n", [Clause]),
 	    varp_formula:set_level(Bs,1),
@@ -93,13 +93,13 @@ validate_loop(Fd,Type,Bs, I) ->
 				    io:format("\nUNSATISFIABLE, INVALID ~w\n",
 					      [EClause])
 			    end,
-			    false;
+			    {?INCONSISTENT,[],Bs};
 			true ->
 			    validate_loop(Fd,Type,Bs,I1)
 		    end;
 		true ->
 		    io:format("\nINVALID\n"),
-		    error
+		    {?ERROR,"invalid",Bs}
 	    end;
 	{d,Clause} ->
 	    %% what tests must be done?

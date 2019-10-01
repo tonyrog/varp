@@ -22,7 +22,7 @@ run(Bs, _Param) ->
 	      Mon = monitor(process, SELF),
 	      loop(Bs, Mon)
       end),
-    Bs.
+    {?CONTINUE,[],Bs}.
 
 loop(Bs, Mon) ->
     receive
@@ -42,4 +42,3 @@ loop(Bs, Mon) ->
 	    io:format("monitor: got ~p\n", [Other]),
 	    loop(Bs, Mon)
     end.
-

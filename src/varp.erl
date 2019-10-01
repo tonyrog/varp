@@ -28,6 +28,13 @@
 -export([load_option_list/1, load_option_list/3]).
 
 -export([default_options/0]).
+-export([read_timer/1]).
+-export([set_local_timeout/2]).
+-export([set_global_timeout/2]).
+-export([is_local_timeout/1]).
+-export([is_global_timeout/1]).
+-export([is_timeout/1]).
+-export([is_timeout_or_was_canceled/1]).
 
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").
@@ -409,10 +416,6 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 	    OptionInfoList = Mod:options(),
 	    OptionSpec = varp_option:options_spec(OptionInfoList),
 	    OptMap = varp_option:default_opts(OptionInfoList),
-	    %% io:format("mod = ~p\n", [Mod]),
-	    %% io:format("list = ~p\n", [OptionInfoList]),
-	    %% io:format("spec = ~p\n", [OptionSpec]),
-	    %% io:format("map = ~p\n", [OptMap]),
 	    OptMap1 =
 		lists:foldl(
 		  fun({Key,Value}, Mi) ->
@@ -487,41 +490,75 @@ do_run(Do, Formula, GOpts) ->
     R.
 
 do_run_(Do, Formula, GOpts) ->
-    {{bool,Main}, Bs} = varp_formula:build(Formula,GOpts),
-    Bs1 = Bs#bs { main = Main },
-    R = do(Do, Bs1),
+    {Main,Bs} = case varp_formula:build(Formula,GOpts) of
+		    {{bool,Var0},Bs0} -> {Var0,Bs0};
+		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0}
+		end,
+    Timeout = maps:get(timeout, GOpts, infinity),
+    Bs1 = varp:set_global_timeout(Bs, Timeout),    
+    Bs2 = Bs1#bs { main = Main },
+    {R,Acc,Bs3} = do(Do,[],Bs2),
     Method = method(Do),
-    case Bs#bs.proof_fd of
+    case Bs2#bs.proof_fd of
 	undefined -> ok;
 	user -> ok;
 	Fd -> file:close(Fd)
     end,
-    case varp_formula:getopt(Bs1, print) of
-	false -> R;
-	_ -> display_result(R, Method, Bs1), R
+    case varp_formula:getopt(Bs2, print) of
+	false -> 
+	    {R,Acc,Bs3};
+	_ -> 
+	    N = if is_list(Acc) -> length(Acc);
+		   is_integer(Acc) -> Acc
+		end,
+	    M = case R of
+		    ?DONE -> N;
+		    ?CONTINUE when N>0 -> N;
+		    _ -> R
+		end,
+	    display_result(M, Method, Bs3), 
+	    {R,Acc,Bs3}
     end.
 
-do([{Plugin,Param}|Do], Bs) ->
+do([{Plugin,Param}|Do],Acc0,Bs) ->
     S0 = stat(Bs),
     varp_formula:info(Bs, "pass ~p\n", [Plugin]),
     T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
-	R ->
+	{Result,Acc1,Bs1} ->
 	    T1 = erlang:monotonic_time(),
-	    S1 = stat(Bs),
+	    S1 = stat(Bs1),
 	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
 	    Ts = Time/1000000,
-	    show_info(S1, S0, Ts, Bs),
-	    case R of
-		false ->
-		    no_models(Bs);
-		Bs1 when is_record(Bs1,bs) ->
-		    case one_model(Bs1) of
-			false -> do(Do, Bs1);
-			Result -> Result
+	    show_info(S1, S0, Ts, Bs1),
+	    Acc = combine_result(Acc0,Acc1),
+	    case Result of
+		?INCONSISTENT ->
+		    no_models(Bs1);
+		?CANCEL ->
+		    {?CANCEL,Acc,Bs1};
+		?ERROR ->
+		    {?ERROR,Acc,Bs1};
+		?DONE ->
+		    {?DONE,Acc,Bs1};
+		?TIMEOUT ->
+		    case is_local_timeout(Bs1) andalso 
+			not is_global_timeout(Bs1) of
+			true ->
+			    do(Do, Acc, Bs1); %% continue
+			false ->
+			    {?TIMEOUT,Acc,Bs1}
 		    end;
-		Result ->
-		    Result
+		_ when Acc =:= []; Acc =:= 0 ->
+		    case one_model(Bs1) of
+			false ->
+			    do(Do, Acc, Bs1);
+			Acc2 ->
+			    Acc3 = combine_result(Acc2,Acc),
+			    {?DONE,Acc3,Bs1}
+		    end;
+		_ ->
+		    do(Do, Acc, Bs1)
 	    end
     catch
 	?EXCEPTION(error, Reason, Stacktrace) ->
@@ -529,8 +566,17 @@ do([{Plugin,Param}|Do], Bs) ->
 		      [Plugin, Reason, ?GET_STACK(Stacktrace)]),
 	    error
     end;
-do([], _Bs) ->
-    undefined.
+do([], Acc, Bs) ->
+    {?CONTINUE, Acc, Bs}.
+
+combine_result(N, M) when is_integer(N), is_integer(M) ->
+    N+M;
+combine_result(Ns,Ms) when is_list(Ns), is_list(Ms) ->
+    Ns++Ms;
+combine_result(N, Ms) when is_integer(N), is_list(Ms) ->
+    N+length(Ms);
+combine_result(Ns,M) when is_list(Ns), is_integer(M) ->
+    length(Ns)+M.
 
 show_info(S1, S0, Ts, Bs) ->
     varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead)\n    | #clauses = ~w, #dead = ~w\n    | time=~.2fs\n",
@@ -573,34 +619,37 @@ method(Do) ->
 		    end
 	    end
     end.
-    
-display_result({N,_Models}, Method, Bs) ->
-    display_result(N, Method, Bs);
-display_result(0, satisfy, Bs) ->
+
+display_result(N, satisfy, _Bs) when is_integer(N), N>0 ->
+    io:format("% ~w\n", [N]);
+display_result(N, falsify, _Bs) when is_integer(N), N>0 ->
+    io:format("% ~w\n", [N]);
+display_result(N,prove,_Bs) when is_integer(N), N>0 ->
+    io:format("% FALSE\n", []);
+display_result(?INCONSISTENT, satisfy, Bs) ->
     case varp_formula:getopt(Bs, starexec) of
 	true ->
 	    io:format("s UNSATISFIABLE\n");
 	false ->
 	    io:format("% 0\n", [])
     end;
-display_result(N, satisfy, _Bs) when is_integer(N) ->
-    io:format("% ~w\n", [N]);
-display_result(0, falsify, _Bs) ->
+display_result(?INCONSISTENT, falsify, _Bs) ->
     io:format("% 0\n", []);
-display_result(N, falsify, _Bs) when is_integer(N) ->
-    io:format("% ~w\n", [N]);
-display_result(0,prove,_Bs) ->
+display_result(?INCONSISTENT,prove,_Bs) ->
     io:format("% TRUE\n", []);
-display_result(0,none,_Bs) ->
+display_result(?INCONSISTENT,none,_Bs) ->
     ok; %% io:format("\n", []);
-display_result(_N,prove,_Bs) ->
-    io:format("% FALSE\n", []);
-display_result(undefined,prove,_Bs) ->
+display_result(?TIMEOUT,_,_Bs) ->
+    io:format("% TIMEOUT\n", []);
+display_result(?CANCEL,_,_Bs) ->
+    io:format("% USER ABORT\n", []);
+display_result(?ERROR,_,_Bs) ->
+    io:format("% ERROR\n", []);
+display_result(?CONTINUE,prove,_Bs) ->
     io:format("% UNKNOWN\n", []);
-display_result(undefined,_,_Bs) ->
-    ok; %% io:format("\n", []);
-display_result(error,_,_Bs) ->
-    io:format("% ERROR\n", []).
+display_result(?CONTINUE,_,_Bs) ->
+    ok. %% io:format("\n", [])
+
 
 %% check if there is already a "unique" model
 one_model(Bs) ->
@@ -609,7 +658,7 @@ one_model(Bs) ->
     if NV =:= NB ->
 	    Model = output_model(Bs,1),
 	    case varp_formula:getopt(Bs,method) of
-		collect -> {1,[Model]};
+		collect -> [Model];
 		count -> 1
 	    end;
        true ->
@@ -628,8 +677,10 @@ no_models(Bs) ->
 	    ok
     end,
     case varp_formula:getopt(Bs,method) of
-	collect -> {0,[]};
-	count -> 0
+	collect ->
+	    {?INCONSISTENT,[],Bs};
+	count -> 
+	    {?INCONSISTENT,0,Bs}
     end.
 
 anon_decls([{{p,P,Ps},Type,Size}|Decls]) ->
@@ -651,13 +702,13 @@ order_decl([V|Vs],Opts) when is_tuple(V) ->
 order_decl([],Opts) ->
     case lists:reverse(Opts) of
 	[{order_list,L1},{order,K},{order_list,L2}] ->
-	    [{order,K},{order_first,L1},{order_last,L2}];
+	    [{order,K},{first,L1},{last,L2}];
 	[{order_list,L1},{order,K}] ->
-	    [{order,K},{order_first,L1}];
+	    [{order,K},{first,L1}];
 	[{order,K},{order_list,L2}] ->
-	    [{order,K},{order_last,L2}];
+	    [{order,K},{last,L2}];
 	[{order_list,L1}] ->
-	    [{order_first,L1}];
+	    [{first,L1}];
 	[{order,K}] ->
 	    [{order,K}];
 	[] ->
@@ -1111,3 +1162,60 @@ remove_block([]) -> [].
 remove_line(Cs=[$\n|_]) -> Cs;
 remove_line([_|Cs]) -> remove_line(Cs);
 remove_line([]) -> [].
+
+set_local_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
+    TRef = erlang:start_timer(trunc(1000*Timeout), undefined, ok),
+    Bs#bs { t_local = TRef };
+set_local_timeout(Bs, infinity) ->
+    Bs#bs { t_local = undefined }.
+
+set_global_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
+    TRef = erlang:start_timer(trunc(1000*Timeout), undefined, ok),
+    Bs#bs { t_global = TRef };
+set_global_timeout(Bs, infinity) ->
+    Bs#bs { t_global = undefined }.
+
+is_timeout_or_was_canceled(Bs) ->
+    Canceled = was_canceled(),
+    case is_timeout(Bs) of
+	true ->
+	    {true,?TIMEOUT};
+	false ->
+	    if Canceled ->
+		    {true,?CANCEL};
+	       true ->
+		    false
+	    end
+    end.
+
+was_canceled() ->
+    receive
+	{cancel,_From} ->
+	    true
+    after 0 ->
+	    false
+    end.
+	    
+
+is_timeout(Bs) ->
+    is_local_timeout(Bs) orelse is_global_timeout(Bs).
+
+is_local_timeout(Bs) ->
+    case read_timer(Bs#bs.t_local) of
+	0 -> true;
+	_ -> false
+    end.
+
+is_global_timeout(Bs) ->
+    case read_timer(Bs#bs.t_global) of
+	0 -> true;
+	_ -> false
+    end.
+
+read_timer(undefined) -> 
+    infinity;
+read_timer(TRef) when is_reference(TRef) ->
+    case erlang:read_timer(TRef) of
+	false -> 0;
+	Remain -> Remain
+    end.
