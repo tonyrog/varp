@@ -8,6 +8,7 @@ ERL_C_INCLUDE_DIR := "$(ERLDIR)/usr/include"
 CC = gcc
 PRIVDIR=../priv
 
+CFLAGS += -O3
 CFLAGS += -D__WIN32__ -DWIN32 -D_MT -D_DLL -DEBUG_MEM -DDLOG_DEFAULT=DLOG_NONE
 CFLAGS += -Wall -Wextra -Wswitch-default -Wswitch-enum -D_THREAD_SAFE -D_REENTRANT -fno-common
 CFLAGS += -I$(ERL_C_INCLUDE_DIR)
