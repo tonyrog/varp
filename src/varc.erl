@@ -20,8 +20,8 @@
 -export([get_symbol/2]).
 -export([is_atom/2]).
 -export([find_symbol/2]).
--export([variable_info/2, variable_info/3]).
--export([literal_info/3]).
+-export([variable_info/2, variable_info/3, variable_info_keys/0]).
+-export([literal_info/2, literal_info/3, literal_info_keys/0]).
 -export([value/2]).
 -export([bind/2, bind/3]).
 -export([subst/3]).
@@ -71,8 +71,7 @@
 -export([clause_first_none_keep/1]).
 -export([clause_next/2]).
 
--export([info/1]).
--export([info_keys/0]).
+-export([info/1, info_keys/0]).
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
@@ -165,18 +164,28 @@ find_symbol(_Vp, _Name) ->
 %% What::implication|implication_clause|implication_pos|
 %%       activity|level|degree|is_atom|symbol
 %%
-variable_info(Vp, Index) ->
-    [{What,variable_info(Vp, Index, What)} ||
-	What <- [implication, implication_clause, implication_pos,
-		 activity, level, degree, is_atom, symbol]].
 
 variable_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
+variable_info(Vp, Index) ->
+    [{What,variable_info(Vp, Index, What)} || What <-variable_info_keys()].
+
+variable_info_keys() ->
+    [implication, implication_clause, implication_pos,
+     activity, level, degree, is_atom, symbol].
+
 literal_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
+
+literal_info(Vp,Index) ->
+    [{What,literal_info(Vp,Index,What)} || What <- literal_info_keys()].
+
+literal_info_keys() ->
+    [degree, edge_list, symbol].
+
 
 %%
 %% Get literal value 
@@ -501,7 +510,9 @@ get_clause_eval_counter(Vp,2) ->
 get_clause_eval_counter(Vp,3) ->
     info(Vp, clause3_eval_counter);
 get_clause_eval_counter(Vp,dead) ->
-    info(Vp, dead_eval_counter).
+    info(Vp, dead_eval_counter);
+get_clause_eval_counter(Vp,edge) ->
+    info(Vp, edge_eval_counter).
 
 get_eval_counter(Vp) ->
     info(Vp, eval_counter).

@@ -14,22 +14,17 @@
 -include("varp.hrl").
 
 all() ->
-    test1(),
-    test2(),
-    test3(),
-
-    or_simplify(),
-    or_eval(),
-
-    watch1(),
-
-    subst1(),
-    subst2(),
-    subst3(),
-    subst4(),
-    subst5(),
-
-    ok.
+    lists:foreach(
+      fun(Test) ->
+	      io:format("< ~w: ", [Test]),
+	      apply(?MODULE, Test, []),
+	      io:format("> ok\n")
+      end, [test1, test2, test3,
+	    or_simplify, or_eval,
+	    watch1,
+	    edge_list0,edge_list1, edge_list2, edge_list3,
+	    subst1, subst2, subst3, subst4, subst5
+	   ]).
 
 test1() ->
     V = varc:new(),
@@ -239,33 +234,37 @@ or_eval_bindings() ->
 
 order() ->
     V = varc:new(),
+    X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
     X5 = varc:add_variable(V),
     X6 = varc:add_variable(V),
-    X7 = varc:add_variable(V),
     
-    _C0 = add_clause(V, [-X2, -X3, -X4]),
-    _C1 = add_clause(V, [-X3, -X4, -X5]),
-    _C2 = add_clause(V, [X6, X2, X3]),
-    _C3 = add_clause(V, [X7, X6, X2]),
+    _C0 = add_clause(V, [-X1, -X2, -X3]),
+    _C1 = add_clause(V, [-X2, -X3, -X4]),
+    _C2 = add_clause(V, [X5, X1, X2]),
+    _C3 = add_clause(V, [X6, X5, X1]),
+
+    %% d(-X1)=1, d(X1)=2, d(-X2)=2 d(X2)=1
+    %% d(-X3)=2, d(X3)=0, d(-X4)=1, d(X4)=0
+    %% d(-X5)=0, d(X5)=2, d(-X6)=0, d(X6)=1
 
     ok = varc:order_sort(V, identity, undefined, 0),
-    [X2, X3, X4, X5, X6, X7] = varc:order_all(V),
+    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
     ok = varc:order_sort(V, identity, undefined, 0),
-    ok = varc:order_sort_first(V, [X6, X7]),
-    [X6, X7, X2, X3, X4, X5] = varc:order_all(V),
+    ok = varc:order_sort_first(V, [X5, X6]),
+    [X5, X6, X1, X2, X3, X4] = varc:order_all(V),
 
     ok = varc:order_sort(V, identity, undefined, 0),
-    ok = varc:order_sort_last(V, [X3, X2]),  %% reversed
-    [X4, X5, X6, X7, X2, X3] = varc:order_all(V),
+    ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
+    [X3, X4, X5, X6, X1, X2] = varc:order_all(V),
 
     ok = varc:order_sort(V, identity, undefined, 0),
-    ok = varc:order_sort_first(V, [X6, X7]),
-    ok = varc:order_sort_last(V, [X3, X2]),  %% reversed
-    [X6, X7, X4, X5, X2, X3] = varc:order_all(V),
+    ok = varc:order_sort_first(V, [X5, X6]),
+    ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
+    [X6, X5, X4, X3, X1, X2] = varc:order_all(V),
 
     ok = varc:order_sort(V, random, undefined, 1001),
     Sort1 = varc:order_all(V),
@@ -279,7 +278,7 @@ order() ->
     io:format("+degree, Vs = ~p\n", [varc:order_all(V)]),
     
     ok = varc:order_sort(V, '-degree', undefined, 0),
-    io:format("-degreer, Vs = ~p\n", [varc:order_all(V)]),
+    io:format("-degree, Vs = ~p\n", [varc:order_all(V)]),
 
     ok = varc:order_sort(V, '+rank', undefined, 0),
     io:format("rank>0, Vs = ~p\n", [varc:order_all(V)]),
@@ -308,10 +307,10 @@ subst1() ->
     NX3 = -X3,
     C0 = add_clause(V, [X1,X2]),
     C1 = add_clause(V, [X1,-X2]),
-    io:format("subst1: Clause before\n"),
+    io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, X3, X2),
-    io:format("subst1: Clause after\n"),    
+    io:format("clause after\n"),    
     print_clauses(V),
     [X1,X3] = lists:sort(varc:get_clause(V, C0)),
     [NX3,X1] = lists:sort(varc:get_clause(V, C1)),
@@ -323,10 +322,10 @@ subst2() ->
     X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     C0 = add_clause(V, [X1,X2]),
-    io:format("subst2: Clause before\n"),
+    io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, X1, X2),
-    io:format("subst2: Clause after\n"),
+    io:format("clause after\n"),
     print_clauses(V),
     io:format("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
     [] = lists:sort(varc:get_clause(V, C0)),
@@ -338,10 +337,10 @@ subst3() ->
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     C0 = add_clause(V, [-X2,X3]),
-    io:format("subst3: Clause before\n"),
+    io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, -X2, X3),
-    io:format("subst3: Clause after\n"),
+    io:format("clause after\n"),
     print_clauses(V),
     io:format("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
     [] = lists:sort(varc:get_clause(V, C0)),
@@ -365,12 +364,12 @@ subst4() ->
     _C5 = add_clause(V, [X4, X2]),
     _C6 = add_clause(V, [X7, X4, -X2]),
 
-    io:format("subst1: Clause before\n"),
+    io:format("\nbefore\n"),
     print_clauses(V),
 
     io:format(" [~w/~w]\n", [X6,X3]),
     varc:subst(V, X6, X3),
-    io:format("subst1: Clause after\n"),    
+    io:format("clause after\n"),    
     print_clauses(V),
 
     true = varc:eval(V),
@@ -387,7 +386,6 @@ subst5() ->
     X6 = varc:add_variable(V),
     X7 = varc:add_variable(V),
 
-    io:format("subst2: Clause before\n"),    
     _C0 = add_clause(V, [X4,-X3]),
     _C1 = add_clause(V, [X7,X3]),
     _C2 = add_clause(V, [X7,-X5]),
@@ -400,7 +398,7 @@ subst5() ->
     io:format(" [~w/~w]\n", [X3,X7]),
     varc:subst(V, X3, X7),
 
-    io:format("subst2: Clause after\n"),
+    io:format("clause after\n"),
     print_clauses(V,true),
     true = varc:eval(V),
     Bs = [X3,X4,X6] = lists:sort(varc:get_bindings(V,0)),
@@ -471,6 +469,85 @@ watch1() ->
     0 = varc:clause_info(V, C3, watch0),
     1 = varc:clause_info(V, C3, watch1),
 
+    ok.
+
+edge_list0() ->
+    V = varc:new([{edge_list, true}]),
+    true = varc:info(V, edge_list),
+
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+
+    {true,C0} = varc:add_clause(V, [A, B]),
+    
+    %% eval should put in edges (A,B) ~A -> B, ~B -> A 
+    [{C0,B}] = varc:literal_info(V, -A, edge_list),
+    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    ok.
+
+edge_list1() ->
+    V = varc:new([{edge_list, true}]),
+    true = varc:info(V, edge_list),
+
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+
+    {true,C0} = varc:add_clause(V, [A, B, C]),
+
+    varc:bind(V, -C),
+    true = varc:eval(V),
+
+    %% eval should put in edges (A,B) ~A -> B, ~B -> A 
+    [{C0,B}] = varc:literal_info(V, -A, edge_list),
+    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    ok.
+
+edge_list2() ->
+    V = varc:new([{edge_list, true}]),
+    true = varc:info(V, edge_list),
+
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+
+    varc:bind(V, -C),
+
+    {true,C0} = varc:add_clause(V, [A, B, C]),
+
+    %% eval should put in edges (A,B) ~A -> B, ~B -> A 
+    [{C0,B}] = varc:literal_info(V, -A, edge_list),
+    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    ok.
+
+edge_list3() ->
+    V = varc:new([{edge_list, true}]),
+    true = varc:info(V, edge_list),
+
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+    D = varc:add_variable(V),
+
+    {true,C0} = varc:add_clause(V, [A, B]),
+    {true,C1} = varc:add_clause(V, [A, C]),
+    {true,C2} = varc:add_clause(V, [A, -D]),
+
+    %% eval should put in edges (A,B) -A -> B, -B -> A 
+    %% eval should put in edges (A,C) -A -> C, -C -> A
+    %% eval should put in edges (A,-D) -A -> -D, D -> A
+
+    R1 = lists:sort([{C0,B},{C2,-D},{C1,C}]),
+    R1 = lists:sort(varc:literal_info(V, -A, edge_list)),
+    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    [{C1,A}] = varc:literal_info(V, -C, edge_list),
+    [{C2,A}] = varc:literal_info(V, D, edge_list),
+
+    true = varc:bind(V, -A),
+    true = varc:eval(V),
+    ?T = varc:value(V, B),
+    ?T = varc:value(V, C),
+    ?F = varc:value(V, D),
     ok.
 
 %% Utils

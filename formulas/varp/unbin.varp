@@ -1,10 +1,15 @@
 //
-// binary unuary coding
+// binary/unuary coding
 //
+// using this coding one can switch between unary Y
+// and binary X encoding
+// 
 
 declare X(i):(isize(n));
 
-[A i=1..n] ((X(i) >= 0) && (X(i) < n)) &&
-[A i=1..n,j=1..n,i<j] (X(i) < X(j)) &&
+[A i=1..n] ((X(i) >= 1) && (X(i) <= n)) &&
+[A i=1..n-1] (X(i) < X(i+1)) &&
+[A i=1..n,j=1..n] ((X(i)==j) <-> Y(i,j))
 
-([A i=1..n,j=0..n-1] (Y(i,j) == (X(i)==j)))
+
+

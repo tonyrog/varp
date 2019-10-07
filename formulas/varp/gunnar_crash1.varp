@@ -1,0 +1,7 @@
+//
+// Formel crash 0.9.6 with saturate backjump -rank
+// n=24
+//
+
+[A x=1..n] [E! y=1..n] P(x,y) &&
+[A x=1..n][A y=1..n, x<y][A z=1..n] (not P(x,z) or not P(y,z))

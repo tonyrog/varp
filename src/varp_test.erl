@@ -243,8 +243,10 @@ sat(Formula, ExpectedModels) ->
     GOpts = varp:load_option_list(Options),
     GDo = varp:parse_do(Do),
     case varp:do_run(GDo,Formula,GOpts) of
-	{N,Ms} ->
+	{?DONE,Ms,_Bs1} ->
 	    lists:sort(Ms) == lists:sort(ExpectedModels);
+	{?INCONSISTENT,Ms,_Bs1} ->
+	    Ms == [];
 	Res ->
 	    io:format("Res=~w\n", [Res]),
 	    false

@@ -31,15 +31,15 @@ Boolean connectives in priority order are
 
 Integer are represented in two complement form and integer variables
 may be signed or unsigned. A integer variable X of bit size N is 
-entered as X:N. The default sign is unsigned. To alter the sign of
-a variable X:N/signed is used. Integer variables may also be declared
-like
+entered as X:N. The default sign is unsigned. To enter a signed
+variable the notation X:N/signed is used. 
+Integer variables may also be declared like:
 
     declare X:n/signed;
     declare Y:m/unsigned;
 
 Integer variables are infact boolean variable vectors and integer values
-are boolean constant vectors and are handled as such internally.
+are boolean constant vectors and may be used as such.
 
 # Integer operators
 
@@ -80,9 +80,16 @@ vectors of length 1.
 
 # Quantifiers
 
-    '['<quatifiers> [expr] [var=domain...] ']' <formula>
+    '['<quatifiers> [<expr>] (<domain>|<condition>)* ']' <formula>
+    '['<quatifiers> [<expr>] (<domain>|<condition>)* ']' <formula-args>
 
-The quantifiers are
+    <domain> = <var> '=' <set> 
+    <domain> = '{' <var1> ...<varn> '}' '=' <set>
+	<condition> is a boolean meta expression
+	<set> = a..b integer set of all integers including a to b
+	<set> = 
+	
+The quantifiers are:
 
     A  | ALL        all quantification
 	E  | ANY        existence quantification
@@ -115,37 +122,39 @@ The quantifiers are
 
     builin meta function
 	
-	factorial(Integer A)
-	binom(Integer A, Integer B)
-	sqrt(Number A)
-	isqrt(Integer A)
-	sqr(Number A)
-	nroot(Number A, Integer N)
-	ln(Number A)
-	log(Number A)
-	log2(Number A)
-	log10(Number A)
-	ilog2(Integer A)
-	isize(Integer A)
-	usize(Integer A)
-	pi()
-	e()
-	pow(Integer A, Integer B)
-	pow(Number A, Number B)	
-	sin(Number A)
-	cos(Number A)
-	trunc(Number A)
-	round(Number A)
-	abs(Number A)
-	max(Number A, Number B)
-	min(Number A, Number B)
-	sum(Number X1,...Numner Xn)
-	union(OrdSet A, OrdSet B) -> OrdSet
-	subtract(OrdSet A, OrdSet B) -> OrdSet
-	intersect(OrdSet A, OrdSet B) -> OrdSet
-	product(OrdSet A, OrdSet B) -> Sequence(Ai,Bj)
-	permutation(Sequence A) -> Set(Sequence)
-	zip(Sequence A,Sequence B) -> Sequence(Ai,Bi)
+	  factorial(Integer A) -> Integer
+	  binom(Integer A, Integer B) -> Integer
+	  sqrt(Number A) -> Float
+	  isqrt(Integer A) -> Integer
+	  sqr(Number A) -> Float
+	  nroot(Number A, Integer N) -> Float
+	  ln(Number A) -> Float
+	  log(Number A) -> Float
+	  log2(Number A) -> Float
+	  log10(Number A) -> Float
+	  ilog2(Integer A) -> Integer
+	  isize(Integer A) -> Integer
+	  usize(Integer A) -> Integer
+	  pi() -> Float
+	  e() -> Float
+	  pow(Integer A, Integer B) -> Integer
+	  pow(Number A, Number B)  -> Float
+	  sin(Number A) -> Float
+	  cos(Number A) -> Float
+	  trunc(Number A) -> Integer
+	  round(Number A) -> Integer
+	  abs(Number A) -> Number
+	  max(Number A, Number B) -> Number
+	  min(Number A, Number B) -> Number
+	  sum(Number X1,...Numner Xn) -> Number
+	  union(OrdSet A, OrdSet B) -> OrdSet
+	  subtract(OrdSet A, OrdSet B) -> OrdSet
+	  intersect(OrdSet A, OrdSet B) -> OrdSet
+	  product(OrdSet A, OrdSet B) -> Sequence(Ai,Bj)
+	  subsets(Set A) -> Sequence(Set)
+      subsets(Integer K,Set A) -> Sequence(Set) of size K
+	  permutation(Sequence A) -> Set(Sequence)
+	  zip(Sequence A,Sequence B) -> Sequence(Ai,Bi)
 
 
 ## Examples of quantifier use

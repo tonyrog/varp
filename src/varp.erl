@@ -1,4 +1,4 @@
-%% @author Tony Rogvall <tony@rogvall.se>
+%%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2010, Tony Rogvall
 %%% @doc
 %%%    Prover interface
@@ -46,6 +46,7 @@
 	 clause_count_2,
 	 clause_count_3,
 	 clause_count_dead,
+	 clause_count_edge,
 	 eval_count,
 	 bound,
 	 clauses,
@@ -213,6 +214,12 @@ global_options() ->
 	 spec =>  {enum,[?BOOL]},
 	 default => false,
 	 description => "use clause hash, speed up validate."
+       },
+      #{ long => "edge-list",
+	 key => edge_list,
+	 spec =>  {enum,[?BOOL]},
+	 default => false,
+	 description => "use edge list, instead of 2-clauses."
        },
       #{ long => "version",
 	 short => "V", 
@@ -579,12 +586,13 @@ combine_result(Ns,M) when is_list(Ns), is_integer(M) ->
     length(Ns)+M.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead)\n    | #clauses = ~w, #dead = ~w\n    | time=~.2fs\n",
+    varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead),~w(edge)\n    | #clauses = ~w, #dead = ~w\n    | time=~.2fs\n",
 		      [S1#stat.eval_count-S0#stat.eval_count,
 		       S1#stat.clause_count - S0#stat.clause_count,
 		       S1#stat.clause_count_2 - S0#stat.clause_count_2,
 		       S1#stat.clause_count_3 - S0#stat.clause_count_3,
 		       S1#stat.clause_count_dead - S0#stat.clause_count_dead,
+		       S1#stat.clause_count_edge - S0#stat.clause_count_edge,
 		       S1#stat.clauses,
 		       S1#stat.dead_clauses,
 		       Ts]),
@@ -599,6 +607,7 @@ stat(Bs) ->
 	    clause_count_2 = varp_formula:clause_eval_counter(Bs,2),
 	    clause_count_3 = varp_formula:clause_eval_counter(Bs,3),
 	    clause_count_dead = varp_formula:clause_eval_counter(Bs,dead),
+	    clause_count_edge = varp_formula:clause_eval_counter(Bs,edge),
 	    eval_count     = varp_formula:eval_counter(Bs),
 	    bound          = varp_formula:number_of_bound(Bs),
 	    clauses        = varp_formula:number_of_clauses(Bs),
@@ -624,8 +633,10 @@ display_result(N, satisfy, _Bs) when is_integer(N), N>0 ->
     io:format("% ~w\n", [N]);
 display_result(N, falsify, _Bs) when is_integer(N), N>0 ->
     io:format("% ~w\n", [N]);
-display_result(N,prove,_Bs) when is_integer(N), N>0 ->
+display_result(N, prove,_Bs) when is_integer(N), N>0 ->
     io:format("% FALSE\n", []);
+display_result(N, none,_Bs) when is_integer(N), N>0 ->
+    io:format("% ~w\n", [N]);
 display_result(?INCONSISTENT, satisfy, Bs) ->
     case varp_formula:getopt(Bs, starexec) of
 	true ->

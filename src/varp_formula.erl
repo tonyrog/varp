@@ -126,7 +126,9 @@ new(Options) when is_list(Options) ->
     new(maps:from_list(Options));  %% fixme validate?
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{qtype,maps:get(qtype,OptMap)},
-		    {clause_hash,maps:get(clause_hash,OptMap)}]),
+		    {clause_hash,maps:get(clause_hash,OptMap)},
+		    {edge_list,maps:get(edge_list,OptMap)}
+		   ]),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
@@ -1271,6 +1273,18 @@ build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
     Bs5 = pop_meta(Bs4),
     {Zs2,Bs6} = build_quant_domain(F, V, Ys, Xs, Bs5),
     {Zs1++Zs2,Bs6};
+%% fixme handle arbitrary vector! handle set/seqeuences properly
+build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
+		   [[Y1,Y2]|Ys], Xs, Bs) ->
+    ?dbg("Bind ~s=~w, ~s=~w\n", [Vn1,Y1,Vn2,Y2]),
+    Bs1 = push_meta(Vn1, Y1, Bs),
+    Bs2 = push_meta(Vn2, Y2, Bs1),
+    {Zs1,Bs3} = build_quant_(F, Xs, Bs2),
+    Bs4 = pop_meta(Bs3),
+    Bs5 = pop_meta(Bs4),
+    {Zs2,Bs6} = build_quant_domain(F, V, Ys, Xs, Bs5),
+    {Zs1++Zs2,Bs6};
+
 build_quant_domain(_F, _V, [], _Xs, Bs) ->
     {[], Bs}.
 
