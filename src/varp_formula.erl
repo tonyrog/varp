@@ -2887,13 +2887,24 @@ model(Vp, Vs) ->
     lists:keysort(1, collect_model(Vp,Vs)).
 
 collect_model(Vp,Vs) ->
-    maps:fold(
-      fun (?T,_,Ms) -> Ms;
-	  (?F,_,Ms) -> Ms;
-	  (Y,Xs,Ms) when is_integer(Y) ->
-	      model_vars(Vp,Vs,Xs,Y,Ms);
-	  (_, _, Ms) -> Ms
-      end, [], Vs).
+    case maps:size(Vs) of
+	0 -> %% fixme mixed model! CNF with is declarations
+	    N = varc:get_number_of_variables(Vp),
+	    [{{p,'x',[I]},
+	      case varc:value(Vp,I) of
+		  ?T -> true;
+		  ?F -> false
+	      end} || 
+		I <- lists:seq(1, N)];
+	_ ->
+	    maps:fold(
+	      fun (?T,_,Ms) -> Ms;
+		  (?F,_,Ms) -> Ms;
+		  (Y,Xs,Ms) when is_integer(Y) ->
+		      model_vars(Vp,Vs,Xs,Y,Ms);
+		  (_, _, Ms) -> Ms
+	      end, [], Vs)
+    end.
 
 %% collect all alias variables    
 model_vars(Vp,Vs,[{bit,X,N,I}|Xs],Y,Ms) ->
