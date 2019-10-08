@@ -129,6 +129,7 @@ new(OptMap) when is_map(OptMap) ->
 		    {clause_hash,maps:get(clause_hash,OptMap)},
 		    {edge_list,maps:get(edge_list,OptMap)}
 		   ]),
+    Symbols = maps:get(syms,OptMap),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
@@ -155,8 +156,8 @@ new(OptMap) when is_map(OptMap) ->
 	       end,
     #bs {
        option = OptMap,
-       vs = #{ true => ?T, ?T => true,
-	       false => ?F, ?F => false},
+       vs = Symbols,
+       %% vs = #{ }, %% true => ?T, ?T => true, false => ?F, ?F => false},
        meta     = maps:get(meta,OptMap),
        defs     = maps:get(defs,OptMap),
        decls    = maps:get(decls,OptMap),
@@ -1059,12 +1060,19 @@ build_({'>>>',A,K},Bs) ->
 
 build_({cnf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
-build_({cnf,{_Vars,_Clauses,_Sections,Units,Cs}},Bs) 
+build_({cnf,{Vars,_Clauses,_Sections,Units,Cs}},Bs) 
   when is_list(Cs), is_list(Units) ->
+    lists:foreach(fun(I) ->
+			  I = varc:add_variable(Bs#bs.vp)
+		  end,
+		  lists:seq(1,Vars)),
     %% fixme bind all literals in Ls = TRUE
     %% io:format("Units = ~p\n", [Units]),
-    Bs1 = build_cnf(Cs, Bs),
-    {{bool,?T}, Bs1};
+    lists:foreach(fun(CL) ->
+			  varc:add_clause(Bs#bs.vp, CL)
+		  end, Cs),
+    %% Bs1 = build_cnf(Cs, Bs),
+    {{bool,?T}, Bs};
 %%    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
 
 build_({snf,{[],[],_Sections}},Bs) ->
@@ -3206,6 +3214,8 @@ implication_level(Bs,Imp) ->
 
 format_symbol(true) -> "true";
 format_symbol(false) -> "false";
+format_symbol(?T) -> "t";
+format_symbol(?F) -> "f";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);
 format_symbol(I) when is_integer(I),I>0 -> [$$|integer_to_list(I)];
 format_symbol({bit,V,_N,I}) ->

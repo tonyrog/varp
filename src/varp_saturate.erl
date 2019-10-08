@@ -228,7 +228,7 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 			 [indent(Level),Level]),
 		    pop(Bs,Level),
 		    eq_eval(Bs,-X,Level),
-		    varp_formula:log_bindings(Bs, X, ?FALSE, Ls),
+		    varp_formula:log_bindings(Bs, X, ?F, Ls),
 		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold);
 		true ->
 		    ?dbg("~s~s/1: => [~s]\n",

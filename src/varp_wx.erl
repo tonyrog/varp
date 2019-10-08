@@ -316,7 +316,22 @@ falsify(S) ->
 
 %% FIXME block interface while running
 run(Mode, S) ->
-    Meta      = wxTextCtrl:getValue(S#s.meta),
+    Meta  = wxTextCtrl:getValue(S#s.meta),
+    case varp_scan:string(Meta) of
+	{ok,Ts,_Ln} ->
+	    case parse_bindings(Ts) of
+		{ok,L} -> run(Mode, S, L);
+		{error,{_Ln,Reason,Mess1}} ->
+		    Err = io_lib:format("~w ~p\n", 
+					[Reason,Mess1]),
+		    output_error(S, Err)
+	    end;
+	Error ->
+	    Err = io_lib:format("~p", [Error]),
+	    output_error(S, Err)
+    end.
+
+run(Mode, S, Bound) ->
     Max       = wxSpinCtrl:getValue(S#s.config_max_models),
     Timeout   = case wxSpinCtrl:getValue(S#s.config_timeout) of
 		    0 -> infinity;
@@ -331,16 +346,7 @@ run(Mode, S) ->
     ?dbg("backtrack = ~w\n", [Backtrack]),
     ?dbg("order = ~w\n", [Order]),
     ?dbg("timeout = ~w\n", [Timeout]),
-    Bound = case varp_scan:string(Meta) of
-		{ok,Ts,_Ln} ->
-		      case parse_bindings(Ts) of
-			  {ok,L} -> L;
-			  _Err = {error,Ln1,Mess1} ->
-			      io:format("error:~w:~w\n", [Ln1,Mess1]),
-			      []
-		      end;
-		  _Error -> []
-	      end,
+
     Formula = wxStyledTextCtrl:getText(S#s.formula),
     case parse(Formula) of
 	{ok,{Sections,Form}} ->

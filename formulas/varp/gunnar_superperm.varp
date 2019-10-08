@@ -1,0 +1,11 @@
+// run with n=4 and try various m (m=28 should be unsa and m=29 first sat)
+
+[A v=1..k-1][A x=1..n][A y=1..n, y!=x][A z=1..n, z!=x, z!=y][A u=1..n, u!=x, u!=y,u!=z] (P(x,y,z,u,v) ->
+[EQ 1] (P(y,z,u,x,v+1),P(z,u,x,y,v+1),P(z,u,y,x,v+1),P(u,x,y,z,v+1),P(u,x,z,y,v+1),P(u,y,x,z,v+1),P(u,y,z,x,v+1),P(u,z,y,x,v+1),P(u,z,x,y,v+1))) &&
+P(1,2,3,4,1) && [A x=1..n][A y=1..n, y!=x][A z=1..n, z!=x, z!=y][A u=1..n, u!=x, u!=y, u!=z][E! v=1..k] P(x,y,z,u,v) &&
+
+[A v=1..k-1][A x=1..n][A y=1..n, y!=x][A z=1..n, z!=x, z!=y][A u=1..n, u!=x, u!=y, u!=z] ((P(x,y,z,u,v) && P(y,z,u,x,v+1) -> Q(v)) &&
+   (P(x,y,z,u,v) && (P(z,u,x,y,v+1) or P(z,u,y,x,v+1)) ->(Q(v) && R(v))) &&
+   (P(x,y,z,u,v) && (P(u,x,y,z,v+1) or P(u,x,z,y,v+1) or P(u,y,x,z,v+1) or P(u,y,z,x,v+1) or P(u,z,x,y,v+1) or P(u,z,y,x,v+1)) ->(Q(v) && R(v) && S(v) )) ) &&
+
+[LTE m, v=1..23] (Q(v), R(v), S(v))

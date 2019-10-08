@@ -237,7 +237,7 @@ test_equation2() ->
 
 sat(Formula, ExpectedModels) ->
     application:start(varp),
-    N = length(ExpectedModels),
+    %% _N = length(ExpectedModels),
     Options = [{print,false}],
     Do = [{satisfy,[]}, {backtrack,[]}],
     GOpts = varp:load_option_list(Options),

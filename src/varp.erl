@@ -266,7 +266,11 @@ internal_options() -> %% needed?
      #{ key => output,
 	spec => {list,term},
 	default => [],  %% list
-	description => "Internal list of output modules"}
+	description => "Internal list of output modules"},
+     #{ key => syms,
+	spec => map,
+	default => #{},  %% map
+	description => "Internal map of symbols" }
     ].
     
 
@@ -758,7 +762,7 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		    Error
 	    end;
        true ->
-	    io:format("Read file ~s\n", [F]),
+	    %% io:format("Read file ~s\n", [F]),
 	    {ok, Data} = read_file(F),
 	    case parse(F, Data) of
 		{ok,{Sections1,Formula}} ->
@@ -933,22 +937,22 @@ parse_formulas([F|Fs], Formula, Sections0,JoinOp) ->
 parse_formulas([], Formula, Sections, _JoinOp) ->
     {ok,{Sections,Formula}}.
 
-
 empty_sections() ->
-    #{ decls=>[], order=>[], literals=>[], defs=>[], 
+    #{ decls=>[], order=>[], literals=>[], defs=>[], syms => #{},
        assert=>[], input=>[], output=>[] }.
 
 append_sections(#{ decls:=D0,order:=O0,literals:=Ls0,defs:=Ds0,
-		   assert:=A0,input:=I0, output:=T0 },
+		   assert:=A0,input:=I0, output:=T0,syms:=S0  },
 		#{ decls:=D1,order:=O1,literals:=Ls1,defs:=Ds1,
-		   assert:=A1,input:=I1, output:=T1 }) ->
+		   assert:=A1,input:=I1, output:=T1,syms:=S1 }) ->
     #{ decls=>D0++D1, 
        order=>O0++O1, 
        literals=>Ls0++Ls1,
        defs=>Ds0++Ds1,
        assert => A0++A1,
        input => I0++I1,
-       output => T0++T1
+       output => T0++T1,
+       syms => maps:merge(S0,S1)
      }.
 
 
@@ -958,7 +962,8 @@ section_opts(#{ decls := Decls,
 		defs := Defs,
 		assert := Assert,
 		input := Input,
-		output := Output },
+		output := Output,
+		syms := Syms },
 	     GOpts) ->
     GOpts#{
 	   order => order_decl(Order),
@@ -967,7 +972,9 @@ section_opts(#{ decls := Decls,
 	   literals => Literals,
 	   assert => Assert,
 	   input => Input,
-	   output => Output }.
+	   output => Output,
+	   syms => Syms
+	  }.
     
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;

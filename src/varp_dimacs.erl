@@ -34,7 +34,7 @@ load(File) ->
 %% Each clause consist of a list of integers and is terminate by number 0
 %%
 %% Each integer I > 0 is mapped to {p,x,[I]}}
-%% ande I < 0 is mapped to {'not',{p,x,[I]}}
+%% and I < 0 is mapped to {'not',{p,x,[I]}}
 %%
 %% special comment
 %% c <chars> 'is' <integer>
@@ -92,14 +92,25 @@ to_cnf_(Bin,Sect,L,Acc,Cs) ->
 	    end
     end.
 
+
 add_literals([L|Ls], Acc) ->
-    case list_to_integer(L) of
-	0 -> {true,Acc};
-	I when I < 0 -> add_literals(Ls, [{'not',{p,x,[-I]}}|Acc]);
-	I -> add_literals(Ls, [{p,x,[I]}|Acc])
+    Li = list_to_integer(L),
+    if Li =:= 0 ->
+	    {true,Acc};
+       true ->
+	    add_literals(Ls, [Li|Acc])
     end;
 add_literals([], Acc) ->
     {false, Acc}.
+
+%% add_literals([L|Ls], Acc) ->
+%%     case list_to_integer(L) of
+%% 	0 -> {true,Acc};
+%% 	I when I < 0 -> add_literals(Ls, [{'not',{p,x,[-I]}}|Acc]);
+%% 	I -> add_literals(Ls, [{p,x,[I]}|Acc])
+%%     end;
+%% add_literals([], Acc) ->
+%%     {false, Acc}.
 
 %% SAT format
 sat(_Bin,_Sect,_L, _Vars) ->
@@ -174,12 +185,15 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
     
 
 save(File, Cs) ->
-    file:write_file(File, format(Cs)).
+    file:write_file(File, format(Cs, File)).
 
 format(Cs) ->
+    format(Cs, "*input*").
+
+format(Cs, FileName) ->
     {Cs1,NVars} = from_cnf(Cs),
     NClauses = length(Cs1),
-    [["c auto generated from <file>\n"],
+    [["c auto generated from ", FileName, "\n"],
      ["p cnf ", integer_to_list(NVars), " ", integer_to_list(NClauses), "\n"],
      [[format_clause(CL)," 0","\n"] || CL <- Cs1]].
 %%     ["%\n"],
@@ -204,8 +218,8 @@ from_cnf_([], Acc, D) ->
 
 from_cnf_([L|Ls], Acc1, Cs, Acc, D) ->
     case L of
-	true  -> from_cnf_(Cs, Acc, D);  %% clause is true remove it
-	false -> from_cnf_(Ls, Acc1, Cs, Acc, D);
+	?T -> from_cnf_(Cs, Acc, D);  %% clause is true remove it
+	?F -> from_cnf_(Ls, Acc1, Cs, Acc, D);
 	{'not',V={p,_V,_Vs}} ->
 	    case dict:find(V, D) of
 		error -> 
@@ -245,22 +259,32 @@ binary_line(Bin) ->
 %%    declare <name> ":" <size>/unsigned
 %%    order <li> ... .
 %% 
-scan_section(Line,Sect=#{ decls := Decls, order := Order }) ->
+scan_section(Line,Sect=#{ decls := Decls, order := Order, syms := Sym }) ->
     case varp_scan:string(Line) of
-	{ok,[{symbol,_,V},{identifier,_,"is"},{decnum,_,N}],_} ->
-	    X = list_to_atom(V),
-	    Y = list_to_integer(N),
-	    Sect#{ declare => Decls++[{{p,X,[]},Y}]};
-	{ok,[{declare,_},{symbol,_,V},{':',_},
-	     {decnum,_,Size},{'/',_},{signed,_}],_} ->
-	    X = list_to_atom(V),
-	    Sz = list_to_integer(Size),
-	    Sect#{ declare => Decls++[{{p,X,[]},int,Sz}]};
-	{ok,[{declare,_},{symbol,_,V},{':',_},
-	     {decnum,_,Size},{'/',_},{unsigned,_}],_} ->
-	    X = list_to_atom(V),
-	    Sz = list_to_integer(Size),
-	    Sect#{ declare => Decls ++ [{{p,X,[]},uint,Sz}]};
+	{ok,Ts=[{symbol,_,_}|_],_} ->
+	    case parse_symbol(Ts,{identifier,1,"is"}) of
+		{Symbol,[{decnum,_,Num}]} ->
+		    I = list_to_integer(Num),
+		    Sym1 = maps:put(Symbol, I, Sym),
+		    Sym2 = maps:put(I, [Symbol], Sym1),
+		    Sect#{ syms => Sym2 };
+		_ ->
+		    Sect
+	    end;
+	{ok,[{declare,_}|Ts=[{symbol,_,_}|_]],_} ->
+	    case parse_symbol(Ts,{':',1}) of
+		{Symbol,[{decnum,_,Size},{'/',_},{signed,_}]} ->
+		    Sz = list_to_integer(Size),
+		    Sect#{ declare => Decls++[{Symbol,int,Sz}]};
+		{Symbol,[{decnum,_,Size},{'/',_},{unsigned,_}]} ->
+		    Sz = list_to_integer(Size),
+		    Sect#{ declare => Decls++[{Symbol,uint,Sz}]};
+		{Symbol,[{decnum,_,Size}]} ->
+		    Sz = list_to_integer(Size),
+		    Sect#{ declare => Decls++[{Symbol,uint,Sz}]};
+		_ ->
+		    Sect
+	    end;
 	{ok,Ts=[{order,_Ln}|_],Ln1} ->
 	    {ok,{[{order,Order1}],_}} = varp_parse:parse(Ts ++ [{';',Ln1}]),
 	    Sect# { order => Order ++ Order1 };
@@ -268,3 +292,28 @@ scan_section(Line,Sect=#{ decls := Decls, order := Order }) ->
 	    %% io:format("scan = ~p\n", [_Str]),
 	    Sect
     end.
+
+parse_symbol(Ts, Separator) ->
+    %% io:format("parse_symbol: ~p (sep = ~p)\n", [Ts, Separator]),
+    case lists:takewhile(fun(T) -> T =/= Separator end, Ts) of
+	[] -> 
+	    false;
+	Ts0 ->
+	    case varp_snf:parse(Ts0++[{'.',1}]) of
+		{ok,[Sym]} ->
+		    Rest = lists:dropwhile(fun(T) -> T =/= Separator end, Ts),
+		    {eval_sym(Sym), tl(Rest)};
+		{ok,_} ->
+		    false;
+		_ ->
+		    false
+	    end
+    end.
+
+eval_sym({p,S,Args}) ->
+    {p,S,[eval_arg(A)||A<-Args]};
+eval_sym({bit_index,Sym,Index}) ->
+    {bit_index,eval_sym(Sym),eval_arg(Index)}.
+
+eval_arg(V) when is_integer(V) -> V;
+eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).

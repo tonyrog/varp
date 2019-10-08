@@ -295,7 +295,10 @@ match_val_({list,Spec}, Val) ->
 match_val_({union,Ts}, Val) ->
     match_union_(Ts, Val);
 match_val_(void, "") ->
-    {ok,true}.
+    {ok,true};
+match_val_(map, _Val) -> %% no map format yet!
+    {ok,#{}}.
+
 
 match_union_([T|Ts], Val) ->
     case match_val_(T, Val) of
@@ -386,6 +389,7 @@ usage(Key,Value,Spec) when is_atom(Key) ->
 
 format_spec({multiple,T}) -> "{"++format_spec(T)++"}*";
 format_spec({list,T}) -> "["++format_spec(T)++"]";
+format_spec(map)      -> "map";
 format_spec(unsigned) -> "unsigned integer";
 format_spec(integer)  -> "integer";
 format_spec(float)    -> "float";
@@ -484,6 +488,8 @@ validate_value(_Key,atom,Value,_Old) ->
     is_atom(Value);
 validate_value(_Key,void, Value,_Old) ->
     (Value =:= "") orelse (value =:= undefined);
+validate_value(_Key,map, Value,_Old) ->
+    is_map(Value);
 validate_value(_Key,term, _Value,_Old) ->  %% any value
     true;
 validate_value(_Key,pred, Value,_Old) ->  %% predicate

@@ -27,29 +27,37 @@ options() ->
 	 default => "",
 	 description => "Filename of file to write clauses to."
        },
+      #{ long => "symbols",
+	 short => "s",
+	 key   => symbols,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "Emit symbol comments."
+       },
       #{ long => "raw",
 	 short => "r",
 	 key   => raw,
 	 spec => {enum,[?BOOL,{"debug",debug}]},
 	 default => false,
-	 description => "output 'raw' clauses."
+	 description => "Output 'raw' clauses."
        }
     ].
 
 run(Bs, Opts) ->
-    cnf(Bs, Opts).
+    emit(Bs, Opts).
 
 %% output cnf clauses
-cnf(Bs, Opts) when is_record(Bs,bs), is_map(Opts) ->
+emit(Bs, Opts) when is_record(Bs,bs), is_map(Opts) ->
     Raw = maps:get(raw, Opts),
     Type = maps:get(type, Opts),
+    Symbols = maps:get(symbols, Opts),
     case maps:get(file, Opts) of
 	"" ->
-	    cnf(user, Type, Raw, Bs);
+	    emit_fd(user, Type, Symbols, Raw, Bs);
 	File ->
 	    case file:open(File, [write]) of
 		{ok,Fd} ->
-		    try cnf(Fd, Type, Raw, Bs) of
+		    try emit_fd(Fd, Type, Symbols, Raw, Bs) of
 			R -> R
 		    after
 			file:close(Fd)
@@ -61,49 +69,116 @@ cnf(Bs, Opts) when is_record(Bs,bs), is_map(Opts) ->
 	    end
     end.
 
-cnf(Fd, Type, Raw, Bs) ->
-    N = if Raw =:= false -> count_number_of_clauses(Bs);
-	   true -> varp_formula:info(Bs, number_of_clauses)
-	end,	   
-    M = if Raw =:= false -> 
-		varp_formula:info(Bs, number_of_unbound_variables);
-	   true ->
-		varp_formula:info(Bs, number_of_variables)
-	end,
+emit_fd(Fd, Type, Symbols, Raw, Bs) ->
+    {VarMap, NumClauses, NumVars} = renumerate_clauses(Bs, Raw),
     case Type of
 	cnf ->
-	    io:format(Fd, "p cnf ~w ~w\n", [M, N]);
+	    io:format(Fd, "p cnf ~w ~w\n", [NumVars, NumClauses]),
+	    emit_symbols(Fd, Symbols, Bs, VarMap);
 	snf ->
-	    io:format(Fd, "p snf ~w ~w\n", [M, N])
+	    io:format(Fd, "p snf ~w ~w\n", [NumVars, NumClauses])
     end,
-    I = varc:clause_first(Bs#bs.vp),
-    cnf_(Fd, Type, Raw, I, Bs).
+    cnf_(Fd, Type, Raw, varc:clause_first(Bs#bs.vp), VarMap, Bs).
 
-cnf_(_Fd,_Type,_Raw,false,Bs) ->
+
+cnf_(_Fd,_Type,_Raw,false,_VarMap,Bs) ->
     {?CONTINUE,[],Bs};
-cnf_(Fd,Type,Raw,I,Bs) ->
+cnf_(Fd,Type,Raw,I,VarMap,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
 	true ->
-	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs);
+	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),VarMap,Bs);
 	[] ->
-	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs);
+	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),VarMap,Bs);
 	CL ->
 	    Fmt = case Type of
-		      cnf -> format_cnf_clause(Bs,CL,Raw); 
-		      snf -> format_snf_clause(Bs,CL,Raw)
+		      cnf -> format_cnf_clause(Bs,CL,Raw,VarMap); 
+		      snf -> format_snf_clause(Bs,CL,Raw,VarMap)
 		  end,
 	    io:put_chars(Fd,[Fmt,"\n"]),
-	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),Bs)
+	    cnf_(Fd,Type,Raw,varc:clause_next(Bs#bs.vp,I),VarMap,Bs)
     end.
 
-format_cnf_clause(_Bs,CL,_) ->
-    [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].
+format_cnf_clause(_Bs,CL,_,VarMap) ->
+    [lists:join(" ", [integer_to_list(translate_literal(L,VarMap))||L<-CL]),
+     " 0"].
 
-format_snf_clause(Bs,CL,debug) ->
+format_snf_clause(Bs,CL,debug,_VarMap) ->
     [lists:join(" ", [varp_formula:format_lit(Bs,L,true)||L<-CL]), "."];
-format_snf_clause(Bs,CL,_) ->
+format_snf_clause(Bs,CL,_,_VarMap) ->
     [lists:join(" ", [varp_formula:format_lit(Bs,L,false)||L<-CL]), "."].
 
+%% emit symbols as comments
+%% 'c' <symbol> is <literal-number>
+%% ...
+emit_symbols(_Fd, false, _Bs, _VarMap) ->
+    ok;
+emit_symbols(Fd, true, Bs, VarMap) ->
+    maps:fold(
+      fun (Key,_Value,Acc) when is_integer(Key) ->
+	      Acc;
+	  (Key,Value,_Acc) ->
+	      Val = case maps:find(Value, VarMap) of
+			{ok, Value1} -> Value1;
+			error -> Value
+		    end,
+	      io:format(Fd, "c ~s is ~w\n", 
+			[varp_formula:format_symbol(Key),Val])
+      end, [], Bs#bs.vs).
+
+%%
+%% Count clause, and variabels. Also construct a
+%% mapping into compact literal numbers
+%%
+renumerate_clauses(Bs, Raw) ->
+    renumerate_clauses(Bs, Raw, #{}, 0, 0).
+
+renumerate_clauses(Bs, Raw, VarMap, NumClauses, NumVars) ->
+    renumerate_clauses(Bs, varc:clause_first(Bs#bs.vp),
+		       Raw, VarMap, NumClauses, NumVars).
+
+renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses, NumVars) ->
+    {VarMap, NumClauses, NumVars};
+renumerate_clauses(Bs, I, Raw, VarMap, NumClauses, NumVars) ->
+    I1 = varc:clause_next(Bs#bs.vp,I),
+    case varc:get_clause(Bs#bs.vp, I, undefined, Raw) of
+	true ->
+	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses,NumVars);
+	[] ->
+	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses,NumVars);
+	CL ->
+	    {VarMap1,NumVars1} = renumerate_clause(CL,VarMap, NumVars),
+	    renumerate_clauses(Bs,I1,Raw,VarMap1,NumClauses+1,NumVars1)
+    end.
+
+%% generate variabel mapping into a compact set of variables
+renumerate_clause([L|Ls], VarMap, NumVars) ->
+    case translate_literal(L, VarMap) of 
+	error ->
+	    N = maps:size(VarMap),
+	    J = if L < 0 -> -(N+1);
+		   L > 0 -> (N+1)
+		end,
+	    renumerate_clause(Ls, maps:put(L, J, VarMap), NumVars+1);
+	_M ->
+	    renumerate_clause(Ls, VarMap, NumVars)
+    end;
+renumerate_clause([], VarMap, NumVars) ->
+    {VarMap, NumVars}.
+
+translate_literal(?T, _VarMap) -> ?T;
+translate_literal(?F, _VarMap) -> ?F;
+translate_literal(L, VarMap) when L < 0 ->
+    case maps:find(-L, VarMap) of
+	error -> error;
+	{ok, M} -> -M
+    end;
+translate_literal(L, VarMap) when L > 0 ->
+    case maps:find(L, VarMap) of
+	error -> error;
+	{ok,M} -> M
+    end.
+
+-ifdef(unused).
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
     count_number_of_clauses_(Bs, varc:clause_first(Bs#bs.vp), 0).
@@ -119,3 +194,4 @@ count_number_of_clauses_(Bs, I, N) ->
 	_CL ->    
 	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N+1)
     end.
+-endif.

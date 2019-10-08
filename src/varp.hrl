@@ -8,9 +8,6 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
--define(TRUE,  t).
--define(FALSE, f).
-
 -define(T,  t).
 -define(F,  f).
 

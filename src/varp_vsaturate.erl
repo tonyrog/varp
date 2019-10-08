@@ -123,7 +123,7 @@ saturate_vec_(_Bs,[],_Level) ->
     true.
 
 saturate_vec__(Bs,X,V,Level) ->
-    case mark_eq_eval(Bs,X,?FALSE,Level) of
+    case mark_eq_eval(Bs,X,?F,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    varp_formula:undo_level(Bs,Level),
@@ -153,7 +153,7 @@ saturate_vec__(Bs,X,V,Level) ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level),Level]),
 			    varp_formula:undo_level(Bs,Level),  %% (X=true)
-			    eq_eval(Bs,X,?FALSE,Level);
+			    eq_eval(Bs,X,?F,Level);
 			true ->
 			    ?dbg("~s~s/true: => {~s}\n",
 				 [indent(Level),varp_formula:fmt_var(Bs,X),
