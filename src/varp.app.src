@@ -5,20 +5,21 @@
   {registered, []},
   {env, [
 	 {plugins, [
-		    {"sat",   "satisfy",   varp_satisfy},
-		    {"unsat", "falsify",   varp_falsify},
-		    {"p",     "prove",     varp_prove},
-		    {"ord",   "order",     varp_order},
-		    {"bt",    "backtrack", varp_backtrack},
-		    {"bj",    "backjump",  varp_backjump},
-		    {"s",     "saturate",  varp_saturate},
-		    {"red",   "reduction", varp_reduction},
-		    {"rat",   "rat",       varp_rat},
-		    {"cnf",   "cnf",       varp_cnf},
-		    {"mon",   "monitor",   varp_monitor},
-		    {"clean", "clean",     varp_clean},
-		    {"succ",  "succ",      varp_succ},
-		    {"validate", "validate", varp_validate}
+		    {"sat",   "satisfy",     varp_satisfy},
+		    {"unsat", "falsify",     varp_falsify},
+		    {"p",     "prove",       varp_prove},
+		    {"ord",   "order",       varp_order},
+		    {"bt",    "backtrack",   varp_backtrack},
+		    {"bj",    "backjump",    varp_backjump},
+		    {"s",     "saturate",    varp_saturate},
+		    {"red",   "reduction",   varp_reduction},
+		    {"rat",   "rat",         varp_rat},
+		    {"cnf",   "cnf",         varp_cnf},
+		    {"mon",   "monitor",     varp_monitor},
+		    {"clean", "clean",       varp_clean},
+		    {"succ",  "succ",        varp_succ},
+		    {"validate", "validate", varp_validate},
+		    {"wx",     "wx",         varp_wx}
 		   ]}
 	 ]},
   {applications,[kernel,stdlib]}

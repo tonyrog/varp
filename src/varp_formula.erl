@@ -1062,6 +1062,8 @@ build_({cnf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
 build_({cnf,{Vars,_Clauses,_Sections,Units,Cs}},Bs) 
   when is_list(Cs), is_list(Units) ->
+    %% CNF only works as first formula! variables
+    %% must be numerated 1..Vars
     lists:foreach(fun(I) ->
 			  I = varc:add_variable(Bs#bs.vp)
 		  end,
@@ -1071,7 +1073,7 @@ build_({cnf,{Vars,_Clauses,_Sections,Units,Cs}},Bs)
     lists:foreach(fun(CL) ->
 			  varc:add_clause(Bs#bs.vp, CL)
 		  end, Cs),
-    %% Bs1 = build_cnf(Cs, Bs),
+    %% Bs1 = build_snf(Cs, Bs),
     {{bool,?T}, Bs};
 %%    build__({'and',{'ALL',Ls},cnf_to_formula(Cs)},Bs);
 
@@ -1079,7 +1081,7 @@ build_({snf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
 build_({snf,{_Vars,_Clauses,_Sections,Units,Cs}},Bs) 
   when is_list(Cs), is_list(Units) ->
-    Bs1 = build_cnf(Cs, Bs),
+    Bs1 = build_snf(Cs, Bs),
     {{bool,?T}, Bs1};
 
 
@@ -1201,21 +1203,17 @@ build_({{'PROD',Qs}, F}, Bs) ->
 %% literal integers
 %% in the snf case the literals are symbols
 %%
-build_cnf([CL|CLs], Bs) ->
+build_snf([CL|CLs], Bs) ->
     {Xs,Bs1} = args(CL,Bs),
     Ls = [L || {bool,L} <- Xs],
-    %% io:format("CLAUSE: ~s\n", [format_clause(Bs1,Ls,true)]),
-    %% io:format("  ~w\n", [Ls]),
-    %% io:format("  ~p\n", [CL]),
-    %% io:format("  ~w\n", [[value(Bs,L)||L<-Ls]]),
     try add_clause(Bs1,Ls) of
 	_ ->
-	    build_cnf(CLs, Bs1)
+	    build_snf(CLs, Bs1)
     catch
 	error:Reason ->
 	    error(Reason)
     end;
-build_cnf([], Bs) ->
+build_snf([], Bs) ->
     Bs.
 
 -ifdef(__UNUSED__).

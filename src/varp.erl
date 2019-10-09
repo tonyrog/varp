@@ -506,7 +506,7 @@ do_run_(Do, Formula, GOpts) ->
 		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0}
 		end,
     Timeout = maps:get(timeout, GOpts, infinity),
-    Bs1 = varp:set_global_timeout(Bs, Timeout),    
+    Bs1 = varp:set_global_timeout(Bs, Timeout),
     Bs2 = Bs1#bs { main = Main },
     {R,Acc,Bs3} = do(Do,[],Bs2),
     Method = method(Do),
@@ -717,15 +717,15 @@ order_decl([V|Vs],Opts) when is_tuple(V) ->
 order_decl([],Opts) ->
     case lists:reverse(Opts) of
 	[{order_list,L1},{order,K},{order_list,L2}] ->
-	    [{order,K},{first,L1},{last,L2}];
+	    [{sort,K},{first,L1},{last,L2}];
 	[{order_list,L1},{order,K}] ->
-	    [{order,K},{first,L1}];
+	    [{sort,K},{first,L1}];
 	[{order,K},{order_list,L2}] ->
-	    [{order,K},{last,L2}];
+	    [{sort,K},{last,L2}];
 	[{order_list,L1}] ->
 	    [{first,L1}];
 	[{order,K}] ->
-	    [{order,K}];
+	    [{sort,K}];
 	[] ->
 	    []
     end.
@@ -1158,9 +1158,7 @@ string(String) when is_list(String) ->
 
 tokens(String) ->
     case varp_scan:string(remove_comments(String)) of
-	{ok,Ts,_Ln} -> 
-	    %% io:format("tokens=~p\n", [Ts]),
-	    {ok,Ts};
+	{ok,Ts,_Ln} -> {ok,Ts};
 	Error -> Error
     end.
 

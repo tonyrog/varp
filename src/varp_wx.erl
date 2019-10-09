@@ -12,11 +12,14 @@
 -export([start/0]).
 -export([output_model/3]).  %% varp callback
 
+%% warp_wx is also a plugin (monitor assignment etc)
+-export([options/0, run/2]).
+
 -include("varp.hrl").
 
 -record(s,
 	{
-	 frame,
+	 window,
 	 meta,
 	 formula,
 	 model,
@@ -24,13 +27,20 @@
 	 falsify,
 	 cancel,
 	 dir = "",
+	 wx_env,            %% environment passed to plugin 
 	 %% config
 	 config_max_models, %% wxSpinCtrl
 	 config_timeout,    %% wxSpinCtrl
 	 config_saturate,   %% wxSpinCtrl (saturate=1 or none=0)
 	 config_backtrack,  %% wxRadioBox (backtrack|backjump|none)
-	 config_order       %% wxRadioBox (-degree|-rank|none)
+	 config_order,      %% wxRadioBox (-degree|-rank|none)
+	 config_assoc,      %% wxRadioBox (left|right|balanced|none)
+	 config_nbound      %% wxGauge
 	}).
+
+version() ->
+    {ok,Vsn} = application:get_key(varp, vsn),
+    Vsn.
 
 start() ->
     application:start(varp),
@@ -38,23 +48,29 @@ start() ->
     spawn(
       fun() ->
 	      Wx = wx:new(),
-	      S = wx:batch(fun() -> create_window(Wx) end),
-	      wxWindow:show(S#s.frame),
-	      loop(S),
-	      wx:destroy(),
-	      erlang:halt()
+	      %% try wx:batch(fun() -> create_window(Wx) end) of
+	      try create_window(Wx) of
+		  S ->
+		      wxWindow:show(S#s.window),
+		      loop(S),
+		      wx:destroy(),
+		      erlang:halt()
+	      catch
+		  ?EXCEPTION(error,Reason,Trace) ->
+		      io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)])
+	      end
       end).
 
 
 create_window(Wx) ->
-    Frame = wxFrame:new(Wx, -1, "Varp", [{size, {800,600}}]),
+    Window = wxFrame:new(Wx, -1, "Varp", [{size, {800,600}}]),
 
     Path = code:priv_dir(varp),
-    wxFrame:setIcon(Frame,  wxIcon:new(filename:join(Path,"varp.png"),
-				       [{type, ?wxBITMAP_TYPE_PNG}])),
+    wxFrame:setIcon(Window,  wxIcon:new(filename:join(Path,"varp.png"),
+					[{type, ?wxBITMAP_TYPE_PNG}])),
 
-    wxFrame:createStatusBar(Frame,[]),
-    wxFrame:connect(Frame, close_window),
+    wxFrame:createStatusBar(Window,[]),
+    wxFrame:connect(Window, close_window),
 
     MenuBar  = wxMenuBar:new(),
     FileM    = wxMenu:new([]),
@@ -73,11 +89,11 @@ create_window(Wx) ->
     ContentsMenuItem = wxMenu:append(HelpM, ?wxID_HELP_CONTENTS, "&Contents"),
     wxMenuItem:enable(ContentsMenuItem, [{enable, false}]),
 
-    ok = wxFrame:connect(Frame, command_menu_selected),
+    ok = wxFrame:connect(Window, command_menu_selected),
 
     wxMenuBar:append(MenuBar, FileM, "&File"),
     wxMenuBar:append(MenuBar, HelpM, "&Help"),
-    wxFrame:setMenuBar(Frame, MenuBar),
+    wxFrame:setMenuBar(Window, MenuBar),
 
     %% Create varp GUI
     %%  +-----------------------------+
@@ -87,6 +103,7 @@ create_window(Wx) ->
     %%  |                             |
     %%  |                             |
     %%  |                             |
+    %%  +-----------------------------+
     %%  +-----------------------------+
     %%  | |Satisfy| |Falsify| |Cancel |
     %%  |  Config ...                 |
@@ -101,14 +118,27 @@ create_window(Wx) ->
     %%  +-----+--------+
 
     FixedFont = wxFont:new(10, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
+    SmallFont = wxFont:new(8, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
 
     MainSizer = wxBoxSizer:new(?wxVERTICAL),
-    MetaBox = wxStaticBoxSizer:new(?wxVERTICAL, Frame, [{label, "meta"}]),
-    
-    Meta = wxTextCtrl:new(Frame, 1, [{value, ""},
-				     {style, ?wxDEFAULT}]),
+    Splitter = wxSplitterWindow:new(Window, []),
+    Win1 = wxPanel:new(Splitter, []),
+    Win2 = wxPanel:new(Splitter, []),
 
-    Formula = wxStyledTextCtrl:new(Frame),
+    wxSplitterWindow:splitHorizontally(Splitter, Win1, Win2),
+    wxSplitterWindow:setSashGravity(Splitter, 0.1),
+    wxSplitterWindow:setMinimumPaneSize(Splitter, 100),
+    wxSplitterWindow:setSashPosition(Splitter, 300),
+
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %% WINDOW 1
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+    MetaBox = wxStaticBoxSizer:new(?wxVERTICAL, Win1, [{label, "meta"}]),
+    Meta = wxTextCtrl:new(Win1, 1, [{value, ""},
+				    {style, ?wxDEFAULT}]),
+    Formula = wxStyledTextCtrl:new(Win1),
     wxStyledTextCtrl:styleSetFont(Formula, ?wxSTC_STYLE_DEFAULT, FixedFont),
     wxStyledTextCtrl:setLexer(Formula, ?wxSTC_LEX_CPP),
     wxStyledTextCtrl:setMarginType(Formula, 0, ?wxSTC_MARGIN_NUMBER),
@@ -140,75 +170,90 @@ create_window(Wx) ->
     wxStyledTextCtrl:setVisiblePolicy(Formula, Policy, 3),
     wxStyledTextCtrl:setReadOnly(Formula, false),
 
+    Sizer1 = wxBoxSizer:new(?wxVERTICAL),
+    wxSizer:add(MetaBox, Meta,  [{flag, ?wxEXPAND}]),
+    wxSizer:add(Sizer1, MetaBox, [{flag, ?wxEXPAND}]),
+    wxSizer:addSpacer(Sizer1, 10),
+    wxSizer:add(Sizer1, Formula, [{flag, ?wxEXPAND}, {proportion, 1}]),
+
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    %% WINDOW 2
+    %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+    Sizer2 = wxBoxSizer:new(?wxVERTICAL),
+
     %% BUTTONS
-    Run = wxStaticBoxSizer:new(?wxHORIZONTAL, Frame, [{label, "run"}]),
-    Satisfy = wxButton:new(Frame, 10, [{label,"Satisfy"}]),
+    Run = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label, "run"}]),
+    Satisfy = wxButton:new(Win2, 10, [{label,"Satisfy"}]),
     wxButton:connect(Satisfy, command_button_clicked),
 
-    Falsify = wxButton:new(Frame, 11, [{label,"Falsify"}]),
+    Falsify = wxButton:new(Win2, 11, [{label,"Falsify"}]),
     wxButton:connect(Falsify, command_button_clicked),
 
-    Cancel = wxButton:new(Frame, 12, [{label,"Cancel"}]),
+    Cancel = wxButton:new(Win2, 12, [{label,"Cancel"}]),
     SELF = self(),
     wxButton:connect(Cancel, command_button_clicked,
 		     [{callback,
 		       fun(_Event,_Object) -> 
 			       SELF ! {cancel, self()}
 		       end }]),
-
     wxSizer:add(Run, Satisfy, []),
     wxSizer:add(Run, Falsify, []),
     wxSizer:add(Run, Cancel, []),
 
     %% CONFIG max models
-    MaxBox = wxStaticBoxSizer:new(?wxVERTICAL,Frame,[{label, "max"}]),
-    MaxModels = wxSpinCtrl:new(Frame, []),
+    MaxBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label, "max"}]),
+    MaxModels = wxSpinCtrl:new(Win2, []),
     wxSpinCtrl:setRange(MaxModels, 1, 1000),
     wxSizer:add(MaxBox, MaxModels),
 
-    TimeBox = wxStaticBoxSizer:new(?wxVERTICAL,Frame,[{label,"timeout"}]),
-    Timeout = wxSpinCtrl:new(Frame, []),
+    TimeBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"timeout"}]),
+    Timeout = wxSpinCtrl:new(Win2, []),
     wxSpinCtrl:setRange(Timeout, 0, 100000),
     wxSizer:add(TimeBox, Timeout),
 
-    SaturateBox = wxStaticBoxSizer:new(?wxVERTICAL,Frame,[{label,"saturate"}]),
-    Saturate = wxSpinCtrl:new(Frame, []),
+    SaturateBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"saturate"}]),
+    Saturate = wxSpinCtrl:new(Win2, []),
     wxSpinCtrl:setRange(Saturate, 0, 3),
     wxSizer:add(SaturateBox, Saturate),
 
-    %% SmallFont = wxFont:new(8, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
-    Backtrack = wxRadioBox:new(Frame, 1, "backtrack",
+    Backtrack = wxRadioBox:new(Win2, 21, "backtrack",
 			       ?wxDefaultPosition,
 			       ?wxDefaultSize,
 			       ["backjump","backtrack","none"],
 			       [{majorDim, 1}, {style, ?wxVERTICAL}]),
 
-    Order = wxRadioBox:new(Frame, 1, "order",
+    Order = wxRadioBox:new(Win2, 22, "order",
 			   ?wxDefaultPosition,
 			   ?wxDefaultSize,
 			   ["-degree", "-rank", "none"],
 			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
 
+    Assoc = wxRadioBox:new(Win2, 23, "assoc",
+			   ?wxDefaultPosition,
+			   ?wxDefaultSize,
+			   ["left", "right", "balanced", "none"],
+			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
 
+    NBound = wxGauge:new(Win2, 31, 100, [{size,{800,10}},
+					 {style, ?wxGA_HORIZONTAL}]),
 
     %% wxRadioBox:connect(ModelMode, command_radiobox_selected),
     Config = wxBoxSizer:new(?wxVERTICAL),
     Config1 = wxBoxSizer:new(?wxHORIZONTAL),
     Config2 = wxBoxSizer:new(?wxHORIZONTAL),
-
     wxSizer:add(Config, Config1, []),
     wxSizer:add(Config, Config2, []),
+    wxSizer:add(Config, NBound, []),
     wxSizer:add(Config1, Run, []),
     wxSizer:add(Config1, MaxBox, []),
     wxSizer:add(Config1, TimeBox, []),
-    wxSizer:add(Config1, SaturateBox, []),
-    
+    wxSizer:add(Config1, SaturateBox, []),    
     wxSizer:add(Config2, Backtrack, []),
     wxSizer:add(Config2, Order, []),
+    wxSizer:add(Config2, Assoc, []),
 
     %% MODEL output window
-
-    Model = wxStyledTextCtrl:new(Frame),
+    Model = wxStyledTextCtrl:new(Win2),
     wxStyledTextCtrl:styleSetFont(Model, ?wxSTC_STYLE_DEFAULT, FixedFont),
     wxStyledTextCtrl:setLexer(Model, ?wxSTC_LEX_NULL),
     wxStyledTextCtrl:setMarginType(Model, 0, ?wxSTC_MARGIN_NUMBER),
@@ -222,18 +267,21 @@ create_window(Wx) ->
     wxStyledTextCtrl:setVisiblePolicy(Model, Policy, 3),
     wxStyledTextCtrl:setReadOnly(Model, true),
 
-    ok = wxFrame:setStatusText(Frame, "ok",[]),
+    wxSizer:add(Sizer2, Config, []),
+    wxSizer:add(Sizer2, Model,  [{flag, ?wxEXPAND}, {proportion, 1}]),
 
-    wxSizer:add(MetaBox, Meta,  [{flag, ?wxEXPAND}]),
-    wxSizer:add(MainSizer, MetaBox, [{flag, ?wxEXPAND}]),
-    wxSizer:addSpacer(MainSizer, 10),
-    wxSizer:add(MainSizer, Formula, [{flag, ?wxEXPAND}, {proportion, 1}]),
-    wxSizer:add(MainSizer, Config, []),
-    wxSizer:add(MainSizer, Model,  [{flag, ?wxEXPAND}, {proportion, 1}]),
+    %% Setup toplevel sizers
+    wxSizer:add(MainSizer, Splitter, [{flag,?wxEXPAND},{proportion,1}]),
 
-    wxFrame:setSizer(Frame, MainSizer),
+    wxPanel:setSizer(Win1, Sizer1),
+    wxPanel:setSizer(Win2, Sizer2),
+
+    ok = wxFrame:setStatusText(Window,lists:flatten(["Varp-",version()]),[]),
+    wxFrame:connect(Window, command_splitter_sash_pos_changed),
+    wxFrame:setSizer(Window, MainSizer),
+
     {ok, DefaultDir} = file:get_cwd(),  %% fixme: save dir?
-    #s { frame = Frame, 
+    #s { window = Window, 
 	 meta = Meta, 
 	 formula = Formula, 
 	 model = Model,
@@ -245,20 +293,22 @@ create_window(Wx) ->
 	 config_timeout    = Timeout,
 	 config_saturate   = Saturate,
 	 config_backtrack  = Backtrack,
-	 config_order      = Order
+	 config_order      = Order,
+	 config_assoc      = Assoc,
+	 config_nbound     = NBound,
+	 wx_env            = wx:get_env()
        }.
-
 
 loop(S) ->
     receive 
         #wx{event=#wxClose{}} ->
-            wxFrame:destroy(S#s.frame),
+            wxFrame:destroy(S#s.window),
             ok;
         #wx{id=?wxID_EXIT, event=#wxCommand{type=command_menu_selected}} ->
-            wxWindow:destroy(S#s.frame),
+            wxWindow:destroy(S#s.window),
             ok;
         #wx{id=?wxID_OPEN, event=#wxCommand{type=command_menu_selected}} ->
-	    Dialog = wxFileDialog:new(S#s.frame,
+	    Dialog = wxFileDialog:new(S#s.window,
 				      [{defaultDir,S#s.dir},
 				       {wildCard, 
 					"*.varp;*.cnf;*.snf;*.txt"}]),
@@ -282,7 +332,7 @@ loop(S) ->
 			{error,Reason} ->
 			    Text = io_lib:format("file error: ~s ~p",
 						 [Path,Reason]),
-			    ok = wxFrame:setStatusText(S#s.frame, Text),
+			    ok = wxFrame:setStatusText(S#s.window, Text),
 			    loop(S)
 		    end;
 		?wxID_CANCEL ->
@@ -290,8 +340,13 @@ loop(S) ->
 	    end;
 
         #wx{id=?wxID_ABOUT, event=#wxCommand{type=command_menu_selected}} ->
-            dialog(?wxID_ABOUT, S#s.frame),
+            dialog(?wxID_ABOUT, S#s.window),
             loop(S);
+
+        #wx{event=#wxSplitter{type=command_splitter_sash_pos_changed}} ->
+	    io:format("Splitter pos changed\n"),
+            loop(S);
+
         Msg = #wx{obj=Obj, event=#wxCommand{type=command_button_clicked}} ->	
 	    if S#s.satisfy =:= Obj ->
 		    S1 = satisfy(S),
@@ -309,18 +364,84 @@ loop(S) ->
     end.
 
 satisfy(S) ->
-    run(satisfy, S).
+    solve(satisfy, S).
 
 falsify(S) ->
-    run(falsify, S).
+    solve(falsify, S).
+
+%% built in plugin to monitor variables
+options() ->
+    [
+     #{ key => nbound,
+	spec => term,
+	default => undefined,
+	description => "wxGauge setting % of bound variables."
+      },
+     #{ key => window,
+	spec => term,
+	default => undefined,
+	description => "top wxFrame container."
+      },
+    #{ key => env,
+       spec => term,
+       default => undefined,
+       description => "wx environment passed to plugin, use wx:set_env."
+     }
+    ].
+
+run(Bs, Param) ->
+    SELF = self(),
+    Mon = 
+	spawn(
+	  fun() ->
+		  io:format("varp_wx monitor ~p started\n", [self()]),
+		  varc:subscribe(Bs#bs.vp, atom),
+		  Mon = monitor(process, SELF),
+		  wx:set_env(maps:get(env, Param)),
+		  update_nbound(Bs, Param),
+		  mon_loop(Bs, Param, Mon)
+	  end),
+    put(mon_proc, Mon),
+    {?CONTINUE,[],Bs}.
+    
+mon_loop(Bs,Param,Mon) ->
+    receive
+	{'DOWN', Mon, process, _Pid, _Reason} ->
+	    done;
+	{varp, {X,Y}} ->
+	    io:format("varp_wx monitor: substitut (~w=>~w) ~s => ~s\n", 
+		      [Y,X,
+		       varp_formula:format_lit(Bs,Y),
+		       varp_formula:format_lit(Bs,X)]),
+	    update_nbound(Bs, Param),
+	    mon_loop(Bs,Param,Mon);
+	{varp, X} ->
+	    io:format("varp_wx monitor: permanent (~w=1) ~s = ~w\n", 
+		      [X,varp_formula:format_lit(Bs,X), 1]),
+	    update_nbound(Bs, Param),
+	    mon_loop(Bs,Param,Mon);
+	Other ->
+	    io:format("varp_wx monitor: got ~p\n", [Other]),
+	    mon_loop(Bs,Param,Mon)
+    end.
+
+update_nbound(Bs,#{nbound:=NBound, window:=Window}) ->
+    NV = varp_formula:number_of_variables(Bs),
+    NB = varp_formula:number_of_bound(Bs),
+    Percent = 100*(NB/NV),
+    NC = varp_formula:number_of_clauses(Bs),
+    Status = io_lib:format("#Var: ~w, #Bound: ~w, #Clauses: ~w", [NV, NB, NC]),
+    wxGauge:setValue(NBound, trunc(Percent)),
+    wxFrame:setStatusText(Window, Status,[]).
+
 
 %% FIXME block interface while running
-run(Mode, S) ->
+solve(Mode, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp_scan:string(Meta) of
 	{ok,Ts,_Ln} ->
 	    case parse_bindings(Ts) of
-		{ok,L} -> run(Mode, S, L);
+		{ok,L} -> solve(Mode, S, L);
 		{error,{_Ln,Reason,Mess1}} ->
 		    Err = io_lib:format("~w ~p\n", 
 					[Reason,Mess1]),
@@ -331,7 +452,7 @@ run(Mode, S) ->
 	    output_error(S, Err)
     end.
 
-run(Mode, S, Bound) ->
+solve(Mode, S, Bound) ->
     Max       = wxSpinCtrl:getValue(S#s.config_max_models),
     Timeout   = case wxSpinCtrl:getValue(S#s.config_timeout) of
 		    0 -> infinity;
@@ -340,27 +461,44 @@ run(Mode, S, Bound) ->
     Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
     Backtrack = wxRadioBox:getSelection(S#s.config_backtrack),
     Order     = wxRadioBox:getSelection(S#s.config_order),
+    Assoc     = case wxRadioBox:getSelection(S#s.config_assoc) of
+		    0 -> left;
+		    1 -> right;
+		    2 -> balanced;
+		    3 -> none
+		end,
+    QType = recursive,
+    %% _EdgeList = true,
     ?dbg("meta = ~p\n", [Meta]),
     ?dbg("max  = ~p\n", [Max]),
     ?dbg("saturate = ~w\n", [Saturate]),
     ?dbg("backtrack = ~w\n", [Backtrack]),
     ?dbg("order = ~w\n", [Order]),
+    ?dbg("assoc = ~w\n", [Assoc]),
+    ?dbg("qtype = ~w\n", [QType]),
     ?dbg("timeout = ~w\n", [Timeout]),
 
     Formula = wxStyledTextCtrl:getText(S#s.formula),
     case parse(Formula) of
 	{ok,{Sections,Form}} ->
+	    %% io:format("Form = ~p\n", [Form]),
+	    %% io:format("Sections = ~p\n", [Sections]),
 	    %% method=count,print=true,output={M,F,A} will allow 
 	    %% to display models in the window without output without
 	    %% storing them in memory.
-	    Options = [{method,count},{print,true},{timeout,Timeout}],
+	    Options = [{method,count},{print,true},{timeout,Timeout},
+		       {assoc,Assoc},{qtype,QType}],
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),
 	    Do =
-		[{Mode,[]}] ++
+		[{Mode,[]},
+		 {wx,[{nbound,S#s.config_nbound},
+		      {window,S#s.window},
+		      {env, S#s.wx_env}]}
+		] ++
 		case Saturate of
 		    0 -> [];
-		    _K -> [{saturate,[{level,1}]}]  %% fixme set level
+		    _K -> [{saturate,[{level,1}]}]
 		end ++
 		case Order of
 		    0 ->
@@ -371,7 +509,6 @@ run(Mode, S, Bound) ->
 			%% pickup order from input file
 			case maps:find(order, GOpts1) of
 			    {ok, FileOrder} ->
-				%% io:format("Order = ~w\n", [FileOrder]),
 				[{order, FileOrder}];
 			    _ -> 
 				[]
@@ -391,7 +528,7 @@ run(Mode, S, Bound) ->
 	    GOpts2 = GOpts1#{ meta => Bound,
 			      output => [{?MODULE,output_model,[S]}] },
 	    output_clear(S),
-	    ok = wxFrame:setStatusText(S#s.frame, "ok",[]),
+	    ok = wxFrame:setStatusText(S#s.window, "ok",[]),
 	    %% wxStyledTextCtrl:setCaretLineVisible(S#s.formula, false),
 
 	    wxButton:disable(S#s.satisfy),
@@ -404,6 +541,8 @@ run(Mode, S, Bound) ->
 	    wxButton:enable(S#s.falsify),
 	    wxButton:disable(S#s.cancel),
 
+	    exit(get(mon_proc), kill),
+
 	    case Res of
 		{?INCONSISTENT,_,_Bs} ->
 		    output_text(S, "UNSATISFIABLE\n");
@@ -415,6 +554,8 @@ run(Mode, S, Bound) ->
 		       true ->
 			    S
 		    end;
+		{?CONTINUE, [], _Bs} ->
+		    S;
 		{?TIMEOUT,_,_} ->
 		    output_text(S, "TIMEOUT\n");
 		{?CANCEL,_,_} ->
@@ -440,7 +581,7 @@ run(Mode, S, Bound) ->
 
 output_error(S, Text) ->
     output_clear(S),
-    ok = wxFrame:setStatusText(S#s.frame, "Error",[]),
+    ok = wxFrame:setStatusText(S#s.window, "Error",[]),
     output_text(S, ["ERROR: ", Text]).
 
 output_text(S, Text) ->
@@ -493,9 +634,12 @@ parse_bindings_([T={_,Ln,_}|_Ts], _Acc) ->
 parse_bindings_([], Acc) ->
     {ok,lists:reverse(Acc)}.
 
-
 parse(String) ->
-    case tokens(String) of
+    case varp:tokens(String) of
+	{ok,[{identifier,_,"c"}|_Ts]} ->
+	    parse_dimacs(String);
+	{ok,[{identifier,_,"p"}|_Ts]} ->
+	    parse_dimacs(String);
 	{ok,Ts} ->
 	    case varp_parse:parse(Ts) of
 		{ok,{Sections,Formula}} ->
@@ -512,41 +656,21 @@ parse(String) ->
 	    {error, io_lib:format("~p\n", [Reason])}
     end.
 
-tokens(String) ->
-    case varp_scan:string(remove_comments(String)) of
-	{ok,Ts,_Ln} -> 
-	    {ok,Ts};
-	{error,{_Ln1,Mod,Why},_Ln2} -> 
-	    Reason = Mod:format_error(Why),
-	    {error, Reason};
-	{error,Reason} -> 
-	    {error, io_lib:format("~p\n", [Reason])}
+parse_dimacs(String) ->
+    Bin = list_to_binary(String), %% utf?
+    case varp_dimacs:parse(Bin) of
+	Form={cnf,{_Var,_Clause,SectionMap,_Units,_Cs}} ->
+	    {ok,{SectionMap,Form}};
+	Form={snf,{_Var,_Clause,SectionMap,_Units,_Cs}} ->
+	    {ok,{SectionMap,Form}};
+	Error -> Error
     end.
 
-%% remove C-style comments from data
-remove_comments([$/,$/|Cs]) -> remove_comments(remove_line(Cs));
-remove_comments([$/,$*|Cs]) -> remove_comments(remove_block(Cs));
-remove_comments([C|Cs]) -> [C|remove_comments(Cs)];
-remove_comments([]) -> [].
-
-%% remove until */ but keep all \n
-remove_block([$*,$/|Cs]) -> Cs;
-remove_block([$\n|Cs]) -> [$\n|remove_block(Cs)];
-remove_block([_|Cs]) -> remove_block(Cs);
-remove_block([]) -> [].
-
-%% remove until end-of-line (but keep it)
-remove_line(Cs=[$\n|_]) -> Cs;
-remove_line([_|Cs]) -> remove_line(Cs);
-remove_line([]) -> [].
-
-
-
 dialog(?wxID_ABOUT,  Frame) ->
-    Str = string:join(["Varp.", 
-                       "Varp is a propositional theorem prover\n",
+    Str = string:join(["Varp ", version(),
+		       " is a propositional theorem prover\n",
                        "running under ",
-                       wx_misc:getOsDescription(),
+		       wx_misc:getOsDescription(),
                        "."], 
                       ""),
     MD = wxMessageDialog:new(Frame,

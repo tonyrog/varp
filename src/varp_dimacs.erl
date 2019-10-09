@@ -7,7 +7,8 @@
 
 -module(varp_dimacs).
 
--export([load/1, save/2]).
+-export([load/1, save/2, detect/1]).
+-export([detect_binary/1]).
 -export([parse/1]).
 -export([format/1]).
 -export([from_cnf/1]).
@@ -22,6 +23,34 @@ load(File) ->
 	{ok,Bin} ->
 	    parse(Bin);
 	Error -> Error
+    end.
+
+detect(File) ->
+    case file:read_file(File) of
+	{ok,Bin} ->
+	    detect_binary(Bin);
+	Error -> Error
+    end.
+
+detect_binary(Bin) ->
+    case binary_line(Bin) of
+	eof ->
+	    false;
+	{ok,[$c|_Comment],Bin1} ->
+	    detect_binary(Bin1);
+	{ok,[$p|Line],_Bin1} ->
+	    case string:tokens(Line, " \r") of
+		["snf", _Variables, _Clauses] ->
+		    {true,snf};
+		["cnf", _Variables, _Clauses] ->
+		    {true,cnf};
+		["sat", _Variables] ->
+		    {true,sat};
+		_ ->
+		    false
+	    end;
+	{ok,_} ->
+	    false
     end.
 
 %% File format:

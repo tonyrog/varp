@@ -1547,6 +1547,15 @@ static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 //
 // send message to process(es) interested in permanent assignments
 // of variables.
+// send either
+//     X      for permanent assignment
+//     {X, Y} for substitution where Y is replaced by X
+// FIXME: add statistics
+//     {number-of-vars,
+//      number-of-bound-vars,
+//      number-of-clauses,
+//      number-of-dead-clauses,
+//      ...}
 //
 static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
 {
