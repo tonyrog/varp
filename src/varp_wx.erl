@@ -120,7 +120,7 @@ create_window(Wx) ->
     %%  +-----+--------+
 
     FixedFont = wxFont:new(10, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
-    SmallFont = wxFont:new(8, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
+    %SmallFont = wxFont:new(8, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
 
     MainSizer = wxBoxSizer:new(?wxVERTICAL),
     Splitter = wxSplitterWindow:new(Window, []),
@@ -284,10 +284,10 @@ create_window(Wx) ->
 
     {ok, DefaultDir} = file:get_cwd(),  %% fixme: save dir?
     #s { window = Window, 
-	 meta = Meta, 
-	 formula = Formula, 
+	 meta = Meta,
+	 formula = Formula,
 	 model = Model,
-	 falsify = Falsify, 
+	 falsify = Falsify,
 	 satisfy = Satisfy,
 	 cancel = Cancel,
 	 dir = DefaultDir,
@@ -349,7 +349,6 @@ loop(S) ->
             loop(S);
 
         #wx{event=#wxSplitter{type=command_splitter_sash_pos_changed}} ->
-	    io:format("Splitter pos changed\n"),
             loop(S);
 
         #wx{obj=Obj, event=#wxStyledText{type=stc_change}} when
@@ -359,7 +358,7 @@ loop(S) ->
 	    wxStyledTextCtrl:disconnect(S#s.formula, stc_change),
 	    loop(S#s { change = true });
 
-        Msg = #wx{obj=Obj, event=#wxCommand{type=command_button_clicked}} ->	
+        _Msg = #wx{obj=Obj, event=#wxCommand{type=command_button_clicked}} ->
 	    if S#s.satisfy =:= Obj ->
 		    S1 = solve(satisfy, S),
 		    loop(S1);
@@ -367,15 +366,13 @@ loop(S) ->
 		    S1 = solve(falsify, S),
 		    loop(S1);
 	       true ->
-		    io:format("Got command_button_clicked ~p ~n", [Msg]),
+		    ?dbg("Got command_button_clicked ~p ~n", [_Msg]),
 		    loop(S)
 	    end;
-        Msg ->
-            io:format("Got ~p ~n", [Msg]),
+        _Msg ->
+            ?dbg("Got ~p ~n", [_Msg]),
             loop(S)
     end.
-
-
 
 %% FIXME block interface while running
 solve(Mode, S) ->
@@ -518,14 +515,14 @@ solve(Mode, S, Bound) ->
 		Res ->
 		    output_error(S, io_lib:format("unexpected ~p\n", [Res]))
 	    end;
-	{error, Line, Message} ->
-	    Pos = wxStyledTextCtrl:positionFromLine(S#s.formula, Line-1),
-	    io:format("Error Line: line=~w, pos=~w\n", [Line, Pos]),
-	    %% wxStyledTextCtrl:setCurrentPos(S#s.formula, Pos),
-	    %% wxStyledTextCtrl:setCaretLineVisible(S#s.formula, true),
-	    output_error(S, Message);
+
+	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->
+	    _Pos = wxStyledTextCtrl:positionFromLine(S#s.formula, Ln-1),
+	    Text = (catch apply(Mod, format_error, [Message])),
+	    output_error(S, Text);
+
 	{error, Message} ->
-	    output_error(S, Message)
+	    output_error(S, io_lib:format("~p\n", [Message]))
     end.
 
 output_error(S, Text) ->
@@ -594,15 +591,9 @@ parse(String) ->
 		{ok,{Sections,Formula}} ->
 		    SectionMap = varp:split_sections(Sections),
 		    {ok,{SectionMap,Formula}};
-		{error,{Ln,Mod,Why}} when 
-		      is_integer(Ln), is_atom(Mod) ->
-		    Reason = Mod:format_error(Why),
-		    {error, Ln, Reason};
-		{error,Reason} ->
-		    {error, io_lib:format("~p\n", [Reason])}
+		Error -> Error
 	    end;
-	{error,Reason}->
-	    {error, io_lib:format("~p\n", [Reason])}
+	Error -> Error
     end.
 
 parse_dimacs(String) ->
@@ -612,9 +603,8 @@ parse_dimacs(String) ->
 	    {ok,{SectionMap,Form}};
 	Form={snf,{_Var,_Clause,SectionMap,_Units,_Cs}} ->
 	    {ok,{SectionMap,Form}};
-	{error,{Line,Mesg}} ->
-	    {error, Line, io_lib:format("~p", [Mesg])};
-	Error -> Error
+	Error ->
+	    Error
     end.
 
 dialog(?wxID_ABOUT,  Frame) ->
@@ -682,7 +672,8 @@ run(Bs, Param) ->
 		  SELF ! {ack,Ref},
 		  wx:set_env(maps:get(env, Param)),
 		  T0 = erlang:monotonic_time(),
-		  mon_loop(Bs, Param, Mon, T0, [])
+		  Info0 = initial_info(Bs),
+		  mon_loop(Bs, Param, Mon, T0, Info0)
 	  end),
     receive
 	{ack,Ref} ->
@@ -740,6 +731,13 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,Info) ->
     wxGauge:setValue(NBound, trunc(100*(NB/NV))),
     wxFrame:setStatusText(Window, Status,[]).
 
+initial_info(Bs) ->
+    [{Key, varc:info(Bs#bs.vp, Key)} ||
+	Key <- [number_of_variables,
+		number_of_bound_variables,
+		number_of_clauses,
+		number_of_dead_clauses]].
+
 call(undefined, _Request) ->
     noproc;
 call(Pid, Request) ->
@@ -759,4 +757,3 @@ call(Pid, Request) ->
 
 response({Ref,Pid}, Response) ->
     Pid ! {response,Ref,Response}.
-

@@ -12,6 +12,8 @@
 -export([parse/1]).
 -export([format/1]).
 -export([from_cnf/1]).
+-export([format_error/1]).
+
 -import(lists, [reverse/1]).
 
 -define(l2a(X), list_to_atom((X))).
@@ -90,7 +92,7 @@ preamble(Bin,Sect,L) ->
 		["sat", Variables] ->
 		    sat(Bin1,Sect,L,list_to_integer(Variables));
 		_ ->
-		    {error,{L,unknown_format}}
+		    {error,{L,?MODULE,unknown_format}}
 	    end
     end.
 
@@ -132,7 +134,7 @@ add_literals([L|Ls],Ln,Acc) ->
 	    add_literals(Ls,Ln,[Li|Acc])
     catch
 	error:_ ->
-	    {error, {Ln,{not_integer_literal,L}}}
+	    {error, {Ln,?MODULE,{not_integer_literal,L}}}
     end;
 add_literals([],_Ln,Acc) ->
     {false, Acc}.
@@ -147,8 +149,8 @@ add_literals([],_Ln,Acc) ->
 %%     {false, Acc}.
 
 %% SAT format
-sat(_Bin,_Sect,_L, _Vars) ->
-    {error, not_implemented}.
+sat(_Bin,_Sect, L, _Vars) ->
+    {error,{L,?MODULE,not_implemented}}.
 
 %% SNF (Symbolc CNF format)
 to_snf(Bin,Sect,L,Vars,Clauses) ->
@@ -180,14 +182,18 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 				{ok,CL} ->
 				    %% CL1 = rewrite_snf_claus(CL,Vs),
 				    to_snf_(Bin1,Sect,Ln1,[],[CL|CLs]);
+				{error,{Ln1,Mod,Message}} ->
+				    {error,{Ln1-1+Ln,Mod,Message}};
 				Error ->
-				    {error,Ln,Error}
+				    Error
 			    end;
 		       true ->
 			    to_snf_(Bin1,Sect,Ln1,Ts2,CLs)
 		    end;
+		{error,{Ln1,Mod,Message}} ->
+		    {error,{Ln1-1+Ln,Mod,Message}};
 		Error ->
-		    {error,Ln,Error}
+		    Error
 	    end
     end.
 
@@ -284,7 +290,8 @@ binary_line(Bin) ->
 	[<<>>] -> eof;
 	[<<>>,<<>>] -> eof;
 	[<<"\r">>,<<>>] -> eof;
-	[Line,Bin1] -> {ok,binary_to_list(Line),Bin1}
+	[Line,Bin1] -> {ok,binary_to_list(Line),Bin1};
+	[Line] -> {ok,binary_to_list(Line),<<>>}
     end.
 
 %% look for:
@@ -351,3 +358,7 @@ eval_sym({bit_index,Sym,Index}) ->
 
 eval_arg(V) when is_integer(V) -> V;
 eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).
+
+format_error(Error) ->
+    io_lib:format("~p", [Error]).
+
