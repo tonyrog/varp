@@ -36,7 +36,7 @@ run(Bs, Param)  when is_record(Bs,bs), is_map(Param) ->
 		    case varp_formula:eval(Bs) of
 			false ->
 			    {?INCONSISTENT,[],Bs};
-			true -> 
+			true ->
 			    {?CONTINUE,[],Bs}
 		    end
 	    end

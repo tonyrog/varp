@@ -74,7 +74,6 @@
 // #define USE_CLAUSE_SHUFFLE
 // #define USE_CLAUSE_FIND
 
-#define LOG_ASSIGN_ATOM
 // #define NDEBUG
 #include <assert.h>
 
@@ -499,11 +498,20 @@ typedef struct arc4_stream_t {
     uint8_t s[256];
 } arc4_stream_t;
 
+// flags
+#define SUB_FLAG_VAR         0x0001    // report variable bindings (level 0)
+#define SUB_FLAG_ATOM        0x0002    // only report "atom" bindings
+#define SUB_FLAG_NUM_VARS    0x0010    // report number of variables
+#define SUB_FLAG_NUM_BOUND   0x0020    // report number of bound variables
+#define SUB_FLAG_NUM_CLAUSES 0x0040    // report number of variables
+#define SUB_FLAG_NUM_DEAD    0x0080    // report number of bound variables
+
+
 typedef struct _subscription_t { // :object_t
     struct _subscription_t* next;
     ErlNifPid pid;               // the subscriber pid
     ErlNifMonitor mon;           // monitor the pid
-    ERL_NIF_TERM what;           // what is subscribed to
+    uint32_t      flags;         // subscription flags
 } subscription_t;
 
 typedef struct _varp_t {
@@ -1550,65 +1558,86 @@ static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 // send either
 //     X      for permanent assignment
 //     {X, Y} for substitution where Y is replaced by X
-// FIXME: add statistics
-//     {number-of-vars,
-//      number-of-bound-vars,
-//      number-of-clauses,
-//      number-of-dead-clauses,
+// FIXME: add statistics (map?)
+//     [{number-of-vars,NV}
+//      {number-of-bound-vars,NB}
+//      {number-of-clauses, NC}
+//      {number-of-dead-clauses,NCD}]
 //      ...}
 //
-static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
+static ERL_NIF_TERM make_sub_info(varp_t* vp, ERL_NIF_TERM list, uint32_t flags)
 {
-#ifdef LOG_ASSIGN_ATOM
-    if ((level == 0) && (x->var->flags & VAR_FLAG_ATOM)) {
-	subscription_t* sp;
-	if (y == NULL) {
-	    DBG("PERMANENT(ATOM) %s=%d\r\n", format_literal(vp,x),
-		(EXPORT(get_ll(vp,x))+1)>>1);
-	}
-	else if (y->var->flags & VAR_FLAG_ATOM) {
-	    DBG("PERMANENT(ATOM) %s=%s\r\n", format_literal(vp,y),
-		format_literal(vp,x));
-	}
-	sp = vp->subs;
-	while(sp != NULL) {
-	    if (sp->what == ATOM(atom)) {
-		ERL_NIF_TERM xt;
-		ERL_NIF_TERM yt;
-		ERL_NIF_TERM bnd = ATOM(false);
-		ERL_NIF_TERM msg;
+    ErlNifEnv* env = vp->msg_env;
+    ERL_NIF_TERM elem;
 
-		if (y == NULL) {
-		    xt = external_ll(vp->msg_env,x);
-		    bnd = xt;
-		}
-		else { // if (y->var->flags & VAR_FLAG_ATOM) {
-		    yt = external_ll(vp->msg_env,y);
-		    xt = external_ll(vp->msg_env,x);
-		    bnd = enif_make_tuple2(vp->msg_env, xt, yt);
-		}
-		if (bnd != ATOM(false)) {
-		    msg = enif_make_tuple2(vp->msg_env, ATOM(varp), bnd);
-		    if (vp->caller_env != NULL) {
-			enif_send(vp->caller_env, &sp->pid, vp->msg_env, msg);
-			enif_clear_env(vp->msg_env);
-		    }
-		    else {
-			DBG("caller_env NOT set!!!\r\n");
-		    }
-		}
-	    }
-	    sp = sp->next;
-	}
+    if (flags & SUB_FLAG_NUM_VARS) {
+	elem = enif_make_tuple2(env, ATOM(number_of_variables),
+				enif_make_int(env, vp->vnum));
+	list = enif_make_list_cell(env, elem, list);
     }
-#else
-    UNUSED(vp);
-    UNUSED(x);
-    UNUSED(y);    
-    UNUSED(level);
-#endif
+    if (flags & SUB_FLAG_NUM_BOUND) {
+	elem = enif_make_tuple2(env, ATOM(number_of_bound_variables),
+				enif_make_int(env, vp->num_bound));
+	list = enif_make_list_cell(env, elem, list);
+    }
+    if (flags & SUB_FLAG_NUM_CLAUSES) {
+	elem = enif_make_tuple2(env, ATOM(number_of_clauses),
+				enif_make_int(env, vp->cnum));
+	list = enif_make_list_cell(env, elem, list);
+    }
+    if (flags & SUB_FLAG_NUM_DEAD) {
+	elem = enif_make_tuple2(env, ATOM(number_of_dead_clauses),
+				enif_make_int(env, vp->cdead));
+	list = enif_make_list_cell(env, elem, list);
+    }
+    return list;
 }
 
+static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
+{
+    ErlNifEnv* env = vp->msg_env;
+    subscription_t* sp;
+
+    if (level != 0) return;
+    
+    sp = vp->subs;
+    while(sp != NULL) {
+	if ((sp->flags & SUB_FLAG_VAR) ||
+	    ((sp->flags & SUB_FLAG_ATOM) &&
+	     (x->var->flags & VAR_FLAG_ATOM))) {
+	    ERL_NIF_TERM xt;
+	    ERL_NIF_TERM yt;
+	    ERL_NIF_TERM bnd = ATOM(false);
+	    ERL_NIF_TERM info = enif_make_list(env, 0);
+	    ERL_NIF_TERM msg;
+
+	    // enif_fprintf(stdout, "log_permanent x=%s\r\n",
+	    //  format_literal(vp, x));
+		
+	    if (y == NULL) {
+		xt = external_ll(env,x);
+		bnd = xt;
+	    }
+	    else { // if (y->var->flags & VAR_FLAG_ATOM) {
+		yt = external_ll(env,y);
+		xt = external_ll(env,x);
+		bnd = enif_make_tuple2(env, xt, yt);
+	    }
+	    info = make_sub_info(vp, info, sp->flags);
+	    msg = enif_make_tuple3(env, ATOM(varp), bnd, info);
+	    if (vp->caller_env != NULL) {
+		enif_send(vp->caller_env, &sp->pid, env, msg);
+		enif_clear_env(env);
+	    }
+	    else {
+		DBG("caller_env NOT set!!!\r\n");
+	    }
+	}
+	sp = sp->next;
+    }
+}
+
+#if 0
 static inline void set_literal(varp_t* vp,lit_t l,ival_t ivalue,
 			       long li, cix_t cix, int level)
 {
@@ -1623,6 +1652,8 @@ static inline void set_literal(varp_t* vp,lit_t l,ival_t ivalue,
     var->level = level;
     log_permanent(vp, lp, NULL, level);
 }
+#endif
+
 
 // level=0 work
 // after evaluation of a literal in the L literal queue
@@ -5259,35 +5290,87 @@ static ERL_NIF_TERM varp_decay(ErlNifEnv* env, int argc,
     return ATOM(ok);
 }
 
+static int vif_get_sub_flag(ErlNifEnv* env, ERL_NIF_TERM term, uint32_t* flag)
+{
+    UNUSED(env);
+    if (term == ATOM(variable))
+	*flag = SUB_FLAG_VAR;    
+    else if (term == ATOM(atom))
+	*flag = SUB_FLAG_ATOM;
+    else if (term ==  ATOM(number_of_variables))
+	*flag = SUB_FLAG_NUM_VARS;
+    else if (term ==  ATOM(number_of_bound_variables))
+	*flag = SUB_FLAG_NUM_BOUND;
+    else if (term ==  ATOM(number_of_clauses))
+	*flag = SUB_FLAG_NUM_CLAUSES;
+    else if (term ==  ATOM(number_of_dead_clauses))
+	*flag = SUB_FLAG_NUM_DEAD;
+    else
+	return 0;
+    return 1;
+}
+
+static int vif_get_sub_flags(ErlNifEnv* env, ERL_NIF_TERM term, uint32_t* flags)
+{
+    ERL_NIF_TERM list = term;    
+    ERL_NIF_TERM head, tail;
+    uint32_t fs = 0;
+
+    if (enif_is_atom(env, term)) {
+	if (!vif_get_sub_flag(env, head, &fs))
+	    return 0;
+    }
+    else {
+	while(enif_get_list_cell(env, list, &head, &tail)) {
+	    uint32_t f;	
+	    if (!vif_get_sub_flag(env, head, &f))
+		return 0;
+	    fs |= f;
+	    list = tail;
+	}
+	if (!enif_is_empty_list(env, list))
+	    return 0;	
+    }
+    *flags = fs;
+    return 1;
+}
+
+//
+// FIXME: set flag(s) that indicate what kind of messages
+// that are of interest.
+//    assignment
+//    substitution
+//    statistics
+//
 static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
 				   const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
+    uint32_t flags;
+    subscription_t* sp;
+    int r;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
 
-    if ((argv[1] == ATOM(atom)) ||
-	(argv[1] == ATOM(variable))) {
-	subscription_t* sp;
-	int r;
-	if ((sp = varp_alloc(&vp->sub_allocator)) == NULL)
-	    return enif_make_badarg(env);
-	r = enif_monitor_process(env, vp, enif_self(env,&sp->pid), &sp->mon);
-	if (r != 0) {
-	    // r < 0 no down callback, r > 0 process not alive
-	    varp_free(&vp->sub_allocator, sp);
-	    return enif_make_badarg(env);
-	}
-	sp->what = argv[1];
-	// link in first
-	sp->next = vp->subs;
-	vp->subs = sp;
-	
-	return ATOM(ok);	
+    if (!vif_get_sub_flags(env, argv[1], &flags))
+	return enif_make_badarg(env);	
+
+    if ((sp = varp_alloc(&vp->sub_allocator)) == NULL)
+	return enif_make_badarg(env);
+    r = enif_monitor_process(env, vp, enif_self(env,&sp->pid), &sp->mon);
+    if (r != 0) {
+	// r < 0 no down callback, r > 0 process not alive
+	varp_free(&vp->sub_allocator, sp);
+	return enif_make_badarg(env);
     }
-    return enif_make_badarg(env);
+    sp->flags = flags;
+    // link in first
+    sp->next = vp->subs;
+    vp->subs = sp;
+	
+    return ATOM(ok);	
 }
 
 static ERL_NIF_TERM make_edge_list(ErlNifEnv* env, varp_t* vp,
@@ -5570,10 +5653,12 @@ static void varp_down(ErlNifEnv* env, void* obj,
     while(*spp) {
 	subscription_t* sp = *spp;
 	if (enif_compare_monitors(mon, &sp->mon) == 0) {
+#ifdef DEBUG
 	    char buf[80];
 	    enif_snprintf(buf, sizeof(buf), "process %T died",
 			  enif_make_pid(env, &sp->pid));
 	    enif_fprintf(stdout, "%s\r\n", buf);
+#endif
 	    *spp = sp->next;
 	    varp_free(&vp->sub_allocator, sp);
 	    return;

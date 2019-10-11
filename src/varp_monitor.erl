@@ -15,28 +15,43 @@ options() ->
 
 run(Bs, _Param) ->
     SELF = self(),
-    spawn(
-      fun() ->
-	      io:format("monitor ~p started\n", [self()]),
-	      varc:subscribe(Bs#bs.vp, atom),
-	      Mon = monitor(process, SELF),
-	      loop(Bs, Mon)
-      end),
+    Info = [atom,variable,number_of_variables,number_of_bound_variables,
+	    number_of_clauses, number_of_dead_clauses],
+    Ref = make_ref(),
+    {Pid,Mon} = 
+	spawn_monitor(
+	  fun() ->
+		  io:format("monitor ~p started\n", [self()]),
+		  varc:subscribe(Bs#bs.vp, Info),
+		  Mon = monitor(process, SELF),
+		  SELF ! {ack,Ref},
+		  loop(Bs, Mon)
+	  end),
+    receive
+	{ack,Ref} ->
+	    erlang:demonitor(Mon);
+	{'DOWN', Mon, process, Pid, _Reason} ->
+	    ok
+    after 3000 ->
+	    io:format("need to wait longer?\n"),
+	    timeout
+    end,
     {?CONTINUE,[],Bs}.
 
 loop(Bs, Mon) ->
     receive
 	{'DOWN', Mon, process, _Pid, _Reason} ->
 	    done;
-	{varp, {X,Y}} ->
-	    io:format("monitor: substitut (~w=>~w) ~s => ~s\n", 
+	{varp, {X,Y}, Info} ->
+	    io:format("monitor: substitut (~w=>~w) ~s => ~s info=~w\n", 
 		      [Y,X,
 		       varp_formula:format_lit(Bs,Y),
-		       varp_formula:format_lit(Bs,X)]),
+		       varp_formula:format_lit(Bs,X),
+		       Info]),
 	    loop(Bs, Mon);
-	{varp, X} ->
-	    io:format("monitor: permanent (~w=1) ~s = ~w\n", 
-		      [X,varp_formula:format_lit(Bs,X), 1]),
+	{varp, X, Info} ->
+	    io:format("monitor: permanent (~w=1) ~s = ~w, info=~w\n", 
+		      [X,varp_formula:format_lit(Bs,X), ?T, Info]),
 	    loop(Bs, Mon);
 	Other ->
 	    io:format("monitor: got ~p\n", [Other]),

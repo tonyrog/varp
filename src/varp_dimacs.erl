@@ -103,7 +103,7 @@ to_cnf(Bin,Sect,L,Vars,Clauses) ->
 	    Error
     end.
 
-to_cnf_(Bin,Sect,L,Acc,Cs) ->
+to_cnf_(Bin,Sect,Ln,Acc,Cs) ->
     case binary_line(Bin) of
 	eof ->
 	    {ok,Sect,reverse(Cs)};
@@ -111,25 +111,30 @@ to_cnf_(Bin,Sect,L,Acc,Cs) ->
 	    {ok,Sect,reverse(Cs)};
 	{ok,[$c|Comment],Bin1} -> 
 	    Sect1 = scan_section(Comment,Sect),
-	    to_cnf_(Bin1,Sect1,L+1,Acc,Cs);
+	    to_cnf_(Bin1,Sect1,Ln+1,Acc,Cs);
 	{ok,Line,Bin1} ->
-	    case add_literals(string:tokens(Line, " \n"),Acc) of
+	    case add_literals(string:tokens(Line, " \n"),Ln,Acc) of
 		{false,Acc1} ->
-		    to_cnf_(Bin1,Sect,L+1,Acc1,Cs);
+		    to_cnf_(Bin1,Sect,Ln+1,Acc1,Cs);
 		{true,Acc1} ->
-		    to_cnf_(Bin1,Sect,L+1,[],[reverse(Acc1) | Cs])
+		    to_cnf_(Bin1,Sect,Ln+1,[],[reverse(Acc1) | Cs]);
+		Error={error,_Reason} ->
+		    Error
 	    end
     end.
 
 
-add_literals([L|Ls], Acc) ->
-    Li = list_to_integer(L),
-    if Li =:= 0 ->
+add_literals([L|Ls],Ln,Acc) ->
+    try list_to_integer(L) of
+	0 ->
 	    {true,Acc};
-       true ->
-	    add_literals(Ls, [Li|Acc])
+	Li ->
+	    add_literals(Ls,Ln,[Li|Acc])
+    catch
+	error:_ ->
+	    {error, {Ln,{not_integer_literal,L}}}
     end;
-add_literals([], Acc) ->
+add_literals([],_Ln,Acc) ->
     {false, Acc}.
 
 %% add_literals([L|Ls], Acc) ->

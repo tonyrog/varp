@@ -15,6 +15,7 @@
 %% warp_wx is also a plugin (monitor assignment etc)
 -export([options/0, run/2]).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
 -record(s,
@@ -22,6 +23,7 @@
 	 window,
 	 meta,
 	 formula,
+	 change = false,   %% formula udated?
 	 model,
 	 satisfy,
 	 falsify,
@@ -328,7 +330,10 @@ loop(S) ->
 			    wxStyledTextCtrl:setTextRaw(S#s.formula,
 							<<Bin/binary,0>>),
 			    Dir = wxFileDialog:getDirectory(Dialog),
-			    loop(S#s { dir = Dir });
+			    File = wxFileDialog:getFilename(Dialog),
+			    wxFrame:setTitle(S#s.window, File),
+			    wxStyledTextCtrl:connect(S#s.formula, stc_change),
+			    loop(S#s { dir = Dir, change = false });
 			{error,Reason} ->
 			    Text = io_lib:format("file error: ~s ~p",
 						 [Path,Reason]),
@@ -347,12 +352,19 @@ loop(S) ->
 	    io:format("Splitter pos changed\n"),
             loop(S);
 
+        #wx{obj=Obj, event=#wxStyledText{type=stc_change}} when
+	      Obj =:= S#s.formula, not S#s.change ->
+	    Title = wxFrame:getTitle(S#s.window),
+	    wxFrame:setTitle(S#s.window, [$*|Title]),
+	    wxStyledTextCtrl:disconnect(S#s.formula, stc_change),
+	    loop(S#s { change = true });
+
         Msg = #wx{obj=Obj, event=#wxCommand{type=command_button_clicked}} ->	
 	    if S#s.satisfy =:= Obj ->
-		    S1 = satisfy(S),
+		    S1 = solve(satisfy, S),
 		    loop(S1);
 	       S#s.falsify =:= Obj ->
-		    S1 = falsify(S),
+		    S1 = solve(falsify, S),
 		    loop(S1);
 	       true ->
 		    io:format("Got command_button_clicked ~p ~n", [Msg]),
@@ -363,76 +375,6 @@ loop(S) ->
             loop(S)
     end.
 
-satisfy(S) ->
-    solve(satisfy, S).
-
-falsify(S) ->
-    solve(falsify, S).
-
-%% built in plugin to monitor variables
-options() ->
-    [
-     #{ key => nbound,
-	spec => term,
-	default => undefined,
-	description => "wxGauge setting % of bound variables."
-      },
-     #{ key => window,
-	spec => term,
-	default => undefined,
-	description => "top wxFrame container."
-      },
-    #{ key => env,
-       spec => term,
-       default => undefined,
-       description => "wx environment passed to plugin, use wx:set_env."
-     }
-    ].
-
-run(Bs, Param) ->
-    SELF = self(),
-    Mon = 
-	spawn(
-	  fun() ->
-		  io:format("varp_wx monitor ~p started\n", [self()]),
-		  varc:subscribe(Bs#bs.vp, atom),
-		  Mon = monitor(process, SELF),
-		  wx:set_env(maps:get(env, Param)),
-		  update_nbound(Bs, Param),
-		  mon_loop(Bs, Param, Mon)
-	  end),
-    put(mon_proc, Mon),
-    {?CONTINUE,[],Bs}.
-    
-mon_loop(Bs,Param,Mon) ->
-    receive
-	{'DOWN', Mon, process, _Pid, _Reason} ->
-	    done;
-	{varp, {X,Y}} ->
-	    io:format("varp_wx monitor: substitut (~w=>~w) ~s => ~s\n", 
-		      [Y,X,
-		       varp_formula:format_lit(Bs,Y),
-		       varp_formula:format_lit(Bs,X)]),
-	    update_nbound(Bs, Param),
-	    mon_loop(Bs,Param,Mon);
-	{varp, X} ->
-	    io:format("varp_wx monitor: permanent (~w=1) ~s = ~w\n", 
-		      [X,varp_formula:format_lit(Bs,X), 1]),
-	    update_nbound(Bs, Param),
-	    mon_loop(Bs,Param,Mon);
-	Other ->
-	    io:format("varp_wx monitor: got ~p\n", [Other]),
-	    mon_loop(Bs,Param,Mon)
-    end.
-
-update_nbound(Bs,#{nbound:=NBound, window:=Window}) ->
-    NV = varp_formula:number_of_variables(Bs),
-    NB = varp_formula:number_of_bound(Bs),
-    Percent = 100*(NB/NV),
-    NC = varp_formula:number_of_clauses(Bs),
-    Status = io_lib:format("#Var: ~w, #Bound: ~w, #Clauses: ~w", [NV, NB, NC]),
-    wxGauge:setValue(NBound, trunc(Percent)),
-    wxFrame:setStatusText(Window, Status,[]).
 
 
 %% FIXME block interface while running
@@ -469,7 +411,6 @@ solve(Mode, S, Bound) ->
 		end,
     QType = recursive,
     %% _EdgeList = true,
-    ?dbg("meta = ~p\n", [Meta]),
     ?dbg("max  = ~p\n", [Max]),
     ?dbg("saturate = ~w\n", [Saturate]),
     ?dbg("backtrack = ~w\n", [Backtrack]),
@@ -491,11 +432,10 @@ solve(Mode, S, Bound) ->
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),
 	    Do =
-		[{Mode,[]},
-		 {wx,[{nbound,S#s.config_nbound},
+		[{wx,[{nbound,S#s.config_nbound},
 		      {window,S#s.window},
-		      {env, S#s.wx_env}]}
-		] ++
+		      {env, S#s.wx_env}]},
+		 {Mode,[]}] ++
 		case Saturate of
 		    0 -> [];
 		    _K -> [{saturate,[{level,1}]}]
@@ -541,7 +481,8 @@ solve(Mode, S, Bound) ->
 	    wxButton:enable(S#s.falsify),
 	    wxButton:disable(S#s.cancel),
 
-	    exit(get(mon_proc), kill),
+	    call(get(mon_proc), flush),
+	    call(get(mon_proc), stop),
 
 	    case Res of
 		{?INCONSISTENT,_,_Bs} ->
@@ -564,6 +505,14 @@ solve(Mode, S, Bound) ->
 		    output_text(S, "ERROR\n");
 		{'EXIT',{{unbound,Var}, _Where}} ->
 		    output_error(S, ["Variable ", Var, " is unbound\n"]);
+		{'EXIT',{{var_out_of_range,Var}, _Where}} ->
+		    VarName = if is_integer(Var) -> integer_to_list(Var);
+				 is_list(Var) -> Var;
+				 is_atom(Var) -> atom_to_list(Var)
+			      end,
+		    output_error(S, ["Variable ",VarName," is out of range\n"]);
+		{'EXIT',{empty_clause, _Where}} ->
+		    output_error(S, ["Empty clause not allowed\n"]);
 		{'EXIT',Err} ->
 		    output_error(S, io_lib:format("~p\n", [Err]));
 		Res ->
@@ -663,6 +612,8 @@ parse_dimacs(String) ->
 	    {ok,{SectionMap,Form}};
 	Form={snf,{_Var,_Clause,SectionMap,_Units,_Cs}} ->
 	    {ok,{SectionMap,Form}};
+	{error,{Line,Mesg}} ->
+	    {error, Line, io_lib:format("~p", [Mesg])};
 	Error -> Error
     end.
 
@@ -690,3 +641,122 @@ keyWords() ->
 	 "and", "or", "xor", "not", "imp", "equ", "A", "E", "ALL", "ANY",
 	 "SUM", "PROD"],
     lists:flatten([K ++ " " || K <- L] ++ [0]).
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%%  varp plugin for monitoring assignments, updating statistics time etc
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%% built in plugin to monitor variables
+options() ->
+    [
+     #{ key => nbound,
+	spec => term,
+	default => undefined,
+	description => "wxGauge setting % of bound variables."
+      },
+     #{ key => window,
+	spec => term,
+	default => undefined,
+	description => "top wxFrame container."
+      },
+    #{ key => env,
+       spec => term,
+       default => undefined,
+       description => "wx environment passed to plugin, use wx:set_env."
+     }
+    ].
+
+run(Bs, Param) ->
+    SELF = self(),
+    Info = [atom,variable,number_of_variables,number_of_bound_variables,
+	    number_of_clauses, number_of_dead_clauses],
+    Ref = make_ref(),
+    {Pid,Mon} =
+	spawn_monitor(
+	  fun() ->
+		  ?dbg("varp_wx monitor ~p started\n", [self()]),
+		  ok = varc:subscribe(Bs#bs.vp, Info),
+		  Mon = monitor(process, SELF),
+		  SELF ! {ack,Ref},
+		  wx:set_env(maps:get(env, Param)),
+		  T0 = erlang:monotonic_time(),
+		  mon_loop(Bs, Param, Mon, T0, [])
+	  end),
+    receive
+	{ack,Ref} ->
+	    erlang:demonitor(Mon);
+	{'DOWN', Mon, process, Pid, _Reason} ->
+	    ok
+    after 3000 ->
+	    ?dbg("need to wait longer?\n",[]),
+	    timeout
+    end,
+    put(mon_proc, Pid),  %% must be killed after each run!
+    {?CONTINUE,[],Bs}.
+
+mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
+    receive
+	{'DOWN', Mon, process, _Pid, _Reason} ->
+	    done;
+	{call, From, flush} ->
+	    update_info(Param,StartTime,PrevInfo),
+	    response(From, ok),
+	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo);
+	{call, From, stop} ->
+	    update_info(Param,StartTime,PrevInfo),
+	    response(From, ok);
+	{varp, {_X,_Y}, Info} ->
+	    ?dbg("varp_wx monitor: substitut (~w=>~w) ~s => ~s,info=~w\n",
+		 [_Y,_X, varp_formula:format_lit(Bs,_Y),
+		  varp_formula:format_lit(Bs,_X),Info]),
+	    update_info(Param,StartTime,Info),
+	    mon_loop(Bs,Param,Mon,StartTime,Info);
+	{varp, _X, Info} ->
+	    ?dbg("varp_wx monitor: permanent (~w=1) ~s = ~w,info=~w\n", 
+		 [_X,varp_formula:format_lit(Bs,_X), 1, Info]),
+	    update_info(Param,StartTime,Info),
+	    mon_loop(Bs,Param,Mon,StartTime,Info);
+	Other ->
+	    io:format("varp_wx monitor: got ~p\n", [Other]),
+	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
+    after 1000 ->
+	    update_info(Param,StartTime,PrevInfo),
+	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
+    end.
+
+update_info(#{nbound:=NBound,window:=Window},StartTime,Info) ->
+    NV = proplists:get_value(number_of_variables, Info, 1),
+    NB = proplists:get_value(number_of_bound_variables, Info, 0),
+    NC = proplists:get_value(number_of_clauses,Info,0),
+    ND = proplists:get_value(number_of_dead_clauses,Info,0),
+    CurrentTime = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(CurrentTime - StartTime,
+				    native, millisecond),
+    Status = io_lib:format(
+	       "#Var: ~-6w #Bound: ~-6w #Clauses: ~-6w #Dead: ~-6w #Time: ~.2fs",
+	       [NV, NB, NC, ND, Time/1000]),
+    wxGauge:setValue(NBound, trunc(100*(NB/NV))),
+    wxFrame:setStatusText(Window, Status,[]).
+
+call(undefined, _Request) ->
+    noproc;
+call(Pid, Request) ->
+    Ref = erlang:monitor(process, Pid),
+    Pid ! {call, {Ref,self()}, Request},
+    receive
+	{response,Ref,Response} ->
+	    erlang:demonitor(Ref,[flush]),
+	    Response;
+	{'DOWN', Ref, process, Pid, _Reason} ->
+	    down
+    after 10000 ->
+	    erlang:demonitor(Ref),
+	    io:format("call failes?\n"),
+	    timeout
+    end.
+
+response({Ref,Pid}, Response) ->
+    Pid ! {response,Ref,Response}.
+

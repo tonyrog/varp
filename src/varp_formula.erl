@@ -1071,7 +1071,21 @@ build_({cnf,{Vars,_Clauses,_Sections,Units,Cs}},Bs)
     %% fixme bind all literals in Ls = TRUE
     %% io:format("Units = ~p\n", [Units]),
     lists:foreach(fun(CL) ->
-			  varc:add_clause(Bs#bs.vp, CL)
+			  try varc:add_clause(Bs#bs.vp, CL) of
+			      _ -> ok
+			  catch
+			      error:_ ->
+				  if CL =:= [] -> 
+					  error(empty_clause);
+				     true ->
+					  MV = lists:max([abs(L)||L<-CL]),
+					  if MV > Vars ->
+						  error({var_out_of_range,MV});
+					     true ->
+						  error(add_clause)
+					  end
+				  end
+			  end
 		  end, Cs),
     %% Bs1 = build_snf(Cs, Bs),
     {{bool,?T}, Bs};
