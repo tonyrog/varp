@@ -5,7 +5,7 @@ Terminals
         order rank degree random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
-        'SUM' 'PROD'
+        'SUM' 'PROD' 'implies' 'equivalent'
         '<->' '>>>' '<<<' '..'
         hexnum octnum binnum decnum flonum chrnum identifier
 	'->' '<<' '>>' '<' '>' '>=' '<=' '==' '!=' ':='
@@ -330,9 +330,11 @@ lexpr70 -> lexpr70 '||'  lexpr60    : { op('$2'), '$1', '$3' }.
 lexpr80 -> lexpr70                  : '$1'.
 lexpr80 -> lexpr80 '->'  lexpr70    : { op('$2'), '$1', '$3' }.
 lexpr80 -> lexpr80 'imp' lexpr70    : { op('$2'), '$1', '$3' }.
+lexpr80 -> lexpr80 'implies' lexpr70 : { op('$2'), '$1', '$3' }.
 
 lexpr90 -> lexpr80                  : '$1'.
 lexpr90 -> lexpr90 'equ' lexpr80    : { op('$2'), '$1', '$3' }.
+lexpr90 -> lexpr90 'equivalent' lexpr80 : { op('$2'), '$1', '$3' }.
 lexpr90 -> lexpr90 '<->' lexpr80    : { op('$2'), '$1', '$3' }.
 
 lexpr -> lexpr90                    : '$1'.

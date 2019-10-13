@@ -9,7 +9,10 @@
 
 -include_lib("wx/include/wx.hrl").
 
+
 -export([start/0]).
+-export([main_loop/1]).
+
 -export([output_model/3]).  %% varp callback
 
 %% warp_wx is also a plugin (monitor assignment etc)
@@ -18,18 +21,24 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
+-define(STCMOD, stc_modified).
+
 -record(s,
 	{
 	 window,
 	 meta,
 	 formula,
-	 change = false,   %% formula udated?
+	 modified = false, %% formula modified
 	 model,
 	 satisfy,
 	 falsify,
 	 cancel,
 	 dir = "",
+	 filename = undefined,
+	 path = undefined,
 	 wx_env,            %% environment passed to plugin 
+	 %% menus
+	 menu_save,         %% wxMenu
 	 %% config
 	 config_max_models, %% wxSpinCtrl
 	 config_timeout,    %% wxSpinCtrl
@@ -47,6 +56,7 @@ version() ->
 start() ->
     application:start(varp),
     application:load(wx),
+    start_win_reg(),
     spawn(
       fun() ->
 	      Wx = wx:new(),
@@ -54,9 +64,9 @@ start() ->
 	      try create_window(Wx) of
 		  S ->
 		      wxWindow:show(S#s.window),
-		      loop(S),
-		      wx:destroy(),
-		      erlang:halt()
+		      register_process(),
+		      ?MODULE:main_loop(S),
+		      wx:destroy()
 	      catch
 		  ?EXCEPTION(error,Reason,Trace) ->
 		      io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)])
@@ -72,28 +82,44 @@ create_window(Wx) ->
 					[{type, ?wxBITMAP_TYPE_PNG}])),
 
     wxFrame:createStatusBar(Window,[]),
-    wxFrame:connect(Window, close_window),
+    ok = wxFrame:connect(Window, close_window, [{skip,false}]),
+    ok = wxFrame:connect(Window, command_menu_selected, []),
+    %% ok = wxFrame:connect(Window, activate, [{skip, true}]),
+    %% ok = wxFrame:connect(Window, command_button_clicked),
 
     MenuBar  = wxMenuBar:new(),
     FileM    = wxMenu:new([]),
+    EditM    = wxMenu:new([]),
     HelpM    = wxMenu:new([]),
 
     % unlike wxwidgets the stock menu items still need text to be given, 
     % although help text does appear
-    _OpenMenuItem  = wxMenu:append(FileM, ?wxID_OPEN, "&Open"),
-    _SaveMenuItem  = wxMenu:append(FileM, ?wxID_SAVE, "&Save"),
+
+    %% FileMenu
+    _NewMenuItem     = wxMenu:append(FileM, ?wxID_NEW, "&New"),
+    _OpenMenuItem    = wxMenu:append(FileM, ?wxID_OPEN, "&Open..."),
+    SaveMenuItem     = wxMenu:append(FileM, ?wxID_SAVE, "&Save"),
     _SaveAsMenuItem  = wxMenu:append(FileM, ?wxID_SAVEAS, "&Save As..."),
-    _QuitMenuItem  = wxMenu:append(FileM, ?wxID_EXIT, "&Quit"),
+    _QuitMenuItem    = wxMenu:append(FileM, ?wxID_EXIT, "&Quit"),
+
+    %% Edit menu
+    _Cut             = wxMenu:append(EditM, ?wxID_CUT, "&Cut"),
+    _Copy            = wxMenu:append(EditM, ?wxID_COPY, "&Copy"),
+    _Paste           = wxMenu:append(EditM, ?wxID_PASTE, "&Paste"),
+    _Clear           = wxMenu:append(EditM, ?wxID_CLEAR, "&Clear\tDEL"),
+    _SelectAll       = wxMenu:append(EditM, ?wxID_SELECTALL, "&Select All\tCtrl+A"),
+
     % Note the keybord accelerator
     _AboutMenuItem = wxMenu:append(HelpM, ?wxID_ABOUT, "&About...\tF1"),
+
+    wxMenuItem:enable(SaveMenuItem,[{enable,false}]),
 
     wxMenu:appendSeparator(HelpM),
     ContentsMenuItem = wxMenu:append(HelpM, ?wxID_HELP_CONTENTS, "&Contents"),
     wxMenuItem:enable(ContentsMenuItem, [{enable, false}]),
 
-    ok = wxFrame:connect(Window, command_menu_selected),
-
     wxMenuBar:append(MenuBar, FileM, "&File"),
+    wxMenuBar:append(MenuBar, EditM, "&Edit"),
     wxMenuBar:append(MenuBar, HelpM, "&Help"),
     wxFrame:setMenuBar(Window, MenuBar),
 
@@ -178,6 +204,8 @@ create_window(Wx) ->
     wxSizer:addSpacer(Sizer1, 10),
     wxSizer:add(Sizer1, Formula, [{flag, ?wxEXPAND}, {proportion, 1}]),
 
+    wxStyledTextCtrl:connect(Formula,?STCMOD),
+
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% WINDOW 2
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -187,9 +215,11 @@ create_window(Wx) ->
     Run = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label, "run"}]),
     Satisfy = wxButton:new(Win2, 10, [{label,"Satisfy"}]),
     wxButton:connect(Satisfy, command_button_clicked),
+    wxButton:enable(Satisfy),
 
     Falsify = wxButton:new(Win2, 11, [{label,"Falsify"}]),
     wxButton:connect(Falsify, command_button_clicked),
+    wxButton:enable(Falsify),
 
     Cancel = wxButton:new(Win2, 12, [{label,"Cancel"}]),
     SELF = self(),
@@ -198,6 +228,8 @@ create_window(Wx) ->
 		       fun(_Event,_Object) -> 
 			       SELF ! {cancel, self()}
 		       end }]),
+    wxButton:disable(Cancel),
+
     wxSizer:add(Run, Satisfy, []),
     wxSizer:add(Run, Falsify, []),
     wxSizer:add(Run, Cancel, []),
@@ -237,9 +269,9 @@ create_window(Wx) ->
 			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
 
     NBound = wxGauge:new(Win2, 31, 100, [{size,{800,10}},
-					 {style, ?wxGA_HORIZONTAL}]),
+					 {style, 
+					  ?wxGA_HORIZONTAL+?wxGA_SMOOTH}]),
 
-    %% wxRadioBox:connect(ModelMode, command_radiobox_selected),
     Config = wxBoxSizer:new(?wxVERTICAL),
     Config1 = wxBoxSizer:new(?wxHORIZONTAL),
     Config2 = wxBoxSizer:new(?wxHORIZONTAL),
@@ -282,7 +314,9 @@ create_window(Wx) ->
     wxFrame:connect(Window, command_splitter_sash_pos_changed),
     wxFrame:setSizer(Window, MainSizer),
 
-    {ok, DefaultDir} = file:get_cwd(),  %% fixme: save dir?
+    wxFrame:setTitle(Window, "Untitled"),
+
+    {ok, DefaultDir} = file:get_cwd(), %% fixme: save dir?
     #s { window = Window, 
 	 meta = Meta,
 	 formula = Formula,
@@ -290,6 +324,8 @@ create_window(Wx) ->
 	 falsify = Falsify,
 	 satisfy = Satisfy,
 	 cancel = Cancel,
+	 filename = undefined,
+	 path = undefined,
 	 dir = DefaultDir,
 	 config_max_models = MaxModels,
 	 config_timeout    = Timeout,
@@ -298,81 +334,281 @@ create_window(Wx) ->
 	 config_order      = Order,
 	 config_assoc      = Assoc,
 	 config_nbound     = NBound,
-	 wx_env            = wx:get_env()
+	 wx_env            = wx:get_env(),
+	 menu_save         = SaveMenuItem
        }.
 
-loop(S) ->
-    receive 
+main_loop(S) ->
+    receive
         #wx{event=#wxClose{}} ->
-            wxFrame:destroy(S#s.window),
-            ok;
+	    ?dbg("CLOSE\n",[]),
+	    if S#s.modified ->
+		    case save_before(S, "Save before close") of
+			{ok,S1} ->
+			    wxFrame:destroy(S1#s.window),
+			    ok;
+			{cancel,S1} ->
+			    ?MODULE:main_loop(S1)
+		    end;
+	       true ->
+		    ok
+	    end;
+
         #wx{id=?wxID_EXIT, event=#wxCommand{type=command_menu_selected}} ->
-            wxWindow:destroy(S#s.window),
-            ok;
-        #wx{id=?wxID_OPEN, event=#wxCommand{type=command_menu_selected}} ->
+	    ?dbg("EXIT\n",[]),
+	    if S#s.modified ->
+		    case save_before(S, "Save before exit") of
+			{ok,S1} ->
+			    wxWindow:destroy(S1#s.window),
+			    ok;
+			{cancel,S1} ->
+			    ?MODULE:main_loop(S1)
+		    end;
+	       true ->
+		    ok
+	    end;
+
+        #wx{id=?wxID_NEW, event=#wxCommand{type=command_menu_selected}} ->
+	    ?dbg("NEW\n",[]),
+	    _Pid = varp_wx:start(),
+	    ?MODULE:main_loop(S);
+
+        #wx{id=?wxID_SAVE, event=#wxCommand{type=command_menu_selected}} ->
+	    %% FIXME: handle file error !!!
+	    ?dbg("SAVE\n",[]),
+	    case save(S, 0) of
+		{ok,S1} ->
+		    ?MODULE:main_loop(S1);
+		{cancel,S1} ->
+		    ?MODULE:main_loop(S1)
+	    end;
+	       
+        #wx{id=?wxID_SAVEAS, event=#wxCommand{type=command_menu_selected}} ->
+	    ?dbg("SAVEAS\n",[]),
 	    Dialog = wxFileDialog:new(S#s.window,
-				      [{defaultDir,S#s.dir},
-				       {wildCard, 
-					"*.varp;*.cnf;*.snf;*.txt"}]),
+				      [{message, "Save a copy"},
+				       {style,?wxFD_SAVE bor ?wxFD_OVERWRITE_PROMPT},
+				       {defaultDir,S#s.dir},
+				       {wildCard,"*.varp;*.cnf;*.snf;*.txt"}]),
 	    case wxFileDialog:showModal(Dialog) of
 		?wxID_OK ->
+		    Data = wxStyledTextCtrl:getText(S#s.formula),
+		    BinData = unicode:characters_to_binary(Data),
 		    Path = wxFileDialog:getPath(Dialog),
-		    case file:read_file(Path) of
-			{ok,Bin} ->
-			    %% clear model
-			    wxStyledTextCtrl:setReadOnly(S#s.model, false),
-			    wxStyledTextCtrl:clearAll(S#s.model),
-			    wxStyledTextCtrl:setScrollWidth(S#s.model, 1),
-			    wxStyledTextCtrl:setReadOnly(S#s.model, true),
-			    %% load formula text
-			    wxStyledTextCtrl:clearAll(S#s.formula),
-			    wxStyledTextCtrl:setScrollWidth(S#s.formula, 1),
-			    wxStyledTextCtrl:setTextRaw(S#s.formula,
-							<<Bin/binary,0>>),
-			    Dir = wxFileDialog:getDirectory(Dialog),
-			    File = wxFileDialog:getFilename(Dialog),
-			    wxFrame:setTitle(S#s.window, File),
-			    wxStyledTextCtrl:connect(S#s.formula, stc_change),
-			    loop(S#s { dir = Dir, change = false });
-			{error,Reason} ->
-			    Text = io_lib:format("file error: ~s ~p",
-						 [Path,Reason]),
-			    ok = wxFrame:setStatusText(S#s.window, Text),
-			    loop(S)
-		    end;
+		    Dir = wxFileDialog:getDirectory(Dialog),
+		    Filename = wxFileDialog:getFilename(Dialog),
+		    wxFrame:setTitle(S#s.window, Filename),
+		    file:write_file(Path, BinData),
+		    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
+		    wxDialog:destroy(Dialog),
+		    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
+		    ?MODULE:main_loop(S#s { dir=Dir,
+					    filename=Filename, 
+					    path = Path,
+					    modified = false });
 		?wxID_CANCEL ->
-		    loop(S)
+		    wxDialog:destroy(Dialog),
+		    ?MODULE:main_loop(S)
 	    end;
+
+        #wx{id=?wxID_OPEN, event=#wxCommand{type=command_menu_selected}} ->
+	    ?dbg("OPEN\n",[]),
+	    if S#s.modified ->
+		    case save_before(S, "Save before open new") of
+			{ok,S1} -> 
+			    case open_new(S1) of
+				{ok,S2} ->
+				    ?MODULE:main_loop(S2);
+				{cancel,S2} ->
+				    ?MODULE:main_loop(S2)
+			    end;
+			{cancel,S1} ->
+			    ?MODULE:main_loop(S1)
+		    end;
+	       true ->
+		    case open_new(S) of
+			{ok,S1} ->
+			    ?MODULE:main_loop(S1);
+			{cancel,S1} ->
+			    ?MODULE:main_loop(S1)
+		    end
+	    end;
+
+
+        #wx{id=?wxID_CUT,event=#wxCommand{type=command_menu_selected}} ->
+	    case wxStyledTextCtrl:getSelection(S#s.formula) of
+		{N,N} ->
+		    ?MODULE:main_loop(S);
+		_ ->
+		    wxStyledTextCtrl:cut(S#s.formula),
+		    ?MODULE:main_loop(S)
+	    end;
+
+        #wx{id=?wxID_COPY,event=#wxCommand{type=command_menu_selected}} ->
+	    case wxStyledTextCtrl:getSelection(S#s.formula) of
+		{N,N} ->
+		    case wxStyledTextCtrl:getSelection(S#s.model) of
+			{K,K} ->
+			    ?MODULE:main_loop(S);
+			_ ->
+			    wxStyledTextCtrl:copy(S#s.model),
+			    ?MODULE:main_loop(S)
+		    end;
+		_ ->
+		    wxStyledTextCtrl:copy(S#s.formula),
+		    ?MODULE:main_loop(S)
+	    end;
+
+        #wx{id=?wxID_PASTE,event=#wxCommand{type=command_menu_selected}} ->
+            wxStyledTextCtrl:paste(S#s.formula),
+            ?MODULE:main_loop(S);
+
+        #wx{id=?wxID_CLEAR,event=#wxCommand{type=command_menu_selected}} ->
+	    case wxStyledTextCtrl:getSelection(S#s.formula) of
+		{N,N} ->
+		    ?MODULE:main_loop(S);
+		_ ->
+		    wxStyledTextCtrl:clear(S#s.formula),
+		    ?MODULE:main_loop(S)
+	    end;
+
+        #wx{id=?wxID_SELECTALL,event=#wxCommand{type=command_menu_selected}} ->
+            wxStyledTextCtrl:selectAll(S#s.formula),
+            ?MODULE:main_loop(S);
 
         #wx{id=?wxID_ABOUT, event=#wxCommand{type=command_menu_selected}} ->
             dialog(?wxID_ABOUT, S#s.window),
-            loop(S);
+            ?MODULE:main_loop(S);
 
         #wx{event=#wxSplitter{type=command_splitter_sash_pos_changed}} ->
-            loop(S);
+	    ?dbg("SASH POS CHANGED\n",[]),
+            ?MODULE:main_loop(S);
 
-        #wx{obj=Obj, event=#wxStyledText{type=stc_change}} when
-	      Obj =:= S#s.formula, not S#s.change ->
+        #wx{obj=Obj,event=#wxStyledText{type=?STCMOD}} when
+	      Obj =:= S#s.formula, not S#s.modified ->
 	    Title = wxFrame:getTitle(S#s.window),
 	    wxFrame:setTitle(S#s.window, [$*|Title]),
-	    wxStyledTextCtrl:disconnect(S#s.formula, stc_change),
-	    loop(S#s { change = true });
+	    wxStyledTextCtrl:disconnect(S#s.formula, ?STCMOD),
+	    wxMenuItem:enable(S#s.menu_save,[{enable,true}]),
+	    ?MODULE:main_loop(S#s { modified = true });
 
         _Msg = #wx{obj=Obj, event=#wxCommand{type=command_button_clicked}} ->
 	    if S#s.satisfy =:= Obj ->
 		    S1 = solve(satisfy, S),
-		    loop(S1);
+		    ?MODULE:main_loop(S1);
 	       S#s.falsify =:= Obj ->
 		    S1 = solve(falsify, S),
-		    loop(S1);
+		    ?MODULE:main_loop(S1);
 	       true ->
 		    ?dbg("Got command_button_clicked ~p ~n", [_Msg]),
-		    loop(S)
+		    ?MODULE:main_loop(S)
 	    end;
         _Msg ->
             ?dbg("Got ~p ~n", [_Msg]),
-            loop(S)
+            ?MODULE:main_loop(S)
     end.
+
+open_new(S) ->
+    Dialog = wxFileDialog:new(S#s.window,
+			      [{message, "Open a file"},
+			       {style, ?wxFD_OPEN},
+			       {defaultDir,S#s.dir},
+			       {wildCard, 
+				"*.varp;*.cnf;*.snf;*.txt"}]),
+    case wxFileDialog:showModal(Dialog) of
+	?wxID_OK ->
+	    Path = wxFileDialog:getPath(Dialog),
+	    case file:read_file(Path) of
+		{ok,Bin} ->
+		    wxStyledTextCtrl:disconnect(S#s.formula,?STCMOD),
+		    %% clear model
+		    wxStyledTextCtrl:setReadOnly(S#s.model, false),
+		    wxStyledTextCtrl:clearAll(S#s.model),
+		    wxStyledTextCtrl:setScrollWidth(S#s.model, 1),
+		    wxStyledTextCtrl:setReadOnly(S#s.model, true),
+		    %% load formula text
+		    wxStyledTextCtrl:clearAll(S#s.formula),
+		    wxStyledTextCtrl:setScrollWidth(S#s.formula, 1),
+		    wxStyledTextCtrl:setTextRaw(S#s.formula,
+						<<Bin/binary,0>>),
+		    Dir = wxFileDialog:getDirectory(Dialog),
+		    Filename = wxFileDialog:getFilename(Dialog),
+		    wxFrame:setTitle(S#s.window, Filename),
+		    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
+		    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
+		    wxDialog:destroy(Dialog),
+		    {ok, S#s { dir=Dir,
+			       filename=Filename, 
+			       path = Path,
+			       modified = false }};
+		{error,Reason} ->
+		    wxDialog:destroy(Dialog),
+		    Text = io_lib:format("file error: ~s ~p",
+					 [Path,Reason]),
+		    ok = wxFrame:setStatusText(S#s.window, Text),
+		    {cancel, S}
+	    end;
+	?wxID_CANCEL ->
+	    wxDialog:destroy(Dialog),
+	    {cancel, S}
+    end.
+
+
+save_before(S, Message) ->
+    Dialog = wxMessageDialog:new(S#s.window, Message,
+				 [{style, ?wxYES bor ?wxNO bor ?wxCANCEL}]),
+    case wxMessageDialog:showModal(Dialog) of
+	?wxID_YES ->
+	    wxDialog:destroy(Dialog),
+	    save(S, ?wxFD_OVERWRITE_PROMPT);
+	?wxID_NO ->
+	    wxDialog:destroy(Dialog),
+	    {ok,S};
+	?wxID_CANCEL ->
+	    wxDialog:destroy(Dialog),
+	    {cancel,S}
+    end.
+
+save(S, Overwrite) ->
+    if S#s.path =:= undefined ->
+	    Dialog = wxFileDialog:new(S#s.window,
+				      [{message,"Save file"},
+				       {style, ?wxFD_SAVE bor Overwrite},
+				       {defaultDir,S#s.dir},
+				       {wildCard, 
+					"*.varp;*.cnf;*.snf;*.txt"}]),
+	    case wxFileDialog:showModal(Dialog) of
+		?wxID_OK ->
+		    Data = wxStyledTextCtrl:getText(S#s.formula),
+		    BinData = unicode:characters_to_binary(Data),
+		    Path = wxFileDialog:getPath(Dialog),
+		    Dir = wxFileDialog:getDirectory(Dialog),
+		    Filename = wxFileDialog:getFilename(Dialog),
+		    wxFrame:setTitle(S#s.window, Filename),
+		    file:write_file(Path, BinData),
+		    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
+		    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
+		    wxDialog:destroy(Dialog),
+		    {ok,S#s { dir=Dir, 
+			      filename=Filename, 
+			      path = Path,
+			      modified = false }};
+		?wxID_CANCEL ->
+		    wxDialog:destroy(Dialog),
+		    {cancel, S}
+	    end;
+       true ->
+	    Data = wxStyledTextCtrl:getText(S#s.formula),
+	    BinData = unicode:characters_to_binary(Data),
+	    file:write_file(S#s.path, BinData),
+	    wxFrame:setTitle(S#s.window, S#s.filename),
+	    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
+	    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
+	    {ok, S#s { modified = false}}
+    end.
+
+
+    
 
 %% FIXME block interface while running
 solve(Mode, S) ->
@@ -521,6 +757,11 @@ solve(Mode, S, Bound) ->
 	    Text = (catch apply(Mod, format_error, [Message])),
 	    output_error(S, Text);
 
+	{error, {Ln,Mod,Message}, _EndLn} when is_integer(Ln), is_atom(Mod) ->
+	    _Pos = wxStyledTextCtrl:positionFromLine(S#s.formula, Ln-1),
+	    Text = (catch apply(Mod, format_error, [Message])),
+	    output_error(S, Text);
+
 	{error, Message} ->
 	    output_error(S, io_lib:format("~p\n", [Message]))
     end.
@@ -626,9 +867,13 @@ dialog(?wxID_ABOUT,  Frame) ->
 keyWords() ->
     L = ["EQ", "NEQ", "GT", "GTE", "LT", "LTE", "NONE", "ONE",
 	 "symbol", "true", "false", "define", "declare", "literals",
-	 "assert", "input", "output", "order", "rank", "degree", 
+	 "assert", "input", "output", "order", "rank", "degree",
 	 "random", "identity",
-	 "and", "or", "xor", "not", "imp", "equ", "A", "E", "ALL", "ANY",
+	 "and", "or", "xor", "not", 
+	 "implies", "imp", 
+	 "equivalent", "equ", 
+	 "A", "ALL", 
+	 "E", "ANY",
 	 "SUM", "PROD"],
     lists:flatten([K ++ " " || K <- L] ++ [0]).
 
@@ -672,8 +917,7 @@ run(Bs, Param) ->
 		  SELF ! {ack,Ref},
 		  wx:set_env(maps:get(env, Param)),
 		  T0 = erlang:monotonic_time(),
-		  Info0 = initial_info(Bs),
-		  mon_loop(Bs, Param, Mon, T0, Info0)
+		  mon_loop(Bs, Param, Mon, T0, get_info(Bs))
 	  end),
     receive
 	{ack,Ref} ->
@@ -692,9 +936,10 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 	{'DOWN', Mon, process, _Pid, _Reason} ->
 	    done;
 	{call, From, flush} ->
-	    update_info(Param,StartTime,PrevInfo),
+	    Info = get_info(Bs),
+	    update_info(Param,StartTime,Info),
 	    response(From, ok),
-	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo);
+	    mon_loop(Bs,Param,Mon,StartTime,Info);
 	{call, From, stop} ->
 	    update_info(Param,StartTime,PrevInfo),
 	    response(From, ok);
@@ -713,31 +958,41 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 	    io:format("varp_wx monitor: got ~p\n", [Other]),
 	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
     after 1000 ->
-	    update_info(Param,StartTime,PrevInfo),
-	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
+	    Info1 = get_info(Bs),
+	    Info2 = merge_info(Info1, PrevInfo),
+	    update_info(Param,StartTime,Info2),
+	    mon_loop(Bs,Param,Mon,StartTime,Info2)
     end.
 
-update_info(#{nbound:=NBound,window:=Window},StartTime,Info) ->
-    NV = proplists:get_value(number_of_variables, Info, 1),
-    NB = proplists:get_value(number_of_bound_variables, Info, 0),
-    NC = proplists:get_value(number_of_clauses,Info,0),
-    ND = proplists:get_value(number_of_dead_clauses,Info,0),
+update_info(#{nbound:=NBound,window:=Window},StartTime,
+	    #{number_of_variables:=NV,
+	      number_of_bound_variables:=NB,
+	      number_of_clauses:=NC,
+	      number_of_dead_clauses:=ND}) ->
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
     Status = io_lib:format(
 	       "#Var: ~-6w #Bound: ~-6w #Clauses: ~-6w #Dead: ~-6w #Time: ~.2fs",
 	       [NV, NB, NC, ND, Time/1000]),
-    wxGauge:setValue(NBound, trunc(100*(NB/NV))),
+    wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 
-initial_info(Bs) ->
-    [{Key, varc:info(Bs#bs.vp, Key)} ||
-	Key <- [number_of_variables,
-		number_of_bound_variables,
-		number_of_clauses,
-		number_of_dead_clauses]].
-
+merge_info(#{ number_of_clauses := NC,
+	      number_of_dead_clauses := ND }, Info2) ->
+    Info2#{ number_of_clauses => NC,
+	    number_of_dead_clauses => ND }.
+    
+get_info(Bs) ->
+    #{ number_of_variables =>
+	   varc:info(Bs#bs.vp,  number_of_variables),
+       number_of_bound_variables => 
+	   varc:info(Bs#bs.vp,number_of_bound_variables),
+       number_of_clauses =>
+	   varc:info(Bs#bs.vp,number_of_clauses),
+       number_of_dead_clauses =>
+	   varc:info(Bs#bs.vp,number_of_dead_clauses) }.
+       
 call(undefined, _Request) ->
     noproc;
 call(Pid, Request) ->
@@ -757,3 +1012,53 @@ call(Pid, Request) ->
 
 response({Ref,Pid}, Response) ->
     Pid ! {response,Ref,Response}.
+
+
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%%
+%%  varp wx window register
+%%
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+register_process() ->
+    varp_wx_reg ! {register, self()}.
+
+start_win_reg() ->
+    STARTER = self(),
+    {Pid,Mon} = spawn_monitor(
+		  fun() ->
+			  try register(varp_wx_reg, self()) of
+			      true ->
+				  STARTER ! {self(), ok},
+				  varp_wx_reg_loop([])
+			  catch
+			      error:_ ->
+				  STARTER ! {self(), already_started}
+			  end
+		  end),
+    receive
+	{'DOWN', Mon, process, Pid, Reason} ->
+	    {error,Reason};
+	{Pid, Message} ->
+	    erlang:demonitor(Mon, [flush]),
+	    Message
+    end.
+
+varp_wx_reg_loop(Ws) ->
+    receive
+	{register, Pid} ->
+	    Mon = erlang:monitor(process, Pid),
+	    varp_wx_reg_loop([{Mon,Pid}|Ws]);
+	{'DOWN', Mon, process, _Pid, _Reason} ->
+	    case lists:keytake(Mon, 1, Ws) of
+		{value,_,[]} ->
+		    erlang:halt(0);
+		{value,_,Ws1} ->
+		    varp_wx_reg_loop(Ws1);
+		false ->
+		    varp_wx_reg_loop(Ws)
+	    end;
+	Mesg ->
+	    io:format("varp_wx_reg_loop: got ~w\n", [Mesg]),
+	    varp_wx_reg_loop(Ws)
+    end.

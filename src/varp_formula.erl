@@ -2109,6 +2109,9 @@ operation('|',A,B,Bs) ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
 
+operation('implies',A,B,Bs) ->
+    operation_('imp',A,B,Bs);
+
 operation('imp',{bool,?F},{bool,?T}, Bs) ->  {{bool,?T},Bs};
 operation('imp',{bool,?F},{bool,?F}, Bs) -> {{bool,?T},Bs};
 operation('imp',{bool,?T},{bool,?T}, Bs) ->   {{bool,?T},Bs};
@@ -2119,6 +2122,9 @@ operation('imp',{bool,Y},{bool,Z}, Bs) ->
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation_('~',A,Bs),
     operation_('|',An,B,Bs1);
+
+operation('equivalent',A,B,Bs) ->
+    operation_('equ',A,B,Bs);
 
 operation('equ',{bool,?T},{bool,?F},Bs) -> {{bool,?F},Bs};    
 operation('equ',{bool,?F},{bool,?T},Bs) -> {{bool,?F},Bs};

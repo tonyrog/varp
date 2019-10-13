@@ -46,7 +46,9 @@ or                  : {token,{'or',TokenLine}}.
 xor                 : {token,{'xor',TokenLine}}.
 not                 : {token,{'not',TokenLine}}.
 imp                 : {token,{imp,TokenLine}}.
+imp                 : {token,{implies,TokenLine}}.
 equ                 : {token,{equ,TokenLine}}.
+equivalent          : {token,{equivalent,TokenLine}}.
 A                   : {token,{'A',TokenLine}}.
 E                   : {token,{'E',TokenLine}}.
 ALL                 : {token,{'ALL',TokenLine}}.

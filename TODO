@@ -1,6 +1,28 @@
+
+- Bajkal release
+
+  fix satisfy/falsify/cancel (OK)
+  
+  check gauge glow under windows, looks like running (NOT POSSIBLE).
+  
+  update final statistics (OK)
+  
+  update clauses/dead-clauses while running time update (OK)
+
+  check content changed ! maybe use modified? (OK)
+
+  new - create new window? or clear (OK)
+
+  save to file (OK)
+
+  open ( save before )  (OK)
+  
+  save as (overwrite/rename dialog) (OK)
+
+
 - move varc wrapper api into varp module!
 
-- map TRUE and FALSE
++ map TRUE and FALSE (FIXED using atoms t and f in erlang)
 
   map TRUE to   (1 bsl 27)  =  0x8000000
   and FALSE to -(1 bsl 27)  = -0x8000000
@@ -68,9 +90,7 @@
 
  Spara P till konflikt klausuler.
  
-
 - size (atoms ?)
-
 
 + order occure + clause length
 

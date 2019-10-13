@@ -1565,32 +1565,38 @@ static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 //      {number-of-dead-clauses,NCD}]
 //      ...}
 //
-static ERL_NIF_TERM make_sub_info(varp_t* vp, ERL_NIF_TERM list, uint32_t flags)
+
+static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 {
     ErlNifEnv* env = vp->msg_env;
-    ERL_NIF_TERM elem;
+    ERL_NIF_TERM keys[4] = {
+	ATOM(number_of_variables),
+	ATOM(number_of_bound_variables),
+	ATOM(number_of_clauses),
+	ATOM(number_of_dead_clauses) };
+    ERL_NIF_TERM values[4];
+	
+    if (flags & SUB_FLAG_NUM_VARS)
+	values[0] = enif_make_int(env, vp->vnum);
+    else
+	values[0] = ATOM(undefined);
 
-    if (flags & SUB_FLAG_NUM_VARS) {
-	elem = enif_make_tuple2(env, ATOM(number_of_variables),
-				enif_make_int(env, vp->vnum));
-	list = enif_make_list_cell(env, elem, list);
-    }
-    if (flags & SUB_FLAG_NUM_BOUND) {
-	elem = enif_make_tuple2(env, ATOM(number_of_bound_variables),
-				enif_make_int(env, vp->num_bound));
-	list = enif_make_list_cell(env, elem, list);
-    }
-    if (flags & SUB_FLAG_NUM_CLAUSES) {
-	elem = enif_make_tuple2(env, ATOM(number_of_clauses),
-				enif_make_int(env, vp->cnum));
-	list = enif_make_list_cell(env, elem, list);
-    }
-    if (flags & SUB_FLAG_NUM_DEAD) {
-	elem = enif_make_tuple2(env, ATOM(number_of_dead_clauses),
-				enif_make_int(env, vp->cdead));
-	list = enif_make_list_cell(env, elem, list);
-    }
-    return list;
+    if (flags & SUB_FLAG_NUM_BOUND)
+	values[1] = enif_make_int(env, vp->num_bound);
+    else
+	values[1] = ATOM(undefined);
+    
+    if (flags & SUB_FLAG_NUM_CLAUSES)
+	values[2] = enif_make_int(env, vp->cnum);
+    else
+	values[2] = ATOM(undefined);
+
+    if (flags & SUB_FLAG_NUM_DEAD)
+	values[3] = enif_make_int(env, vp->cdead);
+    else
+	values[3] = ATOM(undefined);
+
+    return enif_make_map_from_arrays(env, keys, values, 4, info);
 }
 
 static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
@@ -1608,7 +1614,7 @@ static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
 	    ERL_NIF_TERM xt;
 	    ERL_NIF_TERM yt;
 	    ERL_NIF_TERM bnd = ATOM(false);
-	    ERL_NIF_TERM info = enif_make_list(env, 0);
+	    ERL_NIF_TERM info;
 	    ERL_NIF_TERM msg;
 
 	    // enif_fprintf(stdout, "log_permanent x=%s\r\n",
@@ -1623,14 +1629,16 @@ static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
 		xt = external_ll(env,x);
 		bnd = enif_make_tuple2(env, xt, yt);
 	    }
-	    info = make_sub_info(vp, info, sp->flags);
-	    msg = enif_make_tuple3(env, ATOM(varp), bnd, info);
-	    if (vp->caller_env != NULL) {
-		enif_send(vp->caller_env, &sp->pid, env, msg);
-		enif_clear_env(env);
-	    }
-	    else {
-		DBG("caller_env NOT set!!!\r\n");
+
+	    if (make_sub_info(vp, sp->flags, &info)) {
+		msg = enif_make_tuple3(env, ATOM(varp), bnd, info);
+		if (vp->caller_env != NULL) {
+		    enif_send(vp->caller_env, &sp->pid, env, msg);
+		    enif_clear_env(env);
+		}
+		else {
+		    DBG("caller_env NOT set!!!\r\n");
+		}
 	    }
 	}
 	sp = sp->next;
