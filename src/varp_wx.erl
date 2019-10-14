@@ -18,10 +18,15 @@
 %% warp_wx is also a plugin (monitor assignment etc)
 -export([options/0, run/2]).
 
+%% debug export
+-export([format_time/1]).
+
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
 -define(STCMOD, stc_modified).
+
+
 
 -record(s,
 	{
@@ -719,7 +724,11 @@ solve(Mode, S, Bound) ->
 
 	    case Res of
 		{?INCONSISTENT,_,_Bs} ->
-		    output_text(S, "UNSATISFIABLE\n");
+		    if Mode =:= falsify ->
+			    output_text(S, "VALID\n");
+		       true ->
+			    output_text(S, "UNSATISFIABLE\n")
+		    end;
 		{?DONE, _, _Bs} ->
 		    S;
 		{?CONTINUE, N, _Bs} when is_integer(N) ->
@@ -947,13 +956,15 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 	    ?dbg("varp_wx monitor: substitut (~w=>~w) ~s => ~s,info=~w\n",
 		 [_Y,_X, varp_formula:format_lit(Bs,_Y),
 		  varp_formula:format_lit(Bs,_X),Info]),
-	    update_info(Param,StartTime,Info),
-	    mon_loop(Bs,Param,Mon,StartTime,Info);
+	    Info1 = mon_loop_collect(Info),
+	    update_info(Param,StartTime,Info1),
+	    mon_loop(Bs,Param,Mon,StartTime,Info1);
 	{varp, _X, Info} ->
 	    ?dbg("varp_wx monitor: permanent (~w=1) ~s = ~w,info=~w\n", 
 		 [_X,varp_formula:format_lit(Bs,_X), 1, Info]),
-	    update_info(Param,StartTime,Info),
-	    mon_loop(Bs,Param,Mon,StartTime,Info);
+	    Info1 = mon_loop_collect(Info),
+	    update_info(Param,StartTime,Info1),
+	    mon_loop(Bs,Param,Mon,StartTime,Info1);
 	Other ->
 	    io:format("varp_wx monitor: got ~p\n", [Other]),
 	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
@@ -962,6 +973,16 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 	    Info2 = merge_info(Info1, PrevInfo),
 	    update_info(Param,StartTime,Info2),
 	    mon_loop(Bs,Param,Mon,StartTime,Info2)
+    end.
+
+mon_loop_collect(Info) ->
+    receive
+	{varp, {_X,_Y}, Info1} ->
+	    mon_loop_collect(Info1);
+	{varp, _X, Info1} ->
+	    mon_loop_collect(Info1)
+    after 1 ->
+	    Info
     end.
 
 update_info(#{nbound:=NBound,window:=Window},StartTime,
@@ -973,10 +994,42 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
     Status = io_lib:format(
-	       "#Var: ~-6w #Bound: ~-6w #Clauses: ~-6w #Dead: ~-6w #Time: ~.2fs",
-	       [NV, NB, NC, ND, Time/1000]),
+	       "#Var: ~-8w #Bound: ~-8w #Clauses: ~-8w #Dead: ~-8w #Time: ~s",
+	       [NV, NB, NC, ND, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
+
+format_time(Ms) ->
+    S0 = Ms div 1000,    
+    S = S0 rem 60,
+    F = Ms rem 1000,  %% decimal fraction 3 digits
+    %% F = round(((Ms rem 1000)/1000)*100),  decimal fraction 2digits
+    if S0 >= 60 ->
+	    M0 = S0 div 60,
+	    M = M0 rem 60,
+	    if M0 >= 60 ->
+		    H = M0 div 60,
+		    if H >= 24 ->
+			    D = H div 24,
+			    [integer_to_list(D),"d ",
+			     f2i(H),$:,f2i(M),$:,f2i(S),$.,f3i(F)];
+		       true ->
+			    [f2i(H),$:,f2i(M),$:,f2i(S),$.,f3i(F)]
+		    end;
+	       true ->
+		    [f2i(M),$:,f2i(S),$.,f3i(F)]
+	    end;
+       true ->
+	    [f2i(S),$.,f3i(F)]
+    end.
+
+f3i(N) when N >= 0, N < 1000 ->
+    tl(integer_to_list(1000 + N)).
+
+%% format N as two digits
+f2i(N) when N >= 0, N < 100 ->
+    tl(integer_to_list(100 + N)).
+
 
 merge_info(#{ number_of_clauses := NC,
 	      number_of_dead_clauses := ND }, Info2) ->

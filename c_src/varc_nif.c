@@ -1569,6 +1569,7 @@ static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 {
     ErlNifEnv* env = vp->msg_env;
+    // FIXME: create a static array of keys?
     ERL_NIF_TERM keys[4] = {
 	ATOM(number_of_variables),
 	ATOM(number_of_bound_variables),
