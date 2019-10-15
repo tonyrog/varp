@@ -1,3 +1,17 @@
+- Ulanbaatar
+
+  - Explicit short cuts to all menu items, did not work automatically under
+   windows. (OK)
+
+  - Multiple clause set 0(delta), 1(gamma), 2(alpha?), 3(beta?) (30 bit index)
+    (OK)
+    
+  - Multiple models with backjump (OK)
+
+  - Level/Bound feedback (for fun)
+
+  - PARITY function (OK)
+  
 
 - Bajkal release
 

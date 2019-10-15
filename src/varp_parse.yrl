@@ -4,7 +4,7 @@ Terminals
 	symbol true false define declare literals assert input output
         order rank degree random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
-	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY'
+	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY' 'PARITY'
         'SUM' 'PROD' 'implies' 'equivalent'
         '<->' '>>>' '<<<' '..'
         hexnum octnum binnum decnum flonum chrnum identifier
@@ -185,28 +185,30 @@ integer -> hexnum : '$1'.
 %%
 %% Formulas
 %%
-qtype -> 'E' '!' : 'ONE'.
-qtype -> 'E'     : 'ANY'.
-qtype -> 'A'     : 'ALL'.
-qtype -> 'ALL'   : op('$1').
-qtype -> 'ANY'   : op('$1').
-qtype -> 'ONE'   : op('$1').
-qtype -> 'NONE'  : op('$1').
-qtype -> 'EQ'    : op('$1').
-qtype -> 'NEQ'   : op('$1').
-qtype -> 'GT'    : op('$1').
-qtype -> 'GTE'   : op('$1').
-qtype -> 'LT'    : op('$1').
-qtype -> 'LTE'   : op('$1').
-qtype -> 'SUM'   : op('$1').
-qtype -> 'PROD'  : op('$1').
+qtype -> 'E' '!'  : 'ONE'.
+qtype -> 'E'      : 'ANY'.
+qtype -> 'A'      : 'ALL'.
+qtype -> 'ALL'    : op('$1').
+qtype -> 'ANY'    : op('$1').
+qtype -> 'ONE'    : op('$1').
+qtype -> 'NONE'   : op('$1').
+qtype -> 'EQ'     : op('$1').
+qtype -> 'NEQ'    : op('$1').
+qtype -> 'GT'     : op('$1').
+qtype -> 'GTE'    : op('$1').
+qtype -> 'LT'     : op('$1').
+qtype -> 'LTE'    : op('$1').
+qtype -> 'SUM'    : op('$1').
+qtype -> 'PROD'   : op('$1').
+qtype -> 'PARITY' : op('$1').
     
-quantifier -> '[' 'ALL' ']'   : op('$2').
-quantifier -> '[' 'ANY' ']'   : op('$2').
-quantifier -> '[' 'NONE' ']'  : op('$2').
-quantifier -> '[' 'ONE'  ']'  : op('$2').
-quantifier -> '[' 'SUM' ']'   : op('$2').
-quantifier -> '[' 'PROD' ']'  : op('$2').
+quantifier -> '[' 'ALL' ']'    : op('$2').
+quantifier -> '[' 'ANY' ']'    : op('$2').
+quantifier -> '[' 'NONE' ']'   : op('$2').
+quantifier -> '[' 'ONE'  ']'   : op('$2').
+quantifier -> '[' 'SUM' ']'    : op('$2').
+quantifier -> '[' 'PROD' ']'   : op('$2').
+quantifier -> '[' 'PARITY' ']' : op('$2').
 quantifier -> '[' 'E' ']'     : 'ANY'.
 quantifier -> '[' 'E' '!' ']' : 'ONE'.
 quantifier -> '[' 'A' ']'     : 'ALL'.

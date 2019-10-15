@@ -26,8 +26,6 @@
 
 -define(STCMOD, stc_modified).
 
-
-
 -record(s,
 	{
 	 window,
@@ -101,17 +99,17 @@ create_window(Wx) ->
     % although help text does appear
 
     %% FileMenu
-    _NewMenuItem     = wxMenu:append(FileM, ?wxID_NEW, "&New"),
-    _OpenMenuItem    = wxMenu:append(FileM, ?wxID_OPEN, "&Open..."),
-    SaveMenuItem     = wxMenu:append(FileM, ?wxID_SAVE, "&Save"),
+    _NewMenuItem     = wxMenu:append(FileM, ?wxID_NEW, "&New\tCtrl+N"),
+    _OpenMenuItem    = wxMenu:append(FileM, ?wxID_OPEN, "&Open...\tCtrl+O"),
+    SaveMenuItem     = wxMenu:append(FileM, ?wxID_SAVE, "&Save\tCtrl+S"),
     _SaveAsMenuItem  = wxMenu:append(FileM, ?wxID_SAVEAS, "&Save As..."),
-    _QuitMenuItem    = wxMenu:append(FileM, ?wxID_EXIT, "&Quit"),
+    _QuitMenuItem    = wxMenu:append(FileM, ?wxID_EXIT, "&Quit\tCtrl+Q"),
 
     %% Edit menu
-    _Cut             = wxMenu:append(EditM, ?wxID_CUT, "&Cut"),
-    _Copy            = wxMenu:append(EditM, ?wxID_COPY, "&Copy"),
-    _Paste           = wxMenu:append(EditM, ?wxID_PASTE, "&Paste"),
-    _Clear           = wxMenu:append(EditM, ?wxID_CLEAR, "&Clear\tDEL"),
+    _Cut             = wxMenu:append(EditM, ?wxID_CUT, "&Cut\tCtrl+X"),
+    _Copy            = wxMenu:append(EditM, ?wxID_COPY, "&Copy\tCtrl+C"),
+    _Paste           = wxMenu:append(EditM, ?wxID_PASTE, "&Paste\tCtrl+V"),
+    _Clear           = wxMenu:append(EditM, ?wxID_CLEAR, "&Clear\tDelete"),
     _SelectAll       = wxMenu:append(EditM, ?wxID_SELECTALL, "&Select All\tCtrl+A"),
 
     % Note the keybord accelerator
@@ -162,7 +160,6 @@ create_window(Wx) ->
     wxSplitterWindow:setSashGravity(Splitter, 0.1),
     wxSplitterWindow:setMinimumPaneSize(Splitter, 100),
     wxSplitterWindow:setSashPosition(Splitter, 300),
-
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% WINDOW 1
@@ -471,8 +468,10 @@ main_loop(S) ->
         #wx{id=?wxID_CLEAR,event=#wxCommand{type=command_menu_selected}} ->
 	    case wxStyledTextCtrl:getSelection(S#s.formula) of
 		{N,N} ->
+		    io:format("clear ~w:~w\n", [N,N]),
 		    ?MODULE:main_loop(S);
-		_ ->
+		{N,M} ->
+		    io:format("clear ~w:~w\n", [N,M]),
 		    wxStyledTextCtrl:clear(S#s.formula),
 		    ?MODULE:main_loop(S)
 	    end;
@@ -486,7 +485,7 @@ main_loop(S) ->
             ?MODULE:main_loop(S);
 
         #wx{event=#wxSplitter{type=command_splitter_sash_pos_changed}} ->
-	    ?dbg("SASH POS CHANGED\n",[]),
+	    %% not used yet
             ?MODULE:main_loop(S);
 
         #wx{obj=Obj,event=#wxStyledText{type=?STCMOD}} when
@@ -707,7 +706,6 @@ solve(Mode, S, Bound) ->
 			      output => [{?MODULE,output_model,[S]}] },
 	    output_clear(S),
 	    ok = wxFrame:setStatusText(S#s.window, "ok",[]),
-	    %% wxStyledTextCtrl:setCaretLineVisible(S#s.formula, false),
 
 	    wxButton:disable(S#s.satisfy),
 	    wxButton:disable(S#s.falsify),
@@ -762,18 +760,29 @@ solve(Mode, S, Bound) ->
 	    end;
 
 	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->
-	    _Pos = wxStyledTextCtrl:positionFromLine(S#s.formula, Ln-1),
+	    select_line(S#s.formula, Ln),
+	    show_line(S#s.formula, Ln),
+	    wxStyledTextCtrl:refresh(S#s.formula),
 	    Text = (catch apply(Mod, format_error, [Message])),
 	    output_error(S, Text);
 
 	{error, {Ln,Mod,Message}, _EndLn} when is_integer(Ln), is_atom(Mod) ->
-	    _Pos = wxStyledTextCtrl:positionFromLine(S#s.formula, Ln-1),
+	    select_line(S#s.formula, Ln),
+	    show_line(S#s.formula, Ln),
 	    Text = (catch apply(Mod, format_error, [Message])),
 	    output_error(S, Text);
 
 	{error, Message} ->
 	    output_error(S, io_lib:format("~p\n", [Message]))
     end.
+
+select_line(Stc, Line) ->
+    Start = wxStyledTextCtrl:positionFromLine(Stc, Line-1),
+    End = wxStyledTextCtrl:positionFromLine(Stc, Line),    
+    wxStyledTextCtrl:setSelection(Stc, Start, End).
+
+show_line(Stc, Line) ->
+    wxStyledTextCtrl:scrollToLine(Stc, Line-1).
 
 output_error(S, Text) ->
     output_clear(S),
@@ -989,7 +998,7 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
 	    #{number_of_variables:=NV,
 	      number_of_bound_variables:=NB,
 	      number_of_clauses:=NC,
-	      number_of_dead_clauses:=ND}) ->
+	      number_of_dead_clauses:=ND }) ->
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
@@ -1030,11 +1039,13 @@ f3i(N) when N >= 0, N < 1000 ->
 f2i(N) when N >= 0, N < 100 ->
     tl(integer_to_list(100 + N)).
 
-
 merge_info(#{ number_of_clauses := NC,
-	      number_of_dead_clauses := ND }, Info2) ->
+	      number_of_dead_clauses := ND,
+	      max_level := L, max_bound := B }, Info2) ->
     Info2#{ number_of_clauses => NC,
-	    number_of_dead_clauses => ND }.
+	    number_of_dead_clauses => ND,
+	    max_level => L,
+	    max_bound => B }.
     
 get_info(Bs) ->
     #{ number_of_variables =>
@@ -1044,7 +1055,8 @@ get_info(Bs) ->
        number_of_clauses =>
 	   varc:info(Bs#bs.vp,number_of_clauses),
        number_of_dead_clauses =>
-	   varc:info(Bs#bs.vp,number_of_dead_clauses) }.
+	   varc:info(Bs#bs.vp,number_of_dead_clauses)
+     }.
        
 call(undefined, _Request) ->
     noproc;

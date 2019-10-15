@@ -38,6 +38,7 @@
 -export([move_level/3]).
 -export([eval/1]).
 -export([add_clause/2]).
+-export([add_clause/3]).
 -export([find_clause/2]).
 -export([get_clause/2]).
 -export([get_clause/3]).
@@ -46,7 +47,7 @@
 -export([compress_clause/2]).
 -export([clean_clause/2]).
 -export([clean_literal/2]).
--export([sort_none_permanent_clauses/1]).
+-export([sort_clauses/2]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
 -export([use_clause/2]).
@@ -67,8 +68,9 @@
 -export([order_all/1]).
 -export([decay/2]).
 -export([subscribe/2]).
--export([clause_first/1]).
--export([clause_first_none_keep/1]).
+-export([clauseset_size/2]).
+-export([clauseset_offset/2, clauseset_offset/3]).
+-export([clause_first/1, clause_first/2]).
 -export([clause_next/2]).
 
 -export([info/1, info_keys/0]).
@@ -90,6 +92,11 @@
 -else.
 -define(debug(F,A), ok).
 -endif.
+
+-define(CLAUSE_SET_DELTA, 0).
+-define(CLAUSE_SET_GAMMA, 1).
+-define(CLAUSE_SET_ALPHA, 2).
+-define(CLAUSE_SET_BETA,  3).
 
 -type varc() :: reference().
 -type literal() :: integer().
@@ -128,7 +135,6 @@ info(_Vp, Item) when is_atom(Item) ->
 
 %% set config
 %%    permanent       -- number of clauses that are permanent
-%%    keep            -- size of lru cache for garbage collect conflict clauses
 %%    max_conflicting -- max number of conflicting <= MAX_CONFLICTING
 %% 
 config(_Vp, Item, _Value) when is_atom(Item) ->
@@ -267,9 +273,19 @@ undo_level(_Vp,_Level) ->
 eval(_Vp) ->
     ?nif_stub().
 
+-spec clauseset_size(Vp::varc(),Si::integer()) ->
+			     integer().
+clauseset_size(_Vp, _Si) ->
+    ?nif_stub().    
+
 -spec add_clause(Vp::varc(),Ls::[literal()]) ->
 			false | error | integer().
 add_clause(_Vp,Ls) when is_list(Ls) ->
+    ?nif_stub().
+
+-spec add_clause(Vp::varc(),Ls::[literal()],Si::0..3) ->
+			false | error | integer().
+add_clause(_Vp,Ls,Si) when is_list(Ls), is_integer(Si), Si>=0, Si=<3 ->
     ?nif_stub().
 
 -spec find_clause(Vp::varc(),Ls::[literal()]) ->
@@ -327,8 +343,8 @@ clean_literal(_Vp,Lit)
   when is_integer(Lit), Lit >= 1 ->
     ?nif_stub().
 
-sort_none_permanent_clauses(_Vp) ->
-    ?nif_stub().
+sort_clauses(_Vp, _Si) ->
+    ?nif_stub().    
 
 get_clauses(Vp,Var) ->
     get_clauses(Vp,Var,literal).
@@ -412,12 +428,17 @@ order_sort_first(_Vp, _VarList) ->
 order_sort_last(_Vp, _VarList) ->
     ?nif_stub().
 
-%% return index to first clause | false
-clause_first(_Vp) ->
+clauseset_offset(_Vp, _Si) ->
     ?nif_stub().
 
-%% return index to first clause in the none! keep area | false
-clause_first_none_keep(_Vp) ->
+clauseset_offset(_Vp, _Si, _Offset) ->
+    ?nif_stub().
+
+%% return index to first clause | false
+clause_first(Vp) ->
+    clause_first(Vp, ?CLAUSE_SET_DELTA).
+
+clause_first(_Vp, _Si) ->
     ?nif_stub().
 
 %% return index to next clause | false
@@ -469,14 +490,14 @@ info_keys() ->
      value_stack_size,
      grow,
      size,
-     permanent,        %% index of first permanent clause
-     keep,
      level,
      literal_size,     %% 8,16,32,64 (sizeof literal)
      literal_integer,  %% true,false (integer or pointer)
      literal_signed,   %% true,false (when literal_integer)
      value_packing,    %% 1,4,undefined (variable value packing)
-     edge_list         %% true,false (edge_list is enabled or not)
+     edge_list,        %% true,false (edge_list is enabled or not)
+     activity,         %% conflict activity is enabled (used in sort activity)
+     xref              %% xref is used (need for saturate with substitution)
     ].
 
 get_number_of_variables(Vp) ->

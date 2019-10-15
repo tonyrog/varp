@@ -43,6 +43,24 @@ test1() ->
     Ls1 = get_clause(V, C1),
     io:format("Ls0=~w\n", [Ls1]),
     ok.
+
+test1_gamma() ->
+    V = varc:new(),
+    X1 = add_variable(V),
+    X2 = add_variable(V),
+    X3 = add_variable(V),
+    Ls0 = lists:usort([X1, X2, X3]),
+    C0 = add_clause(V, Ls0, ?GAMMA),
+    io:format("C0=~w\n", [C0]),
+    Ls0 = get_clause(V, C0),
+    io:format("Ls0=~w\n", [Ls0]),
+    
+    Ls1 = lists:usort([X1,-X2,X3]),
+    C1 = add_clause(V, Ls1),
+    io:format("C0=~w\n", [C1]),
+    Ls1 = get_clause(V, C1),
+    io:format("Ls0=~w\n", [Ls1]),
+    ok.
     
 test2() ->
     V = varc:new(),
@@ -62,7 +80,7 @@ test2() ->
 %% Test clause / queue 
 %%    
 test3() ->
-    V = varc:new(),
+    V = varc:new([{xref,true}]),
     X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
@@ -300,7 +318,7 @@ order() ->
 
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
-    V = varc:new(), 
+    V = varc:new([{xref,true}]), 
     X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
@@ -310,7 +328,7 @@ subst1() ->
     io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, X3, X2),
-    io:format("clause after\n"),    
+    io:format("clause after\n"),
     print_clauses(V),
     [X1,X3] = lists:sort(varc:get_clause(V, C0)),
     [NX3,X1] = lists:sort(varc:get_clause(V, C1)),
@@ -318,7 +336,7 @@ subst1() ->
 
 %% simply substitute {X2,X3} [X2/X3] => {X2}
 subst2() ->
-    V = varc:new(), 
+    V = varc:new([{xref,true}]), 
     X1 = varc:add_variable(V),
     X2 = varc:add_variable(V),
     C0 = add_clause(V, [X1,X2]),
@@ -333,7 +351,7 @@ subst2() ->
     ok.
 
 subst3() ->
-    V = varc:new(), 
+    V = varc:new([{xref,true}]), 
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     C0 = add_clause(V, [-X2,X3]),
@@ -348,7 +366,7 @@ subst3() ->
     ok.
     
 subst4() ->
-    V = varc:new(),
+    V = varc:new([{xref,true}]),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
@@ -378,7 +396,7 @@ subst4() ->
     Bs.
 
 subst5() ->
-    V = varc:new(),
+    V = varc:new([{xref,true}]),
     X2 = varc:add_variable(V),
     X3 = varc:add_variable(V),
     X4 = varc:add_variable(V),
@@ -580,7 +598,10 @@ add_variable(V) ->
     varc:add_variable(V).
 
 add_clause(V, Literals) ->
-    case varc:add_clause(V, Literals) of
+    add_clause(V, Literals, ?DELTA).
+
+add_clause(V, Literals, Set) ->
+    case varc:add_clause(V, Literals, Set) of
 	{true,Ci} -> Ci;
 	true -> true
     end.

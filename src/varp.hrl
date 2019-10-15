@@ -23,6 +23,11 @@
 
 -define(TOP_LEVEL, 0).
 
+-define(DELTA, 0).
+-define(GAMMA, 1).
+-define(ALPHA, 2).
+-define(BETA,  3).
+
 -define(NUM_COUNTERS, 9).
 -define(COUNTER_CONFLICT_CLAUSES,   1).
 -define(COUNTER_MINIMIZE_COUNT,     2).

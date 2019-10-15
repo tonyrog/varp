@@ -127,7 +127,9 @@ new(Options) when is_list(Options) ->
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{qtype,maps:get(qtype,OptMap)},
 		    {clause_hash,maps:get(clause_hash,OptMap)},
-		    {edge_list,maps:get(edge_list,OptMap)}
+		    {edge_list,maps:get(edge_list,OptMap)},
+		    {xref, true},
+		    {activity, false}
 		   ]),
     Symbols = maps:get(syms,OptMap),
     Counters = counters:new(?NUM_COUNTERS, []),
@@ -231,8 +233,11 @@ gate(Bs, 'xor',X, Xs) when abs(X) =/= 1 -> %% or n-gate
     gate_tree(Bs,'xor',X,Xs).
 
 add_clause(Bs,Ls) ->
+    add_clause(Bs,Ls,?DELTA).
+
+add_clause(Bs,Ls,Set) ->
     ?dbg("add clause: ~s\n", [format_clause(Bs,Ls)]),
-    case varc:add_clause(Bs#bs.vp,Ls) of
+    case varc:add_clause(Bs#bs.vp,Ls,Set) of
 	{false,_I} ->
 	    error(conflict_clause_error);
 	false ->
@@ -267,12 +272,12 @@ del_clause(Bs, IndexOrClause) ->
 
 del_unused_clauses(Bs) ->
     V = Bs#bs.vp,
-    varc:sort_none_permanent_clauses(V),
+    varc:sort_clauses(V, ?GAMMA),  %% learned clauses
     case varp_formula:getopt(Bs, proof_output) of
 	none ->
-	    del_clauses(V, varc:clause_first_none_keep(V));
+	    del_clauses(V, varc:clause_first(V, ?GAMMA));
 	_ ->
-	    del_proof_clauses(Bs, V, varc:clause_first_none_keep(V))
+	    del_proof_clauses(Bs, V, varc:clause_first(V, ?GAMMA))
     end.
 
 del_clauses(_V, false) ->
@@ -284,7 +289,7 @@ del_clauses(V, I) ->
 del_proof_clauses(_Bs, _V, false) ->
     ok;
 del_proof_clauses(Bs, V, I) ->
-    proof_output(Bs, $d, I),    
+    proof_output(Bs, $d, I),  
     varc:del_clause(V, I),
     del_proof_clauses(Bs, V, varc:clause_next(V, I)).
 
@@ -1144,6 +1149,9 @@ build_({'SUM',Ys}, Bs) ->
 build_({'PROD',Ys}, Bs) ->
     {Xs,Bs1} = args(Ys,Bs),
     prod(Xs, Bs1);
+build_({'PARITY',Ys}, Bs) ->
+    {Xs,Bs1} = args(Ys,Bs),
+    parity(Xs, Bs1);
 
 %% Quatifer version
 build_({{'ALL',Qs}, F}, Bs) ->
@@ -1209,7 +1217,10 @@ build_({{'SUM',Qs}, F}, Bs) ->
     sum(Xs,Bs1);
 build_({{'PROD',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
-    prod(Xs,Bs1).
+    prod(Xs,Bs1);
+build_({{'PARITY',Qs}, F}, Bs) ->
+    {Xs,Bs1} = build_quant(F,Qs,Bs),
+    parity(Xs,Bs1).
 
 %%
 %% Special build of cnf/snf
@@ -1746,7 +1757,6 @@ any_([], Xs, Bs) ->
     X = add_variable(Bs),
     {{bool,X}, or_gate(Bs,X,Xs)}.
 
-
 none(As,Bs) ->
     {A,Bs1} = any(As,Bs),
     operation_('not',A,Bs1).
@@ -1769,6 +1779,17 @@ prod([X], Bs) ->
 prod([X|Xs], Bs) ->
     {Xn,Bs1} = prod(Xs,Bs),
     operation_('*', X, Xn, Bs1).
+
+parity([], Bs) ->
+    {{bool,?F},Bs};
+parity([X|Xs],Bs) ->
+    parity(X, Xs, Bs).
+
+parity(X, [], Bs) ->
+    {X, Bs};
+parity(X, [Xi|Xs], Bs) ->
+    {Y,Bs1} = operation('xor',X,Xi,Bs),
+    parity(Y,Xs,Bs1).
 
 -ifdef(__UNDEFINE__).
 %% Not used - size = 5n
@@ -2218,15 +2239,14 @@ operation('<=',Y,Z,Bs) ->
 operation('>=',Y,Z,Bs) ->
     operation_('<=',Z,Y,Bs);
 
-operation('!=',{bool,Y},{bool,Z},Bs) ->
-    operation_('xor',{bool,Y},{bool,Z},Bs);
+operation('!=',A={bool,_},B={bool,_},Bs) ->
+    operation_('xor',A,B,Bs);
 operation('!=',Y,Z,Bs) ->
     {C,Bs1} = operation_('==', Y, Z, Bs),
     {negate(C),Bs1};
 
-operation('==',{bool,Y},{bool,Z},Bs) ->
-    operation_('equ',{bool,Y},{bool,Z},Bs);
-
+operation('==',A={bool,_},B={bool,_},Bs) ->
+    operation_('equ',A,B,Bs);
 operation('==',{uint,An,Ax},{uint,Bn,Bx},Bs) ->
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(uint,Ax,An,Cn),

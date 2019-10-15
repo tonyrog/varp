@@ -24,8 +24,8 @@ Boolean connectives in priority order are
 	and  &&
 	xor
 	or   ||	
-    imp  ->       implication	
-    equ  <->      equivalence
+    imp  implies ->
+    equ  equivalent <->
 
 # Integers
 
@@ -95,6 +95,7 @@ The quantifiers are:
 	E  | ANY        existence quantification
 	E! | ONE        exist one quantification
 	NONE            exist none
+	PARITY          odd number of true
 	EQ n            exactly n true
 	NEQ n           exactly n false
 	GT n            more than n true
@@ -166,6 +167,7 @@ The quantifiers are:
     [EQ 1,a=1..10] S(a)
     [EQ 2,a=1..10] S(a)
     [GT 2,b=1..10] T(b)
+	[PARITY i=1..5] Q(i)
 
 # Integer quantifiers
 
