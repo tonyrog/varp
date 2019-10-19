@@ -14,6 +14,8 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
+-define(CHECK_INTERVAL, 1000).
+
 -compile(export_all).
 -import(varp_formula, [format_lit/2, format_lit/3]).
 -import(varp_formula, [format_var/2]).
@@ -170,7 +172,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 	0 -> ok;
 	_ ->
 	    EvalCounter = varp_formula:info(Bs, eval_counter),
-	    counters:put(Bs#bs.counters,?COUNTER_EVAL_COUNTER, EvalCounter)
+	    counters:put(Bs#bs.counters,?COUNTER_BJR_EVAL_COUNTER, EvalCounter)
     end,
     case maps:get(restart_interval,Param) of
 	0 -> ok;
@@ -347,11 +349,11 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	case maps:get(restart_counter,Param) of
 	    0 -> false;
 	    RestartCounter ->
-		EvalCounter = varp_formula:info(Bs, eval_counter),
-		PrevCounter = counters:get(Bs#bs.counters,
-					   ?COUNTER_EVAL_COUNTER),
+		EvalCounter = varp_formula:info(Bs2, eval_counter),
+		PrevCounter = counters:get(Bs2#bs.counters,
+					   ?COUNTER_BJR_EVAL_COUNTER),
 		if (EvalCounter - PrevCounter) >= RestartCounter ->
-			counters:put(Bs#bs.counters,?COUNTER_EVAL_COUNTER,
+			counters:put(Bs2#bs.counters,?COUNTER_BJR_EVAL_COUNTER,
 				     EvalCounter),
 			true;
 		   true ->
@@ -371,21 +373,22 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
     DoRestart = DoRestartCount orelse DoRestartTime,
 
     {DoStop,StopReason} 
-	= case varp:is_timeout_or_was_canceled(Bs) of
+	= case varp:check_timeout_or_cancel(Bs2,?COUNTER_BJT_EVAL_COUNTER,
+					    ?CHECK_INTERVAL) of
 	      false -> {false, none};
 	      YY -> YY
 	  end,
 
     if DoStop ->
-	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    case MR#m.method of
-		collect -> {StopReason,MR#m.ms,Bs};
-		count   -> {StopReason,MR#m.n,Bs}
+		collect -> {StopReason,MR#m.ms,Bs2};
+		count   -> {StopReason,MR#m.n,Bs2}
 	    end;
        DoPurge, JLevel =:= ?TOP_LEVEL ->
 	    if Learned > MaxLearned ->
-		    varp_formula:del_unused_clauses(Bs),
-		    reorder(Bs);
+		    varp_formula:del_unused_clauses(Bs2),
+		    reorder(Bs2);
 	       true ->
 		    %% but we can re-order literals?
 		    ok
@@ -399,24 +402,24 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
        DoPurge, Learned > MaxLearned ->
 	    %% restart and purge!
 
-	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
-	    varp_formula:set_level(Bs, ?TOP_LEVEL),
+	    varp_formula:set_level(Bs2, ?TOP_LEVEL),
 	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
 	    ?dbg("del_unused_clauses\n", []),
 	    varp_formula:del_unused_clauses(Bs),
 	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
-	    reorder(Bs),
-	    init(Bs,Param,MaxLearned,M);
+	    reorder(Bs2),
+	    init(Bs2,Param,MaxLearned,M);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
-	    undo_until(Bs, Level, ?TOP_LEVEL),
-	    varp_formula:set_level(Bs, ?TOP_LEVEL),
-	    reorder(Bs),
-	    init(Bs,Param,MaxLearned,MR);
+	    undo_until(Bs2, Level, ?TOP_LEVEL),
+	    varp_formula:set_level(Bs2, ?TOP_LEVEL),
+	    reorder(Bs2),
+	    init(Bs2,Param,MaxLearned,MR);
        true ->
 	    loop(Bs2,Param,JLevel,MaxLearned,MR,INext,Stack1)
     end.

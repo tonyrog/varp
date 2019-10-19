@@ -5,6 +5,7 @@ Terminals
         order rank degree random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY' 'PARITY'
+        'ODD' 'EVEN'
         'SUM' 'PROD' 'implies' 'equivalent'
         '<->' '>>>' '<<<' '..'
         hexnum octnum binnum decnum flonum chrnum identifier
@@ -201,6 +202,8 @@ qtype -> 'LTE'    : op('$1').
 qtype -> 'SUM'    : op('$1').
 qtype -> 'PROD'   : op('$1').
 qtype -> 'PARITY' : op('$1').
+qtype -> 'ODD'    : op('$1').
+qtype -> 'EVEN'   : op('$1').
     
 quantifier -> '[' 'ALL' ']'    : op('$2').
 quantifier -> '[' 'ANY' ']'    : op('$2').
@@ -209,6 +212,8 @@ quantifier -> '[' 'ONE'  ']'   : op('$2').
 quantifier -> '[' 'SUM' ']'    : op('$2').
 quantifier -> '[' 'PROD' ']'   : op('$2').
 quantifier -> '[' 'PARITY' ']' : op('$2').
+quantifier -> '[' 'ODD' ']'    : op('$2').
+quantifier -> '[' 'EVEN' ']'   : op('$2').
 quantifier -> '[' 'E' ']'     : 'ANY'.
 quantifier -> '[' 'E' '!' ']' : 'ONE'.
 quantifier -> '[' 'A' ']'     : 'ALL'.

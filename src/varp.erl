@@ -35,6 +35,7 @@
 -export([is_global_timeout/1]).
 -export([is_timeout/1]).
 -export([is_timeout_or_was_canceled/1]).
+-export([check_timeout_or_cancel/3]).
 
 -include_lib("stdlib/include/zip.hrl").
 -include("varp.hrl").
@@ -1191,6 +1192,16 @@ set_global_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
 set_global_timeout(Bs, infinity) ->
     Bs#bs { t_global = undefined }.
 
+check_timeout_or_cancel(Bs, Counter, CheckValue) ->
+    EvalCounter = varp_formula:info(Bs, eval_counter),
+    PrevCounter = counters:get(Bs#bs.counters, Counter),
+    if PrevCounter + CheckValue >= EvalCounter ->
+	    counters:put(Bs#bs.counters,Counter,EvalCounter),
+	    is_timeout_or_was_canceled(Bs);
+       true ->
+	    false
+    end.
+
 is_timeout_or_was_canceled(Bs) ->
     Canceled = was_canceled(),
     case is_timeout(Bs) of
@@ -1219,13 +1230,17 @@ is_timeout(Bs) ->
 is_local_timeout(Bs) ->
     case read_timer(Bs#bs.t_local) of
 	0 -> true;
-	_ -> false
+	_T -> 
+	    %% io:format("local_time=~w\n", [_T]),
+	    false
     end.
 
 is_global_timeout(Bs) ->
     case read_timer(Bs#bs.t_global) of
 	0 -> true;
-	_ -> false
+	_T ->
+	    %% io:format("global_time=~w\n", [_T]),
+	    false
     end.
 
 read_timer(undefined) -> 

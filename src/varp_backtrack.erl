@@ -17,6 +17,7 @@
 %% -define(DEBUG, true).
 -define(LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).
+
 options() ->
     [#{ long  => "timeout",
 	short => "t",
@@ -108,35 +109,34 @@ next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
 next([],_Bs) ->
     false.
 
-loop(Stack,Func,?CHECK_INTERVAL,Count,Acc,Bs) ->
-    case varp:is_timeout_or_was_canceled(Bs) of
-	{true,What} ->
+loop(Stack,Func,I,Count,Acc,Bs) ->
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_EVAL_COUNTER,
+				      ?CHECK_INTERVAL) of
+	{true, What} ->
 	    undo_all(Bs, Stack), %% make environment useful
 	    {What,Acc,Bs};
 	false ->
-	    loop(Stack,Func,0,Count,Acc,Bs)
-    end;
-loop(Stack,Func,I,Count,Acc,Bs) ->
-    case next(Stack,Bs) of
-	{model,Stack1} ->
-	    Count1 = Count+1,
-	    case Func(Count1,Acc,Bs) of
-		{true,Acc1} ->
-		    undo(Bs,Stack1),
-		    loop(Stack1,Func,I+1,Count1,Acc1,Bs);
-		{false,Acc1} ->
-		    {?CONTINUE,Acc1,Bs}
-	    end;
-	{true,Stack1} ->
-	    loop(Stack1,Func,I+1,Count,Acc,Bs);
-	false ->
-	    if Count =:= 0 ->
-		    {?INCONSISTENT,Acc,Bs};
-	       true ->
-		    {?DONE,Acc,Bs}
+	    case next(Stack,Bs) of
+		{model,Stack1} ->
+		    Count1 = Count+1,
+		    case Func(Count1,Acc,Bs) of
+			{true,Acc1} ->
+			    undo(Bs,Stack1),
+			    loop(Stack1,Func,I+1,Count1,Acc1,Bs);
+			{false,Acc1} ->
+			    {?CONTINUE,Acc1,Bs}
+		    end;
+		{true,Stack1} ->
+		    loop(Stack1,Func,I+1,Count,Acc,Bs);
+		false ->
+		    if Count =:= 0 ->
+			    {?INCONSISTENT,Acc,Bs};
+		       true ->
+			    {?DONE,Acc,Bs}
+		    end
 	    end
     end.
-
+	
 undo(Bs,[{_,_,_,Level}|_]) ->
     varp_formula:undo_level(Bs,Level);
 undo(_Bs,[]) ->

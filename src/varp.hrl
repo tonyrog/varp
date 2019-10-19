@@ -28,7 +28,7 @@
 -define(ALPHA, 2).
 -define(BETA,  3).
 
--define(NUM_COUNTERS, 9).
+-define(NUM_COUNTERS, 12).
 -define(COUNTER_CONFLICT_CLAUSES,   1).
 -define(COUNTER_MINIMIZE_COUNT,     2).
 -define(COUNTER_COMPRESS_CLAUSES,   3).
@@ -36,8 +36,11 @@
 -define(COUNTER_STUMBLE_COUNT,      5).
 -define(COUNTER_OLLE_COUNT,         6).
 -define(COUNTER_STUMBLE_OLLE_COUNT, 7).
--define(COUNTER_EVAL_COUNTER,       8).
+-define(COUNTER_BJR_EVAL_COUNTER,   8).  %% restart counter
 -define(COUNTER_REORDER_COUNTER,    9).
+-define(COUNTER_ST_EVAL_COUNTER,    10). %% cancel/timeout check counter
+-define(COUNTER_BT_EVAL_COUNTER,    11). %% cancel/timeout check counter
+-define(COUNTER_BJT_EVAL_COUNTER,   12). %% cancel/timeout check counter
 
 %% plugin results
 -define(INCONSISTENT, inconsistent).
@@ -51,7 +54,6 @@
 %% none resumable
 -define(CANCEL,       ?ABORT(user)).
 -define(ERROR,        ?ABORT(error)).
-
 
 -record(cid,
 	{ 

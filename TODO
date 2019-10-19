@@ -1,3 +1,9 @@
+- Beijing
+
+  - only allow on predicate symbol to be used for one
+    arity. P(x) and P(x,y) is then not allowed. Neither is
+    X:6 and X:5 ony one size per symbol may be declared.
+
 - Ulanbaatar
 
   - Explicit short cuts to all menu items, did not work automatically under
@@ -11,10 +17,10 @@
   - Level/Bound feedback (for fun)
 
   - PARITY function (OK)
+  - ODD/EVEN (OK)
 
-  - select error line on parse error
-  
-
+  - select error line on parse error (OK)
+    
 - Bajkal release
 
   fix satisfy/falsify/cancel (OK)

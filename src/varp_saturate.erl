@@ -17,6 +17,8 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
+-define(CHECK_INTERVAL, 1000).
+
 options() ->
     [#{ long  => "timeout",
 	short => "t",
@@ -168,11 +170,12 @@ loop_k(Bs,I,X,K,N,Level,Laps,Threshold) ->
     end.
 
 loop_k_next(Bs,I,_X,K,N,Level,Laps,Threshold) ->
-    case varp_formula:next_unbound(Bs,I) of
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_EVAL_COUNTER,
+				      ?CHECK_INTERVAL) of
+	{true,What} ->
+	    {What,Bs};
 	false ->
-	    case varp:is_timeout_or_was_canceled(Bs) of	    
-		{true,What} ->
-		    {What,Bs};
+	    case varp_formula:next_unbound(Bs,I) of
 		false ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
@@ -184,10 +187,10 @@ loop_k_next(Bs,I,_X,K,N,Level,Laps,Threshold) ->
 				Laps1 ->
 				    init_k(Bs,K,N1,Level,Laps1,Threshold)
 			    end
-		    end
-	    end;
-	{I1,X1} when K>1   -> loop_k(Bs,I1,X1,K,N,Level,Laps,Threshold);
-	{I1,X1} when K=:=1 -> loop_1(Bs,I1,X1,N,Level,Laps,Threshold)
+		    end;
+		{I1,X1} when K>1   -> loop_k(Bs,I1,X1,K,N,Level,Laps,Threshold);
+		{I1,X1} when K=:=1 -> loop_1(Bs,I1,X1,N,Level,Laps,Threshold)
+	    end
     end.
 
 init_1(Bs,N,Level,Laps,Threshold) ->
@@ -260,27 +263,27 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
     end.
 
 loop_1_next(Bs,I,_X,N,Level,Laps,Threshold) ->
-    case varp_formula:next_unbound(Bs,I) of
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_EVAL_COUNTER,
+				      ?CHECK_INTERVAL) of
+	{true,What} ->
+	    ?dbg("terminate reaon=~w\n", [What]),
+	    loop_1_done(What,Laps,Bs);
 	false ->
-	    case varp:is_timeout_or_was_canceled(Bs) of
-		{true,What} ->
-		    ?dbg("terminate reaon=~w\n", [What]),
-		    loop_1_done(What,Laps,Bs);
+	    case varp_formula:next_unbound(Bs,I) of
 		false ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
-			    ?dbg("threshold limit\n", []),
 			    loop_1_done(?THRESHOLD,Laps,Bs);
-		       true -> 
+		       true ->
 			    case dec(1,Laps) of
 				stop ->
 				    loop_1_done(?ITERATIONS,Laps,Bs);
 				Laps1 ->
 				    init_1(Bs,N1,Level,Laps1,Threshold)
 			    end
-		    end
-	    end;
-	{I1,X1} -> loop_1(Bs,I1,X1,N,Level,Laps,Threshold)
+		    end;
+		{I1,X1} -> loop_1(Bs,I1,X1,N,Level,Laps,Threshold)
+	    end
     end.
 
 loop_1_done(Reason, _Laps={_Ls,_Ms}, Bs) ->

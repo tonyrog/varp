@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%% -define(DEBUG, true).
+%-define(DEBUG, true).
 -compile(export_all).
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -159,7 +159,6 @@ new(OptMap) when is_map(OptMap) ->
     #bs {
        option = OptMap,
        vs = Symbols,
-       %% vs = #{ }, %% true => ?T, ?T => true, false => ?F, ?F => false},
        meta     = maps:get(meta,OptMap),
        defs     = maps:get(defs,OptMap),
        decls    = maps:get(decls,OptMap),
@@ -844,11 +843,13 @@ get_var(V, Bs) ->
 
 set_var(Var, Vi, Bs) ->
     Vs = Bs#bs.vs,
+    ?dbg("set_var ~w => ~w\n", [Var, Vi]),
     Vs1 = Vs#{ Var => Vi,  Vi => [Var] },
     Bs#bs { vs = Vs1 }.
 
 add_var(Var, Vi, Alias,Bs) ->
     Vs = Bs#bs.vs,
+    ?dbg("add_var ~w => ~w\n", [Var, Vi]),
     Vs1 = Vs#{ Var => Vi, Vi => [Var|Alias] },
     Bs#bs { vs = Vs1 }.
 
@@ -1152,6 +1153,13 @@ build_({'PROD',Ys}, Bs) ->
 build_({'PARITY',Ys}, Bs) ->
     {Xs,Bs1} = args(Ys,Bs),
     parity(Xs, Bs1);
+build_({'ODD',Ys}, Bs) ->
+    {Xs,Bs1} = args(Ys,Bs),
+    parity(Xs, Bs1);
+build_({'EVEN',Ys}, Bs) ->
+    {Xs,Bs1} = args(Ys,Bs),
+    {Y,Bs2} = parity(Xs, Bs1),
+    {negate(Y),Bs2};
 
 %% Quatifer version
 build_({{'ALL',Qs}, F}, Bs) ->
@@ -1220,7 +1228,14 @@ build_({{'PROD',Qs}, F}, Bs) ->
     prod(Xs,Bs1);
 build_({{'PARITY',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_quant(F,Qs,Bs),
-    parity(Xs,Bs1).
+    parity(Xs,Bs1);
+build_({{'ODD',Qs}, F}, Bs) ->
+    {Xs,Bs1} = build_quant(F,Qs,Bs),
+    parity(Xs,Bs1);
+build_({{'EVEN',Qs}, F}, Bs) ->
+    {Xs,Bs1} = build_quant(F,Qs,Bs),
+    {Y,Bs2} = parity(Xs,Bs1),
+    {negate(Y),Bs2}.
 
 %%
 %% Special build of cnf/snf

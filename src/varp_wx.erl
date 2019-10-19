@@ -32,6 +32,7 @@
 	 meta,
 	 formula,
 	 modified = false, %% formula modified
+	 error    = false, %% error is marked
 	 model,
 	 satisfy,
 	 falsify,
@@ -87,8 +88,6 @@ create_window(Wx) ->
     wxFrame:createStatusBar(Window,[]),
     ok = wxFrame:connect(Window, close_window, [{skip,false}]),
     ok = wxFrame:connect(Window, command_menu_selected, []),
-    %% ok = wxFrame:connect(Window, activate, [{skip, true}]),
-    %% ok = wxFrame:connect(Window, command_button_clicked),
 
     MenuBar  = wxMenuBar:new(),
     FileM    = wxMenu:new([]),
@@ -177,7 +176,7 @@ create_window(Wx) ->
     wxStyledTextCtrl:setMarginWidth(Formula, 1, 0),
     wxStyledTextCtrl:setSelectionMode(Formula, ?wxSTC_SEL_LINES),
     wxStyledTextCtrl:setScrollWidth(Formula, 1),
-    %% wxStyledTextCtrl:setCaretLineBackAlpha(Formula, 127),
+    wxStyledTextCtrl:setCaretLineBackAlpha(Formula, 127),
 
     Styles =  [{?wxSTC_C_DEFAULT,     {0,0,0}},
 	       {?wxSTC_C_COMMENT,     {160,53,35}},
@@ -207,6 +206,9 @@ create_window(Wx) ->
     wxSizer:add(Sizer1, Formula, [{flag, ?wxEXPAND}, {proportion, 1}]),
 
     wxStyledTextCtrl:connect(Formula,?STCMOD),
+    wxStyledTextCtrl:connect(Formula,set_focus, [{skip,true}]),
+    wxStyledTextCtrl:connect(Formula,left_down, [{skip,true}]),
+    wxStyledTextCtrl:connect(Formula,key_down, [{skip,true}]),
 
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
     %% WINDOW 2
@@ -342,15 +344,32 @@ create_window(Wx) ->
 
 main_loop(S) ->
     receive
+	Event when is_record(Event, wx) ->
+	    try handle_event(Event, S) of
+		{noreply, S1} ->
+		    ?MODULE:main_loop(S1);
+		{stop, Reason, _S1} ->
+		    Reason
+	    catch
+		?EXCEPTION(error,Reason,Trace) ->
+		    io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)])
+	    end;
+        _Msg ->
+            ?dbg("Got ~p ~n", [_Msg]),
+            ?MODULE:main_loop(S)
+    end.
+
+handle_event(Event, S) ->
+    case Event of
         #wx{event=#wxClose{}} ->
 	    ?dbg("CLOSE\n",[]),
 	    if S#s.modified ->
 		    case save_before(S, "Save before close") of
 			{ok,S1} ->
 			    wxFrame:destroy(S1#s.window),
-			    ok;
+			    {stop, ok, S1};
 			{cancel,S1} ->
-			    ?MODULE:main_loop(S1)
+			    {noreply, S1}
 		    end;
 	       true ->
 		    ok
@@ -364,7 +383,7 @@ main_loop(S) ->
 			    wxWindow:destroy(S1#s.window),
 			    ok;
 			{cancel,S1} ->
-			    ?MODULE:main_loop(S1)
+			    {noreply, S1}
 		    end;
 	       true ->
 		    ok
@@ -373,16 +392,16 @@ main_loop(S) ->
         #wx{id=?wxID_NEW, event=#wxCommand{type=command_menu_selected}} ->
 	    ?dbg("NEW\n",[]),
 	    _Pid = varp_wx:start(),
-	    ?MODULE:main_loop(S);
+	    {noreply, S};
 
         #wx{id=?wxID_SAVE, event=#wxCommand{type=command_menu_selected}} ->
 	    %% FIXME: handle file error !!!
 	    ?dbg("SAVE\n",[]),
 	    case save(S, 0) of
 		{ok,S1} ->
-		    ?MODULE:main_loop(S1);
+		    {noreply, S1};
 		{cancel,S1} ->
-		    ?MODULE:main_loop(S1)
+		    {noreply, S1}
 	    end;
 	       
         #wx{id=?wxID_SAVEAS, event=#wxCommand{type=command_menu_selected}} ->
@@ -404,13 +423,13 @@ main_loop(S) ->
 		    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
 		    wxDialog:destroy(Dialog),
 		    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
-		    ?MODULE:main_loop(S#s { dir=Dir,
-					    filename=Filename, 
-					    path = Path,
-					    modified = false });
+		    {noreply, S#s { dir=Dir,
+				    filename=Filename, 
+				    path = Path,
+				    modified = false }};
 		?wxID_CANCEL ->
 		    wxDialog:destroy(Dialog),
-		    ?MODULE:main_loop(S)
+		    {noreply, S}
 	    end;
 
         #wx{id=?wxID_OPEN, event=#wxCommand{type=command_menu_selected}} ->
@@ -419,98 +438,112 @@ main_loop(S) ->
 		    case save_before(S, "Save before open new") of
 			{ok,S1} -> 
 			    case open_new(S1) of
-				{ok,S2} ->
-				    ?MODULE:main_loop(S2);
-				{cancel,S2} ->
-				    ?MODULE:main_loop(S2)
+				{ok,S2} -> {noreply, S2};
+				{cancel,S2} -> {noreply, S2}
 			    end;
 			{cancel,S1} ->
-			    ?MODULE:main_loop(S1)
+			    {noreply, S1}
 		    end;
 	       true ->
 		    case open_new(S) of
-			{ok,S1} ->
-			    ?MODULE:main_loop(S1);
-			{cancel,S1} ->
-			    ?MODULE:main_loop(S1)
+			{ok,S1} -> {noreply, S1};
+			{cancel,S1} -> {noreply, S1}
 		    end
 	    end;
-
-
+	
         #wx{id=?wxID_CUT,event=#wxCommand{type=command_menu_selected}} ->
 	    case wxStyledTextCtrl:getSelection(S#s.formula) of
-		{N,N} ->
-		    ?MODULE:main_loop(S);
+		{N,N} -> {noreply, S};
 		_ ->
 		    wxStyledTextCtrl:cut(S#s.formula),
-		    ?MODULE:main_loop(S)
+		    {noreply, S}
 	    end;
 
         #wx{id=?wxID_COPY,event=#wxCommand{type=command_menu_selected}} ->
 	    case wxStyledTextCtrl:getSelection(S#s.formula) of
 		{N,N} ->
 		    case wxStyledTextCtrl:getSelection(S#s.model) of
-			{K,K} ->
-			    ?MODULE:main_loop(S);
+			{K,K} -> {noreply, S};
 			_ ->
 			    wxStyledTextCtrl:copy(S#s.model),
-			    ?MODULE:main_loop(S)
+			    {noreply,S}
 		    end;
 		_ ->
 		    wxStyledTextCtrl:copy(S#s.formula),
-		    ?MODULE:main_loop(S)
+		    {noreply,S}
 	    end;
 
         #wx{id=?wxID_PASTE,event=#wxCommand{type=command_menu_selected}} ->
             wxStyledTextCtrl:paste(S#s.formula),
-            ?MODULE:main_loop(S);
+	    {noreply,S};
 
         #wx{id=?wxID_CLEAR,event=#wxCommand{type=command_menu_selected}} ->
 	    case wxStyledTextCtrl:getSelection(S#s.formula) of
-		{N,N} ->
-		    io:format("clear ~w:~w\n", [N,N]),
-		    ?MODULE:main_loop(S);
-		{N,M} ->
-		    io:format("clear ~w:~w\n", [N,M]),
+		{N,N} -> {noreply,S};
+		{_N,_M} ->
 		    wxStyledTextCtrl:clear(S#s.formula),
-		    ?MODULE:main_loop(S)
+		    {noreply,S}
 	    end;
 
         #wx{id=?wxID_SELECTALL,event=#wxCommand{type=command_menu_selected}} ->
             wxStyledTextCtrl:selectAll(S#s.formula),
-            ?MODULE:main_loop(S);
+	    {noreply,S};
 
         #wx{id=?wxID_ABOUT, event=#wxCommand{type=command_menu_selected}} ->
             dialog(?wxID_ABOUT, S#s.window),
-            ?MODULE:main_loop(S);
+	    {noreply,S};
 
         #wx{event=#wxSplitter{type=command_splitter_sash_pos_changed}} ->
 	    %% not used yet
-            ?MODULE:main_loop(S);
+	    {noreply,S};
+
+        #wx{obj=Obj,event=#wxStyledText{type=?STCMOD, text=""}} when
+	      Obj =:= S#s.formula ->
+	    {noreply,S};
 
         #wx{obj=Obj,event=#wxStyledText{type=?STCMOD}} when
 	      Obj =:= S#s.formula, not S#s.modified ->
+	    ?dbg("modified Event = ~p\n", [Event]),
 	    Title = wxFrame:getTitle(S#s.window),
 	    wxFrame:setTitle(S#s.window, [$*|Title]),
 	    wxStyledTextCtrl:disconnect(S#s.formula, ?STCMOD),
 	    wxMenuItem:enable(S#s.menu_save,[{enable,true}]),
-	    ?MODULE:main_loop(S#s { modified = true });
+	    {noreply,S#s { modified = true }};
+
+        #wx{obj=Obj,event=#wxMouse{type=left_down}} when
+	      Obj =:= S#s.formula ->
+	    if S#s.error ->
+		    hide_line(S#s.formula),
+		    {noreply, S#s { error = false }};
+	       true ->
+		    {noreply, S}
+	    end;
+
+        #wx{obj=Obj,event=#wxKey{type=key_down}} when
+	      Obj =:= S#s.formula ->
+	    if S#s.error ->
+		    hide_line(S#s.formula),
+		    {noreply, S#s { error = false }};
+	       true ->
+		    {noreply, S}
+	    end;
 
         _Msg = #wx{obj=Obj, event=#wxCommand{type=command_button_clicked}} ->
 	    if S#s.satisfy =:= Obj ->
 		    S1 = solve(satisfy, S),
-		    ?MODULE:main_loop(S1);
+		    {noreply, S1};
 	       S#s.falsify =:= Obj ->
 		    S1 = solve(falsify, S),
-		    ?MODULE:main_loop(S1);
+		    {noreply, S1};
 	       true ->
 		    ?dbg("Got command_button_clicked ~p ~n", [_Msg]),
-		    ?MODULE:main_loop(S)
+		    {noreply, S}
 	    end;
-        _Msg ->
+        _Msg = #wx{} ->
             ?dbg("Got ~p ~n", [_Msg]),
-            ?MODULE:main_loop(S)
+	    {noreply, S}
     end.
+
 
 open_new(S) ->
     Dialog = wxFileDialog:new(S#s.window,
@@ -760,29 +793,38 @@ solve(Mode, S, Bound) ->
 	    end;
 
 	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->
-	    select_line(S#s.formula, Ln),
 	    show_line(S#s.formula, Ln),
+	    mark_line(S#s.formula, Ln),
 	    wxStyledTextCtrl:refresh(S#s.formula),
 	    Text = (catch apply(Mod, format_error, [Message])),
-	    output_error(S, Text);
+	    S1 = output_error(S, Text),
+	    S1#s { error = true };
 
 	{error, {Ln,Mod,Message}, _EndLn} when is_integer(Ln), is_atom(Mod) ->
-	    select_line(S#s.formula, Ln),
 	    show_line(S#s.formula, Ln),
+	    mark_line(S#s.formula, Ln),
+	    wxStyledTextCtrl:refresh(S#s.formula),
 	    Text = (catch apply(Mod, format_error, [Message])),
-	    output_error(S, Text);
+	    S1 = output_error(S, Text),
+	    S1#s { error = true };
 
 	{error, Message} ->
 	    output_error(S, io_lib:format("~p\n", [Message]))
     end.
 
-select_line(Stc, Line) ->
+mark_line(Stc, Line) ->
+    wxStyledTextCtrl:setCaretLineBackground(Stc, {255, 50, 50}),
     Start = wxStyledTextCtrl:positionFromLine(Stc, Line-1),
-    End = wxStyledTextCtrl:positionFromLine(Stc, Line),    
-    wxStyledTextCtrl:setSelection(Stc, Start, End).
+    wxStyledTextCtrl:setCurrentPos(Stc, Start),
+    wxStyledTextCtrl:setSelection(Stc, Start, Start).
 
 show_line(Stc, Line) ->
-    wxStyledTextCtrl:scrollToLine(Stc, Line-1).
+    wxStyledTextCtrl:scrollToLine(Stc, Line-1),
+    wxStyledTextCtrl:setCaretLineVisible(Stc, true),
+    wxStyledTextCtrl:setFocus(Stc).
+
+hide_line(Stc) ->
+    wxStyledTextCtrl:setCaretLineVisible(Stc, false).
 
 output_error(S, Text) ->
     output_clear(S),
@@ -884,6 +926,7 @@ dialog(?wxID_ABOUT,  Frame) ->
 
 keyWords() ->
     L = ["EQ", "NEQ", "GT", "GTE", "LT", "LTE", "NONE", "ONE",
+	 "PARITY", "ODD", "EVEN",
 	 "symbol", "true", "false", "define", "declare", "literals",
 	 "assert", "input", "output", "order", "rank", "degree",
 	 "random", "identity",
@@ -1040,12 +1083,12 @@ f2i(N) when N >= 0, N < 100 ->
     tl(integer_to_list(100 + N)).
 
 merge_info(#{ number_of_clauses := NC,
-	      number_of_dead_clauses := ND,
-	      max_level := L, max_bound := B }, Info2) ->
+	      number_of_dead_clauses := ND}, Info2) ->
+    %% max_level := L, max_bound := B
     Info2#{ number_of_clauses => NC,
-	    number_of_dead_clauses => ND,
-	    max_level => L,
-	    max_bound => B }.
+	    number_of_dead_clauses => ND }.
+%%	    max_level => L,
+%%	    max_bound => B }.
     
 get_info(Bs) ->
     #{ number_of_variables =>
