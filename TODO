@@ -1,5 +1,7 @@
 - Beijing
 
+  - Level/Bound feedback (for fun)
+
   - only allow on predicate symbol to be used for one
     arity. P(x) and P(x,y) is then not allowed. Neither is
     X:6 and X:5 ony one size per symbol may be declared.
@@ -13,8 +15,6 @@
     (OK)
     
   - Multiple models with backjump (OK)
-
-  - Level/Bound feedback (for fun)
 
   - PARITY function (OK)
   - ODD/EVEN (OK)
