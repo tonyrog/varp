@@ -1,11 +1,11 @@
 Propositional logic library
 ===========================
 
-Command line tool
+# Command line tool
 
-    varp [satisfy|falsify|prove] [plugin [options]]... [bindings] [file1.varp ... filen.varp]
+    varp [global options] [satisfy|falsify|prove] [plugin [options]]... [bindings] [file1.varp ... filen.varp]
 
-# global options
+## global options
     
     --print      true|false         (false)
     --method     collect|count      (collect)
@@ -19,15 +19,18 @@ Command line tool
     level() = debug | info | notice | warning |
     	      error | critical | alert | emergency | none
 
-#  "order" options
+##  "order" options
    	 
     --sort      <order>		(identity)
     --order_first "v1..vn"
     --order_last  "v1..vn"
 
-    order() = identity | reverse | '-occur' | '+occur' | random
+    order() = identity | reverse | random
+		| degree | '-degree' | '+degree' | 
+		| rank | '-rank' | '+rank' |
+		| activity | '-activity' | '+activity'
 
-# Saturation "saturate"/"sat" parameters
+## Saturation "saturate"/"sat" parameters
 
     --timeout    timeout()      (infinity)
     --level      unsigned()		(0=eval)
@@ -35,13 +38,13 @@ Command line tool
     --threshold  unsigned()		(0)
 	--laps       unsigned()     (0)
 
-# Backtrack "backtrack"/"bt" parameters
+## Backtrack "backtrack"/"bt" parameters
 
     --max unsigned()
     --method collect|count
     --partial boolean()    	     
 
-# Backjump "backjump"/"bj" parameters
+## Backjump "backjump"/"bj" parameters
 
     --timeout timeout()
     --max-learned         L
@@ -76,21 +79,25 @@ Command line tool
     --restart-counter  <#eval>
     --restart-interval <seconds>    
 
-# Model reduction "reduction"/"red" parameters
+## Model reduction "reduction"/"red" parameters
 
 	-size unsigned()          Number of literal reductions to add 
 	-type [both|min|pos|neg]  Type of reductions to add
 	
-# RAT remove clauses "rat" parameters
+## RAT remove clauses "rat" parameters
 
 	-size unsigned()          Number of liter1al reductions to add 
 	-type [both|min|pos|neg]  Type of reductions to add	
 	
-# DUMP dump CNF
+## Ouptut CNF "cnf" parameters
 
-	-f <name>
+	-t | --type [cnf|snf] (cnf)   type of output
+	-f <name>                     output file
+	-s boolean() (false)          emit symbold (cnf comments)
+	-raw boolean() (false)        emit raw clauses
 	
-# Binding
+	
+## Binding
 
     <var> = <value>
 
@@ -98,8 +105,15 @@ Variable (lowercase) variables are passed into varp as
 environment (meta) variables that can be used in
 formulas in quantifiers.
 
+# build standalone terminal bases varp
+
+    erl -noshell -s varp start0 -s servator make_appimage varp
+	
+# build wx windows based varp
+
+    erl -wx -noshell -s varp_wx -s servator make_appimage varp
+
 # build starexec varp version
 
     erl -config default.config -config bj.config -s varp start0 -s servator make_starexec varp
-	
 	

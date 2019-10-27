@@ -1192,11 +1192,11 @@ set_global_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
 set_global_timeout(Bs, infinity) ->
     Bs#bs { t_global = undefined }.
 
-check_timeout_or_cancel(Bs, Counter, CheckValue) ->
-    EvalCounter = varp_formula:info(Bs, eval_counter),
-    PrevCounter = counters:get(Bs#bs.counters, Counter),
-    if PrevCounter + CheckValue >= EvalCounter ->
-	    counters:put(Bs#bs.counters,Counter,EvalCounter),
+check_timeout_or_cancel(Bs, Counter, CheckInterval) ->
+    Time1 = erlang:system_time(millisecond),
+    Time0 = counters:get(Bs#bs.counters, Counter),
+    if Time1 - Time0 >= CheckInterval ->
+	    counters:put(Bs#bs.counters,Counter,Time1),
 	    is_timeout_or_was_canceled(Bs);
        true ->
 	    false

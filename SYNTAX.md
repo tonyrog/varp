@@ -96,6 +96,8 @@ The quantifiers are:
 	E! | ONE        exist one quantification
 	NONE            exist none
 	PARITY          odd number of true
+	ODD             odd number of true
+	EVEN            even number of true
 	EQ n            exactly n true
 	NEQ n           exactly n false
 	GT n            more than n true

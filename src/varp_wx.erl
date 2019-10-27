@@ -372,7 +372,7 @@ handle_event(Event, S) ->
 			    {noreply, S1}
 		    end;
 	       true ->
-		    ok
+		    {stop, ok, S}
 	    end;
 
         #wx{id=?wxID_EXIT, event=#wxCommand{type=command_menu_selected}} ->
@@ -386,7 +386,7 @@ handle_event(Event, S) ->
 			    {noreply, S1}
 		    end;
 	       true ->
-		    ok
+		    {stop, ok, S}
 	    end;
 
         #wx{id=?wxID_NEW, event=#wxCommand{type=command_menu_selected}} ->

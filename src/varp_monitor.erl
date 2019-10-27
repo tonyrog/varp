@@ -42,16 +42,16 @@ loop(Bs, Mon) ->
     receive
 	{'DOWN', Mon, process, _Pid, _Reason} ->
 	    done;
-	{varp, {X,Y}, Info} ->
-	    io:format("monitor: substitut (~w=>~w) ~s => ~s info=~w\n", 
+	{varp, {X,Y}, _Info} ->
+	    io:format("monitor: substitut (~w=>~w) ~s => ~s\n", 
 		      [Y,X,
 		       varp_formula:format_lit(Bs,Y),
-		       varp_formula:format_lit(Bs,X),
-		       Info]),
+		       varp_formula:format_lit(Bs,X)
+		      ]),
 	    loop(Bs, Mon);
-	{varp, X, Info} ->
-	    io:format("monitor: permanent (~w=1) ~s = ~w, info=~w\n", 
-		      [X,varp_formula:format_lit(Bs,X), ?T, Info]),
+	{varp, X, _Info} ->
+	    io:format("monitor: permanent (~w=1) ~s = ~w\n", 
+		      [X,varp_formula:format_lit(Bs,X), ?T]),
 	    loop(Bs, Mon);
 	Other ->
 	    io:format("monitor: got ~p\n", [Other]),

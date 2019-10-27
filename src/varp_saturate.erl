@@ -215,9 +215,8 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 		    false;
 		true ->
 		    varp_formula:proof_output(Bs,$a,[X]),
-		    Ls = varp_formula:get_bindings(Bs, Level+1),
+		    %% Ls = varp_formula:get_bindings(Bs, Level+1),
 		    varp_formula:move_level(Bs, Level+1, Level),
-		    varp_formula:log_bindings(Bs, X, ?T, Ls),
 		    varp_formula:set_level(Bs,Level),
 		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold)
 	    end;
@@ -230,8 +229,7 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 		    ?dbg("~scontradiction, undo ~w\n", 
 			 [indent(Level),Level]),
 		    pop(Bs,Level),
-		    eq_eval(Bs,-X,Level),
-		    varp_formula:log_bindings(Bs, X, ?F, Ls),
+		    eq_eval(Bs,-X,Level),  %% or install Ls?
 		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold);
 		true ->
 		    ?dbg("~s~s/1: => [~s]\n",
@@ -240,24 +238,31 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 			    Bs, tl(varp_formula:get_bindings(Bs,Level+1)))]),
 		    %% FIXME: if tl(Ys) = [] then do nothig...
 		    Ys = varp_formula:intersect_bindings(Bs, X, tl(Ls)),
-		    lists:foreach(
-		      fun({A,B}) ->
-			      %% A -> B, B -> A  (-A,B), (-B,A)
-			      varp_formula:proof_output(Bs,$a,[-A,B]),
-			      varp_formula:proof_output(Bs,$a,[-B,A]);
-			 (A) ->
-			      %% X -> A, ~X -> A  (-X,A) (X, A)
-			      varp_formula:proof_output(Bs,$a,[-X,A]),
-			      varp_formula:proof_output(Bs,$a,[ X,A]),
-			      varp_formula:proof_output(Bs,$a,[A])
-		      end, Ys),
+		    %% FIXME: check if proof_output is active!
+		    case varp_formula:want_proof_output(Bs) of
+			false ->
+			    ok;
+			_ ->
+			    lists:foreach(
+			      fun({A,B}) ->
+				      %% A -> B, B -> A  (-A,B), (-B,A)
+				      varp_formula:proof_output(Bs,$a,[-A,B]),
+				      varp_formula:proof_output(Bs,$a,[-B,A]);
+				 (A) ->
+				      %% X -> A, ~X -> A  (-X,A) (X, A)
+				      varp_formula:proof_output(Bs,$a,[-X,A]),
+				      varp_formula:proof_output(Bs,$a,[ X,A]),
+				      varp_formula:proof_output(Bs,$a,[A])
+			      end, Ys)
+		    end,
 		    pop(Bs,Level),
 		    varp_formula:set_level(Bs,Level),
-		    %% io:format("Ys = ~w\n", [Ys]),
-		    %% fixme no need to install+eval when Ys=[]!
-		    varp_formula:install_bindings(Bs,Level,Ys),
-		    true = varp_formula:eval(Bs),
-		    varp_formula:log_bindings(Bs, X, undefined, Ys),
+		    if Ys =:= [] ->
+			    ok;
+		       true ->
+			    varp_formula:install_bindings(Bs,Level,Ys),
+			    true = varp_formula:eval(Bs)
+		    end,
 		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold)
 	    end
     end.

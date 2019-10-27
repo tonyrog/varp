@@ -1,0 +1,5 @@
+// bugg no cancel n=9 with saturate
+// without saturate it is possible to cancel
+[A x=1..n][A y=1..n][A z=1..n-1] (P(x,y,z) imp x<y) and
+[A x=1..n][A y=1..n, x<y][E! z=1..n-1]P(x,y,z) and
+[A x=1..n][A y=1..n-1][E! z=1..n](P(x,z,y) or P(z,x,y))  

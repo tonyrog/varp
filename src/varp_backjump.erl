@@ -14,7 +14,7 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
--define(CHECK_INTERVAL, 1000).
+-define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 -compile(export_all).
 -import(varp_formula, [format_lit/2, format_lit/3]).
@@ -35,7 +35,7 @@ options() ->
 	short => "n",
 	key => max,
 	spec => unsigned,
-	default => 0,
+	default => 1,
 	description => "Max number of models to count or collect, 0=all."
       },
      
@@ -188,26 +188,33 @@ init(Bs, Param, MaxLearned, MR) ->
     loop(Bs,Param,?TOP_LEVEL,MaxLearned,MR,varp_formula:first_init(Bs),[]).
 
 loop(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
-    ?dbg("loop: EVAL\n",[]),
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_EVAL_COUNTER,
+				      ?CHECK_INTERVAL) of
+	false ->
+	    loop_(Bs,Param,Level,MaxLearned,MR,I,Stack);
+	{true, What} ->
+	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    return(What, MR, Bs)
+    end.
+
+return(What, MR, Bs) ->
+    case MR#m.method of
+	collect ->
+	    {What,MR#m.ms,Bs};
+	count ->
+	    {What,MR#m.n,Bs}
+    end.
+
+loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
+    ?dbg("loop_: EVAL\n",[]),
     case varp_formula:eval(Bs) of
 	false ->
 	    if Level =:= 0, MR#m.n =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
 		    display_stat(Bs,Param),
-		    case MR#m.method of
-			collect ->
-			    {?INCONSISTENT,[],Bs};
-			count ->
-			    {?INCONSISTENT,0,Bs}
-		    end;
+		    return(?INCONSISTENT,MR,Bs);
 	       Level =:= 0 ->
-		    case MR#m.method of
-			collect ->
-			    {?CONTINUE,MR#m.ms,Bs};
-			count ->
-			    {?CONTINUE,MR#m.n,Bs}
-		    end;
-		    
+		    return(?CONTINUE,MR,Bs);
 	       true ->
 		    contradiction(Bs,Param,Level,MaxLearned,MR,I,Stack)
 	    end;
@@ -372,20 +379,8 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 
     DoRestart = DoRestartCount orelse DoRestartTime,
 
-    {DoStop,StopReason} 
-	= case varp:check_timeout_or_cancel(Bs2,?COUNTER_BJT_EVAL_COUNTER,
-					    ?CHECK_INTERVAL) of
-	      false -> {false, none};
-	      YY -> YY
-	  end,
-
-    if DoStop ->
-	    undo_until(Bs2, Level, ?TOP_LEVEL),
-	    case MR#m.method of
-		collect -> {StopReason,MR#m.ms,Bs2};
-		count   -> {StopReason,MR#m.n,Bs2}
-	    end;
-       DoPurge, JLevel =:= ?TOP_LEVEL ->
+    if 
+	DoPurge, JLevel =:= ?TOP_LEVEL ->
 	    if Learned > MaxLearned ->
 		    varp_formula:del_unused_clauses(Bs2),
 		    reorder(Bs2);
@@ -465,7 +460,7 @@ next(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 	false ->
 	    N = MR#m.n + 1,
 	    Model = varp:output_model(Bs, N),
-	    if N >= MR#m.max; Stack =:= [] ->
+	    if N >= MR#m.max, MR#m.max > 0; Stack =:= [] ->
 		    display_stat(Bs,Param),
 		    case MR#m.method of
 			collect ->

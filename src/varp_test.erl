@@ -135,17 +135,31 @@ test_div() ->
     ok.
 
 test_cmp() ->
-    X = {p,'X',[]},
-
-    true = sat({'<', {uint,4,X},{uint,4,2}},
-	       [[{X,0}],[{X,1}]]),
-    true = sat({'<', {int,4,X},{int,4,2}},
-	       [[{X,V}] || V <- lists:seq(-8,1)]),
-    true = sat({'>', {uint,4,X},{uint,4,2}},
-	       [[{X,V}] || V <- lists:seq(3,15)]),
-    true = sat({'>', {int,4,X},{int,4,2}},
-	       [[{X,V}] || V <- lists:seq(3,7)]),
+    test_cmp_1(),
+    test_cmp_2(),
+    test_cmp_3(),
+    test_cmp_4(),
     ok.
+
+test_cmp_1() ->
+    X = {p,'X',[]},
+    true = sat({'<', {uint,4,X},{uint,4,2}},
+	       [[{X,0}],[{X,1}]]).
+
+test_cmp_2() ->
+    X = {p,'X',[]},
+    true = sat({'<', {int,4,X},{int,4,2}},
+	       [[{X,V}] || V <- lists:seq(-8,1)]).
+
+test_cmp_3() ->
+    X = {p,'X',[]},
+    true = sat({'>', {uint,4,X},{uint,4,2}},
+	       [[{X,V}] || V <- lists:seq(3,15)]).
+
+test_cmp_4() ->
+    X = {p,'X',[]},
+    true = sat({'>', {int,4,X},{int,4,2}},
+	       [[{X,V}] || V <- lists:seq(3,7)]).
 
 test_shift() ->
     X = {p,'X',[]},
@@ -237,6 +251,7 @@ test_equation2() ->
 
 sat(Formula, ExpectedModels) ->
     application:start(varp),
+    %% io:format("run: ~p\n", [Formula]),
     %% _N = length(ExpectedModels),
     Options = [{print,false}],
     Do = [{satisfy,[]}, {backtrack,[]}],

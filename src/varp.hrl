@@ -55,6 +55,9 @@
 -define(CANCEL,       ?ABORT(user)).
 -define(ERROR,        ?ABORT(error)).
 
+-define(GETOPT(Key, Map), maps:get((Key),(Map))).
+-define(GETOPT_BS(Bs, Key), ?GETOPT((Key),(Bs)#bs.option)).
+
 -record(cid,
 	{ 
 	  line,

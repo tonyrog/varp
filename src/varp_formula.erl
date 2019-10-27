@@ -33,9 +33,9 @@
 -export([format_binding/1]).
 -export([filter_bindings/1]).
 -export([format_clause/2, format_clause/3]).
--export([log_bindings/4]).
 -export([log_clause/2]).
 -export([proof_output/3]).
+-export([want_proof_output/1]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -265,6 +265,13 @@ or_clause(Bs,Xs) ->
     add_clause(Bs, Xs),
     Bs.
 
+%% Check if proof output is active
+want_proof_output(Bs) ->
+    case ?GETOPT_BS(Bs, proof_output) of
+	none -> false;
+	Type -> Type
+    end.
+
 %% delete clause by index or list of literals
 del_clause(Bs, IndexOrClause) ->
     varc:del_clause(Bs#bs.vp, IndexOrClause).
@@ -272,8 +279,8 @@ del_clause(Bs, IndexOrClause) ->
 del_unused_clauses(Bs) ->
     V = Bs#bs.vp,
     varc:sort_clauses(V, ?GAMMA),  %% learned clauses
-    case varp_formula:getopt(Bs, proof_output) of
-	none ->
+    case want_proof_output(Bs) of
+	false ->
 	    del_clauses(V, varc:clause_first(V, ?GAMMA));
 	_ ->
 	    del_proof_clauses(Bs, V, varc:clause_first(V, ?GAMMA))
@@ -313,7 +320,7 @@ clean_literals_(Bs, {I,Xi}) ->
 
 %% "balanced tree"
 gate_tree(Bs,Op,X,Xs) ->
-    case getopt(Bs,assoc) of
+    case ?GETOPT_BS(Bs,assoc) of
 	balanced -> gate_tree_b(Bs,Op,X,Xs);
 	left  -> gate_tree_l(Bs,Op,X,Xs);
 	right -> gate_tree_r(Bs,Op,X,Xs);
@@ -477,7 +484,7 @@ subst(Bs, X, Y) ->
     varc:subst(Bs#bs.vp,X,Y).
 
 getopt(Bs,Key) ->
-    varp_option:getopt(Key, Bs#bs.option).
+    ?GETOPT_BS(Bs, Key).
 
 number_of_variables(Bs) ->
     varc:get_number_of_variables(Bs#bs.vp).
@@ -870,7 +877,7 @@ build(F,Bs) when is_record(Bs, bs) ->
     build1(F, Bs).
 
 build1(F, Bs) ->
-    Bs1 = build_code(getopt(Bs,defs),Bs),
+    Bs1 = build_code(?GETOPT_BS(Bs,defs),Bs),
     try build__(F, Bs1) of
       	Value -> Value
     catch
@@ -2648,7 +2655,7 @@ vrem(X, Y, R, N, I, Bs) ->
 %%
 vsub(Ys, Zs, Bs) ->
     Zs1 = vnot(Zs),
-    case getopt(Bs,adder) of
+    case ?GETOPT_BS(Bs,adder) of
 	plain ->
 	    vadd_plain(Ys,Zs1,?T,Bs);
 	fast ->
@@ -2660,7 +2667,7 @@ vsub(Ys, Zs, Bs) ->
 %%
 vadd(Ys,Zs,Bs) ->
 %%    io:format("vadd: ~w/~w ~w/~w\n", [Ys,length(Ys),Zs,length(Zs)]),
-    case getopt(Bs,adder) of
+    case ?GETOPT_BS(Bs,adder) of
 	plain ->
 	    vadd_plain(Ys,Zs,?F,Bs);
 	fast ->
@@ -3106,9 +3113,8 @@ log_clause(Bs, Clause) ->
     io:format("~s\n", [format_clause(Bs,Clause)]).
 
 proof_output(Bs, Prefix, Clause) ->
-    case varp_formula:getopt(Bs, proof_output) of
-	none ->
-	    ok;
+    case want_proof_output(Bs) of
+	false -> ok;
 	binary ->
 	    Clause1 = lookup_clause(Bs, Clause),
 	    %% fixme: lookup literals!
@@ -3140,9 +3146,9 @@ proof_output_text(Fd, Bs, Prefix, Clause) ->
 proof_literal(Bs,Li) ->
     if Li < 0 ->
 	    case maps:find(-Li, Bs#bs.vs) of
-		error -> [$-,$$|integer_to_list(-Li)];
+		error -> [$!,$$|integer_to_list(-Li)];
 		{ok,[{p,x,[I]}]} -> integer_to_list(-I);
-		{ok,[P|_]} -> [$-|format_symbol(P)]
+		{ok,[P|_]} -> [$!|format_symbol(P)]
 	    end;
        Li > 0 ->
 	    case maps:find(Li, Bs#bs.vs) of
@@ -3166,40 +3172,6 @@ lookup_literal(Bs,Li) when is_integer(Li) ->
 		{ok,[{p,x,[I]}]} -> I
 	    end
     end.
-
-
-log_bindings(_Bs, _X, _Value, _Xs) ->
-    %% log_(Bs, X, Value, Xs).
-    ok.
-
-log_(_Bs, _X, _Value, []) ->
-    ok;
-log_(_Bs, _X, _Value, [{A,A}]) ->
-    ok;
-log_(Bs, X, Value, Xs) ->
-    Val = case Value of
-	      ?T -> "1";
-	      ?F -> "0";
-	      undefined -> "1/0"
-	  end,
-    N = number_of_bound(Bs),
-    T = number_of_variables(Bs),
-    io:format("Log: saturation ~w '~s'/~s [~w/~w]\n",
-	      [length(Xs),fmt_var(Bs, X), Val, N, T]),
-    lists:foreach(
-      fun({A,A}) ->
-	      ok;
-	 ({A,?T}) ->
-	      io:format("    '~s' = 1\n", 
-			[format_lit(Bs, A)]);
-	 ({A,?F}) ->
-	      io:format("    '~s' = 0\n", 
-			[format_lit(Bs, A)]);
-	 ({A,B}) ->
-	      io:format("    '~s' = '~s'\n", 
-			[format_lit(Bs, A),
-			 format_lit(Bs, B)])
-      end, Xs).
 
 format_p({p,T,As}) when is_integer(T) ->
     [$T,integer_to_list(As)|format_params(As)];

@@ -1,0 +1,7 @@
+
+declare X : (isize(n));
+declare Y : (isize(n));
+
+(X < n) && [A i=0..n-1] ((X == i) <-> Xi(i)) &&
+(Y < n) && [A i=0..n-1] ((Y == i) <-> Yi(i)) &&
+(Yi(2) && Xi(2))

@@ -335,7 +335,7 @@ print_help({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
 		       format_value(Def),
 		       Desc])
     end;
-print_help(#{ key := _Key }) -> %% ignore internal options
+print_help({_Key,#{ key := _Key }}) -> %% ignore internal options
     ok.
 
 usage(Spec) ->
@@ -623,4 +623,4 @@ is_string(_) -> false.
 %% Get options
 %%
 getopt(Key, OptMap) ->
-    maps:get(Key, OptMap).
+    ?GETOPT(Key, OptMap).

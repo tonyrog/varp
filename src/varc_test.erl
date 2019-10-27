@@ -23,7 +23,8 @@ all() ->
 	    or_simplify, or_eval,
 	    watch1,
 	    edge_list0,edge_list1, edge_list2, edge_list3,
-	    subst1, subst2, subst3, subst4, subst5
+	    subst0a, subst0b, subst0c, subst0d, 
+	    subst1, subst2, subst3, subst4, subst5, subst6
 	   ]).
 
 test1() ->
@@ -316,6 +317,87 @@ order() ->
 %%    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
     ok.
 
+subst0a() ->
+    V = varc:new([{xref,true}]),
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+    X = varc:add_variable(V),
+    Y = varc:add_variable(V),
+
+    _C0 = varc:add_clause(V, [A, B, Y, C]),
+
+    print_clauses(V),
+
+    io:format(" [~w/~w]\n", [X,Y]),
+    varc:subst(V, X, Y),
+
+    io:format("clause after\n"),
+    print_clauses(V,true),
+    Bs = varc:get_bindings(V,0),
+    io:format("bindings@0 = ~w\n", [Bs]),
+    Bs.
+
+subst0b() ->
+    V = varc:new([{xref,true}]),
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+    X = varc:add_variable(V),
+    Y = varc:add_variable(V),
+
+    _C0 = varc:add_clause(V, [A, X, B, Y, C]),
+
+    print_clauses(V),
+
+    io:format(" [~w/~w]\n", [X,Y]),
+    varc:subst(V, X, Y),
+
+    io:format("clause after\n"),
+    print_clauses(V,true),
+    Bs = varc:get_bindings(V,0),
+    io:format("bindings@0 = ~w\n", [Bs]),
+    Bs.
+
+subst0c() ->
+    V = varc:new([{xref,true}]),
+    A = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+    X = varc:add_variable(V),
+    Y = varc:add_variable(V),
+
+    _C0 = varc:add_clause(V, [A, X, B, -Y, C]),
+
+    print_clauses(V),
+
+    io:format(" [~w/~w]\n", [X,Y]),
+    varc:subst(V, X, Y),
+
+    io:format("clause after\n"),
+    print_clauses(V,true),
+    Bs = varc:get_bindings(V,0),
+    io:format("bindings@0 = ~w\n", [Bs]),
+    Bs.
+
+subst0d() ->
+    V = varc:new([{xref,true}]),
+    X = varc:add_variable(V),
+    Y = varc:add_variable(V),
+
+    _C0 = varc:add_clause(V, [X, Y]),
+
+    print_clauses(V),
+
+    io:format(" [~w/~w]\n", [X,Y]),
+    varc:subst(V, X, Y),
+
+    io:format("clause after\n"),
+    print_clauses(V,true),
+    Bs = varc:get_bindings(V,0),
+    io:format("bindings@0 = ~w\n", [Bs]),
+    Bs.
+    
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
     V = varc:new([{xref,true}]), 
@@ -422,6 +504,31 @@ subst5() ->
     Bs = [X3,X4,X6] = lists:sort(varc:get_bindings(V,0)),
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
+
+subst6() ->
+    V = varc:new([{xref,true}]),
+    Y = varc:add_variable(V),
+    B = varc:add_variable(V),
+    C = varc:add_variable(V),
+    X = varc:add_variable(V),
+    A = varc:add_variable(V),
+
+    _C0 = varc:add_clause(V, [A, X, B, Y, C]),
+    _C1 = varc:add_clause(V, [A, -X, B, Y, C]),
+    _C2 = varc:add_clause(V, [A, X, B, -C]),
+    _C3 = varc:add_clause(V, [-A, B, -Y, C]),
+    _C4 = varc:add_clause(V, [-A, B, -X, C]),
+    _C5 = varc:add_clause(V, [A, -Y, B, -X, C]),
+
+    print_clauses(V),
+
+    io:format(" [~w/~w]\n", [X,Y]),
+    varc:subst(V, X, Y),
+
+    io:format("clause after\n"),
+    print_clauses(V,true),
+    ok.
+
 
 watch1() ->
     V = varc:new(),

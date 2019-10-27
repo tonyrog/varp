@@ -12,11 +12,11 @@
 
 -compile(export_all).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
-%% -define(DEBUG, true).
 -define(LEVEL, 1).
--define(CHECK_INTERVAL, 1000).
+-define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 options() ->
     [#{ long  => "timeout",
@@ -30,7 +30,7 @@ options() ->
 	short => "n",
 	key => max,
 	spec => unsigned,
-	default => 0,
+	default => 1,
 	description => "Max number of models to count or collect, 0=all."
       }
     ].
@@ -95,7 +95,7 @@ next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
 	false ->
 	    Stack1 = [{I,Xi,Xs,Level}|Stack],
 	    proof_output(Bs, Stack1),
-	    varp_formula:undo_level(Bs,Level),
+	    undo_level(Bs,Level),
 	    next(Stack1,Bs);
 	true ->
 	    Next = varp_formula:next_unbound(Bs,I),
@@ -112,41 +112,49 @@ next([],_Bs) ->
 loop(Stack,Func,I,Count,Acc,Bs) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_EVAL_COUNTER,
 				      ?CHECK_INTERVAL) of
-	{true, What} ->
-	    undo_all(Bs, Stack), %% make environment useful
-	    {What,Acc,Bs};
 	false ->
-	    case next(Stack,Bs) of
-		{model,Stack1} ->
-		    Count1 = Count+1,
-		    case Func(Count1,Acc,Bs) of
-			{true,Acc1} ->
-			    undo(Bs,Stack1),
-			    loop(Stack1,Func,I+1,Count1,Acc1,Bs);
-			{false,Acc1} ->
-			    {?CONTINUE,Acc1,Bs}
-		    end;
-		{true,Stack1} ->
-		    loop(Stack1,Func,I+1,Count,Acc,Bs);
-		false ->
-		    if Count =:= 0 ->
-			    {?INCONSISTENT,Acc,Bs};
-		       true ->
-			    {?DONE,Acc,Bs}
-		    end
+	    loop_(Stack,Func,I,Count,Acc,Bs);
+	{true, Why} ->
+	    undo_all(Bs, Stack), %% make environment useful
+	    {Why,Acc,Bs}
+    end.
+
+loop_(Stack,Func,I,Count,Acc,Bs) ->
+    case next(Stack,Bs) of
+	{model,Stack1} ->
+	    Count1 = Count+1,
+	    case Func(Count1,Acc,Bs) of
+		{true,Acc1} ->
+		    undo(Bs,Stack1),
+		    loop(Stack1,Func,I+1,Count1,Acc1,Bs);
+		{false,Acc1} ->
+		    {?CONTINUE,Acc1,Bs}
+	    end;
+	{true,Stack1} ->
+	    loop(Stack1,Func,I+1,Count,Acc,Bs);
+	false ->
+	    if Count =:= 0 ->
+		    {?INCONSISTENT,Acc,Bs};
+	       true ->
+		    {?DONE,Acc,Bs}
 	    end
     end.
 	
 undo(Bs,[{_,_,_,Level}|_]) ->
-    varp_formula:undo_level(Bs,Level);
+    undo_level(Bs,Level);
 undo(_Bs,[]) ->
     ok.
 
 undo_all(Bs,[{_,_,_,Level}|Stack]) ->
-    varp_formula:undo_level(Bs,Level),
+    undo_level(Bs,Level),
     undo_all(Bs, Stack);
 undo_all(_Bs, []) ->
     ok.
+
+undo_level(Bs, Level) ->
+    ?dbg("~sundo@~w\n", [indent(Level),Level]),
+    varp_formula:undo_level(Bs,Level).
+    
 
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
@@ -162,9 +170,11 @@ proof_output(Bs, Stack) ->
     end.
 
 eq_eval(Bs,L,_D) ->
-    ?dbg("~seq_eval: ~w ~s\n", 
-	 [indent(_D), L, varp_formula:fmt_var(Bs,L)]),
-    eqv(Bs,L).
+    ?dbg("~seq_eval@~w: ~w ~s", 
+	 [indent(_D),_D, L, varp_formula:fmt_var(Bs,L)]),
+    Res = eqv(Bs,L),
+    ?dbg(" = ~w\n", [Res]),
+    Res.
 
 eqv(Bs,L) ->
     varp_formula:bind(Bs,L) andalso varp_formula:eval(Bs).

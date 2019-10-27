@@ -2,9 +2,14 @@
 
   - Level/Bound feedback (for fun)
 
-  - only allow on predicate symbol to be used for one
+  - only allow one predicate symbol to be used for one
     arity. P(x) and P(x,y) is then not allowed. Neither is
     X:6 and X:5 ony one size per symbol may be declared.
+
+- Beijing
+
+  - Fix cancel bug (Ok)
+  - Fix substitution bug (Ok)
 
 - Ulanbaatar
 
