@@ -197,14 +197,6 @@ loop(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 	    return(What, MR, Bs)
     end.
 
-return(What, MR, Bs) ->
-    case MR#m.method of
-	collect ->
-	    {What,MR#m.ms,Bs};
-	count ->
-	    {What,MR#m.n,Bs}
-    end.
-
 loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
     ?dbg("loop_: EVAL\n",[]),
     case varp_formula:eval(Bs) of
@@ -220,6 +212,14 @@ loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 	    end;
 	true ->
 	    next(Bs,Param,Level,MaxLearned,MR,I,Stack)
+    end.
+
+return(What, MR, Bs) ->
+    case MR#m.method of
+	collect ->
+	    {What,MR#m.ms,Bs};
+	count ->
+	    {What,MR#m.n,Bs}
     end.
 
 contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
@@ -407,7 +407,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
 	    reorder(Bs2),
-	    init(Bs2,Param,MaxLearned,M);
+	    init(Bs2,Param,MaxLearned,MR);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
@@ -422,18 +422,22 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 reorder(Bs) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    case N rem 3 of
+    varc:decay(Bs#bs.vp, 1/0.95),
+    case N rem 4 of
 	0 ->
+	    io:format("-activity\n"),
+	    varp_formula:order_sort(Bs,'-activity',undefined,-1);
+	1 ->
 	    io:format("-degree\n"),
 	    varp_formula:order_sort(Bs,'-degree',undefined,-1);
-	1 ->
-	    io:format("random\n"),
-	    Seed = varp_formula:getopt(Bs,seed),
-	    varp_formula:order_sort(Bs,random,undefined,Seed);
 	2 ->
 	    io:format("-rank\n"),
 	    varp_formula:order_sort(Bs,'-rank',undefined,-1);
 	3 ->
+	    io:format("random\n"),
+	    Seed = varp_formula:getopt(Bs,seed),
+	    varp_formula:order_sort(Bs,random,undefined,Seed);
+	4 ->
 	    %% enable when 2-clauses works again
 	    io:format("saturate\n"),
 	    varp_saturate:saturate(Bs, 1, infinity, {{1},{1}}, 0)

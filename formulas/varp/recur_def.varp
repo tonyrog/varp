@@ -1,0 +1,4 @@
+define P(1) Q(0);
+define P(i) P(i-1) or Q(i);
+
+P(3)

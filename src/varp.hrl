@@ -11,15 +11,6 @@
 -define(T,  t).
 -define(F,  f).
 
--define(dbg0(F,As), ok).
--define(dbg1(F,A), io:format((F),(A))).
--ifdef(DEBUG).
--define(dbg(F,A), io:format((F),(A))).
--define(dcall(Fun), Fun()).
--else.
--define(dbg(F,A), ok).
--define(dcall(Fun), ok).
--endif.
 
 -define(TOP_LEVEL, 0).
 
@@ -57,6 +48,38 @@
 
 -define(GETOPT(Key, Map), maps:get((Key),(Map))).
 -define(GETOPT_BS(Bs, Key), ?GETOPT((Key),(Bs)#bs.option)).
+
+-define(LOG_LEVEL_NONE, -1).
+-define(LOG_LEVEL_EMERGENCY, 0).
+-define(LOG_LEVEL_ALERT,     1).
+-define(LOG_LEVEL_CRITICAL,  2).
+-define(LOG_LEVEL_ERROR,     3).
+-define(LOG_LEVEL_WARNING,   4).
+-define(LOG_LEVEL_NOTICE,    5).
+-define(LOG_LEVEL_INFO,      6).
+-define(LOG_LEVEL_DEBUG,     7).
+
+-define(debug(Opt, Fmt, As), ?log(Opt,?LOG_LEVEL_DEBUG,Fmt,As)).
+-define(warning(Opt, Fmt, As), ?log(Opt,?LOG_LEVEL_WARNING,Fmt,As)).
+-define(info(Opt, Fmt, As), ?log(Opt,?LOG_LEVEL_INFO,Fmt,As)).
+	
+-define(log(OptMap, Level, Fmt, As),
+	case Level =< maps:get(log,OptMap,?LOG_LEVEL_NONE) of
+	    true ->
+		io:format(Fmt, As);
+	    false ->
+		ok
+	end).
+
+-define(dbg0(F,As), ok).
+-define(dbg1(F,A), io:format((F),(A))).
+-ifdef(DEBUG).
+-define(dbg(F,A), io:format((F),(A))).
+-define(dcall(Fun), Fun()).
+-else.
+-define(dbg(F,A), ok).
+-define(dcall(Fun), ok).
+-endif.
 
 -record(cid,
 	{ 
@@ -118,10 +141,33 @@
 	  to
 	}).
 
+-type literal() :: integer().
+-type vtype() :: 'int' | 'uint' | 'bit'.
+-type ptype() :: vtype() | 'bool'.
+-type psize() :: pos_integer().
+-type pbits() :: {vtype(),Size::psize(),[literal()]} | {bool,literal()}.
+
+-type pred()  :: {p,Name::atom(),[index()]}.
+-type index() :: integer() | atom() | [integer()|atom()] | func().
+-type func()  :: {f,Name::atom(),[index()]}.
+
+-type var() :: pred() |
+	       {uint,Size::psize(),pred()} |
+	       {int,pred(),Size::psize(),Pos::integer()} |
+	       {bit,pred(),Size::psize(),Pos::integer()}.
+
+%% -define(PSYM_ARITY, true).
+
+-type pdecl() ::
+	#{ {atom(),arity()} => {ptype(),arity(),psize()}, %% PSYM_ARITY
+	   atom()           => {ptype(),arity(),psize()} %% !PSYM_ARITY
+	 }.
+	   
+-type plit() ::
+	#{ {atom(),ptype(),psize()} => literal()|[literal()] }.
 
 -record(bs,
 	{
-	 state  = ok :: ok|cancel|timeout,
 	 option = #{} :: map(), %% the options
 	 counters :: reference(), %% counters(?NUM_COUNTERS)
 	 d1 :: reference(),   %% histogram delta1 counters(1024)
@@ -131,17 +177,20 @@
 	 vp :: reference(),   %% varc instance
 	 t_global :: reference(), %% global timer 
 	 t_local :: reference(),  %% local timer
-	 main,                %% main formula variable
-	 meta=[],            %% meta variable bindings during build
-	 defs=[],            %% definitions [{{p,x,[v1,..vn]}, F(v1...vn)}]
-	 decls=[],           %% declarations [{int,Sz,Pred},{uint,Sz,Pred}]
-	 subst=[],           %% var/function substitution(s)
-	 literals=[],        %% declared literals [atom()]
-	 assert=[],          %% list of assertions [A1,...An]
-	 input=[],           %% list of input modules [I1,...In]
-	 output=[],          %% list of output modules [I1,...In]
-	 proof_fd            %% proof output file
+	 main,                 %% main formula variable
+	 meta=#{} :: #{ string() => integer() },
+	 %% Def = {[v1,..vn],F(v1...vn)}
+	 defs=#{} :: #{ pred() => {[atom()],term()}},
+	 decls=#{} :: pdecl(),
+	 subst=[],             %% var/function substitution(s)
+	 literals=#{} :: #{ atom() => true },
+	 assert=[],            %% list of assertions [A1,...An]
+	 input=[],             %% list of input modules [I1,...In]
+	 output=[],            %% list of output modules [I1,...In]
+	 proof_fd              %% proof output file
 	}).
+
+-type bs() :: #bs{}.
 
 -define(BOOL,
 	{"true",true},

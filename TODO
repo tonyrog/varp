@@ -1,10 +1,13 @@
-- Beijing
+
 
   - Level/Bound feedback (for fun)
 
+- Shanghai
+
   - only allow one predicate symbol to be used for one
     arity. P(x) and P(x,y) is then not allowed. Neither is
-    X:6 and X:5 ony one size per symbol may be declared.
+    X:6 and X:5 ony one size per symbol may be declared. OK
+  - Fixed sorting bug, keep variable order better
 
 - Beijing
 

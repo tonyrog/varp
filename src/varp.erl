@@ -18,7 +18,7 @@
 -export([archive_path/1]).
 -export([output_model/2]).
 -export([empty_sections/0]).
--export([split_sections/1]).
+-export([split_sections/1, split_sections/2]).
 -export([section_opts/2]).
 -export([load_plugins/0]).
 -export([load_do/0, load_do/1]).
@@ -36,10 +36,13 @@
 -export([is_timeout/1]).
 -export([is_timeout_or_was_canceled/1]).
 -export([check_timeout_or_cancel/3]).
+-export([make_psym/2]).
+-export([format_error/1]).
 
 -include_lib("stdlib/include/zip.hrl").
+
+%% -define(DEBUG, true).
 -include("varp.hrl").
--include("log.hrl").
 
 -record(stat,
 	{
@@ -222,6 +225,12 @@ global_options() ->
 	 default => false,
 	 description => "use edge list, instead of 2-clauses."
        },
+      #{ long => "activity",
+	 key => activity,
+	 spec =>  {enum,[?BOOL]},
+	 default => false,
+	 description => "enable activity sorting during restarts."
+       },
       #{ long => "version",
 	 short => "V", 
 	 key => version,
@@ -242,19 +251,19 @@ internal_options() -> %% needed?
     [
      #{ key => meta,
 	spec => {set,{string,term}},
-	default => [],  %% ordset
+	default => #{},
 	description => "Internal list of meta variables and values"},
      #{ key => defs,
 	spec => {set,{pred,term}},
-	default => [],  %% ordset
+	default => #{},
 	description => "Internal list of all definitions"},
      #{ key => decls,
 	spec => {set,{predpat,atom,term}},
-	default => [],  %% ordset
+	default => #{},
 	description => "Internal list of all declarations"},     
      #{ key => literals,
 	spec => {set,atom},
-	default => [],  %% ordset
+	default => #{},
 	description => "Internal list of all literals"},
      #{ key => assert,
 	spec => {list,term},
@@ -306,8 +315,9 @@ main(Args) ->
     %% io:format("main: options1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
 
-    {Do1,Files,GOpts2,Bound} =
+    {Do1,Files,GOpts2,Bound0} =
 	process_args(Args, Plugins, [], [], GlobalOptionSpec, GOpts1, []),
+    Bound = maps:from_list(Bound0),
 
     Do = if Do1 =/= [] -> Do1;
 	    true -> Do0
@@ -318,29 +328,37 @@ main(Args) ->
     %% io:format("bound = ~p\n", [Bound]),
 
     {ReadIn,{Sections0,Formula0}} =
-	case load_formulas(maps:get(formula,GOpts2,[]), undefined, 'and') of
+	try load_formulas(maps:get(formula,GOpts2,[]), undefined, 'and',
+			  GOpts2) of
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
-	    {ok,R0} -> {false,R0};
-	    __Error -> halt(1)
+	    {ok,R0} -> {false,R0}
+	catch
+	    ?EXCEPTION(error,Error0,Trace0) ->
+		io:format("~s\n", [format_error(Error0)]),
+		?dbg("~p\n", [?GET_STACK(Trace0)]),
+		halt(1)
 	end,
 
     GOpts3 = section_opts(Sections0, GOpts2#{ meta => Bound }),
 
     case Files of
 	[] when not ReadIn ->
-	    do_run(Do, Formula0, GOpts3);
+	    varp_run(Do, Formula0, GOpts3);
 	[] when ReadIn ->
 	    case read_in() of
 		{ok,<<>>} ->
-		    do_run(Do, Formula0, GOpts3);
+		    varp_run(Do, Formula0, GOpts3);
 		{ok,Data} ->
-		    case parse("*stdin*", Data) of
+		    try parse("*stdin*", Data, GOpts3) of
 			{ok,{Sections1,Formula}} ->
 			    Formula1 = join_f('and',Formula0,Formula),
 			    Sections = append_sections(Sections0,Sections1),
 			    GOpts4 = section_opts(Sections,GOpts3),
-			    do_run(Do,Formula1,GOpts4);
-			_Error ->
+			    varp_run(Do,Formula1,GOpts4)
+		    catch
+			?EXCEPTION(error,Error1,Trace1) ->
+			    io:format("~s\n", [format_error(Error1)]),
+			    ?dbg("~p\n", [?GET_STACK(Trace1)]),
 			    halt(1)
 		    end;
 		_Error ->
@@ -349,22 +367,28 @@ main(Args) ->
 	[F] -> %% check if batch mode, run tar/zip over all formulas
 	    case archive_type(F) of
 		undefined ->
-		    case load_files([F],Formula0,Sections0,'and',GOpts3) of
+		    try load_files([F],Formula0,Sections0,'and',GOpts3) of
 			{ok,{Sections1,Formula}} ->
 			    GOpts4 = section_opts(Sections1, GOpts3),
-			    do_run(Do,Formula,GOpts4);
-			_Error ->
+			    varp_run(Do,Formula,GOpts4)
+		    catch
+			?EXCEPTION(error,Error2,Trace2) ->
+			    io:format("~s\n", [format_error(Error2)]),
+			    ?dbg("~p\n", [?GET_STACK(Trace2)]),
 			    halt(1)
 		    end;
 		Type -> %% with formula?
 		    run_batch(Do,Type,F,GOpts3)
 	    end;
 	Fs ->
-	    case load_files(Fs,Formula0,Sections0,'and',GOpts3) of
+	    try load_files(Fs,Formula0,Sections0,'and',GOpts3) of
 		{ok,{Sections1,Formula}} ->
 		    GOpts4 = section_opts(Sections1, GOpts3),
-		    do_run(Do,Formula,GOpts4);
-		_Error ->
+		    varp_run(Do,Formula,GOpts4)
+	    catch
+		?EXCEPTION(error,Error3,Trace3) ->
+		    io:format("~s\n", [format_error(Error3)]),
+		    ?dbg("~p\n", [?GET_STACK(Trace3)]),
 		    halt(1)
 	    end
     end,
@@ -489,12 +513,46 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
 	      AFile = filename:join(ArchiveFile,F),
 	      case load_files([AFile],true,empty_sections(),'and',GOpts) of
 		  {ok,{Sections,Formula}} ->
-		      do_run(Do,Formula, section_opts(Sections, GOpts));
+		      varp_run(Do,Formula, section_opts(Sections, GOpts));
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
 		      ok
 	      end
       end, Fs).
+
+%% command line - display errors and exception as well as results
+varp_run(Do, Formula, GOpts) ->
+    R = (catch do_run(Do, Formula, GOpts)),
+    case R of
+	{'EXIT',{Error, _Where}} ->
+	    io:format("~s\n", [format_error(Error)]),
+	    ok;
+	_ ->
+	    R
+    end.
+
+format_error(Err) ->
+    case Err of
+	{unbound,Var} ->
+	    ["Variable ", Var, " is unbound\n"];
+	{var_out_of_range,Var} ->
+	    VarName = varp_formula:format_symbol(Var),
+	    ["Variable ",VarName," is out of range\n"];
+	{empty_clause, _Where} ->
+	    ["Empty clause not allowed\n"];
+	{arity_mismatch,Var} ->
+	    VarName = varp_formula:format_symbol(Var),
+	    ["Variable ",VarName, " can only have ", "one arity"];
+	{bitsize_mismatch,Var} ->
+	    VarName = varp_formula:format_symbol(Var),
+	    ["Variable ",VarName, " can only have one size"];
+	{shift_not_constant,B} ->
+	    BStr = varp_formula:format_symbol(B),
+	    ["Shift value ",BStr," must be constant "];
+	_ ->
+	    io_lib:format("~p\n", [Err])
+    end.
+
 
 do_run(Do, Formula, GOpts) ->
     R = do_run_(Do, Formula, GOpts),
@@ -519,7 +577,7 @@ do_run_(Do, Formula, GOpts) ->
     case varp_formula:getopt(Bs2, print) of
 	false -> 
 	    {R,Acc,Bs3};
-	_ -> 
+	_ ->
 	    N = if is_list(Acc) -> length(Acc);
 		   is_integer(Acc) -> Acc
 		end,
@@ -528,7 +586,7 @@ do_run_(Do, Formula, GOpts) ->
 		    ?CONTINUE when N>0 -> N;
 		    _ -> R
 		end,
-	    display_result(M, Method, Bs3), 
+	    display_result(M, Method, Bs3),
 	    {R,Acc,Bs3}
     end.
 
@@ -699,11 +757,6 @@ no_models(Bs) ->
 	    {?INCONSISTENT,0,Bs}
     end.
 
-anon_decls([{{p,P,Ps},Type,Size}|Decls]) ->
-    [{{p,P,['_' || _ <- Ps]},Type,Size}|anon_decls(Decls)];
-anon_decls([]) ->
-    [].
-
 order_decl([]) -> [];
 order_decl(Vs) -> order_decl(Vs,[]).
 
@@ -765,7 +818,7 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
        true ->
 	    %% io:format("Read file ~s\n", [F]),
 	    {ok, Data} = read_file(F),
-	    case parse(F, Data) of
+	    case parse(F, Data, GOpts) of
 		{ok,{Sections1,Formula}} ->
 		    %% io:format("% loaded: ~s\n", [F]),
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
@@ -922,40 +975,40 @@ fjoin(Fs) -> filename:join(Fs).
 
 
 %% load/parse formulas given on command line like -f "A && B"
-load_formulas([], A, _JoinOp) ->
+load_formulas([], A, _JoinOp, _GOpts) ->
     {ok,{empty_sections(),A}};
-load_formulas(Fs, A, JoinOp) ->
-    parse_formulas(Fs,A,empty_sections(),JoinOp).
+load_formulas(Fs, A, JoinOp, GOpts) ->
+    parse_formulas(Fs,A,empty_sections(),JoinOp,GOpts).
 
-parse_formulas([F|Fs], Formula, Sections0,JoinOp) ->
-    case parse("*command-line*", F) of
+parse_formulas([F|Fs], Formula, Sections0,JoinOp,GOpts) ->
+    case parse("*command-line*", F, GOpts) of
 	{ok,{Sections1,Formula1}} ->
 	    parse_formulas(Fs, join_f(JoinOp, Formula, Formula1),
-			   append_sections(Sections0, Sections1), JoinOp);
+			   append_sections(Sections0, Sections1),
+			   JoinOp,GOpts);
 	Error ->
 	    Error
     end;
-parse_formulas([], Formula, Sections, _JoinOp) ->
+parse_formulas([], Formula, Sections, _JoinOp,_GOpts) ->
     {ok,{Sections,Formula}}.
 
 empty_sections() ->
-    #{ decls=>[], order=>[], literals=>[], defs=>[], syms => #{},
-       assert=>[], input=>[], output=>[] }.
+    #{ decls=>#{}, literals=> #{}, syms => #{}, defs=>#{},
+       order=>[],  assert=>[], input=>[], output=>[] }.
 
 append_sections(#{ decls:=D0,order:=O0,literals:=Ls0,defs:=Ds0,
-		   assert:=A0,input:=I0, output:=T0,syms:=S0  },
+		   assert:=A0,input:=I0, output:=T0,syms:=S0 },
 		#{ decls:=D1,order:=O1,literals:=Ls1,defs:=Ds1,
 		   assert:=A1,input:=I1, output:=T1,syms:=S1 }) ->
-    #{ decls=>D0++D1, 
-       order=>O0++O1, 
-       literals=>Ls0++Ls1,
-       defs=>Ds0++Ds1,
+    #{ decls =>maps:merge(D0,D1),  %% must be fixed!
+       order => O0++O1, 
+       literals =>maps:merge(Ls0,Ls1),
+       defs => merge_defs(Ds0, Ds1),
        assert => A0++A1,
        input => I0++I1,
        output => T0++T1,
-       syms => maps:merge(S0,S1)
+       syms => maps:merge(S0,S1)  %% fix?
      }.
-
 
 section_opts(#{ decls := Decls,
 		order := Order,
@@ -968,7 +1021,7 @@ section_opts(#{ decls := Decls,
 	     GOpts) ->
     GOpts#{
 	   order => order_decl(Order),
-	   decls => anon_decls(Decls),
+	   decls => Decls,
 	   defs => Defs,
 	   literals => Literals,
 	   assert => Assert,
@@ -976,6 +1029,13 @@ section_opts(#{ decls := Decls,
 	   output => Output,
 	   syms => Syms
 	  }.
+
+merge_defs(Ds0, Ds1) ->
+    maps:fold(
+      fun(Key,DefList1,Ds00) ->
+	      DefList0 = maps:get(Key,Ds00,[]),
+	      maps:put(Key,DefList0++DefList1,Ds00)
+      end, Ds0, Ds1).
     
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;
@@ -1108,15 +1168,23 @@ zip_names([]) ->
 parse(String) ->
     parse("*internal*", String).
 
-parse(File, Binary) when is_binary(Binary) ->
-    parse(File, binary_to_list(Binary));
 parse(File, String) ->
+    parse(File, String, #{}).
+
+parse(File, Binary, GOpts) when is_binary(Binary) ->
+    parse(File, binary_to_list(Binary), GOpts);    
+parse(File, String, GOpts) ->
     case tokens(String) of
 	{ok,Ts} ->
 	    case varp_parse:parse(Ts) of
 		{ok,{Sections,Formula}} ->
-		    SectionMap = split_sections(Sections),
-		    {ok,{SectionMap,Formula}};
+		    case split_sections(Sections,GOpts) of
+			{ok, SectionMap} ->
+			    {ok,{SectionMap,Formula}};
+			Error ->
+			    io:format("~s: Error: ~p\n", [File,Error]),
+			    Error
+		    end;
 		Error={error,{Ln,Mod,Why}} when 
 		      is_integer(Ln), is_atom(Mod) ->
 		    Reason = Mod:format_error(Why),
@@ -1132,24 +1200,57 @@ parse(File, String) ->
     end.
 
 split_sections(Sections) ->
-    split_sections(Sections,empty_sections()).
+    split_sections(Sections,#{}).
 
-split_sections([{declare,Decl}|Sections], Map=#{ decls:=Decl0 }) ->
-    split_sections(Sections, Map#{ decls => Decl0++Decl });
-split_sections([{order,Order}|Sections],Map=#{ order:=Order0 }) ->
-    split_sections(Sections, Map#{ order => Order0++Order });
-split_sections([{literals,Ls}|Sections],Map=#{ literals:=Ls0 }) ->
-    split_sections(Sections, Map#{ literals => Ls0++Ls });
-split_sections([{define,P,Expr}|Sections], Map=#{ defs:=Defs0 }) ->
-    split_sections(Sections, Map#{ defs => Defs0++[{P,Expr}] });
-split_sections([{assert,Expr}|Sections], Map=#{ assert:=Assert0 }) ->
-    split_sections(Sections, Map#{ assert => Assert0++[Expr] });
-split_sections([{input,Name}|Sections], Map=#{ input:=Input0 }) ->
-    split_sections(Sections, Map#{ input => Input0++[Name] });
-split_sections([{output,Name}|Sections], Map=#{ output:=Output0 }) ->
-    split_sections(Sections, Map#{ output => Output0++[Name] });
-split_sections([], Map) ->
-    Map.
+split_sections(Sections,GOpts) ->
+    split_sections(Sections,empty_sections(),GOpts).
+
+split_sections([{declare,DeclList}|Sections], Map=#{ decls:=Decl0 },GOpts) ->
+    Bs = #bs { meta = maps:get(meta,GOpts,#{}) },  %% dummy bs
+    case add_decls(DeclList, Decl0, Bs) of
+	{ok,Decls1} ->
+	    split_sections(Sections, Map#{ decls => Decls1 },GOpts);
+	Error ->
+	    Error
+    end;
+split_sections([{order,Order}|Sections],Map=#{ order:=Order0 },GOpts) ->
+    split_sections(Sections, Map#{ order => Order0++Order },GOpts);
+split_sections([{literals,Ls}|Sections],Map=#{ literals:=Ls0 },GOpts) ->
+    Ls1 = maps:from_list([{L,true} || L <- Ls]),
+    Ls2 = maps:merge(Ls1,Ls0),
+    split_sections(Sections, Map#{ literals => Ls2 },GOpts);
+split_sections([{define,{p,P,Ps},Expr}|Sections], Map=#{ defs:=Defs0 },GOpts) ->
+    PSym = {P,length(Ps)},
+    DefList = maps:get(PSym, Defs0, []),
+    Defs1 = maps:put(PSym,DefList++[{Ps,Expr}],Defs0),
+    split_sections(Sections, Map#{ defs => Defs1 },GOpts);
+split_sections([{assert,Expr}|Sections], Map=#{ assert:=Assert0 },GOpts) ->
+    split_sections(Sections, Map#{ assert => Assert0++[Expr] },GOpts);
+split_sections([{input,Name}|Sections], Map=#{ input:=Input0 },GOpts) ->
+    split_sections(Sections, Map#{ input => Input0++[Name] },GOpts);
+split_sections([{output,Name}|Sections], Map=#{ output:=Output0 },GOpts) ->
+    split_sections(Sections, Map#{ output => Output0++[Name] },GOpts);
+split_sections([], Map, _GOpts) ->
+    {ok, Map}.
+
+-ifdef(PSYM_ARITY).
+make_psym(Sym,Args) -> {Sym,length(Args)}.
+-else.
+make_psym(Sym,_Args) -> Sym.
+-endif.
+
+add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
+    Size = varp_formula:eval_meta(SExpr, Bs),
+    PSym = make_psym(Sym,Args),
+    case maps:find(PSym, Decls) of
+	error ->
+	    Decls1 = maps:put(PSym, {PType,length(Args),Size}, Decls),
+	    add_decls(Ds, Decls1, Bs);
+	{ok,_} ->
+	    {error, {symbol, Sym, already_declared}}
+    end;
+add_decls([], Decls, _Bs) ->
+    {ok,Decls}.
     
 string(Binary) when is_binary(Binary) ->
     string(binary_to_list(Binary));

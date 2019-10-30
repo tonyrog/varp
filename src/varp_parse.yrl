@@ -28,7 +28,7 @@ Nonterminals
 	expr constant
 	file 
         integer sexpr
-        qtype quantifier psymbol pexpr oexpr odecl odecls ldecl ldecls
+        qtype quantifier psymbol pexpr pcexpr oexpr odecl odecls ldecl ldecls
         lexpr_const lexpr_var
         lexpr0 lexpr10 lexpr20 lexpr30 lexpr40 lexpr41 lexpr43 lexpr45 lexpr47 
         lexpr50 lexpr60 lexpr70 lexpr80 lexpr90
@@ -220,7 +220,7 @@ quantifier -> '[' 'A' ']'     : 'ALL'.
 quantifier -> '[' qtype expr ']' : {'$2',comma_list('$3')}.
 
 %%
-%% Declaration of boolean and integer "predicates"
+%% Declaration of integers (can be extended)
 %%
 pdecl -> pexpr ':' sexpr '/' 'signed'   : {'$1',int,'$3'}.
 pdecl -> pexpr ':' sexpr '/' 'unsigned' : {'$1',uint,'$3'}.
@@ -260,11 +260,11 @@ oexpr -> '!' pexpr                      : {'!', '$2'}.
 %%
 %% Logic expression
 %%
-lexpr_var -> pexpr                          : '$1'.
-lexpr_var -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
-lexpr_var -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
-lexpr_var -> pexpr ':' sexpr                : {uint,'$3','$1'}.
-    
+lexpr_var -> pexpr                           : '$1'.
+lexpr_var -> pcexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
+lexpr_var -> pcexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
+lexpr_var -> pcexpr ':' sexpr                : {uint,'$3','$1'}.
+
 lexpr_const -> integer               : constant(value('$1')).
 lexpr_const -> identifier            : name('$1').  %% meta/env variable
 %%lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
@@ -370,6 +370,10 @@ sexpr -> identifier : name('$1').
 pexpr -> psymbol               : { p, '$1', []}.
 pexpr -> psymbol '(' ')'       : { p, '$1', []}.
 pexpr -> psymbol '(' expr ')'  : { p, '$1', comma_list('$3')}.
+
+pcexpr -> pexpr : '$1'.
+pcexpr -> integer : constant(value('$1')).
+pcexpr -> identifier : name('$1').
 
 psymbol -> 'A' : 'A'.
 psymbol -> 'E' : 'E'.

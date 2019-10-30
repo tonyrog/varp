@@ -1945,11 +1945,11 @@ static void activate_level(varp_t* vp, int level, float delta)
     }
 }
 
-// update activity on all levels
+// update activity on all levels (excluding 0 - that is already bound)
 static void activate_levels(varp_t* vp, float delta)
 {
     int i;
-    for (i = 0; i <= vp->level; i++)
+    for (i = 1; i <= vp->level; i++)
 	activate_level(vp, i, delta);
 }
 
@@ -2974,11 +2974,10 @@ static int order_reset(varp_t* vp)
 
     vp->order_map[0] = 0;
     vp->var_map[0]->map_index = 0;
-    i = 1;
     l = 0;
     u = vp->vnext;
 
-    for (i=1; i < (int)vp->vnext; i++) {
+    for (i=(int)vp->vnext-1; i >= 1; i--) {
 	if (vis_bound(vp, i)) {
 	    l++;
 	    vp->order_map[l] = i;

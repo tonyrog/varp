@@ -254,7 +254,7 @@ sat(Formula, ExpectedModels) ->
     %% io:format("run: ~p\n", [Formula]),
     %% _N = length(ExpectedModels),
     Options = [{print,false}],
-    Do = [{satisfy,[]}, {backtrack,[]}],
+    Do = [{satisfy,[]}, {backtrack,[{max,0}]}],
     GOpts = varp:load_option_list(Options),
     GDo = varp:parse_do(Do),
     case varp:do_run(GDo,Formula,GOpts) of

@@ -63,9 +63,9 @@ file(File) ->
 file(File,Meta) ->
     case file:open(File, [read,binary]) of
 	{ok,Fd} ->
-	    RecNo = case proplists:lookup("recno", Meta) of
-			none -> 1;
-			{"recno",Rn} when is_integer(Rn), Rn>0 -> Rn
+	    RecNo = case maps:find("recno", Meta) of
+			error -> 1;
+			{ok,Rn} when is_integer(Rn), Rn>0 -> Rn
 		    end,
 	    try input_loop(Fd, RecNo, []) of
 		Result -> Result

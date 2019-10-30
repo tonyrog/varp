@@ -17,8 +17,6 @@
 -export([options_spec/1]).
 -export([options_spec_list/1]).
 
--include("log.hrl").
-
 %% -define(DEBUG, true).
 -include("varp.hrl").
 

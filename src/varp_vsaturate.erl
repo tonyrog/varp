@@ -18,10 +18,6 @@
 	   true -> ok
 	end).
 
--type index()::integer().
--type var()::integer().
--type bs()::term().
-
 -spec run(Bs::bs(), K::non_neg_integer()) -> false | bs().
 
 run(Bs,K) when is_integer(K), K >= 1 ->

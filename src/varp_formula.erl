@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%-define(DEBUG, true).
+%% -define(DEBUG, true).
 -compile(export_all).
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -98,26 +98,11 @@
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
--include("log.hrl").
 -include("varp.hrl").
 
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
 
--type literal() :: integer().
--type vtype() :: 'int' | 'uint' | 'bit'.
--type ptype() :: vtype() | 'bool'.
--type psize() :: pos_integer().
--type pbits() :: {vtype(),Size::psize(),[literal()]} | {bool,literal()}.
-
--type pred()  :: {p,Name::atom(),[index()]}.
--type index() :: integer() | atom() | [integer()|atom()] | func().
--type func()  :: {f,Name::atom(),[index()]}.
-
--type var() :: pred() |
-	       {uint,Size::psize(),pred()} |
-	       {int,pred(),Size::psize(),Pos::integer()} |
-	       {bit,pred(),Size::psize(),Pos::integer()}.
 
 new() ->
     new(varp:default_options()).
@@ -129,9 +114,9 @@ new(OptMap) when is_map(OptMap) ->
 		    {clause_hash,maps:get(clause_hash,OptMap)},
 		    {edge_list,maps:get(edge_list,OptMap)},
 		    {xref, true},
-		    {activity, false}
+		    {activity, maps:get(activity,OptMap)}
 		   ]),
-    Symbols = maps:get(syms,OptMap),
+    Symbols  = maps:get(syms,OptMap),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
@@ -713,7 +698,7 @@ variable(V, Bs) ->
 			    ?dbg0("~p = ~p\n", [Bnd2,Def]),
 			    %% Names = [Name || #cid{name=Name}<-Ps],
 			    %% Bnd2 = lists:zip(Names,Rs),
-			    Meta = Bnd2 ++ Bs#bs.meta,
+			    Meta = maps:merge(Bs#bs.meta,maps:from_list(Bnd2)),
 			    ?dbg0("meta bind: ~p\n", [Meta]),
 			    {R,Bs1} = build__(Def, Bs#bs { meta=Meta}),
 			    ?dbg0("R = ~p\n", [R]),
@@ -775,13 +760,19 @@ expand_meta(V,_Bs) ->
     %% io:format("expand_meta: ~p in Bs=~p\n", [V, _Bs]),
     V.
 
-match_def(P, As, [{{p,P,Fs},Def}|Ds]) ->
+match_def(P, As, Defs) ->
+    PSym = {P,length(As)},
+    List = maps:get(PSym, Defs, []),
+    %% io:format("match_def: ~p = ~p\n", [PSym, List]),
+    match_def_list(List,As).
+
+match_def_list([{Fs,Def}|Ds],As) ->
+    %% io:format("match_def_args: ~p ~p\n", [Fs, As]),
     case match_def_args(Fs, As) of
-	false -> match_def(P, As, Ds);
+	false -> match_def_list(Ds, As);
 	Bnd -> {Bnd,Def}
     end;
-match_def(P, As, [_|Ds]) -> match_def(P,As,Ds);
-match_def(_P, _As, []) -> false.
+match_def_list([], _As) -> false.
 
 match_def_args(Fs, As) ->
     match_def_args(Fs, As, []).
@@ -806,9 +797,12 @@ match_eval(#cid{name=Name}) -> list_to_atom(Name);
 match_eval(X) when is_integer(X) -> X;
 match_eval(X) when is_atom(X) -> X.
 
-find_def(P, [Def={{p,P,_Vs},_}|_]) -> Def;
-find_def(P, [_|Defs]) -> find_def(P, Defs);
-find_def(_P, []) -> false.
+%% find propositional variable defintion P() or P
+find_prop_def(P, Defs) ->
+    case maps:get({P,0}, Defs, []) of
+	[{[],Def}] -> Def;
+	_ -> false
+    end.
 
 find_subst(P, [E={_Qy,{p,P,_}}|_]) -> E;
 find_subst(P, [_|Bnd]) -> find_subst(P, Bnd);
@@ -826,9 +820,9 @@ bind_meta([], _Bs, Acc, Bnd) ->
 
 %% bind a "meta" variable
 push_meta(V,I,Bs) ->
-    Bs#bs { meta = [{V,I}|Bs#bs.meta]}.
+    Bs#bs { meta = maps:put(V, I, Bs#bs.meta)}.
 
-pop_meta(Bs = #bs { meta = [_|Meta]}) ->
+pop_meta(Bs, Meta) ->
     Bs#bs { meta = Meta }.
 
 -spec alias(V::var(),N::integer(),Bs::#bs{}) -> #bs{}.
@@ -877,22 +871,11 @@ build(F,Bs) when is_record(Bs, bs) ->
     build1(F, Bs).
 
 build1(F, Bs) ->
-    Bs1 = build_code(?GETOPT_BS(Bs,defs),Bs),
-    try build__(F, Bs1) of
+    try build__(F, Bs) of
       	Value -> Value
     catch
       	throw:contradiction -> 
-     	    {{bool,?F},Bs1}
-    end.
-
-build_code([], Bs) ->
-    Bs;
-build_code(Defs, Bs) ->
-    case proplists:get_value(code, Defs) of
-	undefined -> Bs;
-	_Code ->
-	    %% varp_code:generate(Code, Bs)
-	    Bs
+     	    {{bool,?F},Bs}
     end.
 
 build__(F, Bs) ->
@@ -929,58 +912,43 @@ build_(W, Bs) when is_integer(W) ->
     end;
 
 build_(V={p,P,Ps}, Bs) ->
-    %% match delcs to see if this predicate is declared with
-    %% sign and bit size look for {p,P,['_','_',...]}
-    Px = {p,P,['_' || _ <- Ps]},
-    %% io:format("find ~p in ~p\n", [Px, Bs#bs.decls]),
-    case proplists:lookup(Px, Bs#bs.decls) of
-	none ->
-	    case variable(V, Bs) of
-		{X,Bs1} when is_integer(X) ->
-		    {{bool,X},Bs1};
-		{Vec,Bs1} -> {Vec,Bs1}
-	    end;
-	_Decl={_,Type,Size} ->
-	    var_vector(Type,V,Size,Bs)
+    PSym = varp:make_psym(P, Ps),
+    Arity = length(Ps),
+    case maps:find(PSym,Bs#bs.decls) of
+	error ->
+	    Decls1 = maps:put(PSym,{bool,Arity,1},Bs#bs.decls),
+	    {X, Bs1} = variable(V, Bs#bs { decls = Decls1 }),
+	    {{bool,X},Bs1};
+	{ok,{bool,Arity1,1}} when Arity =/= Arity1 ->
+	    error({arity_mismatch,P});
+	{ok,{bool,Arity,1}} ->
+	    {X, Bs1} = variable(V, Bs),
+	    true = is_integer(X),
+	    {{bool,X},Bs1};
+	{ok,{PType,_Arity,Size}} ->
+	    var_vector(PType,V,Size,Bs)
     end;
-build_({uint,N,V}, Bs) ->
-    if is_atom(V) ->
-	    Vn = atom_to_list(V),
-	    case proplists:lookup(Vn,Bs#bs.meta) of
-		none ->
+build_({PType,SExpr,PExpr},Bs) when
+      PType =:= uint; PType =:= int; PType =:= bit ->
+    if is_atom(PExpr) ->
+	    Vn = atom_to_list(PExpr),
+	    case maps:find(Vn,Bs#bs.meta) of
+		error ->
 		    io:format("variable '~s' is not bound\n", [Vn]),
 		    error({unbound, Vn});
-		{_,W} ->
-		    const_vector(uint,W,N,Bs)
+		{ok,W} ->
+		    const_vector(PType,W,SExpr,Bs)
 	    end;
-       is_integer(V) -> const_vector(uint,V,N,Bs);
-       true          -> var_vector(uint,V,N,Bs)
-    end;
-build_({int,N,V}, Bs) ->
-    if is_atom(V) ->
-	    Vn = atom_to_list(V),
-	    case proplists:lookup(Vn,Bs#bs.meta) of
-		none ->
-		    io:format("variable '~s' is not bound\n", [Vn]),
-		    error({unbound, Vn});
-		{_,W} ->
-		    const_vector(int,W,N,Bs)
-	    end;
-       is_integer(V) -> const_vector(int,V,N,Bs);
-       true          -> var_vector(int,V,N,Bs)
-    end;
-build_({bit,N,V}, Bs) ->
-    if  is_atom(V) -> 
-	    Vn = atom_to_list(V),
-	    case proplists:lookup(Vn,Bs#bs.meta) of
-		none ->
-		    io:format("variable '~s' is not bound\n", [Vn]),
-		    error({unbound, Vn});
-		{_,W} ->
-		    const_vector(bit,W,N,Bs)
-	    end;
-	is_integer(V) -> const_vector(bit,V,N,Bs);
-	true          -> var_vector(bit,V,N,Bs)
+       is_integer(PExpr) -> 
+	    const_vector(PType,PExpr,SExpr,Bs);
+       true ->
+	    Size = eval_meta(SExpr, Bs),
+	    case lookup_or_add_decl(PExpr,PType,Size,Bs) of
+		{ok,{PType1,_Arity,Size},Bs1} ->
+		    var_vector(PType1,PExpr,Size,Bs1);
+		Error ->
+		    Error
+	    end
     end;
 build_({expr,Expr}, Bs) ->
     W = eval_meta(Expr,Bs),
@@ -1019,13 +987,13 @@ build_({bit_index,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
     case A of
 	{p,P,Ps} ->  %% check if declared
-	    Px = {p,P,['_' || _ <- Ps]},
-	    case proplists:lookup(Px, Bs#bs.decls) of
-		none ->
+	    PSym = varp:make_psym(P, Ps),
+	    case maps:find(PSym, Bs#bs.decls) of
+		error ->
 		    {X,Bs1} = variable({index,A,I1}, Bs),
 		    {{bool,X},Bs1};
-		{_,Type,Size} ->
-		    case var_vector(Type,A,Size,Bs) of
+		{PType,_,PSize} ->
+		    case var_vector(PType,A,PSize,Bs) of
 			{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
 			{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
 			{{bit,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
@@ -1268,13 +1236,13 @@ build_meta(F,X,[Xi|Xs],Acc,Bs) ->
     Bs1 = push_meta(X, Xi, Bs),
     case build__(F,Bs1) of
 	{0,Bs2} ->
-	    Bs3 = pop_meta(Bs2),
+	    Bs3 = pop_meta(Bs2, Bs#bs.meta),
 	    build_meta(F,X,Xs,Acc,Bs3);
 	{Vs,Bs2} when is_list(Vs) ->
-	    Bs3 = pop_meta(Bs2),
+	    Bs3 = pop_meta(Bs2, Bs#bs.meta),
 	    build_meta(F,X,Xs,Vs++Acc,Bs3);
 	{V,Bs2} ->
-	    Bs3 = pop_meta(Bs2),
+	    Bs3 = pop_meta(Bs2, Bs#bs.meta),
 	    build_meta(F,X,Xs,[V|Acc],Bs3)
     end;
 build_meta(_F,_X,[],Acc,Bs) ->
@@ -1312,7 +1280,7 @@ build_quant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
     %% io:format("build Vn=~p Y=~w\n", [Vn,Y]),
     Bs1 = push_meta(Vn, Y, Bs),
     {Zs1,Bs2} = build_quant_(F, Xs, Bs1),
-    Bs3 = pop_meta(Bs2),
+    Bs3 = pop_meta(Bs2, Bs#bs.meta),
     {Zs2,Bs4} = build_quant_domain(F, V, Ys, Xs, Bs3),
     {Zs1++Zs2,Bs4};
 %% fixme handle arbitrary vector!
@@ -1322,10 +1290,9 @@ build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
     Bs1 = push_meta(Vn1, Y1, Bs),
     Bs2 = push_meta(Vn2, Y2, Bs1),
     {Zs1,Bs3} = build_quant_(F, Xs, Bs2),
-    Bs4 = pop_meta(Bs3),
-    Bs5 = pop_meta(Bs4),
-    {Zs2,Bs6} = build_quant_domain(F, V, Ys, Xs, Bs5),
-    {Zs1++Zs2,Bs6};
+    Bs4 = pop_meta(Bs3, Bs#bs.meta),
+    {Zs2,Bs5} = build_quant_domain(F, V, Ys, Xs, Bs4),
+    {Zs1++Zs2,Bs5};
 %% fixme handle arbitrary vector! handle set/seqeuences properly
 build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
 		   [[Y1,Y2]|Ys], Xs, Bs) ->
@@ -1333,10 +1300,9 @@ build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
     Bs1 = push_meta(Vn1, Y1, Bs),
     Bs2 = push_meta(Vn2, Y2, Bs1),
     {Zs1,Bs3} = build_quant_(F, Xs, Bs2),
-    Bs4 = pop_meta(Bs3),
-    Bs5 = pop_meta(Bs4),
-    {Zs2,Bs6} = build_quant_domain(F, V, Ys, Xs, Bs5),
-    {Zs1++Zs2,Bs6};
+    Bs4 = pop_meta(Bs3, Bs#bs.meta),
+    {Zs2,Bs5} = build_quant_domain(F, V, Ys, Xs, Bs4),
+    {Zs1++Zs2,Bs5};
 
 build_quant_domain(_F, _V, [], _Xs, Bs) ->
     {[], Bs}.
@@ -1372,7 +1338,7 @@ build_iquant_(F, [], Bs) ->
 build_iquant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
     Bs1 = push_meta(Vn, Y, Bs),
     {Zs1,Bs2} = build_iquant_(F, Xs, Bs1),
-    Bs3 = pop_meta(Bs2),
+    Bs3 = pop_meta(Bs2, Bs#bs.meta),
     {Zs2,Bs4} = build_iquant_domain(F, V, Ys, Xs, Bs3),
     {Zs1++Zs2,Bs4};
 build_iquant_domain(_F, _V, [], _Xs, Bs) ->
@@ -1441,43 +1407,39 @@ eval_meta(#crange{from=A,to=B}, Bs) ->
 eval_meta(#cid {name="true"}, _Bs)  -> true;
 eval_meta(#cid {name="false"}, _Bs) -> false;
 eval_meta(#cid {name=Vn}, Bs) ->
-    case proplists:lookup(Vn,Bs#bs.meta) of
-	none ->
+    case maps:find(Vn,Bs#bs.meta) of
+	error ->
 	    try list_to_existing_atom(Vn) of
 		L ->
-		    case lists:member(L, Bs#bs.literals) of
-			true ->
+		    case maps:find(L, Bs#bs.literals) of
+			{ok,true} ->
 			    L;
-			false ->
-			    case find_def(L, Bs#bs.defs) of
+			error ->
+			    case find_prop_def(L, Bs#bs.defs) of
 				false ->
-				    io:format("variable '~s' is not bound\n", [Vn]),
 				    error({unbound, Vn});
-				{{p,L,[]},Def} ->
-				    %% io:format("Def = ~p\n", [Def]),
+				Def ->
 				    Def
 			    end
 		    end
 	    catch
 		error:_ ->
-		    io:format("variable '~s' is not bound\n", [Vn]),
 		    error({unbound, Vn})
 	    end;
-	{_,W} -> 
+	{ok,W} -> 
 	    W
     end;
 eval_meta(V, Bs) when is_atom(V) -> %% old format still around
     Vn = atom_to_list(V),
-    case proplists:lookup(Vn,Bs#bs.meta) of
-	none ->
-	    case lists:member(V, Bs#bs.literals) of
-		true ->
+    case maps:find(Vn,Bs#bs.meta) of
+	error ->
+	    case maps:find(V, Bs#bs.literals) of
+		{ok,true} ->
 		    V;
-		false ->
-		    io:format("variable '~s' is not bound\n", [Vn]),
+		error ->
 		    error({unbound, Vn})
 	    end;
-	{_,W} -> 
+	{ok,W} -> 
 	    W
     end;
 eval_meta(#ccall{func=F,args=As},Bs) ->
@@ -1622,6 +1584,27 @@ priority('||') -> 70.
 upriority('-')   -> 1;
 upriority('!')   -> 1;
 upriority('~')   -> 1.
+
+lookup_or_add_decl({p,P,Ps},PType,Size,Bs) ->
+    PSym = varp:make_psym(P,Ps),
+    Arity = length(Ps),
+    case maps:find(PSym,Bs#bs.decls) of
+	{ok,Type={PType,Arity,Size}} ->
+	    {ok,Type,Bs};
+	{ok,Type={_PType1,Arity1,Size1}} ->
+	    if Arity =/= Arity1 ->
+		    error({arity_mismatch,P});
+	       Size =/= Size1 ->
+		    error({bitsize_mismatch,P});
+	       true ->
+		    {ok,Type,Bs}
+	    end;
+	error ->
+	    Type = {PType,Arity,Size},
+	    Decls1 = maps:put(PSym, Type, Bs#bs.decls),
+	    {ok, Type, Bs#bs { decls = Decls1 }}
+    end.
+
 
 format_meta(Expr) ->
     format_meta_(Expr, ?MAX_PRIO).
@@ -2007,6 +1990,7 @@ select_bool(_I,_N,_Xs) ->
  
 select_range(I,J,Step,N,Xs) ->
     M = max(max(I,J)+1,N),
+    %% FIXME? Maybe error on overflow, now we just extend Xs
     Xs1 = list_to_tuple(vset_size(Xs, M)),
     Range = lists:seq(I,J,Step),
     {uint,length(Range), select_range_(Range,Xs1)}.
@@ -2362,7 +2346,10 @@ operation('>>>',A,B,Bs) ->
 
 
 operation('+',A,B,Bs) ->
-    Ct = mix_type(A,B),
+    Ct = case mix_type(A,B) of
+	     bool -> uint;
+	     Ct0 -> Ct0
+	 end,
     {At,An,Ax} = xarg(Ct,A),
     {Bt,Bn,Bx} = xarg(Ct,B),
     Cn = erlang:max(An,Bn)+1,
@@ -2380,6 +2367,7 @@ operation('+',A,B,Bs) ->
 
 operation('-',A,B,Bs) ->
     Ct = case mix_type(A,B) of
+	     bool -> int;
 	     uint -> int;
 	     T -> T
 	 end,
@@ -2396,7 +2384,10 @@ operation('-',A,B,Bs) ->
     {Diff,Bs3};
 
 operation('*',A,B,Bs) ->
-    Ct = mix_type(A,B),
+    Ct = case mix_type(A,B) of
+	     bool -> uint;
+	     Ct0 -> Ct0
+	 end,
     {At,An,Ax} = xarg(Ct,A),
     {Bt,Bn,Bx} = xarg(Ct,B),
     {Cx,Bs1} =
@@ -2492,6 +2483,9 @@ sign_bit({Type,N,Xs}) when ?is_int_type(Type) ->
 
 %% Mix integer type (cast?)
 mix_type({At,_,_},{Bt,_,_}) -> mix_type(At,Bt);
+mix_type({At,_,_},{Bt,_}) -> mix_type(At,Bt);
+mix_type({At,_},{Bt,_,_}) -> mix_type(At,Bt);
+mix_type({At,_},{Bt,_}) -> mix_type(At,Bt);
 mix_type(T,T) -> T;
 mix_type(uint,int)  -> int;
 mix_type(uint,bit)  -> uint;

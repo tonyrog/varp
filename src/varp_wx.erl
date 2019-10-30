@@ -653,7 +653,8 @@ solve(Mode, S) ->
     case varp_scan:string(Meta) of
 	{ok,Ts,_Ln} ->
 	    case parse_bindings(Ts) of
-		{ok,L} -> solve(Mode, S, L);
+		{ok,L} -> 
+		    solve(Mode, S, L);
 		{error,{_Ln,Reason,Mess1}} ->
 		    Err = io_lib:format("~w ~p\n", 
 					[Reason,Mess1]),
@@ -735,7 +736,7 @@ solve(Mode, S, Bound) ->
 
 	    GDo = varp:parse_do(Do),
 
-	    GOpts2 = GOpts1#{ meta => Bound,
+	    GOpts2 = GOpts1#{ meta => maps:from_list(Bound),
 			      output => [{?MODULE,output_model,[S]}] },
 	    output_clear(S),
 	    ok = wxFrame:setStatusText(S#s.window, "ok",[]),
@@ -776,18 +777,8 @@ solve(Mode, S, Bound) ->
 		    output_text(S, "USER ABORT\n");
 		{?ERROR,_,_} ->
 		    output_text(S, "ERROR\n");
-		{'EXIT',{{unbound,Var}, _Where}} ->
-		    output_error(S, ["Variable ", Var, " is unbound\n"]);
-		{'EXIT',{{var_out_of_range,Var}, _Where}} ->
-		    VarName = if is_integer(Var) -> integer_to_list(Var);
-				 is_list(Var) -> Var;
-				 is_atom(Var) -> atom_to_list(Var)
-			      end,
-		    output_error(S, ["Variable ",VarName," is out of range\n"]);
-		{'EXIT',{empty_clause, _Where}} ->
-		    output_error(S, ["Empty clause not allowed\n"]);
-		{'EXIT',Err} ->
-		    output_error(S, io_lib:format("~p\n", [Err]));
+		{'EXIT',{Err,_Where}} ->
+		    output_error(S, varp:format_error(Err));
 		Res ->
 		    output_error(S, io_lib:format("unexpected ~p\n", [Res]))
 	    end;
@@ -890,7 +881,7 @@ parse(String) ->
 	{ok,Ts} ->
 	    case varp_parse:parse(Ts) of
 		{ok,{Sections,Formula}} ->
-		    SectionMap = varp:split_sections(Sections),
+		    {ok, SectionMap} = varp:split_sections(Sections),
 		    {ok,{SectionMap,Formula}};
 		Error -> Error
 	    end;
