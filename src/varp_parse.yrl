@@ -372,7 +372,7 @@ pexpr -> psymbol '(' ')'       : { p, '$1', []}.
 pexpr -> psymbol '(' expr ')'  : { p, '$1', comma_list('$3')}.
 
 pcexpr -> pexpr : '$1'.
-pcexpr -> integer : constant(value('$1')).
+pcexpr -> integer : value('$1').
 pcexpr -> identifier : name('$1').
 
 psymbol -> 'A' : 'A'.

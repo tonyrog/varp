@@ -1,6 +1,6 @@
 
-define FIB(0) 1:8 ;
-define FIB(1) 1:8 ;
+define FIB(0) 1 ;
+define FIB(1) 1 ;
 define FIB(n) FIB(n-1) + FIB(n-2);
 
-FIB(n)
+X:8 == FIB(n)

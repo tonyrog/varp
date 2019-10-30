@@ -371,11 +371,11 @@ make_variable(V, Bs) ->
 	true ->
 	    N = add_variable(Bs, false),
 	    add_symbol(Bs, N, format_symbol(V)),
-	    {N, alias(V,N,Bs)};
+	    {{bool,N}, alias(V,N,Bs)};
 	false ->
 	    N = add_variable(Bs, true),
 	    add_symbol(Bs, N, format_symbol(V)),
-	    {N, alias(V,N,Bs)}
+	    {{bool,N}, alias(V,N,Bs)}
     end.
 
 order_sort_last(Bs, VarList) ->
@@ -703,18 +703,15 @@ variable(V, Bs) ->
 			    {R,Bs1} = build__(Def, Bs#bs { meta=Meta}),
 			    ?dbg0("R = ~p\n", [R]),
 			    %% Meta1 = lists:nthtail(length(Bnd2),Bs1#bs.meta),
-			    case R of
-				{bool,N} ->
-				    {N,Bs1#bs { meta=Bs#bs.meta}};
-				_->
-				    {R,Bs1#bs { meta=Bs#bs.meta}}
-			    end
+			    {R,Bs1#bs { meta=Bs#bs.meta}}
 		    end;
 		_ ->
 		    make_variable(W, Bs)
 	    end;
-	{ok,N} ->
-	    {N,Bs}
+	{ok,N} when is_integer(N) ->
+	    {{bool,N},Bs};
+	{ok,Val} ->
+	    {Val,Bs}
     end.
 
 %%
@@ -917,14 +914,11 @@ build_(V={p,P,Ps}, Bs) ->
     case maps:find(PSym,Bs#bs.decls) of
 	error ->
 	    Decls1 = maps:put(PSym,{bool,Arity,1},Bs#bs.decls),
-	    {X, Bs1} = variable(V, Bs#bs { decls = Decls1 }),
-	    {{bool,X},Bs1};
+	    variable(V, Bs#bs { decls = Decls1 });
 	{ok,{bool,Arity1,1}} when Arity =/= Arity1 ->
 	    error({arity_mismatch,P});
 	{ok,{bool,Arity,1}} ->
-	    {X, Bs1} = variable(V, Bs),
-	    true = is_integer(X),
-	    {{bool,X},Bs1};
+	    variable(V, Bs);
 	{ok,{PType,_Arity,Size}} ->
 	    var_vector(PType,V,Size,Bs)
     end;
@@ -939,7 +933,7 @@ build_({PType,SExpr,PExpr},Bs) when
 		{ok,W} ->
 		    const_vector(PType,W,SExpr,Bs)
 	    end;
-       is_integer(PExpr) -> 
+       is_integer(PExpr) ->
 	    const_vector(PType,PExpr,SExpr,Bs);
        true ->
 	    Size = eval_meta(SExpr, Bs),
@@ -990,8 +984,7 @@ build_({bit_index,A,I},Bs) ->
 	    PSym = varp:make_psym(P, Ps),
 	    case maps:find(PSym, Bs#bs.decls) of
 		error ->
-		    {X,Bs1} = variable({index,A,I1}, Bs),
-		    {{bool,X},Bs1};
+		    variable({index,A,I1}, Bs);
 		{PType,_,PSize} ->
 		    case var_vector(PType,A,PSize,Bs) of
 			{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
@@ -1715,7 +1708,7 @@ var_vector(Type,V,Size,Bs) ->
 var_vector_(-1,Type,N,Xs,_V,Bs) -> 
     {{Type,N,Xs},Bs};
 var_vector_(I,Type,N,Xs,V,Bs) ->
-    {Xi,Bs1} = variable({Type,V,N,I},Bs),
+    {{bool,Xi},Bs1} = variable({Type,V,N,I},Bs),
     var_vector_(I-1,Type,N,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector
