@@ -422,7 +422,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 reorder(Bs) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    varc:decay(Bs#bs.vp, 1/0.95),
+    varc:decay(Bs#bs.vp, 0.95),
     case N rem 4 of
 	0 ->
 	    io:format("-activity\n"),

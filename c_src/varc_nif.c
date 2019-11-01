@@ -382,7 +382,7 @@ typedef literal_t *lit_t;
 
 #endif
 
-typedef uint32_t cix_t;             // clause index type
+typedef uint32_t cix_t;             // clause index type <<set:2,index:30>>
 typedef int32_t  pos_t;             // literal position type (-1 = invalid)
 #define CLAUSE_NONE ((cix_t) -1)
 #define MAKE_CIX(si,ix)  (((si)<<30)|(ix))
@@ -396,7 +396,7 @@ typedef struct _xref_t // :object_t
     pos_t p;
 } xref_t;
 
-typedef struct _edge_t // :object
+typedef struct _edge_t // :object_t
 {
     struct _edge_t* next;
     cix_t cix;            // real 2-clause
@@ -1620,19 +1620,12 @@ static ERL_NIF_TERM make_clause_info(ErlNifEnv* env,varp_t* vp,variable_t* var)
 // send either
 //     X      for permanent assignment
 //     {X, Y} for substitution where Y is replaced by X
-// FIXME: add statistics (map?)
-//     [{number-of-vars,NV}
-//      {number-of-bound-vars,NB}
-//      {number-of-clauses, NC}
-//      {number-of-dead-clauses,NCD}]
-//      ...}
 //
 
 static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 {
     ErlNifEnv* env = vp->msg_env;
-    // FIXME: create a static array of keys?
-    ERL_NIF_TERM keys[6] = {
+    ERL_NIF_TERM sub_info_keys[6] = {
 	ATOM(number_of_variables),
 	ATOM(number_of_bound_variables),
 	ATOM(number_of_clauses),
@@ -1640,42 +1633,32 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 	ATOM(max_level),
 	ATOM(max_bound)
     };
-    ERL_NIF_TERM values[6];
+    ERL_NIF_TERM values[6] = {
+	ATOM(undefined),
+	ATOM(undefined),
+	ATOM(undefined),
+	ATOM(undefined),
+	ATOM(undefined),
+	ATOM(undefined)
+    };
 	
     if (flags & SUB_FLAG_NUM_VARS)
 	values[0] = enif_make_int(env, vp->vnum);
-    else
-	values[0] = ATOM(undefined);
-
     if (flags & SUB_FLAG_NUM_BOUND)
 	values[1] = enif_make_int(env, vp->num_bound);
-    else
-	values[1] = ATOM(undefined);
-    
     if (flags & SUB_FLAG_NUM_CLAUSES)
 	values[2] = enif_make_int(env, get_number_of_clauses(vp));
-    else
-	values[2] = ATOM(undefined);
-
     if (flags & SUB_FLAG_NUM_DEAD)
 	values[3] = enif_make_int(env, vp->cdead);
-    else
-	values[3] = ATOM(undefined);
-
     if (flags & SUB_FLAG_MAX_LEVEL) {
 	values[4] = enif_make_int(env, vp->max_level);
-	vp->max_level = 0;
+	vp->max_level = 0;  // and reset
     }
-    else
-	values[4] = ATOM(undefined);
-
     if (flags & SUB_FLAG_MAX_BOUND) {
 	values[5] = enif_make_int(env, vp->max_bound);
-	vp->max_bound = 0;
+	vp->max_bound = 0;  // and reset
     }
-    else
-	values[5] = ATOM(undefined);    
-    return enif_make_map_from_arrays(env, keys, values, 6, info);
+    return enif_make_map_from_arrays(env, sub_info_keys, values, 6, info);
 }
 
 static void log_permanent(varp_t* vp, literal_t* x, literal_t* y, int level)
@@ -1939,6 +1922,7 @@ static void activate_level(varp_t* vp, int level, float delta)
 {
     variable_t* bp = vp->undo[level].bs;
 
+    // all variables or decision only?
     while(bp != NULL) {
 	bp->activity += delta;
 	bp = bp->next;
@@ -1957,7 +1941,7 @@ static void activity_decay(varp_t* vp, float decay)
 {
     int i;
     for (i = 1; i < (int)vp->vnext; i++)
-	vp->var_map[i]->activity /= decay;
+	vp->var_map[i]->activity *= decay;
 }
 
 static void init_literal(literal_t* lp, variable_t* var, int sign)
@@ -3085,6 +3069,35 @@ static void order_k_activity(varp_t* vp, int k)
 }
 
 // this is INSANE!!!
+#if defined(__ANDROID__)
+// define qsort_r the gnu way
+
+static _Thread_local struct
+{
+    int (*compar)(const void *, const void *, void *);
+    void *arg;
+} qsort_state;
+
+static int qsort_compar_wrapper(const void *a, const void *b)
+{
+    return qsort_state.compar(a, b, qsort_state.arg);
+}
+
+void qsort_r(void *base, size_t nmemb, size_t size,
+             int (*compar)(const void *, const void *, void *),
+             void *arg)
+{
+    int (*saved_compar)(const void *, const void *, void *) = qsort_state.compar;
+    void *saved_arg = qsort_state.arg;
+    qsort_state.compar = compar;
+    qsort_state.arg = arg;
+    qsort(base, nmemb, size, qsort_compar_wrapper);
+    qsort_state.compar = saved_compar;
+    qsort_state.arg = saved_arg;
+}
+
+#endif
+
 #if defined(_GNU_SOURCE)
 #define QSORT(base,nmemb,size,compar,arg) \
     qsort_r((base),(nmemb),(size),(compar),(arg))
@@ -4806,20 +4819,6 @@ error:
     return enif_make_badarg(env);
 }
 
-static ERL_NIF_TERM varp_clauseset_size(ErlNifEnv* env, int argc,
-					const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    unsigned int si;
-    
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_uint(env, argv[1], &si) || (si > NUM_CSET))
-	return enif_make_badarg(env);
-    return enif_make_uint(env, vp->cnum[si]);
-}
-
 //
 // add_clause(vp, [x1, ..., xn])
 // add_clause(vp, [x1, ..., xn], si)
@@ -5177,28 +5176,27 @@ static int cmp_stamp QSORT_ARGS(const void* a, const void* b,void* arg)
 
 // use remap (reverse map) to update cix in cross reference after
 // sorting clauses.
-static void remap_literal(literal_t* lp, unsigned int si, int* remap, int n)
+static void remap_xref(literal_t* lp, unsigned int si, int* remap, int n)
 {
     UNUSED(n);
     xref_t* xp = lp->xfirst;
-    edge_t* ep;
 
     while(xp != NULL) {
 	if (GET_SI(xp->cix) == si) {
 	    int ix = GET_IX(xp->cix);
-	    // enif_fprintf(stdout, "xref-rmap[%d] = ", ix);
-	    // enif_fprintf(stdout, "%d\r\n", remap[ix]);
 	    xp->cix = MAKE_CIX(si, remap[ix]);
 	}
 	xp = xp->next;
     }
+}
 
-    ep = lp->elist;
+static void remap_edge(literal_t* lp, unsigned int si, int* remap, int n)
+{
+    UNUSED(n);    
+    edge_t* ep = lp->elist;
     while(ep != NULL) {
 	if (GET_SI(ep->cix) == si) {
 	    int ix = GET_IX(ep->cix);
-	    // enif_fprintf(stdout, "edge-rmap[%d] = ", ix);
-	    // enif_fprintf(stdout, "%d\r\n", remap[ix]);
 	    ep->cix = MAKE_CIX(si, remap[ix]);
 	}
 	ep = ep->next;
@@ -5211,7 +5209,7 @@ static ERL_NIF_TERM varp_sort_clauses(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     unsigned int si;
-    int ix, n;
+    int n;
     clause_t** cm;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
@@ -5225,26 +5223,49 @@ static ERL_NIF_TERM varp_sort_clauses(ErlNifEnv* env, int argc,
 
     n = (int)vp->cnext[si];
     cm = vp->clause_map[si];
-    // enif_fprintf(stdout, "n map = %d\r\n", n);
     QSORT(cm, n, sizeof(clause_t*), cmp_stamp, vp);
-    {
+
+    if (vp->xref || vp->edge_list) {
+	int ix;
 	int rmap[n];
-	int i;
 
 	for (ix = 0; ix < n; ix++) {
 	    int jx = GET_IX(cm[ix]->cix);
 	    rmap[jx] = ix;  // build reverse map
 	    cm[ix]->cix = MAKE_CIX(si,ix);
-	    // enif_fprintf(stdout, "map[%d] = %d\r\n", jx, ix);
 	}
-	
+
 	// now map all xrefs and edges
-	for (i = 1; i < (int)vp->vnext; i++) {
-	    remap_literal(&vp->var_map[i]->lit[0], si, rmap, n);
-	    remap_literal(&vp->var_map[i]->lit[1], si, rmap, n);
+	if (vp->xref) {
+	    int i;
+	    for (i = 1; i < (int)vp->vnext; i++) {
+		remap_xref(&vp->var_map[i]->lit[0], si, rmap, n);
+		remap_xref(&vp->var_map[i]->lit[1], si, rmap, n);
+	    }
 	}
+	if (vp->edge_list) {
+	    int i;
+	    for (i = 1; i < (int)vp->vnext; i++) {
+		remap_edge(&vp->var_map[i]->lit[0], si, rmap, n);	    
+		remap_edge(&vp->var_map[i]->lit[1], si, rmap, n);
+	    }
+	}	
     }
     return ATOM(ok);
+}
+
+static ERL_NIF_TERM varp_clauseset_size(ErlNifEnv* env, int argc,
+					const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    unsigned int si;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!enif_get_uint(env, argv[1], &si) || (si > NUM_CSET))
+	return enif_make_badarg(env);
+    return enif_make_uint(env, vp->cnum[si]);
 }
 
 static ERL_NIF_TERM varp_clauseset_offset(ErlNifEnv* env, int argc,
@@ -5267,7 +5288,6 @@ static ERL_NIF_TERM varp_clauseset_offset(ErlNifEnv* env, int argc,
     return enif_make_uint(env, vp->coffs[si]);
 }
   
-
 static ERL_NIF_TERM varp_clause_first(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
 {
@@ -5466,8 +5486,6 @@ static ERL_NIF_TERM varp_decay(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     
     if (!vif_get_number(env, argv[1], &decay))
-	return enif_make_badarg(env);
-    if (decay <= 1.0)  // maybe allow values < 1.0...
 	return enif_make_badarg(env);
     if (vp->activity)
 	activity_decay(vp, decay);

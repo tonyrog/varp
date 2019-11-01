@@ -41,7 +41,7 @@
 
 -include_lib("stdlib/include/zip.hrl").
 
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 -include("varp.hrl").
 
 -record(stat,
@@ -526,6 +526,7 @@ varp_run(Do, Formula, GOpts) ->
     case R of
 	{'EXIT',{Error, _Where}} ->
 	    io:format("~s\n", [format_error(Error)]),
+	    ?dbg("~p\n", [_Where]),
 	    ok;
 	_ ->
 	    R
