@@ -902,12 +902,14 @@ static inline literal_t* vindex_ll(varp_t* vp, int vix)
 	&vp->var_map[vix]->lit[LIT_POS];
 }
 
+#ifdef LIT_INTEGER
 static inline literal_t* sindex_ll(varp_t* vp, unsigned uix, unsigned sign)
 {
     assert(uix != 0);
     if (uix == V_TRUE) return sign ? LL_FALSE(vp) : LL_TRUE(vp);
     return &vp->var_map[uix]->lit[sign];
 }
+#endif
 
 static inline lit_t vindex_l(varp_t* vp, int vix)
 {
@@ -1145,6 +1147,7 @@ static inline ival_t get_variable_value(varp_t* vp,variable_t* var)
 	return get_vv(vp, var);
 }
 
+#if 0
 static inline void set_variable_value(varp_t* vp,variable_t* var,ival_t ivalue)
 {
     if (var->bound)
@@ -1152,6 +1155,7 @@ static inline void set_variable_value(varp_t* vp,variable_t* var,ival_t ivalue)
     else
 	set_vv(vp, var, ivalue);
 }
+#endif
 
 // return true if variable is constant or bound to other variable
 // vix is a variable index or the negation of the same
@@ -1204,11 +1208,6 @@ static int32_t literal_array_hash(lit_t* lit, size_t size)
 	len++;
     }
     return len + (s<<10) - s + (p^((x<<5)-x));
-}
-
-static inline uint32_t clause_hash(clause_t* cp)
-{
-    return (uint32_t) literal_array_hash(cp->lit, cp->size);
 }
 
 char* format_variable(variable_t* var)
@@ -1555,11 +1554,6 @@ static inline void lqueue_put_ll(varp_t* vp, literal_t* lp)
 	q->tail = &(lp->qlink);
     }
     q->size++;
-}
-
-static inline void lqueue_put(varp_t* vp, lit_t l)
-{
-    lqueue_put_ll(vp, l2ll(vp,l));
 }
 
 
@@ -5519,14 +5513,15 @@ static int vif_get_sub_flag(ErlNifEnv* env, ERL_NIF_TERM term, uint32_t* flag)
 static int vif_get_sub_flags(ErlNifEnv* env, ERL_NIF_TERM term, uint32_t* flags)
 {
     ERL_NIF_TERM list = term;    
-    ERL_NIF_TERM head, tail;
     uint32_t fs = 0;
 
     if (enif_is_atom(env, term)) {
-	if (!vif_get_sub_flag(env, head, &fs))
+	if (!vif_get_sub_flag(env, term, &fs))
 	    return 0;
     }
     else {
+	ERL_NIF_TERM head, tail;
+
 	while(enif_get_list_cell(env, list, &head, &tail)) {
 	    uint32_t f;	
 	    if (!vif_get_sub_flag(env, head, &f))
