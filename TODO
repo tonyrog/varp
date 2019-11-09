@@ -1,6 +1,10 @@
 
+- Seoul
 
   - Level/Bound feedback (for fun)
+  - Xref on/off (get_clauses) (OK)
+  - What if TWL opt for literals that are already watched in
+    other clauses?
 
 - Shanghai
 

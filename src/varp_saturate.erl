@@ -71,11 +71,13 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     saturate(Bs,K,Timeout,MaxLaps,Threshold).
 
 saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
+    varc:clauseset_xref(Bs#bs.vp, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     case saturate_(Bs1,K,MaxLaps,Threshold) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
 	{Reason,Bs1} -> 
+	    varc:clauseset_xref(Bs#bs.vp, false),
 	    %% io:format("level = ~w\n", [varp_formula:info(Bs, level)]),
 	    ?dbg("saturate limit ~w\n", [_Reason]),
 	    {Reason,[],Bs1#bs{ t_local = undefined }}

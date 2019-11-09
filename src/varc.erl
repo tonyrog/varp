@@ -70,6 +70,8 @@
 -export([subscribe/2]).
 -export([clauseset_size/2]).
 -export([clauseset_offset/2, clauseset_offset/3]).
+-export([clauseset_xref/2]).
+-export([clauseset_xref/3]).
 -export([clause_first/1, clause_first/2]).
 -export([clause_next/2]).
 
@@ -93,10 +95,10 @@
 -define(debug(F,A), ok).
 -endif.
 
--define(CLAUSE_SET_DELTA, 0).
--define(CLAUSE_SET_GAMMA, 1).
--define(CLAUSE_SET_ALPHA, 2).
--define(CLAUSE_SET_BETA,  3).
+-define(DELTA, 0).
+-define(GAMMA, 1).
+-define(ALPHA, 2).
+-define(BETA,  3).
 
 -type varc() :: reference().
 -type literal() :: integer().
@@ -278,6 +280,17 @@ eval(_Vp) ->
 clauseset_size(_Vp, _Si) ->
     ?nif_stub().    
 
+-spec clauseset_xref(Vp::varc(),Enable::boolean()) -> ok.
+clauseset_xref(Vp, Enable) ->
+    clauseset_xref(Vp, ?DELTA, Enable),
+    clauseset_xref(Vp, ?GAMMA, Enable),
+    clauseset_xref(Vp, ?ALPHA, Enable),
+    clauseset_xref(Vp, ?BETA, Enable).
+
+-spec clauseset_xref(Vp::varc(),Si::integer(),Enable::boolean()) -> ok.
+clauseset_xref(_Vp, _Si, _Enable) ->
+    ?nif_stub().
+
 -spec add_clause(Vp::varc(),Ls::[literal()]) ->
 			false | error | integer().
 add_clause(_Vp,Ls) when is_list(Ls) ->
@@ -436,7 +449,7 @@ clauseset_offset(_Vp, _Si, _Offset) ->
 
 %% return index to first clause | false
 clause_first(Vp) ->
-    clause_first(Vp, ?CLAUSE_SET_DELTA).
+    clause_first(Vp, ?DELTA).
 
 clause_first(_Vp, _Si) ->
     ?nif_stub().

@@ -159,7 +159,7 @@ undo_level(Bs, Level) ->
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
 proof_output(Bs, Stack) ->
-    case varp_formula:getopt(Bs, proof_output) of
+    case ?GETOPT_BS(Bs, proof_output) of
 	none ->
 	    ok;
 	_ ->

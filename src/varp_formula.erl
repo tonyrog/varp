@@ -111,9 +111,9 @@ new(Options) when is_list(Options) ->
     new(maps:from_list(Options));  %% fixme validate?
 new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{qtype,maps:get(qtype,OptMap)},
+		    {xref,maps:get(xref,OptMap)},
 		    {clause_hash,maps:get(clause_hash,OptMap)},
 		    {edge_list,maps:get(edge_list,OptMap)},
-		    {xref, true},
 		    {activity, maps:get(activity,OptMap)}
 		   ]),
     Symbols  = maps:get(syms,OptMap),

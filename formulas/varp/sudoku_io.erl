@@ -10,7 +10,6 @@ input(Line, _Acc) ->
     %% remove all zeros and inject indices
     {true,{'ALL',[{p,'S',[I,J,K]} || {{p,'S',[I,J]},K} <- NsSs, K =/= 0]}}.
 
-%% fixme: display a sudoku grid 
 output(Fd, Model) ->
     %% io:format(Fd, "~p\n", [Model]).
     io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n", []),

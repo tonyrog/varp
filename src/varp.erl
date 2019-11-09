@@ -231,6 +231,12 @@ global_options() ->
 	 default => false,
 	 description => "enable activity sorting during restarts."
        },
+      #{ long => "xref",
+	 key => xref,
+	 spec =>  {enum,[?BOOL]},
+	 default => false,
+	 description => "enable xref from start."
+       },
       #{ long => "version",
 	 short => "V", 
 	 key => version,
@@ -368,9 +374,11 @@ main(Args) ->
 	    case archive_type(F) of
 		undefined ->
 		    try load_files([F],Formula0,Sections0,'and',GOpts3) of
-			{ok,{Sections1,Formula}} ->
-			    GOpts4 = section_opts(Sections1, GOpts3),
-			    varp_run(Do,Formula,GOpts4)
+			{ok,{Sections1,Formula,GOpts4}} ->
+			    GOpts5 = section_opts(Sections1, GOpts4),
+			    varp_run(Do,Formula,GOpts5);
+			_Error ->
+			    halt(1)
 		    catch
 			?EXCEPTION(error,Error2,Trace2) ->
 			    io:format("~s\n", [format_error(Error2)]),
@@ -382,9 +390,11 @@ main(Args) ->
 	    end;
 	Fs ->
 	    try load_files(Fs,Formula0,Sections0,'and',GOpts3) of
-		{ok,{Sections1,Formula}} ->
-		    GOpts4 = section_opts(Sections1, GOpts3),
-		    varp_run(Do,Formula,GOpts4)
+		{ok,{Sections1,Formula,GOpts4}} ->
+		    GOpts5 = section_opts(Sections1, GOpts4),
+		    varp_run(Do,Formula,GOpts5);
+		_Error ->
+		    halt(1)
 	    catch
 		?EXCEPTION(error,Error3,Trace3) ->
 		    io:format("~s\n", [format_error(Error3)]),
@@ -512,8 +522,8 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
       fun(F) ->
 	      AFile = filename:join(ArchiveFile,F),
 	      case load_files([AFile],true,empty_sections(),'and',GOpts) of
-		  {ok,{Sections,Formula}} ->
-		      varp_run(Do,Formula, section_opts(Sections, GOpts));
+		  {ok,{Sections,Formula,GOpts1}} ->
+		      varp_run(Do,Formula, section_opts(Sections, GOpts1));
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
 		      ok
@@ -813,6 +823,13 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		{ok,Formula} ->
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
 		    load_files(Fs,Formula1,Sections,JoinOp,GOpts);
+		{ok,MetaF,Formula} ->
+		    %% io:format("Meta = ~p\n", [MetaF]),
+		    Meta1 = maps:merge(Meta, maps:from_list(MetaF)),
+		    %% io:format("Meta1 = ~p\n", [Meta1]),
+		    GOpts1 = maps:put(meta,Meta1,GOpts),
+		    Formula1 = join_f(JoinOp,Formula,Formula0),
+		    load_files(Fs,Formula1,Sections,JoinOp,GOpts1);
 		Error ->
 		    Error
 	    end;
@@ -830,8 +847,8 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		    Error
 	    end
     end;
-load_files([],Formula,Sections,_JoinOp,_GOpts) ->
-    {ok,{Sections,Formula}}.
+load_files([],Formula,Sections,_JoinOp,GOpts) ->
+    {ok,{Sections,Formula,GOpts}}.
 
 
 %% special input format
@@ -1295,9 +1312,12 @@ set_global_timeout(Bs, infinity) ->
     Bs#bs { t_global = undefined }.
 
 check_timeout_or_cancel(Bs, Counter, CheckInterval) ->
-    Time1 = erlang:system_time(millisecond),
+    Time1 = erlang:monotonic_time(millisecond),
     Time0 = counters:get(Bs#bs.counters, Counter),
-    if Time1 - Time0 >= CheckInterval ->
+    if Time0 =:= 0 ->
+	    counters:put(Bs#bs.counters,Counter,Time1),
+	    false;
+       Time1 - Time0 >= CheckInterval ->
 	    counters:put(Bs#bs.counters,Counter,Time1),
 	    is_timeout_or_was_canceled(Bs);
        true ->

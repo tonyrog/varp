@@ -250,71 +250,117 @@ or_eval_bindings() ->
     print_clauses(V),
     ok.
 
+dump_variables(V, List) ->
+    lists:foreach(
+      fun(X) ->
+	      io:format("~w: ~p\n", [X, varc:variable_info(V, X)])
+      end, List).
+
 
 order() ->
-    V = varc:new(),
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
-    X6 = varc:add_variable(V),
+    V = varc:new([{activity, true}]),
+    X1 = varc:add_variable(V), varc:add_symbol(V, X1, <<"X1">>),
+    X2 = varc:add_variable(V), varc:add_symbol(V, X2, <<"X2">>),
+    X3 = varc:add_variable(V), varc:add_symbol(V, X3, <<"X3">>),
+    X4 = varc:add_variable(V), varc:add_symbol(V, X4, <<"X4">>),
+    X5 = varc:add_variable(V), varc:add_symbol(V, X5, <<"X5">>),
+    X6 = varc:add_variable(V), varc:add_symbol(V, X6, <<"X6">>),
+    Y1 = varc:add_variable(V),
+    Y2 = varc:add_variable(V),
+    Y3 = varc:add_variable(V),
+
+    _Z0 = add_clause(V, [Y2, Y3]),
+    _Z1 = add_clause(V, [Y2, -Y3]),
+    _C0 = add_clause(V, [X1, X2, X3, X4, X5, X6, Y1]),
+    _C1 = add_clause(V, [    X2, X3, X4, X5, X6, Y1]),
+    _C2 = add_clause(V, [        X3, X4, X5, X6, Y1]),
+    _C3 = add_clause(V, [            X4, X5, X6, Y1]),
+    _C4 = add_clause(V, [                X5, X6, Y1]),
+    _C5 = add_clause(V, [                    X6, Y1]),
+    varc:bind(V, Y1),
+
+    lists:foreach(
+      fun({L,Xi}) ->
+	      varc:set_level(V,L), varc:bind(V, Xi),
+	      varc:set_level(V,L+1), varc:bind(V, -Y2), false = varc:eval(V),
+	      varc:undo_level(V,L+1)
+      end, [{X1,1},{X2,2},{X3,3},{X4,4},{X5,5},{X6,6}]),
+
+    lists:foreach(
+      fun(L) ->
+	      varc:undo_level(V, L)
+      end, lists:seq(7,1,-1)),
+    varc:bind(V, Y2),
+    varc:bind(V, Y3),
+
+    dump_variables(V, [X1,X2,X3,X4,X5,X6]),
     
-    _C0 = add_clause(V, [-X1, -X2, -X3]),
-    _C1 = add_clause(V, [-X2, -X3, -X4]),
-    _C2 = add_clause(V, [X5, X1, X2]),
-    _C3 = add_clause(V, [X6, X5, X1]),
-
-    %% d(-X1)=1, d(X1)=2, d(-X2)=2 d(X2)=1
-    %% d(-X3)=2, d(X3)=0, d(-X4)=1, d(X4)=0
-    %% d(-X5)=0, d(X5)=2, d(-X6)=0, d(X6)=1
-
-    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort(V, 'identity'),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
+    %% d(X1) = 1
+    %% d(X2) = 2
+    %% d(X3) = 3
+    %% d(X4) = 4
+    %% d(X5) = 5
+    %% d(X6) = 6
+
+    ok = varc:order_sort(V, '-degree'),
+    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+
+    ok = varc:order_sort(V, '+degree'),
+    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+
+    %% r(X1) = 1/7,
+    %% r(X2) = 1/7+1/6
+    %% r(X3) = 1/7+1/6+1/5
+    %% r(X4) = 1/7+1/6+1/5+1/4
+    %% r(X5) = 1/7+1/6+1/5+1/4+1/3
+    %% r(X6) = 1/7+1/6+1/5+1/4+1/3+1/2
+
+    ok = varc:order_sort(V, '-rank'),
+    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+
+    ok = varc:order_sort(V, '+rank'),
+    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+
+    ok = varc:order_sort(V, '-activity'),
+    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+
+    ok = varc:order_sort(V, '+activity'),
+    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+
+    ok = varc:decay(V, 0.1),
+
+    dump_variables(V, [X1,X2,X3,X4,X5,X6]),
+    
+
+    %% first check
     ok = varc:order_sort(V, identity, undefined, 0),
     ok = varc:order_sort_first(V, [X5, X6]),
     [X5, X6, X1, X2, X3, X4] = varc:order_all(V),
 
+    %% last check
     ok = varc:order_sort(V, identity, undefined, 0),
     ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
     [X3, X4, X5, X6, X1, X2] = varc:order_all(V),
 
+    %% first & last check
     ok = varc:order_sort(V, identity, undefined, 0),
     ok = varc:order_sort_first(V, [X5, X6]),
     ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
-    [X6, X5, X4, X3, X1, X2] = varc:order_all(V),
+    [X5, X6, X3, X4, X1, X2] = varc:order_all(V),
 
     ok = varc:order_sort(V, random, undefined, 1001),
-    Sort1 = varc:order_all(V),
-    io:format("random,1001, Vs = ~p\n", [Sort1]),
+    Rand1001 = [X1,X6,-X3,X5,-X4,X2],
+    Rand1001 = varc:order_all(V),
+    %% io:format("random,1001, Vs = ~p\n", [Sort1]),
 
     ok = varc:order_sort(V, random, undefined, 1003),
-    Sort2 = varc:order_all(V),
-    io:format("random,1003, Vs = ~p\n", [Sort2]),
+    Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
+    Rand1003 = varc:order_all(V),
+    %% io:format("random,1003, Vs = ~p\n", [Sort2]),
 
-    ok = varc:order_sort(V, '+degree', undefined, 0),
-    io:format("+degree, Vs = ~p\n", [varc:order_all(V)]),
-    
-    ok = varc:order_sort(V, '-degree', undefined, 0),
-    io:format("-degree, Vs = ~p\n", [varc:order_all(V)]),
-
-    ok = varc:order_sort(V, '+rank', undefined, 0),
-    io:format("rank>0, Vs = ~p\n", [varc:order_all(V)]),
-
-    ok = varc:order_sort(V, '-rank', undefined, 0),
-    io:format("rank<0, Vs = ~p\n", [varc:order_all(V)]),
-
-%%    ok = varc:order_sort(V, '+degree', '+rank', 0),
-%%    io:format("occur,depth>0, Vs = ~p\n", [varc:order_all(V)]),
-%%    ok = varc:order_sort(V, '-degree', '-rank, 0),
-%%    io:format("occur,depth<0, Vs = ~p\n", [varc:order_all(V)]),
-
-%%    ok = varc:order_sort(V, '+rank', '+degree', 0),
-%%    io:format("depth,occur>0, Vs = ~p\n", [varc:order_all(V)]),
-
-%%    ok = varc:order_sort(V, '-rank', '-degree', 0),
-%%    io:format("depth,occur<0, Vs = ~p\n", [varc:order_all(V)]),
     ok.
 
 subst0a() ->
