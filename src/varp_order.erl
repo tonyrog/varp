@@ -50,7 +50,7 @@ order_literals(Bs, Param) ->
 	[Key1,Key2] ->
 	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
 	[Key1] ->
-	    varp_formula:order_sort(Bs,Key1,undefined,Seed)
+	    varp_formula:order_sort(Bs,Key1,?ORDER_UNDEFINED,Seed)
     end,
     Bs1 = case maps:get(first,Param) of
 	      [] -> Bs;

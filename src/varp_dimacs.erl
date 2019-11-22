@@ -40,7 +40,7 @@ detect_binary(Bin) ->
 	    false;
 	{ok,[$c|_Comment],Bin1} ->
 	    detect_binary(Bin1);
-	{ok,[$p|Line],_Bin1} ->
+	{ok,[$p,$\s|Line],_Bin1} ->
 	    case string:tokens(Line, " \r") of
 		["snf", _Variables, _Clauses] ->
 		    {true,snf};
@@ -51,7 +51,7 @@ detect_binary(Bin) ->
 		_ ->
 		    false
 	    end;
-	{ok,_} ->
+	{ok,_, _} ->
 	    false
     end.
 
@@ -80,7 +80,7 @@ preamble(Bin,Sect,L) ->
 	{ok,[$c|Comment],Bin1} ->
 	    Sect1 = scan_section(Comment,Sect),
 	    preamble(Bin1,Sect1,L+1);
-	{ok,[$p|Line],Bin1} ->
+	{ok,[$p,$\s|Line],Bin1} ->
 	    %% io:format("~s", [Line]),
 	    case string:tokens(Line, " \r") of
 		["snf", Variables, Clauses] ->
@@ -93,7 +93,9 @@ preamble(Bin,Sect,L) ->
 		    sat(Bin1,Sect,L,list_to_integer(Variables));
 		_ ->
 		    {error,{L,?MODULE,unknown_format}}
-	    end
+	    end;
+	{ok,_,_Bin} ->
+	    {error,{L,?MODULE,unknown_format}}
     end.
 
 %% CNF format

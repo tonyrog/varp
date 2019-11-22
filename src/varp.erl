@@ -46,15 +46,18 @@
 
 -record(stat,
 	{
-	 clause_count,
-	 clause_count_2,
-	 clause_count_3,
-	 clause_count_dead,
-	 clause_count_edge,
+	 clause_n_counter,
+	 clause_2_counter,
+	 clause_3_counter,
+	 clause_d_counter,
+	 edge_2_counter,
+	 edge_d_counter,
 	 eval_count,
 	 bound,
 	 clauses,
-	 dead_clauses
+	 dead_clauses,
+	 edges,
+	 dead_edges
 	}).
 
 global_options() ->
@@ -210,7 +213,7 @@ global_options() ->
       #{ long => "qtype",
 	 key => qtype,
 	 spec => {enum,[{"fifo",fifo},{"lifo",lifo},{"recursive",recursive}]},
-	 default => lifo,
+	 default => recursive,
 	 description => "lifo, fifo or depth first queue type."
        },
       #{ long => "clause-hash",
@@ -219,8 +222,8 @@ global_options() ->
 	 default => false,
 	 description => "use clause hash, speed up validate."
        },
-      #{ long => "edge-list",
-	 key => edge_list,
+      #{ long => "edge",
+	 key => edge,
 	 spec =>  {enum,[?BOOL]},
 	 default => false,
 	 description => "use edge list, instead of 2-clauses."
@@ -660,15 +663,18 @@ combine_result(Ns,M) when is_list(Ns), is_integer(M) ->
     length(Ns)+M.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | eval: ~w\n    | clause:~w,~w(2),~w(3),~w(dead),~w(edge)\n    | #clauses = ~w, #dead = ~w\n    | time=~.2fs\n",
+    varp_formula:info(Bs, "    | eval: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w,E:~w,D:~w\n    | #clauses:~w, #dead:~w, #edges:~w, #dead-edges:~w\n | time=~.2fs\n",
 		      [S1#stat.eval_count-S0#stat.eval_count,
-		       S1#stat.clause_count - S0#stat.clause_count,
-		       S1#stat.clause_count_2 - S0#stat.clause_count_2,
-		       S1#stat.clause_count_3 - S0#stat.clause_count_3,
-		       S1#stat.clause_count_dead - S0#stat.clause_count_dead,
-		       S1#stat.clause_count_edge - S0#stat.clause_count_edge,
+		       S1#stat.clause_n_counter - S0#stat.clause_n_counter,
+		       S1#stat.clause_2_counter - S0#stat.clause_2_counter,
+		       S1#stat.clause_3_counter - S0#stat.clause_3_counter,
+		       S1#stat.clause_d_counter - S0#stat.clause_d_counter,
+		       S1#stat.edge_2_counter - S0#stat.edge_2_counter,
+		       S1#stat.edge_d_counter - S0#stat.edge_d_counter,
 		       S1#stat.clauses,
 		       S1#stat.dead_clauses,
+		       S1#stat.edges,
+		       S1#stat.dead_edges,
 		       Ts]),
     varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
 		      [S1#stat.bound-S0#stat.bound,
@@ -677,15 +683,18 @@ show_info(S1, S0, Ts, Bs) ->
 		      ]).
 
 stat(Bs) ->
-    #stat { clause_count   = varp_formula:clause_eval_counter(Bs,0),
-	    clause_count_2 = varp_formula:clause_eval_counter(Bs,2),
-	    clause_count_3 = varp_formula:clause_eval_counter(Bs,3),
-	    clause_count_dead = varp_formula:clause_eval_counter(Bs,dead),
-	    clause_count_edge = varp_formula:clause_eval_counter(Bs,edge),
+    #stat { clause_n_counter = varp_formula:clause_eval_counter(Bs,n),
+	    clause_2_counter = varp_formula:clause_eval_counter(Bs,2),
+	    clause_3_counter = varp_formula:clause_eval_counter(Bs,3),
+	    clause_d_counter = varp_formula:clause_eval_counter(Bs,dead),
+	    edge_2_counter = varp_formula:clause_eval_counter(Bs,edge_eval),
+	    edge_d_counter = varp_formula:clause_eval_counter(Bs,edge_dead),
 	    eval_count     = varp_formula:eval_counter(Bs),
 	    bound          = varp_formula:number_of_bound(Bs),
 	    clauses        = varp_formula:number_of_clauses(Bs),
-	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs)
+	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs),
+	    edges          = varp_formula:number_of_edges(Bs),
+	    dead_edges     = varp_formula:number_of_dead_edges(Bs)
 	  }.
 
 %% extract "method" form Do list
@@ -771,9 +780,9 @@ no_models(Bs) ->
 order_decl([]) -> [];
 order_decl(Vs) -> order_decl(Vs,[]).
 
-order_decl([Key1,Key2|Vs],Opts) when is_atom(Key1), is_atom(Key2) ->
+order_decl([Key1,Key2|Vs],Opts) when is_integer(Key1), is_integer(Key2) ->
     order_decl(Vs,[{order,[Key1,Key2]}|Opts]);
-order_decl([Key1|Vs],Opts) when is_atom(Key1) ->
+order_decl([Key1|Vs],Opts) when is_integer(Key1) ->
     order_decl(Vs,[{order,[Key1]}|Opts]);
 order_decl([V|Vs],[{order_list,Ls}|Opts]) when is_tuple(V) ->
     order_decl(Vs, [{order_list,Ls++[V]}|Opts]);

@@ -16,7 +16,7 @@ options() ->
 	key   => edges,
 	spec  => {enum,[?BOOL]},
 	default => false,
-	description => "remove edges that are constant."
+	description => "remove edges that are true."
       },
      #{ long  => "clauses",
 	short => "c",
@@ -34,9 +34,8 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 	    true -> varp_formula:clean_clauses(Bs)
 	end,
     Bs2 = 
-	case maps:get(literals, Param, false) of
+	case maps:get(edges, Param, false) of
 	    false -> Bs1;
-	    true -> varp_formula:clean_literals(Bs1)
+	    true -> varp_formula:clean_edges(Bs1)
 	end,
     {?CONTINUE, [], Bs2}.
-

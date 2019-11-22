@@ -60,14 +60,10 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_formula:config(Bs, max_conflicting, 1),
     K = maps:get(level, Param, 1),
     _Pair = maps:get(pair, Param, false),
-    Order = maps:get(order, Param, undefined),
     Timeout = maps:get(timeout, Param, infinity),
     Threshold = maps:get(threshold, Param, 0),
     Laps = maps:get(laps, Param, infinity),
     MaxLaps = max_laps(K, Laps),
-    if Order =:= undefined -> ok;
-       true -> varp_formula:order_sort(Bs, Order)
-    end,
     saturate(Bs,K,Timeout,MaxLaps,Threshold).
 
 saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
@@ -197,9 +193,10 @@ loop_k_next(Bs,I,_X,K,N,Level,Laps,Threshold) ->
 
 init_1(Bs,N,Level,Laps,Threshold) ->
     case varp_formula:first_unbound(Bs) of
-	false -> 
+	false ->
 	    loop_1_done(?NOVAR,Laps,Bs);
-	{I,X} -> 
+	{I,X} ->
+	    varp_formula:clear_user_count(Bs),
 	    loop_1(Bs,I,X,N,Level,Laps,Threshold)
     end.
 
@@ -224,6 +221,7 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 	    end;
 	true ->
 	    Ls = varp_formula:get_bindings(Bs,Level+1),
+	    set_user_count(Bs, -X, Level+1),
 	    pop(Bs,Level),
 	    case push_eq_eval(Bs,X,Level) of
 		false ->
@@ -238,7 +236,7 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 			 [indent(Level),varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(
 			    Bs, tl(varp_formula:get_bindings(Bs,Level+1)))]),
-		    %% FIXME: if tl(Ys) = [] then do nothig...
+		    set_user_count(Bs, X, Level+1),
 		    Ys = varp_formula:intersect_bindings(Bs, X, tl(Ls)),
 		    %% FIXME: check if proof_output is active!
 		    case varp_formula:want_proof_output(Bs) of
@@ -299,6 +297,13 @@ loop_1_done(Reason, _Laps={_Ls,_Ms}, Bs) ->
     %% io:format("lap count=~w (~w)\n", [(M-L)+1, Laps]),
     {Reason,Bs}.
 
+%% Fixme check flag - we may want to store other stuff as user count!
+set_user_count(Bs, X, Level) ->
+    Vp = Bs#bs.vp,
+    N = varc:get_number_of_bindings(Vp, Level),
+    ?dbg0("set_user_count: ~w = ~w\n", [X, N]),
+    varc:set_user_count(Vp, X, N).
+
 %% push level, set (unbound) variable and eval
 push_eq_eval(Bs,X,Level) ->
     ?dbg("~spush_eq_eval: ~s\n", 
@@ -342,6 +347,7 @@ max_laps(3, [L]) -> {{L,L,L},{L,L,L}};
 max_laps(3, [L2,L1]) -> {{L1,L2,L2},{L1,L2,L2}};
 max_laps(3, [L3,L2,L1]) -> {{L1,L2,L3},{L1,L2,L3}}.
 
+%% FIXME!
 dec(K, {Ls,Ms}) ->
     case element(K, Ls) of
 	1 when K =:= 1 -> stop;

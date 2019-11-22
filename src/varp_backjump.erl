@@ -426,17 +426,20 @@ reorder(Bs) ->
     case N rem 4 of
 	0 ->
 	    io:format("-activity\n"),
-	    varp_formula:order_sort(Bs,'-activity',undefined,-1);
+	    varp_formula:order_sort(Bs,?ORDER_ACTIVITY bor ?ORDER_DESCEND,
+				    ?ORDER_UNDEFINED,-1);
 	1 ->
 	    io:format("-degree\n"),
-	    varp_formula:order_sort(Bs,'-degree',undefined,-1);
+	    varp_formula:order_sort(Bs,?ORDER_DEGREE bor ?ORDER_DESCEND,
+				    ?ORDER_UNDEFINED,-1);
 	2 ->
 	    io:format("-rank\n"),
-	    varp_formula:order_sort(Bs,'-rank',undefined,-1);
+	    varp_formula:order_sort(Bs,?ORDER_RANK bor ?ORDER_DESCEND,
+				    ?ORDER_UNDEFINED,-1);
 	3 ->
 	    io:format("random\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
-	    varp_formula:order_sort(Bs,random,undefined,Seed);
+	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed);
 	4 ->
 	    %% enable when 2-clauses works again
 	    io:format("saturate\n"),
@@ -617,23 +620,11 @@ add_conflict_clause(Bs,Clause=[L]) ->
     Bs;
 add_conflict_clause(Bs,Clause) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
-    Max = varp_formula:info(Bs, max_clause_length),
-    L = length(Clause),
-    if L >= Max ->
-	    L2 = L div 2,
-	    {CL1,CL2} = lists:split(L2, Clause),
-	    Vi = varp_formula:add_variable(Bs),
-	    Bs1 = varp_formula:set_var({p,'#',[Vi]}, Vi, Bs),
-	    Bs2 = add_conflict_clause(Bs1,[Vi|CL1]),
-	    add_conflict_clause(Bs2,[-Vi|CL2]);
-       true ->
-	    ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
-	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
-	    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,
-			 length(Clause)),
-	    varp_formula:proof_output(Bs,$a,ClauseIndex),
-	    Bs
-    end.
+    ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
+    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
+    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),
+    varp_formula:proof_output(Bs,$a,ClauseIndex),
+    Bs.
 
 abs_sort(Clause) ->
     lists:sort(fun(A,B) -> abs(A) < abs(B) end, Clause).

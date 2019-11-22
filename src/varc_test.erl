@@ -22,6 +22,7 @@ all() ->
       end, [test1, test2, test3,
 	    or_simplify, or_eval,
 	    watch1,
+	    order,
 	    edge_list0,edge_list1, edge_list2, edge_list3,
 	    subst0a, subst0b, subst0c, subst0d, 
 	    subst1, subst2, subst3, subst4, subst5, subst6
@@ -256,7 +257,6 @@ dump_variables(V, List) ->
 	      io:format("~w: ~p\n", [X, varc:variable_info(V, X)])
       end, List).
 
-
 order() ->
     V = varc:new([{activity, true}]),
     X1 = varc:add_variable(V), varc:add_symbol(V, X1, <<"X1">>),
@@ -290,12 +290,19 @@ order() ->
       fun(L) ->
 	      varc:undo_level(V, L)
       end, lists:seq(7,1,-1)),
+
+    lists:foreach(
+      fun({L,Cp,Cn}) ->
+	      varc:set_user_count(V,L,Cp),
+	      varc:set_user_count(V,-L,Cn)
+      end, [{X1,12,10},{X2,11,13},{X3,16,14},{X4,15,17},{X5,20,18},{X6,19,21}]),
+	      
     varc:bind(V, Y2),
     varc:bind(V, Y3),
 
     dump_variables(V, [X1,X2,X3,X4,X5,X6]),
     
-    ok = varc:order_sort(V, 'identity'),
+    ok = varc:order_sort(V, ?ORDER_IDENTITY),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
     %% d(X1) = 1
@@ -305,10 +312,10 @@ order() ->
     %% d(X5) = 5
     %% d(X6) = 6
 
-    ok = varc:order_sort(V, '-degree'),
+    ok = varc:order_sort(V, ?ORDER_DEGREE bor ?ORDER_DESCEND),
     [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
 
-    ok = varc:order_sort(V, '+degree'),
+    ok = varc:order_sort(V, ?ORDER_DEGREE bor ?ORDER_ASCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
     %% r(X1) = 1/7,
@@ -318,45 +325,54 @@ order() ->
     %% r(X5) = 1/7+1/6+1/5+1/4+1/3
     %% r(X6) = 1/7+1/6+1/5+1/4+1/3+1/2
 
-    ok = varc:order_sort(V, '-rank'),
+    ok = varc:order_sort(V, ?ORDER_RANK bor ?ORDER_DESCEND),
     [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
 
-    ok = varc:order_sort(V, '+rank'),
+    ok = varc:order_sort(V, ?ORDER_RANK bor ?ORDER_ASCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
-    ok = varc:order_sort(V, '-activity'),
+    ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_DESCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
-    ok = varc:order_sort(V, '+activity'),
+    ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_ASCEND),
     [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
 
     ok = varc:decay(V, 0.1),
 
     dump_variables(V, [X1,X2,X3,X4,X5,X6]),
-    
+
+    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
+    U1 = [X1,-X2,X3,-X4,X5,-X6],
+    U1 = varc:order_all(V),
+
+    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
+    U2 = [-X6,X5,-X4,X3,-X2,X1],
+    U2 = varc:order_all(V),
 
     %% first check
-    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
     ok = varc:order_sort_first(V, [X5, X6]),
     [X5, X6, X1, X2, X3, X4] = varc:order_all(V),
 
     %% last check
-    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
     ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
     [X3, X4, X5, X6, X1, X2] = varc:order_all(V),
 
     %% first & last check
-    ok = varc:order_sort(V, identity, undefined, 0),
+    ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
     ok = varc:order_sort_first(V, [X5, X6]),
     ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
     [X5, X6, X3, X4, X1, X2] = varc:order_all(V),
 
-    ok = varc:order_sort(V, random, undefined, 1001),
+    ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
+			 ?ORDER_UNDEFINED, 1001),
     Rand1001 = [X1,X6,-X3,X5,-X4,X2],
     Rand1001 = varc:order_all(V),
     %% io:format("random,1001, Vs = ~p\n", [Sort1]),
 
-    ok = varc:order_sort(V, random, undefined, 1003),
+    ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
+			 ?ORDER_UNDEFINED, 1003),
     Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
     Rand1003 = varc:order_all(V),
     %% io:format("random,1003, Vs = ~p\n", [Sort2]),
@@ -588,24 +604,24 @@ watch1() ->
        [X1,X2,X3,X4,X5] = varc:get_clause(V, C1),
     %%  0  A   0  0  0
     %% initial watch points are set in the end!
-    4 = varc:clause_info(V, C1, watch0),
-    3 = varc:clause_info(V, C1, watch1),
+    0 = varc:clause_info(V, C1, watch0),
+    1 = varc:clause_info(V, C1, watch1),
 
     %% bind X4, move wp 0
     varc:set_level(V, 1),
     varc:bind(V, -X4),
     true = varc:eval(V),
 
-    4 = varc:clause_info(V, C1, watch0),
-    0 = varc:clause_info(V, C1, watch1),
+    0 = varc:clause_info(V, C1, watch0),
+    1 = varc:clause_info(V, C1, watch1),
 
     %% bind -X3, not watched, watch points should stay the same
     varc:set_level(V, 2),
     varc:bind(V, -X3),
     true = varc:eval(V),
 
-    4 = varc:clause_info(V, C1, watch0),
-    0 = varc:clause_info(V, C1, watch1),
+    0 = varc:clause_info(V, C1, watch0),
+    1 = varc:clause_info(V, C1, watch1),
 
     varc:set_level(V, 3),
     varc:bind(V, -X1),
@@ -630,8 +646,8 @@ watch1() ->
     C2 = add_clause(V, [Y3, Y2, Y1]),
     [Y1, Y2, Y3] = varc:get_clause(V, C2),
 
-    2 = varc:clause_info(V, C2, watch0),
-    0 = varc:clause_info(V, C2, watch1),
+    0 = varc:clause_info(V, C2, watch0),
+    2 = varc:clause_info(V, C2, watch1),
 
     Z3 = X4, Z2 = X3, Z1 = -X1,
     C3 = add_clause(V, [Z3,Z2,Z1]),
@@ -643,40 +659,40 @@ watch1() ->
     ok.
 
 edge_list0() ->
-    V = varc:new([{edge_list, true}]),
-    true = varc:info(V, edge_list),
+    V = varc:new([{edge, true}]),
+    true = varc:info(V, edge),
 
     A = varc:add_variable(V),
     B = varc:add_variable(V),
 
-    {true,C0} = varc:add_clause(V, [A, B]),
+    {true,_C0} = varc:add_clause(V, [A, B]),
     
     %% eval should put in edges (A,B) ~A -> B, ~B -> A 
-    [{C0,B}] = varc:literal_info(V, -A, edge_list),
-    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    [B] = varc:literal_info(V, -A, edge),
+    [A] = varc:literal_info(V, -B, edge),
     ok.
 
 edge_list1() ->
-    V = varc:new([{edge_list, true}]),
-    true = varc:info(V, edge_list),
+    V = varc:new([{edge, true}]),
+    true = varc:info(V, edge),
 
     A = varc:add_variable(V),
     B = varc:add_variable(V),
     C = varc:add_variable(V),
 
-    {true,C0} = varc:add_clause(V, [A, B, C]),
-
-    varc:bind(V, -C),
+    {true,_C0} = varc:add_clause(V, [A, B, C]),
+    %% assume A,B are watched
+    varc:bind(V, -A),
     true = varc:eval(V),
 
-    %% eval should put in edges (A,B) ~A -> B, ~B -> A 
-    [{C0,B}] = varc:literal_info(V, -A, edge_list),
-    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    %% eval should put in edges (B,C) ~C -> B, ~B -> C
+    [B] = varc:literal_info(V, -C, edge),
+    [C] = varc:literal_info(V, -B, edge),
     ok.
 
 edge_list2() ->
-    V = varc:new([{edge_list, true}]),
-    true = varc:info(V, edge_list),
+    V = varc:new([{edge, true}]),
+    true = varc:info(V, edge),
 
     A = varc:add_variable(V),
     B = varc:add_variable(V),
@@ -684,35 +700,35 @@ edge_list2() ->
 
     varc:bind(V, -C),
 
-    {true,C0} = varc:add_clause(V, [A, B, C]),
+    {true,_C0} = varc:add_clause(V, [A, B, C]),
 
     %% eval should put in edges (A,B) ~A -> B, ~B -> A 
-    [{C0,B}] = varc:literal_info(V, -A, edge_list),
-    [{C0,A}] = varc:literal_info(V, -B, edge_list),
+    [B] = varc:literal_info(V, -A, edge),
+    [A] = varc:literal_info(V, -B, edge),
     ok.
 
 edge_list3() ->
-    V = varc:new([{edge_list, true}]),
-    true = varc:info(V, edge_list),
+    V = varc:new([{edge, true}]),
+    true = varc:info(V, edge),
 
     A = varc:add_variable(V),
     B = varc:add_variable(V),
     C = varc:add_variable(V),
     D = varc:add_variable(V),
 
-    {true,C0} = varc:add_clause(V, [A, B]),
-    {true,C1} = varc:add_clause(V, [A, C]),
-    {true,C2} = varc:add_clause(V, [A, -D]),
+    {true,_C0} = varc:add_clause(V, [A, B]),
+    {true,_C1} = varc:add_clause(V, [A, C]),
+    {true,_C2} = varc:add_clause(V, [A, -D]),
 
     %% eval should put in edges (A,B) -A -> B, -B -> A 
     %% eval should put in edges (A,C) -A -> C, -C -> A
     %% eval should put in edges (A,-D) -A -> -D, D -> A
+    ND = -D,
+    [ND,B,C] = lists:sort(varc:literal_info(V, -A, edge)),
 
-    R1 = lists:sort([{C0,B},{C2,-D},{C1,C}]),
-    R1 = lists:sort(varc:literal_info(V, -A, edge_list)),
-    [{C0,A}] = varc:literal_info(V, -B, edge_list),
-    [{C1,A}] = varc:literal_info(V, -C, edge_list),
-    [{C2,A}] = varc:literal_info(V, D, edge_list),
+    [A] = varc:literal_info(V, -B, edge),
+    [A] = varc:literal_info(V, -C, edge),
+    [A] = varc:literal_info(V, D, edge),
 
     true = varc:bind(V, -A),
     true = varc:eval(V),

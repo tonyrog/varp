@@ -198,19 +198,49 @@
 	{"1",true},
 	{"0",false}).
 
+-define(ORDER_UNDEFINED, 16#00).   %% "zero" order
+-define(ORDER_IDENTITY,  16#01).   %% "input" order
+-define(ORDER_RANDOM,    16#02).   %% "random" order
+-define(ORDER_DEGREE,    16#03).   %% order according to occurence
+-define(ORDER_RANK,      16#04).   %% 1/n1+...1/nk where ni is size of clause i
+-define(ORDER_ACTIVITY,  16#05).   %% order according to conflict activity
+-define(ORDER_USER,      16#06).   %% order according to user count
+
+-define(ORDER_ASCEND,     16#00).  %% ascending order
+-define(ORDER_DESCEND,    16#80).  %% descending order
+-define(ORDER_INTERLEAVE, 16#40).  %% mixed order
+
 -define(ORDER,
-	{"undefined", undefined},
-	{"identity",  identity},
-	{"random",    random},
-	{"degree",     '+degree'},
-	{"+degree",    '+degree'},
-	{"-degree",    '-degree'},
-	{"rank",       '+rank'},
-	{"+rank",      '+rank'},
-	{"-rank",      '-rank'},
-	{"activity",   '+activity'},
-	{"+activity",  '+activity'},
-	{"-activity",  '-activity'}
+	{"undefined",  ?ORDER_UNDEFINED},
+	{"identity",   ?ORDER_IDENTITY bor ?ORDER_DESCEND},
+	{"+identity",  ?ORDER_IDENTITY bor ?ORDER_ASCEND},
+	{"-identity",  ?ORDER_IDENTITY bor ?ORDER_DESCEND},
+	{"=identity",  ?ORDER_IDENTITY bor ?ORDER_INTERLEAVE},
+
+	{"random",   ?ORDER_RANDOM bor ?ORDER_DESCEND},
+	{"+random",  ?ORDER_RANDOM bor ?ORDER_ASCEND},
+	{"-random",  ?ORDER_RANDOM bor ?ORDER_DESCEND},
+	{"=random",  ?ORDER_RANDOM bor ?ORDER_INTERLEAVE},
+
+	{"degree",   ?ORDER_DEGREE bor ?ORDER_DESCEND},
+	{"+degree",  ?ORDER_DEGREE bor ?ORDER_ASCEND},
+	{"-degree",  ?ORDER_DEGREE bor ?ORDER_DESCEND},
+	{"=degree",  ?ORDER_DEGREE bor ?ORDER_INTERLEAVE},
+
+	{"rank",     ?ORDER_RANK bor ?ORDER_DESCEND},
+	{"+rank",    ?ORDER_RANK bor ?ORDER_ASCEND},
+	{"-rank",    ?ORDER_RANK bor ?ORDER_DESCEND},
+	{"=rank",    ?ORDER_RANK bor ?ORDER_INTERLEAVE},
+
+	{"activity",   ?ORDER_ACTIVITY bor ?ORDER_DESCEND},
+	{"+activity",  ?ORDER_ACTIVITY bor ?ORDER_ASCEND},
+	{"-activity",  ?ORDER_ACTIVITY bor ?ORDER_DESCEND},
+	{"=activity",  ?ORDER_ACTIVITY bor ?ORDER_INTERLEAVE},
+
+	{"user",     ?ORDER_USER bor ?ORDER_DESCEND},
+	{"+user",    ?ORDER_USER bor ?ORDER_ASCEND},
+	{"-user",    ?ORDER_USER bor ?ORDER_DESCEND},
+	{"=user",    ?ORDER_USER bor ?ORDER_INTERLEAVE}
        ).
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher

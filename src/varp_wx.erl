@@ -48,7 +48,7 @@
 	 config_timeout,    %% wxSpinCtrl
 	 config_saturate,   %% wxSpinCtrl (saturate=1 or none=0)
 	 config_backtrack,  %% wxRadioBox (backtrack|backjump|none)
-	 config_order,      %% wxRadioBox (-degree|-rank|none)
+	 config_order,      %% wxRadioBox (-degree|-rank|eval|random|none)
 	 config_assoc,      %% wxRadioBox (left|right|balanced|none)
 	 config_nbound      %% wxGauge
 	}).
@@ -263,7 +263,7 @@ create_window(Wx) ->
     Order = wxRadioBox:new(Win2, 22, "order",
 			   ?wxDefaultPosition,
 			   ?wxDefaultSize,
-			   ["-degree", "-rank", "none"],
+			   ["-deg", "-rank", "-usr", "rnd", "none"],
 			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
 
     Assoc = wxRadioBox:new(Win2, 23, "assoc",
@@ -713,10 +713,14 @@ solve(Mode, S, Bound) ->
 		end ++
 		case Order of
 		    0 ->
-			[{order,[{sort,['-degree']}]}];
+			[{order,[{sort,[?ORDER_DEGREE bor ?ORDER_DESCEND]}]}];
 		    1 ->
-			[{order,[{sort,['-rank']}]}];
+			[{order,[{sort,[?ORDER_RANK bor ?ORDER_DESCEND]}]}];
 		    2 ->
+			[{order,[{sort,[?ORDER_USER bor ?ORDER_DESCEND]}]}];
+		    3 ->
+			[{order,[{sort,[?ORDER_RANDOM]}]}];
+		    4 ->
 			%% pickup order from input file
 			case maps:find(order, GOpts1) of
 			    {ok, FileOrder} ->

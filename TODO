@@ -1,10 +1,60 @@
 
-- Seoul
+- What if TWL opt for literals that are already watched in
+    other clauses?
+
+  - use a flag that mark if a literal is already watched in some
+    clause.
+  - 
+
+
+- Fix/verify pair substitution
 
   - Level/Bound feedback (for fun)
+
+
+- More flexibel "order" syntax
+
+old syntax: [+|-]<name>[','[+|-]<name>]
+
+  <x          +x    x ascending
+   x>         -x    x descending
+
+  <x|<y       +x,+y
+  <x|y>       +x,-y
+  x>|<y       -x,+y
+  x>|y>       -x,-y
+
+  x>||y>      sort on x if x equal then then y then fold
+
+  x>y == x>|<y  -x,+y
+
+
+
+
+- turbo eval
+
+  eval [<n> [<i>]]
+    eval <n> steps using current order from position <i>
+    if <i> is not given then user has to make the decision
+    if <n> is not given 1 is assumed, one step
+    
+  return
+	true       - model exist
+	false      - contradiction found
+	{more,<j>} - more steps needed from order position <j>
+
+  back
+       undo and flip decision, if already flipped then
+       undo to next level.
+
+    return
+       false       - no more variables to flip = no models = inconsistent
+       {true,<j>}  - backtracked and <j> is now a useful order index
+
+- Seoul
+
   - Xref on/off (get_clauses) (OK)
-  - What if TWL opt for literals that are already watched in
-    other clauses?
+
 
 - Shanghai
 

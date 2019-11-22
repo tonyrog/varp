@@ -46,7 +46,7 @@
 -export([del_clause/2]).
 -export([compress_clause/2]).
 -export([clean_clause/2]).
--export([clean_literal/2]).
+-export([clean_edges/2]).
 -export([sort_clauses/2]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
@@ -61,6 +61,7 @@
 -export([get_bindings/1]).
 -export([get_bindings/2]).
 -export([get_bindings/3]).
+-export([get_number_of_bindings/2]).
 -export([order_init/1]).
 -export([order_first/1, order_next/2, order_next/3]).
 -export([order_sort/2, order_sort/3, order_sort/4]).
@@ -74,12 +75,15 @@
 -export([clauseset_xref/3]).
 -export([clause_first/1, clause_first/2]).
 -export([clause_next/2]).
+-export([set_user_count/3]).
 
 -export([info/1, info_keys/0]).
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
 -export([get_number_of_dead_clauses/1]).
+-export([get_number_of_edges/1]).
+-export([get_number_of_dead_edges/1]).
 -export([get_number_of_conflicting_clauses/1]).
 -export([get_number_of_bound_variables/1]).
 -export([get_number_of_unbound_variables/1]).
@@ -102,12 +106,7 @@
 
 -type varc() :: reference().
 -type literal() :: integer().
--type sort_key()  :: identity|random|occur|depth|
-		     occur_depth|depth_occur|
-		     occur_ascending|occur_descending|
-		     depth_ascending|depth_descending|
-		     occur_depth_ascending|occur_depth_descending|
-		     depth_occur_ascending|depth_occur_descending.
+-type sort_key() :: integer().
 -type sort_value() :: integer().
 
 -define(nif_stub(),
@@ -132,7 +131,7 @@ new() ->
 new(Options) when is_list(Options) ->
     ?nif_stub().
 
-info(_Vp, Item) when is_atom(Item) ->
+info(_Vp, Key) when is_atom(Key) ->
     ?nif_stub().
 
 %% set config
@@ -192,13 +191,12 @@ literal_info(Vp,Index) ->
     [{What,literal_info(Vp,Index,What)} || What <- literal_info_keys()].
 
 literal_info_keys() ->
-    [degree, edge_list, symbol].
-
+    [degree, user, edge, symbol].
 
 %%
 %% Get literal value 
 %%
--spec value(Vp::varc(), Lit::literal()) -> integer().
+-spec value(Vp::varc(), Lit::literal()) -> t | f | undefined.
 
 value(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
@@ -224,7 +222,7 @@ subst(_Vp, X, Y) when is_integer(X),
 		      is_integer(Y) ->
     ?nif_stub().
 
--spec key(Vp::varc(), Lit::literal(), K::integer()) -> integer().
+-spec key(Vp::varc(), Lit::literal(), K::integer()) -> float().
 key(_Vp, Lit, _K) when is_integer(Lit) ->
     ?nif_stub().
 
@@ -280,14 +278,20 @@ eval(_Vp) ->
 clauseset_size(_Vp, _Si) ->
     ?nif_stub().    
 
--spec clauseset_xref(Vp::varc(),Enable::boolean()) -> ok.
+-spec clauseset_xref(Vp::varc(),Enable::boolean()) -> boolean().
 clauseset_xref(Vp, Enable) ->
     clauseset_xref(Vp, ?DELTA, Enable),
     clauseset_xref(Vp, ?GAMMA, Enable),
     clauseset_xref(Vp, ?ALPHA, Enable),
     clauseset_xref(Vp, ?BETA, Enable).
 
--spec clauseset_xref(Vp::varc(),Si::integer(),Enable::boolean()) -> ok.
+
+-spec clauseset_xref(Vp::varc(),Si::integer(),Enable::boolean()) -> boolean().
+%% return previous status of enable
+%% example
+%%   Restore = clauseset_xref(Vp, ?GAMMA, true),
+%%   do_something(),
+%%   clauseset_xref(Vp, ?GAMMA, Restore)
 clauseset_xref(_Vp, _Si, _Enable) ->
     ?nif_stub().
 
@@ -352,7 +356,7 @@ clean_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-clean_literal(_Vp,Lit)
+clean_edges(_Vp,Lit)
   when is_integer(Lit), Lit >= 1 ->
     ?nif_stub().
 
@@ -391,13 +395,16 @@ get_nbindings(_Vp,N,_ClauseInfo) when is_integer(N), N>= 0 ->
 get_bindings(Vp) ->
     get_bindings(Vp, 0, false).
 
-%% get bindings until mark
-get_bindings(Vp, Mark) ->
-    get_bindings(Vp, Mark, false).
+%% get bindings on Level
+get_bindings(Vp, Level) ->
+    get_bindings(Vp, Level, false).
 
-%% get bindings and possible clause info until mark
-get_bindings(_Vp, Mark, _ClauseInfo)
-  when is_integer(Mark), Mark > 0 ->
+%% get bindings and possible clause info on Level
+get_bindings(_Vp, Level, _ClauseInfo)
+  when is_integer(Level), Level > 0 ->
+    ?nif_stub().
+
+get_number_of_bindings(_Vp, _Level) ->
     ?nif_stub().
 
 %% initial index to use if using order_next, instead of order_first
@@ -420,7 +427,7 @@ order_next(_Vp, _Ix, _Skip) ->
 -spec order_sort(Vp::varc(), Key1::sort_key()) -> integer().
 			
 order_sort(Vp, Key1) ->
-    order_sort(Vp, Key1, undefined).
+    order_sort(Vp, Key1, 0).
 
 -spec order_sort(Vp::varc(), Key1::sort_key(), Key2::sort_key()) -> integer().
 
@@ -458,6 +465,10 @@ clause_first(_Vp, _Si) ->
 clause_next(_Vp, _Ix) ->
     ?nif_stub().
 
+%% set user count (unsigned 32-bit) for sorting
+set_user_count(_Vp, _Lit, _Value) ->
+    ?nif_stub().
+
 %% Get all clauses in queue
 get_queue(Vp) ->
     case get_queue_first(Vp) of
@@ -493,22 +504,27 @@ info_keys() ->
      max_clause_length,
      number_of_clauses,
      number_of_dead_clauses,
+     number_of_edges,
+     number_of_dead_edges,
      number_of_conflicting_clauses,
      number_of_variables,
      number_of_bound_variables,
      number_of_unbound_variables,
-     clause_eval_counter,
      eval_counter,
+     clause_n_counter,
+     clause_2_counter,
+     clause_3_counter,
+     clause_d_counter,
+     edge_2_counter,
+     edge_d_counter,
      undo_stack_size,
-     value_stack_size,
      grow,
      size,
      level,
      literal_size,     %% 8,16,32,64 (sizeof literal)
      literal_integer,  %% true,false (integer or pointer)
-     literal_signed,   %% true,false (when literal_integer)
      value_packing,    %% 1,4,undefined (variable value packing)
-     edge_list,        %% true,false (edge_list is enabled or not)
+     edge,             %% true,false (edge_list is enabled or not)
      activity,         %% conflict activity is enabled (used in sort activity)
      xref              %% xref is used (need for saturate with substitution)
     ].
@@ -528,6 +544,12 @@ get_number_of_clauses(Vp) ->
 get_number_of_dead_clauses(Vp) ->
     info(Vp, number_of_dead_clauses).
 
+get_number_of_edges(Vp) ->
+    info(Vp, number_of_edges).
+
+get_number_of_dead_edges(Vp) ->
+    info(Vp, number_of_dead_edges).
+
 get_number_of_conflicting_clauses(Vp) ->
     info(Vp, number_of_conflicting_clauses).
 
@@ -537,16 +559,18 @@ get_max_clause_length(Vp) ->
 get_clause_eval_counter(Vp) ->
     info(Vp, clause_eval_counter).
 
-get_clause_eval_counter(Vp,0) ->
-    info(Vp, clause_eval_counter);
+get_clause_eval_counter(Vp,n) ->
+    info(Vp, clause_n_counter);
 get_clause_eval_counter(Vp,2) ->
-    info(Vp, clause2_eval_counter);
+    info(Vp, clause_2_counter);
 get_clause_eval_counter(Vp,3) ->
-    info(Vp, clause3_eval_counter);
+    info(Vp, clause_3_counter);
 get_clause_eval_counter(Vp,dead) ->
-    info(Vp, dead_eval_counter);
-get_clause_eval_counter(Vp,edge) ->
-    info(Vp, edge_eval_counter).
+    info(Vp, clause_d_counter);
+get_clause_eval_counter(Vp,edge_eval) ->
+    info(Vp, edge_2_counter);
+get_clause_eval_counter(Vp,edge_dead) ->
+    info(Vp, edge_d_counter).
 
 get_eval_counter(Vp) ->
     info(Vp, eval_counter).
