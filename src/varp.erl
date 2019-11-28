@@ -53,6 +53,7 @@
 	 edge_2_counter,
 	 edge_d_counter,
 	 eval_count,
+	 conflict_count,
 	 bound,
 	 clauses,
 	 dead_clauses,
@@ -663,7 +664,7 @@ combine_result(Ns,M) when is_list(Ns), is_integer(M) ->
     length(Ns)+M.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | eval: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w,E:~w,D:~w\n    | #clauses:~w, #dead:~w, #edges:~w, #dead-edges:~w\n | time=~.2fs\n",
+    varp_formula:info(Bs, "    | eval: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w,E:~w,D:~w\n    | #clauses:~w, #dead:~w, #edges:~w, #dead-edges:~w,#conflict:~w\n | time=~.2fs\n",
 		      [S1#stat.eval_count-S0#stat.eval_count,
 		       S1#stat.clause_n_counter - S0#stat.clause_n_counter,
 		       S1#stat.clause_2_counter - S0#stat.clause_2_counter,
@@ -675,6 +676,7 @@ show_info(S1, S0, Ts, Bs) ->
 		       S1#stat.dead_clauses,
 		       S1#stat.edges,
 		       S1#stat.dead_edges,
+		       S1#stat.conflict_count-S0#stat.conflict_count,
 		       Ts]),
     varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
 		      [S1#stat.bound-S0#stat.bound,
@@ -690,6 +692,7 @@ stat(Bs) ->
 	    edge_2_counter = varp_formula:clause_eval_counter(Bs,edge_eval),
 	    edge_d_counter = varp_formula:clause_eval_counter(Bs,edge_dead),
 	    eval_count     = varp_formula:eval_counter(Bs),
+	    conflict_count = varp_formula:conflict_counter(Bs),
 	    bound          = varp_formula:number_of_bound(Bs),
 	    clauses        = varp_formula:number_of_clauses(Bs),
 	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs),

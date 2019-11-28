@@ -36,7 +36,9 @@
 -export([undo_level/2]).
 -export([keep_level/2]).
 -export([move_level/3]).
--export([eval/1]).
+-export([undo/1]).
+-export([bcp/1]).
+-export([nbcp/1]).
 -export([add_clause/2]).
 -export([add_clause/3]).
 -export([find_clause/2]).
@@ -56,6 +58,8 @@
 -export([get_queue_first/1]).
 -export([get_queue_next/2]).
 -export([get_latest_binding/1]).
+-export([get_decision/2]).
+-export([get_decision/3]).
 -export([get_nbindings/2]).
 -export([get_nbindings/3]).
 -export([get_bindings/1]).
@@ -89,7 +93,8 @@
 -export([get_number_of_unbound_variables/1]).
 -export([get_clause_eval_counter/1]).
 -export([get_clause_eval_counter/2]).
--export([get_eval_counter/1]).
+-export([get_bcp_counter/1]).
+-export([get_conflict_counter/1]).
 
 %% -define(debug, true).
 
@@ -270,7 +275,13 @@ move_level(_Vp,_From,_To) ->
 undo_level(_Vp,_Level) ->
     ?nif_stub().
 
-eval(_Vp) ->
+undo(_Vp) ->
+    ?nif_stub().
+
+bcp(_Vp) ->
+    ?nif_stub().
+
+nbcp(_Vp) ->
     ?nif_stub().
 
 -spec clauseset_size(Vp::varc(),Si::integer()) ->
@@ -375,6 +386,13 @@ get_queue_first(_Vp) ->
     ?nif_stub().
 
 get_queue_next(_Vp, _Cix) ->
+    ?nif_stub().
+
+%% get decision variable (bind) on Level
+get_decision(_Vp, _Level) ->
+    ?nif_stub().
+
+get_decision(_Vp, _Level, _ToggleValue) ->
     ?nif_stub().
 
 %% get the very latest binding
@@ -510,14 +528,14 @@ info_keys() ->
      number_of_variables,
      number_of_bound_variables,
      number_of_unbound_variables,
-     eval_counter,
+     bcp_counter,
+     conflict_counter,
      clause_n_counter,
      clause_2_counter,
      clause_3_counter,
      clause_d_counter,
      edge_2_counter,
      edge_d_counter,
-     undo_stack_size,
      grow,
      size,
      level,
@@ -572,5 +590,8 @@ get_clause_eval_counter(Vp,edge_eval) ->
 get_clause_eval_counter(Vp,edge_dead) ->
     info(Vp, edge_d_counter).
 
-get_eval_counter(Vp) ->
-    info(Vp, eval_counter).
+get_bcp_counter(Vp) ->
+    info(Vp, bcp_counter).
+
+get_conflict_counter(Vp) ->
+    info(Vp, conflict_counter).

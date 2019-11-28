@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%% -define(DEBUG, true).
+%%-define(DEBUG, true).
 -compile(export_all).
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -36,6 +36,7 @@
 -export([log_clause/2]).
 -export([proof_output/3]).
 -export([want_proof_output/1]).
+-export([clear_user_count/1]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -52,6 +53,8 @@
 -export([number_of_variables/1]).
 -export([number_of_clauses/1]).
 -export([number_of_dead_clauses/1]).
+-export([number_of_edges/1]).
+-export([number_of_dead_edges/1]).
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
 -export([clause_eval_counter/1]).
@@ -69,6 +72,9 @@
 -export([intersect_bindings/3]).
 -export([install_bindings/3]).
 -export([model_variables/2]).
+-export([each_unbound/2]).
+-export([each_variable/2]).
+-export([fold_unbound/3]).
 -export([eval/1]).
 -export([eval_meta/2]).
 -export([set_level/2]).
@@ -87,11 +93,12 @@
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([clean_clauses/1]).
--export([clean_literals/1]).
+-export([clean_edges/1]).
 -export([set_var/3, add_var/4]).
 -export([config/3]).
 -export([const_vector/2, const_vector/3]).
 -export([const_vector/4]).
+
 
 -export([vconst/1]).
 -export([normalize/3]).
@@ -113,7 +120,7 @@ new(OptMap) when is_map(OptMap) ->
     Vp  = varc:new([{qtype,maps:get(qtype,OptMap)},
 		    {xref,maps:get(xref,OptMap)},
 		    {clause_hash,maps:get(clause_hash,OptMap)},
-		    {edge_list,maps:get(edge_list,OptMap)},
+		    {edge,maps:get(edge,OptMap)},
 		    {activity, maps:get(activity,OptMap)}
 		   ]),
     Symbols  = maps:get(syms,OptMap),
@@ -293,15 +300,14 @@ clean_clauses_(Bs, I) ->
     varc:clean_clause(Bs#bs.vp, I),
     clean_clauses_(Bs, varc:clause_next(Bs#bs.vp, I)).
 
-clean_literals(Bs) ->
-    clean_literals_(Bs, first_unbound(Bs)).
+clean_edges(Bs) ->
+    each_unbound(Bs, 
+		 fun(X) ->
+			 varc:clean_edges(Bs#bs.vp, X),
+			 varc:clean_edges(Bs#bs.vp, -X)
+		 end),
+    Bs.
 
-clean_literals_(Bs, false) ->
-    Bs;
-clean_literals_(Bs, {I,Xi}) ->
-    varc:clean_literal(Bs#bs.vp, Xi),
-    varc:clean_literal(Bs#bs.vp, -Xi),
-    clean_literals_(Bs, next_unbound(Bs, I)).
 
 %% "balanced tree"
 gate_tree(Bs,Op,X,Xs) ->
@@ -386,8 +392,11 @@ order_sort_last(Bs, VarList) ->
 
 order_sort_first(Bs, VarList) ->
     {RevFirst,Bs1} = variable_list_(Bs,VarList,[]),
-    First = lists:reverse(RevFirst),
-    ?dbg("first=~w\n",[First]),
+    InfoList = get_variable_info(Bs, lists:reverse(RevFirst)),
+    ?dbg0("InfoList=~w\n",[InfoList]),
+    InfoList1 = lists:sort(fun({_Xi,Ui},{_Xj,Uj}) -> Ui > Uj end, InfoList),
+    First = [X || {X,_U} <- InfoList1],
+    ?dbg0("first=~w\n",[First]),
     ok = varc:order_sort_first(Bs#bs.vp, First),
     Bs1.
 
@@ -405,16 +414,28 @@ variable_list_(Bs, [V|Vs], Acc) ->
 variable_list_(Bs, [], Acc) ->
     {Acc,Bs}.
 
+get_variable_info(Bs, [X|Xs]) ->
+    U  = varc:literal_info(Bs#bs.vp, X, user),
+    Un = varc:literal_info(Bs#bs.vp, -X, user),
+    if U >= Un ->
+	    [{X,U}|get_variable_info(Bs, Xs)];
+       true ->
+	    [{-X,Un}|get_variable_info(Bs, Xs)]
+    end;
+get_variable_info(_Bs, []) ->
+    [].
+
+
 cat([X|Xs], Ys) -> cat(Xs, [X|Ys]);
 cat([], Ys) -> Ys.
 
 order_sort(Bs,[Key1,Key2]) -> order_sort(Bs,Key1,Key2,-1);
-order_sort(Bs,[Key1]) -> order_sort(Bs,Key1,undefined,-1).
+order_sort(Bs,[Key1]) -> order_sort(Bs,Key1,?ORDER_UNDEFINED,-1).
 
 order_sort(Bs,Key1,Key2,Arg) 
-  when is_atom(Key1), is_atom(Key2), is_integer(Arg) ->
-    Arg1 = if Key1 =:= random,Arg =:= -1;
-	      Key2 =:= random,Arg =:= -1 ->
+  when is_integer(Key1), is_integer(Key2), is_integer(Arg) ->
+    Arg1 = if Key1 band 16#0f =:= ?ORDER_RANDOM, Arg =:= -1;
+	      Key2 band 16#0f =:= ?ORDER_RANDOM, Arg =:= -1 ->
 		   <<Seed:24>> = crypto:strong_rand_bytes(3),
 		   Seed;
 	      true ->
@@ -424,7 +445,7 @@ order_sort(Bs,Key1,Key2,Arg)
     varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
 
 eval(Bs) ->
-    varc:eval(Bs#bs.vp).
+    varc:bcp(Bs#bs.vp).
 
 undo_level(Bs, Level) ->
     varc:undo_level(Bs#bs.vp, Level).
@@ -479,6 +500,12 @@ number_of_clauses(Bs) ->
 
 number_of_dead_clauses(Bs) ->
     varc:get_number_of_dead_clauses(Bs#bs.vp).
+
+number_of_edges(Bs) ->
+    varc:get_number_of_edges(Bs#bs.vp).
+
+number_of_dead_edges(Bs) ->
+    varc:get_number_of_dead_edges(Bs#bs.vp).
     
 number_of_bound(Bs) ->
     varc:get_number_of_bound_variables(Bs#bs.vp).
@@ -493,7 +520,10 @@ clause_eval_counter(Bs,N) ->
     varc:get_clause_eval_counter(Bs#bs.vp,N).
 
 eval_counter(Bs) ->
-    varc:get_eval_counter(Bs#bs.vp).
+    varc:get_bcp_counter(Bs#bs.vp).
+
+conflict_counter(Bs) ->
+    varc:get_conflict_counter(Bs#bs.vp).
 
 first_init(Bs) -> 
     varc:order_init(Bs#bs.vp).
@@ -2922,6 +2952,42 @@ model_variables(Bs,[]) ->
 model_variables(Bs,Ws) ->
     lists:map(fun(W) -> get_var(W,Bs) end, Ws).
 
+
+each_unbound(Bs, Fun) ->
+    each_unbound_(Bs, Fun, varp_formula:first_unbound(Bs)).
+
+each_unbound_(_Bs, _Fun, false) ->
+    ok;
+each_unbound_(Bs, Fun, {I,X}) ->
+    Fun(X),
+    each_unbound_(Bs, Fun, varp_formula:next_unbound(Bs, I)).
+
+
+fold_unbound(Bs, Fun, Acc) ->
+    fold_unbound_(Bs, Fun, Acc, varp_formula:first_unbound(Bs)).
+
+fold_unbound_(_Bs, _Fun, Acc, false) ->
+    Acc;
+fold_unbound_(Bs, Fun, Acc, {I,X}) ->
+    Acc1 = Fun(X, Acc),
+    fold_unbound_(Bs, Fun, Acc1, varp_formula:next_unbound(Bs, I)).
+
+each_variable(Bs, Fun) ->
+    each_variable_(Bs, Fun, 1, varc:info(Bs#bs.vp, number_of_variables)+1).
+
+each_variable_(_Bs, _Fun, Max, Max) ->
+    ok;
+each_variable_(Bs, Fun, X, N) ->
+    Fun(X),
+    each_variable_(Bs, Fun, X+1, N).
+
+clear_user_count(Bs) ->
+    Vp = Bs#bs.vp,
+    each_variable(Bs,
+		 fun(X) ->
+			 varc:set_user_count(Vp, X, 0),
+			 varc:set_user_count(Vp, -X, 0)
+		 end).
 %%
 %% collect the model
 %% Boolean:  [{x,true},{y,false}]
@@ -3125,7 +3191,7 @@ proof_output_text(Fd, Bs, Prefix, Clause) ->
     Chars = [P,[[proof_literal(Bs,Li),$\s] || Li <- Clause], "0\n"],
     if is_atom(Fd) ->
 	    io:put_chars(Fd, Chars);
-       true ->       
+       true ->
 	    file:write(Fd, Chars)
     end.
     

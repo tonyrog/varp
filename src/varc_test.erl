@@ -114,7 +114,7 @@ test3() ->
     io:format("X6 clauses = ~p\n", [varc:get_clauses(V, X6)]),
     io:format("X7 clauses = ~p\n", [varc:get_clauses(V, X7)]),
 
-    true = varc:eval(V),
+    true = varc:bcp(V),
     true = varc:set_level(V, 1),
     true = varc:bind(V, X2),
     true = varc:bind(V, X3),
@@ -132,7 +132,9 @@ or_simplify() ->
     C1 = add_clause(V, [X5,X4,X3,X2]),
     C20 = add_clause(V, [X1,X1,X1,X1,X1]),
     C23 = add_clause(V, [X2,X3,X3,X3,X2]),
-    C3 = add_clause(V, [X2,X3,X2,X3,X4,?F]),
+    L3 = [X2,X3,X2,X3,X4,?F],
+    io:format("L3 = ~w\n", [L3]),
+    C3 = add_clause(V, L3),
     C4 = add_clause(V, [X2,X3,X2,X3,X4]),
     C5 = add_clause(V, [X2,?T,X3,?F,X4,?T,X4,?T, X5,?F]),
     C6 = add_clause(V, [X2,?T,X3,?F,-X3,?T,X3,?T,-X3,?F,X4]),
@@ -172,7 +174,7 @@ or_eval() ->
     print_clauses(V),
 
     io:format("queue=~p\n", [varc:get_queue(V)]),
-    true = varc:eval(V),
+    true = varc:bcp(V),
 
     V1 = varc:value(V, X1),
     io:format("X1 = ~w\n", [V1]),
@@ -217,7 +219,7 @@ or_eval_bindings() ->
     print_clauses(V),
     io:format("2/1\n", []),
     varc:bind(V, X2),
-    true = varc:eval(V),
+    true = varc:bcp(V),
     io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
@@ -227,7 +229,7 @@ or_eval_bindings() ->
     io:format("watched = ~w\n", [get_watched(V)]),
     io:format("3/1\n", []),
     varc:bind(V, X3),
-    true = varc:eval(V),
+    true = varc:bcp(V),
     io:format("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
     io:format("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
@@ -282,7 +284,7 @@ order() ->
     lists:foreach(
       fun({L,Xi}) ->
 	      varc:set_level(V,L), varc:bind(V, Xi),
-	      varc:set_level(V,L+1), varc:bind(V, -Y2), false = varc:eval(V),
+	      varc:set_level(V,L+1), varc:bind(V, -Y2), false = varc:bcp(V),
 	      varc:undo_level(V,L+1)
       end, [{X1,1},{X2,2},{X3,3},{X4,4},{X5,5},{X6,6}]),
 
@@ -534,7 +536,7 @@ subst4() ->
     io:format("clause after\n"),    
     print_clauses(V),
 
-    true = varc:eval(V),
+    true = varc:bcp(V),
     Bs = varc:get_bindings(V,0),
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
@@ -562,7 +564,7 @@ subst5() ->
 
     io:format("clause after\n"),
     print_clauses(V,true),
-    true = varc:eval(V),
+    true = varc:bcp(V),
     Bs = [X3,X4,X6] = lists:sort(varc:get_bindings(V,0)),
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
@@ -610,7 +612,7 @@ watch1() ->
     %% bind X4, move wp 0
     varc:set_level(V, 1),
     varc:bind(V, -X4),
-    true = varc:eval(V),
+    true = varc:bcp(V),
 
     0 = varc:clause_info(V, C1, watch0),
     1 = varc:clause_info(V, C1, watch1),
@@ -618,21 +620,21 @@ watch1() ->
     %% bind -X3, not watched, watch points should stay the same
     varc:set_level(V, 2),
     varc:bind(V, -X3),
-    true = varc:eval(V),
+    true = varc:bcp(V),
 
     0 = varc:clause_info(V, C1, watch0),
     1 = varc:clause_info(V, C1, watch1),
 
     varc:set_level(V, 3),
     varc:bind(V, -X1),
-    true = varc:eval(V),
+    true = varc:bcp(V),
 
     4 = varc:clause_info(V, C1, watch0),
     1 = varc:clause_info(V, C1, watch1),
 
     varc:set_level(V, 4),
     varc:bind(V, -X5),
-    true = varc:eval(V),
+    true = varc:bcp(V),
 
     4 = varc:clause_info(V, C1, watch0),
     1 = varc:clause_info(V, C1, watch1),
@@ -683,7 +685,7 @@ edge_list1() ->
     {true,_C0} = varc:add_clause(V, [A, B, C]),
     %% assume A,B are watched
     varc:bind(V, -A),
-    true = varc:eval(V),
+    true = varc:bcp(V),
 
     %% eval should put in edges (B,C) ~C -> B, ~B -> C
     [B] = varc:literal_info(V, -C, edge),
@@ -731,7 +733,7 @@ edge_list3() ->
     [A] = varc:literal_info(V, D, edge),
 
     true = varc:bind(V, -A),
-    true = varc:eval(V),
+    true = varc:bcp(V),
     ?T = varc:value(V, B),
     ?T = varc:value(V, C),
     ?F = varc:value(V, D),

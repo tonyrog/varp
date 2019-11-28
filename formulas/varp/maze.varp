@@ -1,0 +1,28 @@
+//
+// Maze solver/builder
+//
+
+input  maze_io;
+output maze_io;
+
+define LEFT(s,i,j)  Left(s)  and !Wall(i,j) and Pos(s-1,i,j+1) ;
+define RIGHT(s,i,j) Right(s) and !Wall(i,j) and Pos(s-1,i,j-1) ;
+define UP(s,i,j)    Up(s)    and !Wall(i,j) and Pos(s-1,i+1,j) ;
+define DOWN(s,i,j)  Down(s)  and !Wall(i,j) and Pos(s-1,i-1,j) ;
+
+define FRAME() ([A j=0..m+1] (Wall(0,j) && Wall(n+1,j)) &&
+                [A i=0..n+1] (Wall(i,0) && Wall(i,m+1))) ;
+
+define UNIQUEPOS(s) ([EQ 1,i=1..n,j=1..n] Pos(s,i,j)) ;
+define UNIQUEOP(s)  ([EQ 1](Left(s),Right(s),Up(s),Down(s))) ;
+
+define NEXT(s,i,j) ( Pos(s,i,j) ->
+       		     ( ((Left(s) and !Wall(i,j-1))  -> Pos(s+1,i,j-1)) or
+		       ((Right(s) and !Wall(i,j+1)) -> Pos(s+1,i,j+1)) or
+		       ((Up(s) and !Wall(i-1,j))    -> Pos(s+1,i-1,j)) or
+		   ((Down(s) and !Wall(i+1,j))  -> Pos(s+1,i+1,j)) ) ) ;
+
+FRAME()
+&& [A s=0..k] UNIQUEPOS(s)
+&& [A s=1..k-1] UNIQUEOP(s)
+&& [A s=0..k-1] NEXT(s)

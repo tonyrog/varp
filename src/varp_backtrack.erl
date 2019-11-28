@@ -54,7 +54,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 			       true -> varp:output_model(Bs2,Count)
 			    end,
 			    if Count rem 1000 =:= 0 ->
-				    io:format("~w\n", [Count]);
+				    io:format("~w\n", [Count]); %% option?
 			       true -> 
 				    ok
 			    end,
@@ -90,7 +90,7 @@ next([{_,_,[],_}|Stack1],Bs) ->
     undo(Bs,Stack1),
     next(Stack1,Bs);
 next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
-    varp_formula:set_level(Bs,Level),
+    varc:set_level(Bs#bs.vp,Level),
     case eq_eval(Bs,Xi,Level) of
 	false ->
 	    Stack1 = [{I,Xi,Xs,Level}|Stack],
@@ -155,7 +155,6 @@ undo_level(Bs, Level) ->
     ?dbg("~sundo@~w\n", [indent(Level),Level]),
     varp_formula:undo_level(Bs,Level).
     
-
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
 proof_output(Bs, Stack) ->

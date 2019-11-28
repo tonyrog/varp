@@ -14,7 +14,7 @@ options() ->
     [#{ long => "sort",
 	key => sort,
 	spec => {list,{enum,[?ORDER]}},
-	default => [identity],
+	default => [?ORDER_IDENTITY],
 	description => "Specifiy variable order."
       },
      #{ long => "first",

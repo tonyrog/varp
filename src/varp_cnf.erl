@@ -82,6 +82,7 @@ emit_fd(Fd, Type, Symbols, Raw, Bs) ->
 
 
 cnf_(_Fd,_Type,_Raw,false,_VarMap,Bs) ->
+    %% emit_edge_list(_Fd, Bs, _VarMap),
     {?CONTINUE,[],Bs};
 cnf_(Fd,Type,Raw,I,VarMap,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
@@ -124,6 +125,32 @@ emit_symbols(Fd, true, Bs, VarMap) ->
 	      io:format(Fd, "c ~s is ~w\n", 
 			[varp_formula:format_symbol(Key),Val])
       end, [], Bs#bs.vs).
+
+%% emit edge list as comments
+emit_edge_list(Fd, Bs,VarMap) ->
+    maps:fold(
+      fun(X, Y, _Acc) ->
+	      case edge_list(Bs, X, VarMap) of
+		  [] -> ok;
+		  K -> io:format(Fd, "c ~w => ~s\n", [Y,fmt_list(K)])
+	      end,
+	      case edge_list(Bs, -X, VarMap) of
+		  [] -> ok;
+		  L -> io:format(Fd, "c ~w => ~s\n", [-Y,fmt_list(L)])
+	      end
+      end, ok, VarMap).
+
+%% return translated and filtered edge list
+edge_list(Bs, X, VarMap) ->
+    L = varc:literal_info(Bs#bs.vp, X, edge),
+    lists:foldl(
+      fun(Xi, Acc) ->
+	      case translate_literal(Xi,VarMap) of
+		  error -> Acc;
+		  Yi -> [Yi|Acc]
+	      end
+      end, [], L).
+    
 
 %%
 %% Count clause, and variabels. Also construct a
@@ -195,3 +222,7 @@ count_number_of_clauses_(Bs, I, N) ->
 	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N+1)
     end.
 -endif.
+
+fmt_list(List) ->
+    lists:concat(lists:join(' ', List)).
+
