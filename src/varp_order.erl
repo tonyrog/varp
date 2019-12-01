@@ -40,7 +40,7 @@ options() ->
       }].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    ?dbg("order Param=~p\n", [Param]),
+    ?dbg0("order Param=~p\n", [Param]),
     order_literals(Bs, Param).
 
 order_literals(Bs, Param) ->

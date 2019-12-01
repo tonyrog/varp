@@ -63,7 +63,7 @@ version() ->
     Vsn.
 
 start() ->
-    application:start(varp),
+    application:ensure_all_started(varp),
     application:load(wx),
     start_win_reg(),
     spawn(
@@ -790,22 +790,14 @@ solve(Mode, S, Bound) ->
 	    GOpts2 = GOpts1#{ meta => Meta,
 			      output => [{?MODULE,output_model,[S]}] },
 	    output_clear(S),
+
 	    ok = wxFrame:setStatusText(S#s.window, "ok",[]),
 
 	    wxButton:disable(S#s.satisfy),
 	    wxButton:disable(S#s.falsify),
 	    wxButton:enable(S#s.cancel),
 
-	    Res = (catch varp:do_run(GDo,Form,GOpts2)),
-
-	    wxButton:enable(S#s.satisfy),
-	    wxButton:enable(S#s.falsify),
-	    wxButton:disable(S#s.cancel),
-
-	    call(get(mon_proc), flush),
-	    call(get(mon_proc), stop),
-
-	    case Res of
+	    try varp:do_run(GDo,Form,GOpts2) of
 		{?INCONSISTENT,_,_Bs} ->
 		    if Mode =:= falsify ->
 			    output_text(S, "VALID\n");
@@ -828,10 +820,20 @@ solve(Mode, S, Bound) ->
 		    output_text(S, "USER ABORT\n");
 		{?ERROR,_,_} ->
 		    output_text(S, "ERROR\n");
-		{'EXIT',{Err,_Where}} ->
-		    output_error(S, varp:format_error(Err));
 		Res ->
 		    output_error(S, io_lib:format("unexpected ~p\n", [Res]))
+	    catch
+		?EXCEPTION(error,Reason,Trace) ->
+		    S1 = output_error(S, varp:format_error(Reason)),
+		    io:format("exception:~w\n~p\n", [Reason,?GET_STACK(Trace)]),
+		    S1
+	    after
+		wxButton:enable(S#s.satisfy),
+		wxButton:enable(S#s.falsify),
+		wxButton:disable(S#s.cancel),
+
+		call(get(mon_proc), flush),
+		call(get(mon_proc), stop)
 	    end;
 
 	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->
@@ -908,17 +910,18 @@ export(Type, File, S, Bound) ->
 	    output_clear(S),
 	    ok = wxFrame:setStatusText(S#s.window, "export ok",[]),
 
-	    Res = (catch varp:do_run(GDo,Form,GOpts2)),
-
-	    case Res of
+	    try varp:do_run(GDo,Form,GOpts2) of
 		{?CONTINUE, [], _Bs} ->
 		    S;
 		{?ERROR,_,_} ->
 		    output_text(S, "ERROR\n");
-		{'EXIT',{Err,_Where}} ->
-		    output_error(S, varp:format_error(Err));
 		Res ->
 		    output_error(S, io_lib:format("unexpected ~p\n", [Res]))
+	    catch
+		?EXCEPTION(error,Reason,Trace) ->
+		    S1 = output_error(S, varp:format_error(Reason)),
+		    io:format("Stack: ~p\n", [?GET_STACK(Trace)]),
+		    S1
 	    end;
 
 	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->

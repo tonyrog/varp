@@ -37,6 +37,7 @@
 -export([is_timeout_or_was_canceled/1]).
 -export([check_timeout_or_cancel/3]).
 -export([decision_clause/1, decision_clause/2]).
+-export([block_clause/1]).
 -export([make_psym/2]).
 -export([format_error/1]).
 
@@ -306,24 +307,23 @@ start() ->
     main(init:get_plain_arguments()).
 
 start0() ->
-    io:format("varp dummy start\n"),
     %% dummy start for servator when generating application
-    application:start(varp),
+    application:ensure_all_started(varp),
     ok.
 
 main(Args) ->
-    %% io:format("main: arguments = ~p\n", [Args]),
-    application:start(varp),
+    %% ?dbg1("main: arguments = ~p\n", [Args]),
+    application:ensure_all_started(varp),
 
     Plugins = load_plugins(),
-    %% io:format("main: plugins = ~p\n", [Plugins]),
+    %% ?dbg1("main: plugins = ~p\n", [Plugins]),
 
     GlobalOptionSpec = global_option_spec(),
     GOpts0 = default_options(),
 
-    %% io:format("options0 = ~p\n", [GOpts0]),
+    %% ?dbg1("options0 = ~p\n", [GOpts0]),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
-    %% io:format("main: options1 = ~p\n", [GOpts1]),
+    %% ?dbg1("main: options1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
 
     {Do1,Files,GOpts2,Bound0} =
@@ -1395,7 +1395,7 @@ block_clause(Bs) ->
     Level = varc:info(Bs#bs.vp, level),
     block_clause_(Bs, Level, []).
 
-block_clause_(Bs, 0, Clause) ->
+block_clause_(_Bs, 0, Clause) ->
     Clause;
 block_clause_(Bs, Level, Clause) ->
     Xi = varc:get_decision(Bs#bs.vp, Level, 4),

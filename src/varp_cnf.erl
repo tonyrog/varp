@@ -126,6 +126,7 @@ emit_symbols(Fd, true, Bs, VarMap) ->
 			[varp_formula:format_symbol(Key),Val])
       end, [], Bs#bs.vs).
 
+-if(false).
 %% emit edge list as comments
 emit_edge_list(Fd, Bs,VarMap) ->
     maps:fold(
@@ -140,6 +141,9 @@ emit_edge_list(Fd, Bs,VarMap) ->
 	      end
       end, ok, VarMap).
 
+fmt_list(List) ->
+    lists:concat(lists:join(' ', List)).
+
 %% return translated and filtered edge list
 edge_list(Bs, X, VarMap) ->
     L = varc:literal_info(Bs#bs.vp, X, edge),
@@ -151,6 +155,7 @@ edge_list(Bs, X, VarMap) ->
 	      end
       end, [], L).
     
+-endif.
 
 %%
 %% Count clause, and variabels. Also construct a
@@ -222,7 +227,4 @@ count_number_of_clauses_(Bs, I, N) ->
 	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N+1)
     end.
 -endif.
-
-fmt_list(List) ->
-    lists:concat(lists:join(' ', List)).
 

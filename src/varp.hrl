@@ -11,7 +11,6 @@
 -define(T,  t).
 -define(F,  f).
 
-
 -define(TOP_LEVEL, 0).
 
 -define(DELTA, 0).
@@ -252,6 +251,3 @@
 -endif.
 
 -endif.
-
-
-

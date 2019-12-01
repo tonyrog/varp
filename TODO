@@ -1,3 +1,4 @@
+- Handle declaration of integers and sizes in snf and cnf formats
 
 - Save CNF from varp_wx, {satisfy, [saturate], cnf -f <file> } (OK)
 
