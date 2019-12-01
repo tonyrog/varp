@@ -36,6 +36,7 @@
 -export([is_timeout/1]).
 -export([is_timeout_or_was_canceled/1]).
 -export([check_timeout_or_cancel/3]).
+-export([decision_clause/1, decision_clause/2]).
 -export([make_psym/2]).
 -export([format_error/1]).
 
@@ -1323,6 +1324,9 @@ set_global_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
 set_global_timeout(Bs, infinity) ->
     Bs#bs { t_global = undefined }.
 
+%% FIXME: read_timer + receive may be fast than
+%%  calling monotonic_time + couters:get !?
+
 check_timeout_or_cancel(Bs, Counter, CheckInterval) ->
     Time1 = erlang:monotonic_time(millisecond),
     Time0 = counters:get(Bs#bs.counters, Counter),
@@ -1384,3 +1388,34 @@ read_timer(TRef) when is_reference(TRef) ->
 	false -> 0;
 	Remain -> Remain
     end.
+
+%% This is the negation of the decision variables blocking the
+%% current model.
+block_clause(Bs) ->
+    Level = varc:info(Bs#bs.vp, level),
+    block_clause_(Bs, Level, []).
+
+block_clause_(Bs, 0, Clause) ->
+    Clause;
+block_clause_(Bs, Level, Clause) ->
+    Xi = varc:get_decision(Bs#bs.vp, Level, 4),
+    block_clause_(Bs, Level-1, [-Xi|Clause]).
+
+%% Decision clause, use for proof output
+decision_clause(Bs) ->
+    Level = varc:info(Bs#bs.vp, level),
+    decision_clause(Bs, Level).
+
+decision_clause(_Bs, 0) ->
+    [];
+decision_clause(Bs, Level) ->
+    case varc:get_decision(Bs#bs.vp, Level, 3) of
+	f -> decision_clause(Bs,Level-1);
+	Xi -> decision_clause__(Bs,Level-1,[-Xi])
+    end.
+
+decision_clause__(_Bs, 0, Clause) ->
+    Clause;
+decision_clause__(Bs, Level, Clause) ->
+    Xi = varc:get_decision(Bs#bs.vp, Level, 4),
+    decision_clause__(Bs, Level-1, [-Xi|Clause]).

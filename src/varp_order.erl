@@ -40,8 +40,7 @@ options() ->
       }].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    %% FIXME use the order found in "formula" if declared
-    %% io:format("File order = ~p\n", [varp_formula:getopt(Bs,order)]),
+    ?dbg("order Param=~p\n", [Param]),
     order_literals(Bs, Param).
 
 order_literals(Bs, Param) ->

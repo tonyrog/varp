@@ -139,24 +139,6 @@ undo_all_levels(Bs, I) ->
     varp_formula:undo_level(Bs,I),
     undo_all_levels(Bs, I-1).
 
-decision_clause(Bs) ->
-    Level = varc:info(Bs#bs.vp, level),
-    decision_clause_(Bs, Level).
-
-decision_clause_(_Bs, 0) ->
-    [];
-decision_clause_(Bs, Level) ->
-    case varc:get_decision(Bs#bs.vp, Level, 3) of    
-	f -> decision_clause_(Bs,Level-1);
-	Xi -> decision_clause__(Bs,Level-1,[-Xi])
-    end.
-
-decision_clause__(_Bs, 0, Clause) ->
-    Clause;
-decision_clause__(Bs, Level, Clause) ->
-    Xi = varc:get_decision(Bs#bs.vp, Level, 4),
-    decision_clause__(Bs, Level-1, [-Xi|Clause]).
-    
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
 proof_output(Bs) ->
@@ -164,6 +146,6 @@ proof_output(Bs) ->
 	none ->
 	    ok;
 	_ ->
-	    Clause = decision_clause(Bs),
+	    Clause = varp:decision_clause(Bs),
 	    varp_formula:proof_output(Bs,$a,Clause)
     end.

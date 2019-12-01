@@ -441,7 +441,6 @@ order_sort(Bs,Key1,Key2,Arg)
 	      true ->
 		   Arg
 	   end,
-    ?dbg("order ~w, ~w, ~w\n", [Key1,Key2,Arg1]),
     varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
 
 eval(Bs) ->
@@ -688,6 +687,8 @@ fmt_index_list([I|Is]) ->
 
 fmt_index(I) when is_integer(I) ->
     integer_to_list(I);
+fmt_index(#cconst{base=B,value=V}) ->
+    integer_to_list(list_to_integer(V,B));
 fmt_index(A) when is_atom(A) ->
     atom_to_list(A);
 fmt_index(Set) when is_list(Set) ->
@@ -3236,8 +3237,6 @@ format_p({bit_index,Var,Index}) ->
     [format_p(Var),"[",integer_to_list(Index), "]"];
 format_p({index,Var,Index}) ->
     [format_p(Var),"[",integer_to_list(Index), "]"].
-
-
 
 format_params([]) -> "";
 format_params(As) when is_list(As) ->

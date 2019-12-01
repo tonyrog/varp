@@ -1,4 +1,10 @@
 
+- Save CNF from varp_wx, {satisfy, [saturate], cnf -f <file> } (OK)
+
+- Generate proof files (check box in varp_wx) file.prf
+
+- Validate proofs read file.prf {validate -f <file> }
+
 - What if TWL opt for literals that are already watched in
     other clauses?
 
@@ -6,13 +12,11 @@
     clause.
   - 
 
-
 - Fix/verify pair substitution
 
   - Level/Bound feedback (for fun)
 
-
-- More flexibel "order" syntax
+- More flexibel "order" syntax (Prepared)
 
 old syntax: [+|-]<name>[','[+|-]<name>]
 
@@ -29,27 +33,21 @@ old syntax: [+|-]<name>[','[+|-]<name>]
   x>y == x>|<y  -x,+y
 
 
+- turbo eval (OK)  nbcp + undo
 
+  nbcp
+    bcp n steps until contradiction or model
+    return
+  	  true       - model exist
+	  false      - contradiction found
 
-- turbo eval
-
-  eval [<n> [<i>]]
-    eval <n> steps using current order from position <i>
-    if <i> is not given then user has to make the decision
-    if <n> is not given 1 is assumed, one step
-    
-  return
-	true       - model exist
-	false      - contradiction found
-	{more,<j>} - more steps needed from order position <j>
-
-  back
+  undo
        undo and flip decision, if already flipped then
        undo to next level.
 
     return
-       false       - no more variables to flip = no models = inconsistent
-       {true,<j>}  - backtracked and <j> is now a useful order index
+       false  - no more variables to flip = no models = inconsistent
+       true   - backtracked may call nbcp again
 
 - Seoul
 

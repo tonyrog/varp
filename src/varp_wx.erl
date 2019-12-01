@@ -26,6 +26,10 @@
 
 -define(STCMOD, stc_modified).
 
+-define(ID_EXPORT_CNF, 100).
+-define(ID_EXPORT_SNF, 101).
+
+
 -record(s,
 	{
 	 window,
@@ -38,6 +42,7 @@
 	 falsify,
 	 cancel,
 	 dir = "",
+	 export_dir = "",
 	 filename = undefined,
 	 path = undefined,
 	 wx_env,            %% environment passed to plugin 
@@ -102,6 +107,10 @@ create_window(Wx) ->
     _OpenMenuItem    = wxMenu:append(FileM, ?wxID_OPEN, "&Open...\tCtrl+O"),
     SaveMenuItem     = wxMenu:append(FileM, ?wxID_SAVE, "&Save\tCtrl+S"),
     _SaveAsMenuItem  = wxMenu:append(FileM, ?wxID_SAVEAS, "&Save As..."),
+    _Sep1            = wxMenu:appendSeparator(FileM),
+    _ExportCnf       = wxMenu:append(FileM, ?ID_EXPORT_CNF, "&Export CNF..."),
+    _ExportSnf       = wxMenu:append(FileM, ?ID_EXPORT_SNF, "&Export SNF..."),
+    _Sep2            = wxMenu:appendSeparator(FileM),
     _QuitMenuItem    = wxMenu:append(FileM, ?wxID_EXIT, "&Quit\tCtrl+Q"),
 
     %% Edit menu
@@ -432,6 +441,48 @@ handle_event(Event, S) ->
 		    {noreply, S}
 	    end;
 
+        #wx{id=?ID_EXPORT_CNF, event=#wxCommand{type=command_menu_selected}} ->
+	    ?dbg("EXPORT_CNF\n",[]),
+	    Dialog = wxFileDialog:new(S#s.window,
+				      [{message, "Export CNF"},
+				       {style,?wxFD_SAVE bor 
+					    ?wxFD_OVERWRITE_PROMPT},
+				       {defaultDir,S#s.export_dir},
+				       {wildCard,"*.cnf"}]),
+	    case wxFileDialog:showModal(Dialog) of
+		?wxID_OK ->
+		    Path = wxFileDialog:getPath(Dialog),
+		    Dir = wxFileDialog:getDirectory(Dialog),
+		    File = add_extension(Path, ".cnf"),
+		    S1 = export(cnf, File, S),
+		    wxDialog:destroy(Dialog),
+		    {noreply, S1#s { export_dir=Dir }};
+		?wxID_CANCEL ->
+		    wxDialog:destroy(Dialog),
+		    {noreply, S}
+	    end;
+
+        #wx{id=?ID_EXPORT_SNF, event=#wxCommand{type=command_menu_selected}} ->
+	    ?dbg("EXPORT_SNF\n",[]),
+	    Dialog = wxFileDialog:new(S#s.window,
+				      [{message, "Export SNF"},
+				       {style,?wxFD_SAVE bor 
+					    ?wxFD_OVERWRITE_PROMPT},
+				       {defaultDir,S#s.export_dir},
+				       {wildCard,"*.snf"}]),
+	    case wxFileDialog:showModal(Dialog) of
+		?wxID_OK ->
+		    Path = wxFileDialog:getPath(Dialog),
+		    Dir = wxFileDialog:getDirectory(Dialog),
+		    File = add_extension(Path, ".snf"),
+		    S1 = export(snf, File, S),
+		    wxDialog:destroy(Dialog),
+		    {noreply, S1#s { export_dir=Dir }};
+		?wxID_CANCEL ->
+		    wxDialog:destroy(Dialog),
+		    {noreply, S}
+	    end;
+
         #wx{id=?wxID_OPEN, event=#wxCommand{type=command_menu_selected}} ->
 	    ?dbg("OPEN\n",[]),
 	    if S#s.modified ->
@@ -691,13 +742,9 @@ solve(Mode, S, Bound) ->
     ?dbg("timeout = ~w\n", [Timeout]),
 
     Formula = wxStyledTextCtrl:getText(S#s.formula),
-    case parse(Formula) of
+    Meta = maps:from_list(Bound),
+    case parse(Formula, Meta) of
 	{ok,{Sections,Form}} ->
-	    %% io:format("Form = ~p\n", [Form]),
-	    %% io:format("Sections = ~p\n", [Sections]),
-	    %% method=count,print=true,output={M,F,A} will allow 
-	    %% to display models in the window without output without
-	    %% storing them in memory.
 	    Options = [{method,count},{print,true},{timeout,Timeout},
 		       {assoc,Assoc},{qtype,QType}],
 	    GOpts = varp:load_option_list(Options),
@@ -731,7 +778,7 @@ solve(Mode, S, Bound) ->
 		end ++
 		case Backtrack of
 		    0 ->
-			[{backjump, [{max,Max}]}];
+			[{backjump0, [{max,Max}]}];
 		    1 ->
 			[{backtrack,[{max,Max}]}];
 		    2 ->
@@ -740,7 +787,7 @@ solve(Mode, S, Bound) ->
 
 	    GDo = varp:parse_do(Do),
 
-	    GOpts2 = GOpts1#{ meta => maps:from_list(Bound),
+	    GOpts2 = GOpts1#{ meta => Meta,
 			      output => [{?MODULE,output_model,[S]}] },
 	    output_clear(S),
 	    ok = wxFrame:setStatusText(S#s.window, "ok",[]),
@@ -806,6 +853,94 @@ solve(Mode, S, Bound) ->
 	{error, Message} ->
 	    output_error(S, io_lib:format("~p\n", [Message]))
     end.
+
+%% add extension only if there no extension to the name
+add_extension(Path, Ext) ->
+    case filename:extension(Path) of
+	"" -> Path ++ Ext;
+	_ -> Path
+    end.
+
+export(Type, File, S) ->
+    Meta  = wxTextCtrl:getValue(S#s.meta),
+    case varp_scan:string(Meta) of
+	{ok,Ts,_Ln} ->
+	    case parse_bindings(Ts) of
+		{ok,L} -> 
+		    export(Type, File, S, L);
+		{error,{_Ln,Reason,Mess1}} ->
+		    Err = io_lib:format("~w ~p\n", 
+					[Reason,Mess1]),
+		    output_error(S, Err)
+	    end;
+	Error ->
+	    Err = io_lib:format("~p", [Error]),
+	    output_error(S, Err)
+    end.
+
+export(Type, File, S, Bound) ->
+    Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
+    Assoc     = case wxRadioBox:getSelection(S#s.config_assoc) of
+		    0 -> left;
+		    1 -> right;
+		    2 -> balanced;
+		    3 -> none
+		end,
+    Formula = wxStyledTextCtrl:getText(S#s.formula),
+    Meta = maps:from_list(Bound),
+    case parse(Formula, Meta) of
+	{ok,{Sections,Form}} ->
+	    Options = [{assoc,Assoc}],
+	    GOpts = varp:load_option_list(Options),
+	    GOpts1 = varp:section_opts(Sections, GOpts),
+	    Do =
+		[{satisfy,[]}] ++
+		case Saturate of
+		    0 -> [];
+		    _K -> [{saturate,[{level,1}]}]
+		end ++
+		[{cnf, [{type,Type},{file,File},{symbols,true}]}],
+
+	    GDo = varp:parse_do(Do),
+
+	    GOpts2 = GOpts1#{ meta => Meta,
+			      output => [{?MODULE,output_model,[S]}] },
+	    output_clear(S),
+	    ok = wxFrame:setStatusText(S#s.window, "export ok",[]),
+
+	    Res = (catch varp:do_run(GDo,Form,GOpts2)),
+
+	    case Res of
+		{?CONTINUE, [], _Bs} ->
+		    S;
+		{?ERROR,_,_} ->
+		    output_text(S, "ERROR\n");
+		{'EXIT',{Err,_Where}} ->
+		    output_error(S, varp:format_error(Err));
+		Res ->
+		    output_error(S, io_lib:format("unexpected ~p\n", [Res]))
+	    end;
+
+	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->
+	    show_line(S#s.formula, Ln),
+	    mark_line(S#s.formula, Ln),
+	    wxStyledTextCtrl:refresh(S#s.formula),
+	    Text = (catch apply(Mod, format_error, [Message])),
+	    S1 = output_error(S, Text),
+	    S1#s { error = true };
+
+	{error, {Ln,Mod,Message}, _EndLn} when is_integer(Ln), is_atom(Mod) ->
+	    show_line(S#s.formula, Ln),
+	    mark_line(S#s.formula, Ln),
+	    wxStyledTextCtrl:refresh(S#s.formula),
+	    Text = (catch apply(Mod, format_error, [Message])),
+	    S1 = output_error(S, Text),
+	    S1#s { error = true };
+
+	{error, Message} ->
+	    output_error(S, io_lib:format("~p\n", [Message]))
+    end.
+
 
 mark_line(Stc, Line) ->
     wxStyledTextCtrl:setCaretLineBackground(Stc, {255, 50, 50}),
@@ -876,7 +1011,7 @@ parse_bindings_([T={_,Ln,_}|_Ts], _Acc) ->
 parse_bindings_([], Acc) ->
     {ok,lists:reverse(Acc)}.
 
-parse(String) ->
+parse(String, Meta) ->
     case varp:tokens(String) of
 	{ok,[{identifier,_,"c"}|_Ts]} ->
 	    parse_dimacs(String);
@@ -885,7 +1020,8 @@ parse(String) ->
 	{ok,Ts} ->
 	    case varp_parse:parse(Ts) of
 		{ok,{Sections,Formula}} ->
-		    {ok, SectionMap} = varp:split_sections(Sections),
+		    GOpts = #{ meta => Meta },
+		    {ok, SectionMap} = varp:split_sections(Sections,GOpts),
 		    {ok,{SectionMap,Formula}};
 		Error -> Error
 	    end;

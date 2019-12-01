@@ -1,17 +1,17 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2018, Tony Rogvall
 %%% @doc
-%%%    Implement the main loop with backjump
+%%%    Implement the main loop with backjump (new multi bcp version)
 %%% @end
 %%% Created : 23 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
--module(varp_backjump).
+-module(varp_nbackjump).
 
 -export([run/2]).
 -export([options/0]).
 
 -export([minimize/2]).
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 -include("varp.hrl").
 
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
@@ -185,33 +185,62 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     init(Bs1, Param, MaxLearned, M0).
 
 init(Bs, Param, MaxLearned, MR) ->
-    loop(Bs,Param,?TOP_LEVEL,MaxLearned,MR,varp_formula:first_init(Bs),[]).
+    varp_formula:set_level(Bs, 2),
+    loop(Bs, Param, MaxLearned, MR).
 
-loop(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
+loop(Bs, Param, MaxLearned, MR) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_EVAL_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
-	    loop_(Bs,Param,Level,MaxLearned,MR,I,Stack);
+	    loop_(Bs, Param, MaxLearned, MR);
 	{true, What} ->
-	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    undo_until(Bs, ?TOP_LEVEL),
 	    return(What, MR, Bs)
     end.
 
-loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
-    ?dbg("loop_: EVAL\n",[]),
-    case varp_formula:eval(Bs) of
-	false ->
-	    if Level =:= 0, MR#m.n =:= 0 ->
+loop_(Bs,Param,MaxLearned,MR) ->
+    ?dbg("loop_: nbcp\n",[]),
+    case varc:nbcp(Bs#bs.vp) of
+	false ->  %% contradiction
+	    Level = varc:info(Bs#bs.vp, level),
+	    case Level of
+		0 when MR#m.n =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
 		    display_stat(Bs,Param),
 		    return(?INCONSISTENT,MR,Bs);
-	       Level =:= 0 ->
+		0 ->
 		    return(?CONTINUE,MR,Bs);
-	       true ->
-		    contradiction(Bs,Param,Level,MaxLearned,MR,I,Stack)
+		_ ->
+		    contradiction(Bs,Param,Level,MaxLearned,MR)
 	    end;
-	true ->
-	    next(Bs,Param,Level,MaxLearned,MR,I,Stack)
+	true ->  %% model
+	    N = MR#m.n + 1,
+	    Model = varp:output_model(Bs, N),
+	    Level = varc:info(Bs#bs.vp, level),
+	    if N >= MR#m.max, MR#m.max > 0; Level =:= 0 -> %%?
+		    display_stat(Bs,Param),
+		    case MR#m.method of
+			collect ->
+			    {?CONTINUE,[Model|MR#m.ms],Bs};
+			count ->
+			    {?CONTINUE,N,Bs}
+		    end;
+	       true ->
+		    Block = varp:block_clause(Bs),
+		    %% FIXME: minimize Block clause and find
+		    %% a working jump level (maybe just one up?)
+		    undo_until(Bs, ?TOP_LEVEL),
+		    varp_formula:add_clause(Bs, Block, ?DELTA),
+		    %% we start with simple restart
+		    case MR#m.method of
+			collect ->
+			    MR1 = MR#m { n=N, ms = [Model|MR#m.ms] },
+			    init(Bs,Param,MaxLearned,MR1);
+			count ->
+			    MR1 = MR#m { n=N },
+			    init(Bs,Param,MaxLearned,MR1)
+		    end
+	    end
     end.
 
 return(What, MR, Bs) ->
@@ -222,8 +251,8 @@ return(What, MR, Bs) ->
 	    {What,MR#m.n,Bs}
     end.
 
-contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
-    ClauseList0 = conflict_analysis(Bs,Param,Level),
+contradiction(Bs,Param,Level,MaxLearned,MR) ->
+    ClauseList0 = conflict_analysis(Bs,Param),
     ClauseList1 = 
 	case maps:get(minimize,Param) of
 	    true ->
@@ -311,11 +340,6 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 
     undo_until(Bs, Level, JLevel),  %% undo until JLevel
     varp_formula:set_level(Bs, JLevel),
-    {INext,Stack1} = pop_until(Bs,Stack,JLevel),
-    ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
-		    display_stack_ln(Bs, Stack1),
-		    io:format("\n", [])
-	   end),
 
     %% install unit clauses
     Bs0 = lists:foldl(
@@ -393,7 +417,6 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
 	    varp_formula:set_level(Bs2, ?TOP_LEVEL),
-	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
 	    ?dbg("del_unused_clauses\n", []),
 	    varp_formula:del_unused_clauses(Bs),
 	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
@@ -409,7 +432,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	    reorder(Bs2),
 	    init(Bs2,Param,MaxLearned,MR);
        true ->
-	    loop(Bs2,Param,JLevel,MaxLearned,MR,INext,Stack1)
+	    loop(Bs2,Param,MaxLearned,MR)
     end.
 
 reorder(Bs) ->
@@ -439,64 +462,16 @@ reorder(Bs) ->
 	    varp_saturate:saturate(Bs, 1, infinity, {{1},{1}}, 0)
     end.
 
+undo_until(Bs, NewLevel) ->
+    Level = varc:info(Bs#bs.vp, level),
+    undo_until(Bs, Level, NewLevel).
+
 undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
     ?dbg("undo: ~w\n", [Level]),
     varp_formula:undo_level(Bs, Level),
     undo_until(Bs, Level-1, NewLevel);
 undo_until(Bs, Level, Level) ->
     Bs.
-
-pop_until(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
-    pop_until(Bs,Stack,JLevel);
-pop_until(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
-    ?dbg("backjump[~w]: ~s\n", [JLevel, format_lit(_Bs,_Xk)]),
-    {K,Stack};
-pop_until(Bs,[],_JLevel) ->
-    {varp_formula:first_init(Bs), []}.
-
-next(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
-    ?dbg("next: next_unbound ~w\n", [I]),
-    case varp_formula:next_unbound(Bs,I) of
-	false ->
-	    N = MR#m.n + 1,
-	    Model = varp:output_model(Bs, N),
-	    if N >= MR#m.max, MR#m.max > 0; Stack =:= [] ->
-		    display_stat(Bs,Param),
-		    case MR#m.method of
-			collect ->
-			    {?CONTINUE,[Model|MR#m.ms],Bs};
-			count ->
-			    {?CONTINUE,N,Bs}
-		    end;
-	       true ->
-		    Block = block_model(Stack),
-		    %% FIXME: minimize Block clause and find
-		    %% a working jump level (maybe just one up?)
-		    undo_until(Bs, Level, ?TOP_LEVEL),
-		    varp_formula:add_clause(Bs, Block, ?DELTA),
-		    %% we start with simple restart
-		    case MR#m.method of
-			collect ->
-			    MR1 = MR#m { n=N, ms = [Model|MR#m.ms] },
-			    init(Bs,Param,MaxLearned,MR1);
-			count ->
-			    MR1 = MR#m { n=N },
-			    init(Bs,Param,MaxLearned,MR1)
-		    end
-	    end;
-		    
-	{J,Xj} ->
-	    NextLevel = Level+1,
-	    varp_formula:set_level(Bs,NextLevel),
-	    true = varp_formula:bind(Bs,Xj),
-	    ?dbg("decision@~w = ~s\n", [NextLevel,format_lit(Bs,Xj)]),
-	    loop(Bs,Param,NextLevel,MaxLearned,MR,J,[{J,Xj,NextLevel}|Stack])
-    end.
-
-block_model([{_K,Xk,_Level}|Stack]) ->
-    [-Xk | block_model(Stack)];
-block_model([]) ->
-    [].
 
 %% J2 is backjump level, J3 is backstumble level
 %% D2 is level to backjump delta, D3 is backjump to two free literal level
@@ -670,7 +645,7 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 	-1 ->
 	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
-	    A = get_clause(Bs,I),
+	    A = varc:get_clause(Bs#bs.vp,I),
 	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
 	    %%    [-Li, A, Clause]),
 	    %% if A-{Li} is a subset of Clause then remove Li from clause
@@ -684,7 +659,8 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
     {Removed,Length,lists:reverse(NewClause)}.
 
-conflict_analysis(Bs,Param,Level) ->
+conflict_analysis(Bs,Param) ->
+    Level = varc:info(Bs#bs.vp, level),
     Trail= [P|_] = get_literal_bindings(Bs,Level),
     ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
     Seen0 = #{ abs(P) => true }, %% a set of traversed literals
@@ -741,13 +717,13 @@ conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
 reason(Bs,P) ->
     case implication_clause(Bs,P) of
 	-1 -> [];
-	I -> get_clause(Bs,I) -- [P]
+	I -> varc:get_clause(Bs#bs.vp,I) -- [P]
     end.
 
 conflicting_reason(Bs,P,I) ->
     case varp_formula:conflicting_clause(Bs,I) of
 	-1 -> [];
-	Ci -> get_clause(Bs,Ci) -- [P]
+	Ci -> varc:get_clause(Bs#bs.vp,Ci) -- [P]
     end.
 
 %% check if As is a subset of Bs
@@ -790,9 +766,6 @@ implication_clause(Bs,Li) ->
 implication_level(Bs,Li) ->
     {_,_,Lev} = varp_formula:implication_clause(Bs,Li),
     Lev.
-
-get_clause(Bs, I) ->
-    varp_formula:get_clause(Bs,I).
 
 %% -1 - 1 => 0 1
 neg01(Val) -> (Val+1) div 2. 
@@ -859,9 +832,3 @@ get_literal_implications(Bs, Level) ->
 	[] -> [];
 	[_|L] -> L
     end.
-
-display_stack_ln(Bs,[{K,Xk,Level}|Stack]) ->
-    io:format("~s@~w/~w ", [format_lit(Bs,Xk), Level, K]),
-    display_stack_ln(Bs, Stack);
-display_stack_ln(_Bs,[]) ->
-    ok.
