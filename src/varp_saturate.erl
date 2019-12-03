@@ -160,7 +160,7 @@ loop_k(Bs,I,X,K,N,Level,Laps,Threshold) ->
 					  varp_formula:fmt_bind_list(Bs2,Ys)]),
 				    pop2(Bs2, Level),
 				    varp_formula:install_bindings(Bs,Level,Ys),
-				    true = varp_formula:eval(Bs2),
+				    true = varc:bcp(Bs2#bs.vp),
 				    loop_k_next(Bs2,I,X,K,N,Level,Laps,Threshold)
 			    end
 		    end
@@ -215,8 +215,8 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 		true ->
 		    varp_formula:proof_output(Bs,$a,[X]),
 		    %% Ls = varp_formula:get_bindings(Bs, Level+1),
-		    varp_formula:move_level(Bs, Level+1, Level),
-		    varp_formula:set_level(Bs,Level),
+		    varc:move_level(Bs#bs.vp, Level+1, Level),
+		    varc:set_level(Bs#bs.vp,Level),
 		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold)
 	    end;
 	true ->
@@ -256,12 +256,12 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
 			      end, Ys)
 		    end,
 		    pop(Bs,Level),
-		    varp_formula:set_level(Bs,Level),
+		    varc:set_level(Bs#bs.vp,Level),
 		    if Ys =:= [] ->
 			    ok;
 		       true ->
 			    varp_formula:install_bindings(Bs,Level,Ys),
-			    true = varp_formula:eval(Bs)
+			    true = varc:bcp(Bs#bs.vp)
 		    end,
 		    loop_1_next(Bs,I,X,N,Level,Laps,Threshold)
 	    end
@@ -308,32 +308,32 @@ set_user_count(Bs, X, Level) ->
 push_eq_eval(Bs,X,Level) ->
     ?dbg("~spush_eq_eval: ~s\n", 
 	 [indent(Level+1), varp_formula:format_lit(Bs,X)]),
-    varp_formula:set_level(Bs,Level+1),
-    true = varp_formula:bind(Bs,X),  %% this call should never fail!
-    varp_formula:eval(Bs).   %% but this call may return false
+    varc:set_level(Bs#bs.vp,Level+1),
+    true = varc:bind(Bs#bs.vp,X),  %% this call should never fail!
+    varc:bcp(Bs#bs.vp).   %% but this call may return false
 
 pop(Bs, Level) ->
-    varp_formula:undo_level(Bs,Level+1).
+    varc:undo_level(Bs#bs.vp,Level+1).
 
 %% set on one level eval on next level
 push2_eq_eval(Bs,X,Level) ->
     ?dbg("~spush2_eq_eval: ~s\n", 
 	 [indent(Level+1),varp_formula:fmt_lit(Bs,X)]),
-    varp_formula:set_level(Bs,Level+1),
-    true = varp_formula:bind(Bs,X),  %% this call should never fail!
-    varp_formula:set_level(Bs,Level+2),
-    varp_formula:eval(Bs).   %% but this call may return false
+    varc:set_level(Bs#bs.vp,Level+1),
+    true = varc:bind(Bs#bs.vp,X),  %% this call should never fail!
+    varc:set_level(Bs#bs.vp,Level+2),
+    varc:bcp(Bs#bs.vp).   %% but this call may return false
 
 pop2(Bs, Level) ->
-    varp_formula:undo_level(Bs,Level+2),
-    varp_formula:undo_level(Bs,Level+1).
+    varc:undo_level(Bs#bs.vp,Level+2),
+    varc:undo_level(Bs#bs.vp,Level+1).
 
 eq_eval(Bs,X,Level) ->
     ?dbg("~seq_eval: ~s\n", 
 	 [indent(Level), varp_formula:format_lit(Bs,X)]),
-    varp_formula:set_level(Bs,Level),
-    true = varp_formula:bind(Bs,X),
-    varp_formula:eval(Bs).
+    varc:set_level(Bs#bs.vp,Level),
+    true = varc:bind(Bs#bs.vp,X),
+    varc:bcp(Bs#bs.vp).
 
 indent(D) -> lists:duplicate(D, $\s).
 

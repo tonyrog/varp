@@ -77,14 +77,14 @@ validate_loop(Fd,Type,Bs, I) ->
 	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
 	    %% io:format("check clause ~w\n", [Clause]),
-	    varp_formula:set_level(Bs,1),
+	    varc:set_level(Bs#bs.vp,1),
 	    Res = eval_neg_literal_list(Bs, Clause),
-	    varp_formula:undo_level(Bs,1),
+	    varc:undo_level(Bs#bs.vp,1),
 	    case Res of
 		false -> %% ok valid
-		    varp_formula:set_level(Bs,0),
+		    varc:set_level(Bs#bs.vp,0),
 		    varp_formula:add_clause(Bs, Clause),
-		    case varp_formula:eval(Bs) of
+		    case varc:bcp(Bs#bs.vp) of
 			false ->
 			    case read_clause(Fd,Type,Bs) of
 				{a,[]} ->
@@ -108,12 +108,12 @@ validate_loop(Fd,Type,Bs, I) ->
     end.
 
 eval_neg_literal_list(Bs, [Li|Ls]) ->
-    case varp_formula:bind(Bs,-Li) of
+    case varc:bind(Bs#bs.vp,-Li) of
 	false -> false;
 	true -> eval_neg_literal_list(Bs, Ls)
     end;
 eval_neg_literal_list(Bs, []) ->
-    varp_formula:eval(Bs).
+    varc:bcp(Bs#bs.vp).
 
 read_clause(_Fd, binary,_Bs) ->
     %% read compressed clause

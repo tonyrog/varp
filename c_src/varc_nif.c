@@ -33,7 +33,7 @@
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
 //
 #define TWL_BACKWARD
-//#define LIT_INTEGER 32
+#define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
 // #define ASSERTIONS
@@ -483,8 +483,8 @@ typedef struct _subscription_t { // :object_t
 #define NUM_CSET 4
 
 typedef struct _varp_t {
-    lit_t ltrue;
-    lit_t lfalse;
+    // lit_t ltrue;
+    // lit_t lfalse;
     size_t vnext;             // next free variable number
     size_t vsize;             // allocated size of value map
     size_t vnum;              // number of variables
@@ -1538,7 +1538,7 @@ static void unwatch_ll(varp_t* vp, clause_t* cp, literal_t* lp)
     wlink_t** wlp = &lp->wlist;
     wlink_t* wl;
 
-    DBG("UNWATCH cix=%lu lit=%d wl=%p\r\n", cp->cix, export_ll(lp), *wlp);
+    // DBG("UNWATCH cix=%lu lit=%d wl=%p\r\n", cp->cix, export_ll(lp), *wlp);
 
     while((wl = *wlp) && (clause_pointer(wl) != cp))
 	wlp = &(wl->next);
@@ -1844,18 +1844,21 @@ static inline void put_l(varp_t* vp,lit_t l,ival_t ivalue,
     put_ll(vp,l2ll(vp, l),ivalue,li,cix,level);
 }
 
+static void init_level(varp_t* vp, int level)
+{
+    vp->undo[level].decision = L_FALSE(vp);
+    vp->undo[level].t  = 0;
+    vp->undo[level].ix = 0;	
+    vp->undo[level].bs = NULL;    
+}
 
 static void undo_init(varp_t* vp)
 {
     int i;
     vp->unum = DEFAULT_UNDO_SIZE;
     vp->undo = VARP_ALLOC(DEFAULT_UNDO_SIZE * sizeof(undo_t));
-    for (i = 0; i < DEFAULT_UNDO_SIZE; i++) {
-	vp->undo[i].decision = L_FALSE(vp);
-	vp->undo[i].t  = 0;
-	vp->undo[i].ix = 0;	
-	vp->undo[i].bs = NULL;
-    }    
+    for (i = 0; i < DEFAULT_UNDO_SIZE; i++)
+	init_level(vp, i);
     vp->num_bound = 0;
     vp->level = 0;
 }
@@ -1868,11 +1871,8 @@ static int set_level(varp_t* vp, int level)
 	unsigned int n = vp->unum;
 	vp->unum *= 2;
 	vp->undo = VARP_REALLOC(vp->undo, vp->unum*sizeof(undo_t));
-	for (i = n; i < (int)vp->unum; i++) {
-	    vp->undo[i].decision = L_FALSE(vp);
-	    vp->undo[i].t  = 0;
-	    vp->undo[i].bs = NULL;
-	}
+	for (i = n; i < (int)vp->unum; i++)
+	    init_level(vp, i);
     }
     vp->level = level;
     if (level > vp->max_level)
@@ -1889,7 +1889,7 @@ static int set_level(varp_t* vp, int level)
     return 0;
 }
 
-static void clr_level(varp_t* vp, int level)
+static void unbind_level(varp_t* vp, int level)
 {
     variable_t* bp = vp->undo[level].bs;
     int nbound = 0;
@@ -1903,14 +1903,13 @@ static void clr_level(varp_t* vp, int level)
 	nbound++;
     }
     vp->num_bound -= nbound;
-    vp->undo[level].bs = NULL;    
+    vp->undo[level].bs = NULL;
 }
 
 static void undo_level(varp_t* vp, int level)
 {
-    clr_level(vp, level);
-    vp->undo[level].decision = L_FALSE(vp);
-    vp->undo[level].t = 0;
+    unbind_level(vp, level);
+    init_level(vp, level);
     lqueue_clear(&vp->q);         // must clear queue
 }
 
@@ -1931,7 +1930,7 @@ static void move_level(varp_t* vp, int src, int dst)
 	var->next = vp->undo[dst].bs;
 	var->level = dst;
 	vp->undo[dst].bs = vp->undo[src].bs;
-	vp->undo[src].bs = NULL;
+	init_level(vp, src);
     }
 }
 
@@ -4180,6 +4179,9 @@ static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_uint(env, argv[1], &level))
 	return enif_make_badarg(env);
+    DBG("set_level: level=%d, t=%d, ix=%d, decision=%d\r\n",
+	level, vp->undo[level].t, vp->undo[level].ix,
+	vp->undo[level].decision); 
     set_level(vp, level);
     return ATOM(true);
 }
@@ -4725,18 +4727,16 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     while((level = vp->level) > 0) {
-	clr_level(vp, level);
+	unbind_level(vp, level);
 	if (vp->undo[level].t == 1) {  // SET+EVAL
 	    vp->undo[level].decision = neg_l(vp->undo[level].decision);
 	    vp->undo[level].t = 2;     // UNDO+NEG
 	    return ATOM(true);
 	}
 	else if (vp->undo[level].t == 3) {  // NEG+EVAL
-	    vp->undo[level].decision = L_FALSE(vp);
-	    vp->undo[level].t  = 0;
-	    vp->undo[level].ix = 0;
-	    vp->level--;
+	    init_level(vp, level);
 	}
+	vp->level--;
     }
     return ATOM(false);
 }
@@ -4756,8 +4756,12 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if ((level = vp->level) == 0)
-	return enif_make_badarg(env);
+    
+    level = vp->level;
+    DBG("nbcp: level=%d, t=%d, ix=%d, decision=%d\r\n",
+	level, vp->undo[level].t, vp->undo[level].ix,
+	vp->undo[level].decision);
+    
     if (vp->undo[level].t == 2) { // UNDO+NEG
 	put_l(vp, vp->undo[level].decision, I_TRUE, -1, -1, level);
 	vp->undo[level].t = 3;    // NEG+EVAL
@@ -4766,13 +4770,21 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	ix = vp->undo[level].ix;
 	goto bcp;
     }
-    else if (vp->undo[level].decision != L_FALSE(vp))
-	return enif_make_badarg(env);
-
+    else if (vp->undo[level].t == 1) { // continue SET+EVAL
+	vp->caller_env = env;
+	vp->num_conflicting = 0;
+	ix = vp->undo[level].ix;
+	goto bcp;
+    }
+    
+    if (vp->undo[level].t == 0)  // UNDEF - clear decision
+	vp->undo[level].decision = L_FALSE(vp);
     if ((ix = order_next(vp, 1, 0)) == 0)
 	return ATOM(true);  // model
     vp->caller_env = env;
     vp->num_conflicting = 0;
+    if (level == 0)
+	goto bcp;
 next:
     xp = vindex_l(vp, vp->order_map[ix]);
     vp->undo[level].decision = xp;
@@ -5394,17 +5406,11 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     si = GET_SI(cix);
     ix = GET_IX(cix);
 
-    // enif_fprintf(stdout, "del clause si:%d, ix=%d\r\n", si, ix);
-
     if ((cp = get_clause(vp,cix)) == NULL)
 	return enif_make_badarg(env);
 
-    // enif_fprintf(stdout, "remove clause si:%d, ix=%d\r\n", GET_SI(cp->cix), GET_IX(cp->cix));
-
     remove_clause(vp, cp);
 
-    // enif_fprintf(stdout, "removed clause\r\n");
-    
     ASSERT(get_clause(vp, cix) == NULL);
 
     // check if we have a hole at the end, update cnext
@@ -5640,7 +5646,6 @@ static ERL_NIF_TERM varp_clause_first(ErlNifEnv* env, int argc,
     cm = vp->clause_map[si];
     while(i < (int)vp->cnext[si]) {
 	if (cm[i] != NULL) {
-	    // enif_fprintf(stdout, "clause si:%d,ix:%d\r\n", si, i);
 	    return make_cix(env, MAKE_CIX(si,i));
 	}
 	i++;
@@ -5668,12 +5673,10 @@ static ERL_NIF_TERM varp_clause_next(ErlNifEnv* env, int argc,
     cm = vp->clause_map[si];
     while(ix < n) {
 	if (cm[ix] != NULL) {
-	    // enif_fprintf(stdout, "next: n=%d, si:%d, ix=%d\r\n", n, si, ix);
 	    return make_cix(env, MAKE_CIX(si,ix));
 	}
 	ix++;
     }
-    // enif_fprintf(stdout, "next: false\r\n");    
     return ATOM(false);
 }
 

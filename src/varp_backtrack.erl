@@ -153,7 +153,7 @@ undo_all(_Bs, []) ->
 
 undo_level(Bs, Level) ->
     ?dbg("~sundo@~w\n", [indent(Level),Level]),
-    varp_formula:undo_level(Bs,Level).
+    varc:undo_level(Bs#bs.vp,Level).
     
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
@@ -176,6 +176,6 @@ eq_eval(Bs,L,_D) ->
     Res.
 
 eqv(Bs,L) ->
-    varp_formula:bind(Bs,L) andalso varp_formula:eval(Bs).
+    varc:bind(Bs#bs.vp,L) andalso varc:bcp(Bs#bs.vp).
 
 indent(D) -> lists:duplicate(D, $\s).

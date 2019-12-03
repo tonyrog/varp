@@ -48,7 +48,6 @@
 -export([is_equal/3]).
 -export([is_bound/2]).
 -export([is_unbound/2]).
--export([bind/2, bind/3]).
 -export([getopt/2]).
 -export([number_of_variables/1]).
 -export([number_of_clauses/1]).
@@ -75,12 +74,7 @@
 -export([each_unbound/2]).
 -export([each_variable/2]).
 -export([fold_unbound/3]).
--export([eval/1]).
 -export([eval_meta/2]).
--export([set_level/2]).
--export([keep_level/2]).
--export([move_level/3]).
--export([undo_level/2]).
 -export([vfold_op/4]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
@@ -89,7 +83,6 @@
 -export([get_clauses/3]).
 -export([get_clause_info/2, get_clause_info/3]).
 -export([add_clause/2]).
--export([use_clause/2]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([clean_clauses/1]).
@@ -443,21 +436,6 @@ order_sort(Bs,Key1,Key2,Arg)
 	   end,
     varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
 
-eval(Bs) ->
-    varc:bcp(Bs#bs.vp).
-
-undo_level(Bs, Level) ->
-    varc:undo_level(Bs#bs.vp, Level).
-
-keep_level(Bs, Level) ->
-    varc:keep_level(Bs#bs.vp, Level).
-
-move_level(Bs, Src, Dst) ->
-    varc:move_level(Bs#bs.vp, Src, Dst).
-
-set_level(Bs,Level) ->
-    varc:set_level(Bs#bs.vp, Level).
-
 value(Bs,V) ->
     varc:value(Bs#bs.vp, V).
 
@@ -478,12 +456,6 @@ is_unbound(Bs,Lit) ->
 
 is_equal(Bs,LitA, LitB) ->
     not varc:is_equal(Bs#bs.vp,LitA,LitB).
-
-bind(Bs,L) ->
-    varc:bind(Bs#bs.vp,L).
-
-bind(Bs,L,Level) ->
-    varc:bind(Bs#bs.vp,L,Level).
 
 subst(Bs, X, Y) ->
     varc:subst(Bs#bs.vp,X,Y).
@@ -572,9 +544,6 @@ get_clause_info(Bs, I) ->
 get_clause_info(Bs, I, What) ->
     varc:clause_info(Bs#bs.vp, I, What).
 
-use_clause(Bs, I) ->
-    varc:use_clause(Bs#bs.vp, I).
-
 %% Bs is under the assumption that Var = TRUE
 intersect_bindings(Bs, Var, Bs0) ->
     intersect_(Bs, Var, Bs0).
@@ -609,15 +578,15 @@ install_bindings(Bs,Level,Bnds) ->
     install_(Bs,Level,Bnds).
 
 install_(Bs,Level,[X|Xs]) when is_integer(X) ->
-    true = bind(Bs, X),
+    true = varc:bind(Bs#bs.vp, X),
     install_(Bs,Level,Xs);
 install_(Bs,Level,[{X,X}|Xs]) ->
     install_(Bs,Level,Xs);
 install_(Bs,Level=?TOP_LEVEL,[{X,?T}|Xs]) ->
-    true = bind(Bs, X),
+    true = varc:bind(Bs#bs.vp, X),
     install_(Bs,Level,Xs);
 install_(Bs,Level=?TOP_LEVEL,[{X,?F}|Xs]) ->
-    true = bind(Bs, -X),
+    true = varc:bind(Bs#bs.vp, -X),
     install_(Bs,Level,Xs);
 install_(Bs,?TOP_LEVEL,[{X,Y}|Xs]) ->
     Xa = varc:variable_info(Bs#bs.vp, X, is_atom),

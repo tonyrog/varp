@@ -40,7 +40,6 @@
 	 dir = #{} :: #{ integer() => 'Left'|'Right'|'Up'|'Down' }
 	}).
 	 
-%% fixme: display maze
 output(_Fd, Model) ->
     Out = lists:foldl(
 	     fun({{p,'Wall',[I,J]},true}, Out) ->
@@ -48,14 +47,19 @@ output(_Fd, Model) ->
 		({{p,'Wall',[I,J]},false}, Out) ->
 		     Out#out { maze = maps:put({I,J}, $\s, Out#out.maze) };
 		({{p,'Pos',[S,I,J]},true}, Out) ->
+		     io:format("~w => (~w,~w)\n", [S,I,J]),
 		     Out#out { pos = maps:put(S, {I,J}, Out#out.pos) };
 		({{p,'Left',[S]}, true}, Out) ->
+		     %% io:format("Left(~w)\n", [S]),
 		     Out#out { dir = maps:put(S, 'Left', Out#out.dir) };
 		({{p,'Right',[S]}, true}, Out) ->
+		     %% io:format("Right(~w)\n", [S]),
 		     Out#out { dir = maps:put(S, 'Right', Out#out.dir) };
 		({{p,'Up',[S]}, true}, Out) ->
+		     %% io:format("Up(~w)\n", [S]),
 		     Out#out { dir = maps:put(S, 'Up', Out#out.dir) };
 		({{p,'Down',[S]}, true}, Out) ->
+		     %% io:format("Down(~w)\n", [S]),
 		     Out#out { dir = maps:put(S, 'Down', Out#out.dir) };
 		(_, Mi) ->
 		     Mi
@@ -63,14 +67,18 @@ output(_Fd, Model) ->
     %% io:format("Maze = ~p\n", [Maze]),
     N = lists:max([I || {{p,'Wall',[I,_J]},_} <- Model]),
     M = lists:max([J || {{p,'Wall',[_I,J]},_} <- Model]),
-
+    K = maps:size(Out#out.pos)-1,
     Maze = maps:fold(
-	     fun(S, {I,J}, Mi) ->
-		     io:format("~w => ~w\n", [S, {I,J}]),
-		     Char = if S > 9 -> $A+(S-10);
-			       true -> S+$0
+	     fun(S, Pos, Mi) ->
+		     Char = if S =:= 0 -> $@;
+			       S =:= K -> $#;
+			       true -> $.
 			    end,
-		     maps:put({I,J}, Char, Mi)
+		     %% io:format("~w => ~w\n", [S, Pos]),
+		     %% Char = if S > 9 -> $A+(S-10);
+		     %% true -> S+$0
+		     %% end,
+		     maps:put(Pos, Char, Mi)
 	     end, Out#out.maze, Out#out.pos),
 
     lists:foreach(
@@ -78,9 +86,9 @@ output(_Fd, Model) ->
 	      lists:foreach(
 		fun(J) ->
 			io:put_chars([maps:get({I,J},Maze)])
-		end, lists:seq(0, M)),
+		end, lists:seq(1, M)),
 	      io:put_chars("\n")
-      end, lists:seq(0, N)),
+      end, lists:seq(1, N)),
     ok.
 
 %% Convert ascii maze into bit flag version 
@@ -119,10 +127,8 @@ maze1([Code|Ds], Rs, I, J, Acc) ->
 		    ?FLAG(Code, ?WALL_RIGHT, {p,'R',[I,J]}),
 		    ?FLAG(Code, ?WALL_BELOW, {p,'D',[I,J]})]} | Acc],
     Acc2 = if Code band ?START =:= ?START ->
-		   %% io:format("START = ~p\n", [{I,J}]),
 		   [{p, 'Pos', [0,I,J]} | Acc1];
 	      Code band ?STOP =:= ?STOP ->
-		   %% io:format("STOP = ~p\n", [{I,J}]),
 		   [{p, 'Pos', ['k',I,J]} | Acc1];
 	      true ->
 		   Acc1
@@ -151,10 +157,10 @@ maze2([$X|Ds], Rs,  I, J, Acc) ->
 maze2([$\s|Ds], Rs,  I, J, Acc) ->
     maze2(Ds, Rs, I, J+1, [passage(I,J)|Acc]);
 maze2([$@|Ds], Rs,  I, J, Acc) ->
-    io:format("START = Pos(0,~w,~w)\n", [I,J]),
+    %% io:format("START = Pos(0,~w,~w)\n", [I,J]),
     maze2(Ds, Rs, I, J+1, [pos(0,I,J),passage(I,J)|Acc]);
 maze2([$&|Ds], Rs,  I, J, Acc) ->
-    io:format("STOP = Pos(k,~w,~w)\n", [I,J]),
+    %% io:format("STOP = Pos(k,~w,~w)\n", [I,J]),
     maze2(Ds, Rs, I, J+1, [pos('k',I,J),passage(I,J)|Acc]);
 maze2([], [R|Rs], I, _J, Acc) ->
     maze2(R, Rs, I+1, 1, Acc);
@@ -175,7 +181,7 @@ file(File,_Meta) ->
 		    %% M = length(hd(Lines))-2,
 		    %% MazeFormula = maze1(Data),
 		    MazeFormula = maze2(Lines),
-		    io:format("Maze=~w\n", [MazeFormula]),
+		    %% io:format("Maze=~w\n", [MazeFormula]),
 		    N = length(Lines),
 		    M = length(hd(Lines)),
 		    {ok,[{"n",N},{"m",M}],MazeFormula}

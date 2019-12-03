@@ -74,14 +74,8 @@ options() ->
      #{ long => "max-conflicts",
 	key => max_conflicts,
 	spec =>  unsigned,
-	default => 0,
-	description => "max number of conflicts to generate per conflict"},
-
-     #{ long => "num-conflicts",
-	key => num_conflicts,
-	spec =>  unsigned,
 	default => 1,
-	description => "number of conflicts to analyse"},
+	description => "Max number of conflicts to analyse"},
 
      #{ long => "max-learned",
 	key => max_learned,
@@ -136,9 +130,9 @@ options() ->
 	 ms = []
 	}).
 	 
-
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    varp_formula:config(Bs, max_conflicting, 0),
+    MaxConflicting = maps:get(max_conflicts,Param),
+    varp_formula:config(Bs, max_conflicting, MaxConflicting),
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     %% Calculate size of lru cache
@@ -198,8 +192,8 @@ loop(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
     end.
 
 loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
-    ?dbg("loop_: EVAL\n",[]),
-    case varp_formula:eval(Bs) of
+    ?dbg("loop_: BCP\n",[]),
+    case varc:bcp(Bs#bs.vp) of
 	false ->
 	    if Level =:= 0, MR#m.n =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
@@ -288,14 +282,15 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 				LClauseList5)
 	end,
 
-    LClauseList7 = case maps:get(max_conflicts,Param) of
-		       0 -> 
-			   LClauseList6;
-		       1 ->
-			   [];
-		       MaxC ->
-			   lists:sublist(LClauseList6, MaxC-1)
-		   end,
+    %% LClauseList7 = case maps:get(max_conflicts,Param) of
+    %% 		       0 -> 
+    %% 			   LClauseList6;
+    %% 		       1 ->
+    %% 			   [];
+    %% 		       MaxC ->
+    %% 			   lists:sublist(LClauseList6, MaxC-1)
+    %% 		   end,
+    LClauseList7 = LClauseList6,
 
     L = maps:get(stumble,Param),
     K = maps:get(olle,Param),
@@ -310,7 +305,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	end,
 
     undo_until(Bs, Level, JLevel),  %% undo until JLevel
-    varp_formula:set_level(Bs, JLevel),
+    varc:set_level(Bs#bs.vp, JLevel),
     {INext,Stack1} = pop_until(Bs,Stack,JLevel),
     ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
 		    display_stack_ln(Bs, Stack1),
@@ -392,7 +387,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
-	    varp_formula:set_level(Bs2, ?TOP_LEVEL),
+	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
 	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
 	    ?dbg("del_unused_clauses\n", []),
 	    varp_formula:del_unused_clauses(Bs),
@@ -405,7 +400,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
-	    varp_formula:set_level(Bs2, ?TOP_LEVEL),
+	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
 	    reorder(Bs2),
 	    init(Bs2,Param,MaxLearned,MR);
        true ->
@@ -441,7 +436,7 @@ reorder(Bs) ->
 
 undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
     ?dbg("undo: ~w\n", [Level]),
-    varp_formula:undo_level(Bs, Level),
+    varc:undo_level(Bs#bs.vp, Level),
     undo_until(Bs, Level-1, NewLevel);
 undo_until(Bs, Level, Level) ->
     Bs.
@@ -487,8 +482,8 @@ next(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 		    
 	{J,Xj} ->
 	    NextLevel = Level+1,
-	    varp_formula:set_level(Bs,NextLevel),
-	    true = varp_formula:bind(Bs,Xj),
+	    varc:set_level(Bs#bs.vp,NextLevel),
+	    true = varc:bind(Bs#bs.vp,Xj),
 	    ?dbg("decision@~w = ~s\n", [NextLevel,format_lit(Bs,Xj)]),
 	    loop(Bs,Param,NextLevel,MaxLearned,MR,J,[{J,Xj,NextLevel}|Stack])
     end.
@@ -608,7 +603,7 @@ add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,Clause=[L]) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
-    true = varp_formula:bind(Bs,L,?TOP_LEVEL),
+    true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     Bs;
 add_conflict_clause(Bs,Clause) ->
@@ -684,25 +679,21 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
     {Removed,Length,lists:reverse(NewClause)}.
 
-conflict_analysis(Bs,Param,Level) ->
+conflict_analysis(Bs,_Param,Level) ->
     Trail= [P|_] = get_literal_bindings(Bs,Level),
     ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
     Seen0 = #{ abs(P) => true }, %% a set of traversed literals
     N = varp_formula:info(Bs, number_of_conflicting_clauses),
-    CList = [ {I,varp_formula:conflicting_clause(Bs,I)} || 
-		I <- lists:seq(0, N-1)],
-    M = maps:get(num_conflicts,Param),
-    L = if M =:= 0 -> N;
-	   true -> min(M, N)
-	end,
     [ begin
-	  Ri = conflicting_reason(Bs,-P,I),
-	  varp_formula:use_clause(Bs, I),
+	  Ri = conflicting_reason(Bs,-P,I), %% get conflict clause i
+	  varc:use_clause(Bs#bs.vp, Cix),   %% mark clause as in-use
 	  ?dbg("reason[~w] cix=~w: ~s,~s\n", 
-	       [I,_Cix,format_lit(Bs,-P),
+	       [I,Cix,format_lit(Bs,-P),
 		format_literals(Bs,Ri)]),
+	  %% calculate the conflict clause
 	  conflict_reason(Bs,Ri,Trail,Level,Seen0,1,[])
-      end || {I,_Cix} <- lists:sublist(CList, L)].
+      end || {I,Cix} <- [ {I,varp_formula:conflicting_clause(Bs,I)} ||
+			    I <- lists:seq(0, N-1) ] ].
 
 conflict_reason(Bs,[Q|Qs],Trail,Level,Seen,C,CL) ->
     AbsQ = abs(Q),

@@ -136,7 +136,7 @@ undo_all(Bs) ->
 undo_all_levels(Bs, 0) ->
     varc:set_level(Bs#bs.vp, 0);
 undo_all_levels(Bs, I) ->
-    varp_formula:undo_level(Bs,I),
+    varc:undo_level(Bs#bs.vp,I),
     undo_all_levels(Bs, I-1).
 
 %% Xi is the current decision, that failed, 

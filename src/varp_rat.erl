@@ -106,17 +106,17 @@ rat_lit(Bs,L,Is,CMax) ->
 	      Js = get_delta_clauses(Bs,-L,CMax),
 	      Cs = clauses(Bs,Js,-L,[]),
 	      %% io:format("rat_test l=~w, d=~w, cs=~w\n", [L,D,Cs]),
-	      varp_formula:set_level(Bs,1),
-	      true = varp_formula:bind(Bs,-L),
+	      varc:set_level(Bs#bs.vp, 1),
+	      true = varc:bind(Bs#bs.vp,-L),
 	      true = neg_bind_all(Bs,D),
 	      case rat_test(Bs,Cs) of
 		  true ->
-		      varp_formula:undo_level(Bs,1),
+		      varc:undo_level(Bs#bs.vp,1),
 		      io:format("remove clause ~w = ~w\n", [I,[L|D]]),
-		      varp_formula:set_level(Bs,0), %% must be done at level=0!
+		      varc:set_level(Bs#bs.vp,0), %% must be done at level=0!
 		      varp_formula:del_clause(Bs, I);
 		  false ->
-		      varp_formula:undo_level(Bs,1),
+		      varc:undo_level(Bs#bs.vp,1),
 		      ok
 	      end
       end, Ds),
@@ -124,18 +124,18 @@ rat_lit(Bs,L,Is,CMax) ->
 
 rat_test(Bs, [{_Cix,C}|Cs]) ->
     Level = 2,
-    varp_formula:set_level(Bs,Level),
+    varc:set_level(Bs#bs.vp,Level),
     case neg_bind_all(Bs,C) of
 	false ->
-	    varp_formula:undo_level(Bs,Level),
+	    varc:undo_level(Bs#bs.vp,Level),
 	    false;
 	true ->
-	    case varp_formula:eval(Bs) of
+	    case varc:bcp(Bs#bs.vp) of
 		false ->
-		    varp_formula:undo_level(Bs,Level),
+		    varc:undo_level(Bs#bs.vp,Level),
 		    false;
 		true ->
-		    varp_formula:undo_level(Bs,Level),
+		    varc:undo_level(Bs#bs.vp,Level),
 		    rat_test(Bs, Cs)
 	    end
     end;
@@ -144,7 +144,7 @@ rat_test(_Bs, []) ->
 
 %% bind -Xi
 neg_bind_all(Bs, [Xi|Xs]) ->
-    case varp_formula:bind(Bs,-Xi) of
+    case varc:bind(Bs#bs.vp,-Xi) of
 	false -> false;
 	true -> neg_bind_all(Bs,Xs)
     end;

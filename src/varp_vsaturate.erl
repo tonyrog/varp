@@ -94,7 +94,7 @@ saturate_vec(Bs,Vec) ->
 	   end,
     ?dbg("vector: {~s}\n", 
 	 [varp_formula:fmt_var_list(Bs,[V||{_,V}<-Vec1])]),
-    varp_formula:set_level(Bs, 1),
+    varc:set_level(Bs#bs.vp, 1),
     Res = saturate_vec_(Bs,Vec1,2),
     ?dbg("bound => {~s}\n\n",
 	 [varp_formula:fmt_bind_list(Bs,
@@ -122,7 +122,7 @@ saturate_vec__(Bs,X,V,Level) ->
     case mark_eq_eval(Bs,X,?F,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
-	    varp_formula:undo_level(Bs,Level),
+	    varc:undo_level(Bs#bs.vp,Level),
 	    case eq_eval(Bs,X,?T,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
@@ -134,7 +134,7 @@ saturate_vec__(Bs,X,V,Level) ->
 	    case saturate_vec_(Bs,V,Level+2) of
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
-		    varp_formula:undo_level(Bs,Level),
+		    varc:undo_level(Bs#bs.vp,Level),
 		    eq_eval(Bs,X,?T,Level);
 		true ->
 		    Xs = varp_formula:get_bindings(Bs,Level+1), %% + X=false!
@@ -142,13 +142,13 @@ saturate_vec__(Bs,X,V,Level) ->
 			 [indent(Level),
 			  varp_formula:fmt_var(Bs,X),
 			  varp_formula:fmt_bind_list(Bs,Xs)]),
-		    varp_formula:undo_level(Bs,Level), %% (X=false)
+		    varc:undo_level(Bs#bs.vp,Level), %% (X=false)
 		    
 		    case mark_eq_eval(Bs,X,?T,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level),Level]),
-			    varp_formula:undo_level(Bs,Level),  %% (X=true)
+			    varc:undo_level(Bs#bs.vp,Level),  %% (X=true)
 			    eq_eval(Bs,X,?F,Level);
 			true ->
 			    ?dbg("~s~s/true: => {~s}\n",
@@ -162,9 +162,9 @@ saturate_vec__(Bs,X,V,Level) ->
 			    ?dbg("~sintersect = {~s}\n", 
 				 [indent(Level),
 				  varp_formula:fmt_bind_list(Bs,Ys)]),
-			    varp_formula:undo_level(Bs,Level),  %% undo (X=true)
+			    varc:undo_level(Bs#bs.vp,Level),  %% undo (X=true)
 			    install_bindings(Bs, Ys),
-			    varp_formula:eval(Bs)
+			    varc:eval(Bs#bs.vp)
 		    end
 	    end
     end.
@@ -192,11 +192,11 @@ mark_eq_eval(Bs,V,Value,Level) ->
 	 [indent(Level),
 	  varp_formula:fmt_var(Bs,V),
 	  varp_formula:fmt_var(Bs,Value)]),
-    varp_formula:set_level(Bs,Level),
+    varc:set_level(Bs#bs.vp,Level),
     case varp_formula:equal(Bs,V,Value) of
 	true ->
-	    varp_formula:set_level(Bs,Level+1),
-	    varp_formula:eval(Bs);
+	    varc:set_level(Bs#bs.vp,Level+1),
+	    varc:eval(Bs#bs.vp);
 	false ->
 	    false
     end.
@@ -206,7 +206,7 @@ eq_eval(Bs,V,Value,_D) ->
 	 [indent(_D),
 	  varp_formula:fmt_var(Bs,V),
 	  varp_formula:fmt_var(Bs,Value)]),
-    varp_formula:equal(Bs,V,Value) andalso varp_formula:eval(Bs).
+    varp_formula:equal(Bs,V,Value) andalso varc:bcp(Bs#bs.vp).
 
 indent(D) -> lists:duplicate(D, $\s).
 
