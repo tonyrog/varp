@@ -525,11 +525,11 @@ conflicting_clause(Bs,I) ->
 implication_clause(Bs, V) ->
     varc:implication_clause(Bs#bs.vp, V).
 
-get_clause(Bs, I) ->
-    varc:get_clause(Bs#bs.vp, I).
+get_clause(Bs, ClauseIndex) ->
+    varc:get_clause(Bs#bs.vp, ClauseIndex).
 
-get_clause(Bs, I, SkipLiteral) ->
-    varc:get_clause(Bs#bs.vp, I, SkipLiteral).
+get_clause(Bs, ClauseIndex, SkipLiteral) ->
+    varc:get_clause(Bs#bs.vp, ClauseIndex, SkipLiteral).
 
 get_clause(Bs, I, SkipLiteral, Raw) ->
     varc:get_clause(Bs#bs.vp, I, SkipLiteral, Raw).

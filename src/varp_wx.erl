@@ -53,7 +53,8 @@
 	 config_timeout,    %% wxSpinCtrl
 	 config_saturate,   %% wxSpinCtrl (saturate=1 or none=0)
 	 config_backtrack,  %% wxRadioBox (backtrack|backjump|none)
-	 config_order,      %% wxRadioBox (-degree|-rank|eval|random|none)
+	 config_order_1,    %% [wxRadioButton (deg|rnk|usr|rnd|non)]
+	 config_order_2,    %% [wxRadioButton (deg|rnk|usr|rnd|non)]
 	 config_assoc,      %% wxRadioBox (left|right|balanced|none)
 	 config_nbound      %% wxGauge
 	}).
@@ -226,15 +227,15 @@ create_window(Wx) ->
 
     %% BUTTONS
     Run = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label, "run"}]),
-    Satisfy = wxButton:new(Win2, 10, [{label,"Satisfy"}]),
+    Satisfy = wxButton:new(Win2, ?wxID_ANY, [{label,"Satisfy"}]),
     wxButton:connect(Satisfy, command_button_clicked),
     wxButton:enable(Satisfy),
 
-    Falsify = wxButton:new(Win2, 11, [{label,"Falsify"}]),
+    Falsify = wxButton:new(Win2, ?wxID_ANY, [{label,"Falsify"}]),
     wxButton:connect(Falsify, command_button_clicked),
     wxButton:enable(Falsify),
 
-    Cancel = wxButton:new(Win2, 12, [{label,"Cancel"}]),
+    Cancel = wxButton:new(Win2, ?wxID_ANY, [{label,"Cancel"}]),
     SELF = self(),
     wxButton:connect(Cancel, command_button_clicked,
 		     [{callback,
@@ -263,25 +264,49 @@ create_window(Wx) ->
     wxSpinCtrl:setRange(Saturate, 0, 3),
     wxSizer:add(SaturateBox, Saturate),
 
-    Backtrack = wxRadioBox:new(Win2, 21, "backtrack",
+    Backtrack = wxRadioBox:new(Win2, ?wxID_ANY, "backtrack",
 			       ?wxDefaultPosition,
 			       ?wxDefaultSize,
-			       ["backjump","backtrack","none"],
+			       ["bj","bt","none"],
 			       [{majorDim, 1}, {style, ?wxVERTICAL}]),
 
-    Order = wxRadioBox:new(Win2, 22, "order",
+    Order = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"order"}]),
+    Order1 = wxBoxSizer:new(?wxHORIZONTAL),
+    B10 = wxCheckBox:new(Win2,?wxID_ANY,"",
+			 [{style, ?wxCHK_3STATE bor
+			       ?wxCHK_ALLOW_3RD_STATE_FOR_USER}]),
+    wxCheckBox:set3StateValue(B10, ?wxCHK_CHECKED),
+    B11 = wxRadioButton:new(Win2,?wxID_ANY,"deg",[{style,?wxRB_GROUP}]),
+    B12 = wxRadioButton:new(Win2,?wxID_ANY,"rnk",[]),
+    B13 = wxRadioButton:new(Win2,?wxID_ANY,"usr",[]),
+    B14 = wxRadioButton:new(Win2,?wxID_ANY,"rnd",[]),
+    B15 = wxRadioButton:new(Win2,?wxID_ANY,"id",[]),
+    Order1List = [B10,B11,B12,B13,B14,B15],
+    [wxSizer:add(Order1, Bi) || Bi <- Order1List],
+
+    Order2 = wxBoxSizer:new(?wxHORIZONTAL),
+    B20 = wxCheckBox:new(Win2,?wxID_ANY,"",
+			 [{style, ?wxCHK_3STATE bor
+			       ?wxCHK_ALLOW_3RD_STATE_FOR_USER}]),
+    wxCheckBox:set3StateValue(B20, ?wxCHK_CHECKED),
+    B21 = wxRadioButton:new(Win2,?wxID_ANY,"deg",[{style,?wxRB_GROUP}]),
+    B22 = wxRadioButton:new(Win2,?wxID_ANY,"rnk",[]),
+    B23 = wxRadioButton:new(Win2,?wxID_ANY,"usr",[]),
+    B24 = wxRadioButton:new(Win2,?wxID_ANY,"rnd",[]),
+    B25 = wxRadioButton:new(Win2,?wxID_ANY,"id",[]),
+    Order2List = [B20,B21,B22,B23,B24,B25],
+    [wxSizer:add(Order2, Bi) || Bi <- Order2List],
+
+    wxSizer:add(Order, Order1),
+    wxSizer:add(Order, Order2),
+
+    Assoc = wxRadioBox:new(Win2, ?wxID_ANY, "assoc",
 			   ?wxDefaultPosition,
 			   ?wxDefaultSize,
-			   ["-deg", "-rank", "-usr", "rnd", "none"],
+			   ["left", "right", "mid", "none"],
 			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
 
-    Assoc = wxRadioBox:new(Win2, 23, "assoc",
-			   ?wxDefaultPosition,
-			   ?wxDefaultSize,
-			   ["left", "right", "balanced", "none"],
-			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
-
-    NBound = wxGauge:new(Win2, 31, 100, [{size,{800,10}},
+    NBound = wxGauge:new(Win2, ?wxID_ANY, 100, [{size,{800,10}},
 					 {style, 
 					  ?wxGA_HORIZONTAL+?wxGA_SMOOTH}]),
 
@@ -344,7 +369,8 @@ create_window(Wx) ->
 	 config_timeout    = Timeout,
 	 config_saturate   = Saturate,
 	 config_backtrack  = Backtrack,
-	 config_order      = Order,
+	 config_order_1    = Order1List,
+	 config_order_2    = Order2List,
 	 config_assoc      = Assoc,
 	 config_nbound     = NBound,
 	 wx_env            = wx:get_env(),
@@ -724,7 +750,10 @@ solve(Mode, S, Bound) ->
 		end,
     Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
     Backtrack = wxRadioBox:getSelection(S#s.config_backtrack),
-    Order     = wxRadioBox:getSelection(S#s.config_order),
+    
+    Order_1    = get_order(S#s.config_order_1),
+    Order_2    = get_order(S#s.config_order_2),
+
     Assoc     = case wxRadioBox:getSelection(S#s.config_assoc) of
 		    0 -> left;
 		    1 -> right;
@@ -749,6 +778,20 @@ solve(Mode, S, Bound) ->
 		       {assoc,Assoc},{qtype,QType}],
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),
+
+	    Order = 
+		if Order_1 =:= 0, Order_2 =:= 0 ->
+			case maps:find(order, GOpts1) of
+			    {ok, FileOrder} ->
+				[{order, FileOrder}];
+			    _ -> 
+				[]
+			end;
+		   Order_2 =:= 0 -> [{order,[{sort,[Order_1]}]}];
+		   Order_1 =:= 0 -> [{order,[{sort,[Order_2]}]}];
+		   true -> [{order,[{sort,[Order_1,Order_2]}]}]
+		end,
+	    %% io:format("Order = ~w\n", [Order]),
 	    Do =
 		[{wx,[{nbound,S#s.config_nbound},
 		      {window,S#s.window},
@@ -758,24 +801,7 @@ solve(Mode, S, Bound) ->
 		    0 -> [];
 		    _K -> [{saturate,[{level,1}]}]
 		end ++
-		case Order of
-		    0 ->
-			[{order,[{sort,[?ORDER_DEGREE bor ?ORDER_DESCEND]}]}];
-		    1 ->
-			[{order,[{sort,[?ORDER_RANK bor ?ORDER_DESCEND]}]}];
-		    2 ->
-			[{order,[{sort,[?ORDER_USER bor ?ORDER_DESCEND]}]}];
-		    3 ->
-			[{order,[{sort,[?ORDER_RANDOM]}]}];
-		    4 ->
-			%% pickup order from input file
-			case maps:find(order, GOpts1) of
-			    {ok, FileOrder} ->
-				[{order, FileOrder}];
-			    _ -> 
-				[]
-			end
-		end ++
+		Order ++
 		case Backtrack of
 		    0 ->
 			[{backjump0, [{max,Max}]}];
@@ -853,7 +879,7 @@ solve(Mode, S, Bound) ->
 	    S1#s { error = true };
 
 	{error, Message} ->
-	    output_error(S, io_lib:format("~p\n", [Message]))
+	    output_error(S, varp:format_error(Message))
     end.
 
 %% add extension only if there no extension to the name
@@ -862,6 +888,30 @@ add_extension(Path, Ext) ->
 	"" -> Path ++ Ext;
 	_ -> Path
     end.
+
+get_order([Ascend|Radios]) ->
+    case wxCheckBox:get3StateValue(Ascend) of
+	?wxCHK_CHECKED -> ?ORDER_DESCEND + get_radio_order(Radios);
+	?wxCHK_UNCHECKED -> 0;
+	?wxCHK_UNDETERMINED -> ?ORDER_ASCEND + get_radio_order(Radios)
+    end.
+
+get_radio_order([R|Rs]) ->
+    case wxRadioButton:getValue(R) of
+	true ->
+	    case wxRadioButton:getLabel(R) of
+		"deg" -> ?ORDER_DEGREE;
+		"rnk" -> ?ORDER_RANK;
+		"usr" -> ?ORDER_USER;
+		"rnd" -> ?ORDER_RANDOM;
+		"id"  -> ?ORDER_IDENTITY
+	    end;
+	false ->
+	    get_radio_order(Rs)
+    end;
+get_radio_order([]) ->
+    ?ORDER_UNDEFINED.
+    
 
 export(Type, File, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
@@ -1024,8 +1074,15 @@ parse(String, Meta) ->
 	    case varp_parse:parse(Ts) of
 		{ok,{Sections,Formula}} ->
 		    GOpts = #{ meta => Meta },
-		    {ok, SectionMap} = varp:split_sections(Sections,GOpts),
-		    {ok,{SectionMap,Formula}};
+		    try varp:split_sections(Sections,GOpts) of
+			{ok, SectionMap} ->
+			    {ok,{SectionMap,Formula}};
+			Error ->
+			    Error
+		    catch
+			error:Reason ->
+			    {error,Reason}
+		    end;
 		Error -> Error
 	    end;
 	Error -> Error

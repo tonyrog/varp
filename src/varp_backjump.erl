@@ -217,7 +217,7 @@ return(What, MR, Bs) ->
     end.
 
 contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
-    ClauseList0 = conflict_analysis(Bs,Param,Level),
+    ClauseList0 = varp_conflict:analyze(Bs,Level),
     ClauseList1 = 
 	case maps:get(minimize,Param) of
 	    true ->

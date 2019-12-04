@@ -117,7 +117,7 @@ to_cnf_(Bin,Sect,Ln,Acc,Cs) ->
 	    Sect1 = scan_section(Comment,Sect),
 	    to_cnf_(Bin1,Sect1,Ln+1,Acc,Cs);
 	{ok,Line,Bin1} ->
-	    case add_literals(string:tokens(Line, " \n"),Ln,Acc) of
+	    case add_literals(string:tokens(Line, " \r"),Ln,Acc) of
 		{false,Acc1} ->
 		    to_cnf_(Bin1,Sect,Ln+1,Acc1,Cs);
 		{true,Acc1} ->
