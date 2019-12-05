@@ -275,7 +275,7 @@ create_window(Wx) ->
     B10 = wxCheckBox:new(Win2,?wxID_ANY,"",
 			 [{style, ?wxCHK_3STATE bor
 			       ?wxCHK_ALLOW_3RD_STATE_FOR_USER}]),
-    wxCheckBox:set3StateValue(B10, ?wxCHK_CHECKED),
+    wxCheckBox:set3StateValue(B10, ?wxCHK_UNDETERMINED),
     B11 = wxRadioButton:new(Win2,?wxID_ANY,"deg",[{style,?wxRB_GROUP}]),
     B12 = wxRadioButton:new(Win2,?wxID_ANY,"rnk",[]),
     B13 = wxRadioButton:new(Win2,?wxID_ANY,"usr",[]),
@@ -288,7 +288,7 @@ create_window(Wx) ->
     B20 = wxCheckBox:new(Win2,?wxID_ANY,"",
 			 [{style, ?wxCHK_3STATE bor
 			       ?wxCHK_ALLOW_3RD_STATE_FOR_USER}]),
-    wxCheckBox:set3StateValue(B20, ?wxCHK_CHECKED),
+    wxCheckBox:set3StateValue(B20, ?wxCHK_UNDETERMINED),
     B21 = wxRadioButton:new(Win2,?wxID_ANY,"deg",[{style,?wxRB_GROUP}]),
     B22 = wxRadioButton:new(Win2,?wxID_ANY,"rnk",[]),
     B23 = wxRadioButton:new(Win2,?wxID_ANY,"usr",[]),
