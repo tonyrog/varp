@@ -109,9 +109,9 @@ options() ->
 
      #{ long => "restart-interval",
 	key => restart_interval,
-	spec =>  unsigned,
-	default => 0,
-	description => "Restart interval in milliseconds"},
+	spec =>  {union,[float,{enum,[{"infinity",infinity}]}]},
+	default => infinity,
+	description => "Restart interval in seconds"},
 
      #{ long => "display",
 	short => "d",
@@ -165,13 +165,13 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     case maps:get(restart_counter,Param) of
 	0 -> ok;
 	_ ->
-	    EvalCounter = varp_formula:info(Bs, eval_counter),
-	    counters:put(Bs#bs.counters,?COUNTER_BJR_EVAL_COUNTER, EvalCounter)
+	    EvalCounter = varp_formula:info(Bs, bcp_counter),
+	    counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, EvalCounter)
     end,
     case maps:get(restart_interval,Param) of
-	0 -> ok;
+	infinity -> ok;
 	RestartInterval ->
-	    erlang:start_timer(RestartInterval, self(), restart)
+	    erlang:start_timer(trunc(1000*RestartInterval), self(), restart)
     end,
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     M0  = #m { method = varp_formula:getopt(Bs1,method),
@@ -182,7 +182,7 @@ init(Bs, Param, MaxLearned, MR) ->
     loop(Bs,Param,?TOP_LEVEL,MaxLearned,MR,varp_formula:first_init(Bs),[]).
 
 loop(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
-    case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_EVAL_COUNTER,
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
 	    loop_(Bs,Param,Level,MaxLearned,MR,I,Stack);
@@ -240,7 +240,8 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	lists:map(
 	  fun({L,Clause}) ->
 		  case lists:sort(fun(A,B) -> A > B end,
-				  [implication_level(Bs,Q)||Q <- Clause]) of
+				  [varc:implication_level(Bs#bs.vp,Q) ||
+				      Q <- Clause]) of
 		      [J1,J2,J3|_] ->
 			  D1 = J1 - J2,
 			  D2 = J2 - J3,
@@ -282,14 +283,6 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 				LClauseList5)
 	end,
 
-    %% LClauseList7 = case maps:get(max_conflicts,Param) of
-    %% 		       0 -> 
-    %% 			   LClauseList6;
-    %% 		       1 ->
-    %% 			   [];
-    %% 		       MaxC ->
-    %% 			   lists:sublist(LClauseList6, MaxC-1)
-    %% 		   end,
     LClauseList7 = LClauseList6,
 
     L = maps:get(stumble,Param),
@@ -344,11 +337,11 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	case maps:get(restart_counter,Param) of
 	    0 -> false;
 	    RestartCounter ->
-		EvalCounter = varp_formula:info(Bs2, eval_counter),
+		EvalCounter = varp_formula:info(Bs2, bcp_counter),
 		PrevCounter = counters:get(Bs2#bs.counters,
-					   ?COUNTER_BJR_EVAL_COUNTER),
+					   ?COUNTER_BJR_BCP_COUNTER),
 		if (EvalCounter - PrevCounter) >= RestartCounter ->
-			counters:put(Bs2#bs.counters,?COUNTER_BJR_EVAL_COUNTER,
+			counters:put(Bs2#bs.counters,?COUNTER_BJR_BCP_COUNTER,
 				     EvalCounter),
 			true;
 		   true ->
@@ -359,7 +352,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	receive 
 	    {timeout,_Timer,restart} ->
 		RestartInterval = maps:get(restart_interval,Param),
-		erlang:start_timer(RestartInterval, self(), restart),
+		erlang:start_timer(trunc(1000*RestartInterval),self(),restart),
 		true
 	after 0 ->
 		false
@@ -661,11 +654,11 @@ minimize(Bs,Clause0) ->
     end.
 
 minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
-    case implication_clause(Bs, -Li) of
+    case varc:implication_clause(Bs#bs.vp, -Li) of
 	-1 ->
 	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
-	    A = get_clause(Bs,I),
+	    A = varc:get_clause(Bs#bs.vp,I),
 	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
 	    %%    [-Li, A, Clause]),
 	    %% if A-{Li} is a subset of Clause then remove Li from clause
@@ -678,68 +671,6 @@ minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
     end;
 minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
     {Removed,Length,lists:reverse(NewClause)}.
-
-conflict_analysis(Bs,_Param,Level) ->
-    Trail= [P|_] = get_literal_bindings(Bs,Level),
-    ?dbg("trail: ~s\n", [format_literals(Bs,Trail)]),
-    Seen0 = #{ abs(P) => true }, %% a set of traversed literals
-    N = varp_formula:info(Bs, number_of_conflicting_clauses),
-    [ begin
-	  Ri = conflicting_reason(Bs,-P,I), %% get conflict clause i
-	  varc:use_clause(Bs#bs.vp, Cix),   %% mark clause as in-use
-	  ?dbg("reason[~w] cix=~w: ~s,~s\n", 
-	       [I,Cix,format_lit(Bs,-P),
-		format_literals(Bs,Ri)]),
-	  %% calculate the conflict clause
-	  conflict_reason(Bs,Ri,Trail,Level,Seen0,1,[])
-      end || {I,Cix} <- [ {I,varp_formula:conflicting_clause(Bs,I)} ||
-			    I <- lists:seq(0, N-1) ] ].
-
-conflict_reason(Bs,[Q|Qs],Trail,Level,Seen,C,CL) ->
-    AbsQ = abs(Q),
-    case Seen of
-	#{ AbsQ := true } ->
-	    conflict_reason(Bs,Qs,Trail,Level,Seen,C,CL);
-	_ ->
-	    Seen1 = Seen# { AbsQ => true },
-	    QLevel = implication_level(Bs,Q),
-	    if QLevel =:= Level ->
-		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C+1,CL);
-	       QLevel =< ?TOP_LEVEL -> %% filter constants
-		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C,CL);
-	       true ->
-		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C,[Q|CL])
-	    end
-    end;
-conflict_reason(Bs,[],Trail,Level,Seen,C,CL) ->
-    conflict_seen(Bs,Trail,Level,Seen,C,CL).
-
-conflict_seen(Bs,[P|Trail],Level,Seen,C,CL) ->
-    AbsP = abs(P),
-    case Seen of
-	#{ AbsP := true } ->
-	    if  C =< 1, CL =:= [] ->
-		    [-P];
-		C =< 1 ->
-		    [-P|CL];
-		true ->
-		    conflict_reason(Bs,reason(Bs,P),Trail,Level,Seen,C-1,CL)
-	    end;
-	_ ->
-	    conflict_seen(Bs,Trail,Level,Seen,C,CL)
-    end.
-
-reason(Bs,P) ->
-    case implication_clause(Bs,P) of
-	-1 -> [];
-	I -> get_clause(Bs,I) -- [P]
-    end.
-
-conflicting_reason(Bs,P,I) ->
-    case varp_formula:conflicting_clause(Bs,I) of
-	-1 -> [];
-	Ci -> get_clause(Bs,Ci) -- [P]
-    end.
 
 %% check if As is a subset of Bs
 is_subclause(As, Li, Bs) ->
@@ -773,83 +704,6 @@ is_subclause_abs([],_Li,_Bs) ->
     true;
 is_subclause_abs(_As,_Li,[]) ->
     false.
-
-implication_clause(Bs,Li) ->
-    {Cix,_,_} = varp_formula:implication_clause(Bs,Li),
-    Cix.
-
-implication_level(Bs,Li) ->
-    {_,_,Lev} = varp_formula:implication_clause(Bs,Li),
-    Lev.
-
-get_clause(Bs, I) ->
-    varp_formula:get_clause(Bs,I).
-
-%% -1 - 1 => 0 1
-neg01(Val) -> (Val+1) div 2. 
-    
-val(Xi) when Xi < 0 -> 0;
-val(Xi) when Xi > 0 -> 1.
-
-format_bindings(Bs) ->
-    format_bindings(Bs,all).
-
-format_bindings(Bs,Level) ->
-    Bnd = lists:map(
-	    fun(L) ->
-		    {Cix,_,ImpLev} = varp_formula:implication_clause(Bs,L),
-		    {ImpLev,L,Cix}
-	    end, varp_formula:get_bindings(Bs,0)),
-    lists:foreach(
-      fun(G) ->
-	      [{_Lev,_,_}|_] = G,
-	      if Level =:= all; Level =:= _Lev ->
-		      ?dbg("bindings[~w]: ~s\n",[_Lev,format_group(Bs,G)]);
-		 true ->
-		      ok
-	      end
-      end, key_group_list(1,Bnd)).
-
-format_group(Bs,[{_,L,Cix}|G]) ->
-    case Cix of
-	-1 ->
-	    [ [format_binding(Bs,L)," "] | format_group(Bs,G)];
-	_ ->
-	    [ [format_binding(Bs,L),":",integer_to_list(Cix)," "] |
-	      format_group(Bs,G)]
-    end;
-format_group(_Bs,[]) ->
-    [].
-
-%% generate a list of key groups	      
-key_group_list(Pos,L) ->
-    case lists:keysort(Pos,L) of
-	[] -> [];
-	[H|T] -> key_group_list(Pos,[H],[],T)
-    end.
-
-key_group_list(Pos,Acc=[A|_],Gs,[H|T]) when 
-      element(Pos,A) =:= element(Pos,H) ->
-    key_group_list(Pos,[H|Acc],Gs,T);
-key_group_list(Pos,Acc,Gs,[H|T]) ->
-    key_group_list(Pos,[H],[lists:reverse(Acc)|Gs],T);
-key_group_list(_Pos,Acc,Gs,[]) ->
-    lists:reverse([lists:reverse(Acc)|Gs]).
-
-format_binding(Bs,L) ->
-    [format_var(Bs,abs(L)),"=",
-     if L < 0 -> "0";
-	L > 0 -> "1"
-     end].
-
-get_literal_bindings(Bs,Level) ->
-    lists:reverse(varp_formula:get_bindings(Bs,Level)).
-
-get_literal_implications(Bs, Level) ->
-    case varp_formula:get_bindings(Bs,Level) of
-	[] -> [];
-	[_|L] -> L
-    end.
 
 display_stack_ln(Bs,[{K,Xk,Level}|Stack]) ->
     io:format("~s@~w/~w ", [format_lit(Bs,Xk), Level, K]),

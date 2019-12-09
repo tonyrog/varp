@@ -34,61 +34,59 @@ options() ->
 
 run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
     N = varp_formula:number_of_unbound(Bs),
-    varp_formula:config(Bs, permanent, 0),
-    CMax = varp_formula:info(Bs, permanent),
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
 	    {?CONTINUE,[],Bs};
 	all ->
-	    rat(Bs,N,CMax,Type);
+	    rat(Bs,N,Type);
 	M ->
-	    rat(Bs,min(N,M),CMax,Type)
+	    rat(Bs,min(N,M),Type)
     end.
 
-rat(Bs,N,CMax,Type) ->
+rat(Bs,N,Type) ->
     case varp_formula:first_unbound(Bs) of
 	false -> {?CONTINUE,[],Bs};
-	{I,X} -> rat(Bs,I,X,N,CMax,Type)
+	{I,X} -> rat(Bs,I,X,N,Type)
     end.
 
-rat(Bs,_I,_X,0,_CMax,_Type) -> 
+rat(Bs,_I,_X,0,_Type) -> 
     {?CONTINUE,[],Bs};
-rat(Bs, I, X,N,CMax,Type) ->
-    Bs1 = rat_var(Bs,X,CMax,Type),
+rat(Bs, I, X,N,Type) ->
+    Bs1 = rat_var(Bs,X,Type),
     case varp_formula:next_unbound(Bs1,I) of
 	false -> {?CONTINUE,[],Bs1};
-	{I1,X1} -> rat(Bs1,I1,X1,N-1,CMax,Type)
+	{I1,X1} -> rat(Bs1,I1,X1,N-1,Type)
     end.
 
-rat_var(Bs,V,CMax,Type) ->
+rat_var(Bs,V,Type) ->
     ?dbg("rat=~s,cmax=~w,type=~w\n",
 	 [varp_formula:format_lit(Bs,V),CMax,Type]),
     case Type of
 	pos ->
-	    Is = get_delta_clauses(Bs,V,CMax),
-	    rat_lit(Bs,V,Is,CMax);
+	    Is = get_delta_clauses(Bs,V),
+	    rat_lit(Bs,V,Is);
 	neg ->
-	    Is = get_delta_clauses(Bs,-V,CMax),
-	    rat_lit(Bs,-V,Is,CMax);
+	    Is = get_delta_clauses(Bs,-V),
+	    rat_lit(Bs,-V,Is);
 	both ->
-	    Is1 = get_delta_clauses(Bs,V,CMax),
-	    Is2 = get_delta_clauses(Bs,-V,CMax),
-	    Bs1 = rat_lit(Bs,V,Is1,CMax),
-	    rat_lit(Bs1,-V,Is2,CMax);
+	    Is1 = get_delta_clauses(Bs,V),
+	    Is2 = get_delta_clauses(Bs,-V),
+	    Bs1 = rat_lit(Bs,V,Is1),
+	    rat_lit(Bs1,-V,Is2);
 	min ->
-	    Is1 = get_delta_clauses(Bs,V,CMax),
-	    Is2 = get_delta_clauses(Bs,-V,CMax),
+	    Is1 = get_delta_clauses(Bs,V),
+	    Is2 = get_delta_clauses(Bs,-V),
 	    Is1L = length(Is1),
 	    Is2L = length(Is2),
 	    if Is2L =:= 0 ->
-		    rat_lit(Bs,V,Is1,CMax);
+		    rat_lit(Bs,V,Is1);
 	       Is1L =:= 0 ->
-		    rat_lit(Bs,-V,Is2,CMax);
+		    rat_lit(Bs,-V,Is2);
 	       Is1L < Is2L ->
-		    rat_lit(Bs,V,Is1,CMax);
+		    rat_lit(Bs,V,Is1);
 	       true ->
-		    rat_lit(Bs,-V,Is2,CMax)
+		    rat_lit(Bs,-V,Is2)
 	    end
     end.
 
@@ -98,12 +96,12 @@ rat_var(Bs,V,CMax,Type) ->
 %% ~L,~D,~C is inconsistent
 %%
 
-rat_lit(Bs,L,Is,CMax) ->
+rat_lit(Bs,L,Is) ->
     Ds = clauses(Bs,Is,L,[]),
     %% fixme: add option to emit definition in varp format!
     lists:foreach(
       fun({I,D}) ->
-	      Js = get_delta_clauses(Bs,-L,CMax),
+	      Js = get_delta_clauses(Bs,-L),
 	      Cs = clauses(Bs,Js,-L,[]),
 	      %% io:format("rat_test l=~w, d=~w, cs=~w\n", [L,D,Cs]),
 	      varc:set_level(Bs#bs.vp, 1),
@@ -166,6 +164,9 @@ get_clause(Bs, I, Skip) ->
     varc:get_clause(Bs#bs.vp, I, Skip).
 
 %% only extract clauses in Delta (fixme remove dead clauses)
+get_delta_clauses(Bs, L) ->
+    get_delta_clauses(Bs, L, varc:clauseset_size(Bs#bs.vp, 0)).
+
 get_delta_clauses(Bs, L, CMax) ->
-    CLs = varp_formula:get_clauses(Bs,L,literal),
+    CLs = varc:get_clauses(Bs#bs.vp,L,literal),
     [I || I <- CLs, I < CMax].

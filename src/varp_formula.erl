@@ -78,8 +78,6 @@
 -export([vfold_op/4]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
--export([implication_clause/2]).
--export([get_clause/2, get_clause/3, get_clause/4]).
 -export([get_clauses/3]).
 -export([get_clause_info/2, get_clause_info/3]).
 -export([add_clause/2]).
@@ -521,18 +519,6 @@ conflicting_clause(Bs) ->
 
 conflicting_clause(Bs,I) ->
     varc:conflicting_clause(Bs#bs.vp,I).
-
-implication_clause(Bs, V) ->
-    varc:implication_clause(Bs#bs.vp, V).
-
-get_clause(Bs, ClauseIndex) ->
-    varc:get_clause(Bs#bs.vp, ClauseIndex).
-
-get_clause(Bs, ClauseIndex, SkipLiteral) ->
-    varc:get_clause(Bs#bs.vp, ClauseIndex, SkipLiteral).
-
-get_clause(Bs, I, SkipLiteral, Raw) ->
-    varc:get_clause(Bs#bs.vp, I, SkipLiteral, Raw).
 
 %% How = watch|literal|variable
 get_clauses(Bs, L, How) ->
@@ -3257,17 +3243,13 @@ format_bnd(Bs, X, Var, true) ->
 	    end,
     format_symbol(Var) ++ Value;
 format_bnd(Bs, X, Var, level) ->
-    L = implication_level(Bs, X), 
+    L = varc:implication_level(Bs#bs.vp, X), 
     Value = case value(Bs, X) of
 		true -> "=1@"++integer_to_list(L);
 		false -> "=0@"++integer_to_list(L);
 		_ -> ""
 	    end,
     format_symbol(Var) ++ Value.
-
-implication_level(Bs,Imp) ->
-    {_,_,ImpLev} = implication_clause(Bs,Imp),
-    ImpLev.
 
 format_symbol(true) -> "true";
 format_symbol(false) -> "false";

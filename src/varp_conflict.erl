@@ -43,7 +43,7 @@ conflict_reason(Bs,[Q|Qs],Trail,Level,Seen,C,CL) ->
 	    conflict_reason(Bs,Qs,Trail,Level,Seen,C,CL);
 	_ ->
 	    Seen1 = Seen# { AbsQ => true },
-	    QLevel = implication_level(Bs,Q),
+	    QLevel = varc:implication_level(Bs#bs.vp,Q),
 	    if QLevel =:= Level ->
 		    conflict_reason(Bs,Qs,Trail,Level,Seen1,C+1,CL);
 	       QLevel =< ?TOP_LEVEL -> %% filter constants
@@ -76,18 +76,10 @@ get_clause(Bs, ClauseIndex, SkipLiteral) ->
     varc:get_clause(Bs#bs.vp, ClauseIndex, SkipLiteral).
 
 reason(Bs,Lit) ->
-    case implication_clause(Bs,Lit) of
+    case varc:implication_clause(Bs#bs.vp,Lit) of
 	-1 -> [];
 	ClauseIndex -> get_clause(Bs,ClauseIndex,Lit)
     end.
-
-implication_clause(Bs,Li) ->
-    {Cix,_,_} = varc:implication_clause(Bs#bs.vp, Li),
-    Cix.
-
-implication_level(Bs,Li) ->
-    {_,_,Level} = varc:implication_clause(Bs#bs.vp, Li),
-    Level.
 
 get_bindings(Bs,Level) ->
     %% fixme: get_bindings(Vp, Level, Reversed=true)
