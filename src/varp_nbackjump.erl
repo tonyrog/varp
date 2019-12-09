@@ -113,13 +113,26 @@ options() ->
 	default => infinity,
 	description => "Restart interval in seconds"},
 
+     #{ long => "decay",
+	key => decay,
+	spec =>  float,
+	default => 0.95,
+	description => "Decay factory"},
+
      #{ long => "display",
 	short => "d",
 	key => display,
 	spec => {enum,[?BOOL]},
 	default => false,
 	description => "Display statistics."
-      }
+      },
+
+     %% internal options
+     #{ key => reorder,
+	spec => {list,
+		 {integer,{atom,{list,term}}}},
+	default => [],
+	description => "Internal reorder list"}
     ].
      
 -record(m,
@@ -399,7 +412,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	DoPurge, JLevel =:= ?TOP_LEVEL ->
 	    if Learned > MaxLearned ->
 		    varp_formula:del_unused_clauses(Bs2),
-		    reorder(Bs2);
+		    reorder(Bs2, Param);
 	       true ->
 		    %% but we can re-order literals?
 		    ok
@@ -421,49 +434,33 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
-	    reorder(Bs2),
+	    reorder(Bs2, Param),
 	    init(Bs2,Param,MaxLearned,MR);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
-	    reorder(Bs2),
+	    reorder(Bs2, Param),
 	    init(Bs2,Param,MaxLearned,MR);
        true ->
 	    loop(Bs2,Param,MaxLearned,MR)
     end.
 
-reorder(Bs) ->
+reorder(Bs, Param) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    varc:decay(Bs#bs.vp, 0.95),
-    case N rem 1 of
-	0 ->
-	    io:format("-activity\n"),
-	    varp_formula:order_sort(Bs,?ORDER_ACTIVITY bor ?ORDER_DESCEND,
-				    ?ORDER_UNDEFINED,-1);
-
-	1 ->
+    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
+    ReorderMap = maps:from_list(maps:get(reorder,Param)),
+    case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
+	{ok,{order,[Key1,Key2,Arg]}} ->
+	    varp_formula:order_sort(Bs, Key1, Key2, Arg);
+	{ok,{saturate,[Laps,Timeout]}} ->
+	    varp_saturate:saturate(Bs, 1, Timeout, {{Laps},{Laps}}, 0);
+	_ ->
 	    io:format("random\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
-	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed);
-	2 ->
-	    io:format("-activity\n"),
-	    varp_formula:order_sort(Bs,?ORDER_ACTIVITY bor ?ORDER_DESCEND,
-				    ?ORDER_UNDEFINED,-1);
-	3 ->
-	    io:format("-rank\n"),
-	    varp_formula:order_sort(Bs,?ORDER_RANK bor ?ORDER_DESCEND,
-				    ?ORDER_UNDEFINED,-1);
-	4 ->
-	    %% enable when 2-clauses works again
-	    io:format("saturate\n"),
-	    varp_saturate:saturate(Bs, 1, infinity, {{1},{1}}, 0);
-	5 ->
-	    io:format("-degree\n"),
-	    varp_formula:order_sort(Bs,?ORDER_DEGREE bor ?ORDER_DESCEND,
-				    ?ORDER_UNDEFINED,-1)
+	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
     end.
 
 undo_until(Bs, NewLevel) ->

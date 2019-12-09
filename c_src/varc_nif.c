@@ -71,9 +71,11 @@ typedef enum {
 
 typedef enum {
     off = 0,
-    mvsids = 1,  // minisat style
-    cvsids = 2   // chaff style
+    mvsids = 1,  // minisat style (update variables)
+    cvsids = 2   // chaff style (update literals)
 } atype_t;
+
+#define ACTIVITY_INIT 0.0f
 
 // counters
 #define CLAUSE_N      0   // n>2
@@ -1863,7 +1865,7 @@ static void keep_level(varp_t* vp, int level)
 }
 
 // update activity on one level
-static void activate_level(varp_t* vp, int level, float delta)
+static void activate_lit_level(varp_t* vp, int level, float delta)
 {
     variable_t* bp = vp->undo[level].bs;
     while(bp != NULL) {
@@ -1871,27 +1873,59 @@ static void activate_level(varp_t* vp, int level, float delta)
 	    bp->lit[LIT_NEG].activity += delta;
 	else
 	    bp->lit[LIT_POS].activity += delta;
-	// bp->activity += delta;
 	bp = bp->next;
     }
 }
 
+static void activate_var_level(varp_t* vp, int level, float delta)
+{
+    variable_t* bp = vp->undo[level].bs;
+    while(bp != NULL) {
+      bp->activity += delta;
+      bp = bp->next;
+    }
+}
+
 // update activity on all levels (excluding 0 - that is already bound)
-static void activate_levels(varp_t* vp, float delta)
+static void activate_levels(varp_t* vp, float bump)
 {
     int i;
-    for (i = 1; i <= vp->level; i++)
-	activate_level(vp, i, delta);
+
+    switch(vp->atype) {
+    case mvsids:
+      for (i = 1; i <= vp->level; i++)
+	activate_var_level(vp, i, bump);
+      break;
+    case cvsids:
+      for (i = 1; i <= vp->level; i++)
+	activate_lit_level(vp, i, bump);
+      break;
+    case off:
+    default:
+      break;
+    }
 }
 
 static void activity_decay(varp_t* vp, float decay)
 {
-    int i;
+  int i;
+
+  switch (vp->atype) {
+  case cvsids:
     for (i = 1; i < (int)vp->vnext; i++) {
-	// vp->var_map[i]->activity *= decay;
-	vp->var_map[i]->lit[LIT_POS].activity *= decay;
-	vp->var_map[i]->lit[LIT_NEG].activity *= decay;
+      vp->var_map[i]->lit[LIT_POS].activity *= decay;
+      vp->var_map[i]->lit[LIT_NEG].activity *= decay;
     }
+    break;
+  case mvsids:
+    for (i = 1; i < (int)vp->vnext; i++) {
+      vp->var_map[i]->activity *= decay;
+    }
+    break;
+  case off:
+  default:
+    break;
+  }
 }
 
 static void init_literal(literal_t* lp, variable_t* var, uint32_t sign)
@@ -1899,7 +1933,7 @@ static void init_literal(literal_t* lp, variable_t* var, uint32_t sign)
     lp->sign     = sign;
     lp->degree   = 0;
     lp->l        = MAKE_LIT(var->vix,sign);
-    lp->activity = 1.0f;
+    lp->activity = ACTIVITY_INIT;
     lp->var      = var;
     lp->wlist    = NULL;
     lp->qlink    = NULL;
@@ -1916,7 +1950,7 @@ static void init_variable(varp_t* vp, variable_t* var, int vix)
     var->bound     = NULL;
     var->pkey[0]   = var->pkey[1] = 0.0f;
     var->nkey[0]   = var->nkey[1] = 0.0f;    
-    var->activity  = 1.0f;
+    var->activity  = ACTIVITY_INIT;
     var->map_index = vix;
     var->implication_clause = CLAUSE_NONE;
     var->literal_pos = -1;
@@ -3065,10 +3099,30 @@ static void order_k_rank(varp_t* vp, int k)
 static void order_k_activity(varp_t* vp, int k)
 {
     int i;
-    for (i = 1; i < (int)vp->vnext; i++) {
+
+    switch(vp->atype) {
+    case mvsids:
+      for (i = 1; i < (int)vp->vnext; i++) {
+	variable_t* var = vp->var_map[i];
+	var->pkey[k] = var->activity;
+	var->nkey[k] = var->activity;
+      }
+      break;
+    case cvsids:
+      for (i = 1; i < (int)vp->vnext; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->lit[LIT_POS].activity;
 	var->nkey[k] = var->lit[LIT_NEG].activity;
+      }
+      break;
+    case off:
+    default:
+      for (i = 1; i < (int)vp->vnext; i++) {
+	variable_t* var = vp->var_map[i];
+	var->pkey[k] = 0.0f;
+	var->nkey[k] = 0.0f;
+      }
+      break;
     }
 }
 
@@ -3665,13 +3719,20 @@ static void update_clause_activity(varp_t* vp, clause_t* cp, float value)
 {
     int n = (int)cp->size;
     int i;
-    
-    for (i = 0; i < n; i++) {
+
+    if (vp->atype == cvsids) {
+      for (i = 0; i < n; i++) {
+	literal_t* lp = l2ll(vp, cp->lit[i]);
+	lp->var->activity += value;
+      }
+    }
+    else if (vp->atype == mvsids) {
+      for (i = 0; i < n; i++) {
 	literal_t* lp = l2ll(vp, cp->lit[i]);
 	lp->activity += value;
+      }
     }
 }
-
 
 // insert sort literal level 'l' into la
 // while keeping track on position 'p' and literal index 'v'
@@ -4673,8 +4734,7 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 	vp->conflict_counter++;
 	lqueue_clear(&vp->q);
 	DBG("num conflicts = %d\r\n", vp->num_conflicting);
-	if (vp->atype == mvsids)
-	    activate_levels(vp, 1.0);
+	activate_levels(vp, 1.0);
 	for (i = 0; i < vp->num_conflicting; i++) {
 	    cix_t cix = vp->conflicting_clauses[i];
 	    clause_t* cp = get_clause(vp, cix);
@@ -5861,8 +5921,7 @@ static ERL_NIF_TERM varp_decay(ErlNifEnv* env, int argc,
     
     if (!vif_get_number(env, argv[1], &decay))
 	return enif_make_badarg(env);
-    if (vp->atype != off)
-	activity_decay(vp, decay);
+    activity_decay(vp, decay);
     return ATOM(ok);
 }
 

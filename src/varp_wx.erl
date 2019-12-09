@@ -56,7 +56,24 @@
 	 config_order_1,    %% [wxRadioButton (deg|rnk|usr|rnd|non)]
 	 config_order_2,    %% [wxRadioButton (deg|rnk|usr|rnd|non)]
 	 config_assoc,      %% wxRadioBox (left|right|balanced|none)
-	 config_nbound      %% wxGauge
+ 	 config_nbound,     %% wxGauge
+	 config_backjump    %% #backjump{}
+	}).
+
+-record(backjump,
+	{
+	 minimize,           %% wxCheckBox
+	 iorder,             %% wxSpinCtrl
+	 stumble,            %% wxSpinCtrl
+	 olle,               %% wxStaticBoxSizer
+	 stumble_olle,       %% wxCheckBox
+	 max_conflicts,      %% wxSpinCtrl
+	 max_learned,        %% wxSpinCtrl
+	 max_learned_factor, %% wxStaticBoxSizer
+	 keep_factor,        %% wxStaticBoxSizer
+	 min_keep_clauses,   %% wxSpinCtrl
+	 restart_counter,    %% wxSpinCtrl
+	 restart_interval    %% wxSpinCtrl
 	}).
 
 version() ->
@@ -761,6 +778,7 @@ solve(Mode, S, Bound) ->
 		    3 -> none
 		end,
     QType = recursive,
+    AType = mvsids,
     %% _EdgeList = true,
     ?dbg("max  = ~p\n", [Max]),
     ?dbg("saturate = ~w\n", [Saturate]),
@@ -768,6 +786,7 @@ solve(Mode, S, Bound) ->
     ?dbg("order = ~w\n", [Order]),
     ?dbg("assoc = ~w\n", [Assoc]),
     ?dbg("qtype = ~w\n", [QType]),
+    ?dbg("activity = ~w\n", [AType]),
     ?dbg("timeout = ~w\n", [Timeout]),
 
     Formula = wxStyledTextCtrl:getText(S#s.formula),
@@ -775,7 +794,9 @@ solve(Mode, S, Bound) ->
     case parse(Formula, Meta) of
 	{ok,{Sections,Form}} ->
 	    Options = [{method,count},{print,true},{timeout,Timeout},
-		       {assoc,Assoc},{qtype,QType}],
+		       {assoc,Assoc},{qtype,QType},
+		       {activity,AType}
+		      ],
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),
 
@@ -804,7 +825,9 @@ solve(Mode, S, Bound) ->
 		Order ++
 		case Backtrack of
 		    0 ->
-			[{backjump0, [{max,Max}]}];
+			Backjump = #backjump{},
+			BjParams = read_backjump_params(Backjump),
+			[{backjump, [{max,Max}]++BjParams}];
 		    1 ->
 			[{backtrack,[{max,Max}]}];
 		    2 ->
@@ -881,6 +904,30 @@ solve(Mode, S, Bound) ->
 	{error, Message} ->
 	    output_error(S, varp:format_error(Message))
     end.
+
+%% add inc_learned_factor - no units found for T seconds
+read_backjump_params(_Backjump) ->
+    [{minimize, true},
+     {iorder, 0},
+     {stumble, 0},
+     {olle, 0},
+     {stumble_olle, false},
+     {max_conflicts, 1},
+     {max_learned, 0},
+     {max_learned_factor, 2.0},
+     {keep_factor, 0.5},
+     {min_keep_clauses, 0},
+     {restart_counter, 0},
+     {restart_interval, 5.0},
+     {reorder,
+      [
+       {0,{order,[?ORDER_DEGREE bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
+       {1,{order,[?ORDER_ACTIVITY bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
+       {2,{order,[?ORDER_DEGREE bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
+       {3,{order,[?ORDER_ACTIVITY bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
+       {4,{order,[?ORDER_RANDOM bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}}
+      ]}
+    ].
 
 %% add extension only if there no extension to the name
 add_extension(Path, Ext) ->

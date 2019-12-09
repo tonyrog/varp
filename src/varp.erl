@@ -234,7 +234,7 @@ global_options() ->
       #{ long => "activity",
 	 key => activity,
 	 spec =>  {enum,[{"0",off},{"1",mvsids},{"2",cvsids},
-			 {"off",off},{"mvsids",mvsids}, {"cvsids",cvsids}]},
+			 {"off",off},{"mvsids",mvsids},{"cvsids",cvsids}]},
 	 default => off,
 	 description => "enable activity handling during restarts."
        },
