@@ -26,11 +26,11 @@
 -define(COUNTER_STUMBLE_COUNT,      5).
 -define(COUNTER_OLLE_COUNT,         6).
 -define(COUNTER_STUMBLE_OLLE_COUNT, 7).
--define(COUNTER_BJR_EVAL_COUNTER,   8).  %% restart counter
+-define(COUNTER_BJR_BCP_COUNTER,    8).  %% restart counter
 -define(COUNTER_REORDER_COUNTER,    9).
--define(COUNTER_ST_EVAL_COUNTER,    10). %% cancel/timeout check counter
--define(COUNTER_BT_EVAL_COUNTER,    11). %% cancel/timeout check counter
--define(COUNTER_BJT_EVAL_COUNTER,   12). %% cancel/timeout check counter
+-define(COUNTER_ST_BCP_COUNTER,     10). %% cancel/timeout check counter
+-define(COUNTER_BT_BCP_COUNTER,     11). %% cancel/timeout check counter
+-define(COUNTER_BJT_BCP_COUNTER,    12). %% cancel/timeout check counter
 
 %% plugin results
 -define(INCONSISTENT, inconsistent).

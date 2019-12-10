@@ -168,7 +168,7 @@ loop_k(Bs,I,X,K,N,Level,Laps,Threshold) ->
     end.
 
 loop_k_next(Bs,I,_X,K,N,Level,Laps,Threshold) ->
-    case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_EVAL_COUNTER,
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,What} ->
 	    {What,Bs};
@@ -268,7 +268,7 @@ loop_1(Bs,I,X,N,Level,Laps,Threshold) ->
     end.
 
 loop_1_next(Bs,I,_X,N,Level,Laps,Threshold) ->
-    case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_EVAL_COUNTER,
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,What} ->
 	    ?dbg("terminate reaon=~w\n", [What]),

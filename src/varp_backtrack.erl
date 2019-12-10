@@ -110,7 +110,7 @@ next([],_Bs) ->
     false.
 
 loop(Stack,Func,I,Count,Acc,Bs) ->
-    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_EVAL_COUNTER,
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
 	    loop_(Stack,Func,I,Count,Acc,Bs);

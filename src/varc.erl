@@ -27,6 +27,8 @@
 -export([subst/3]).
 -export([key/3]).
 -export([implication_clause/2]).
+-export([implication_level/2]).
+-export([implication_pos/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([is_variable/2]).
@@ -232,8 +234,18 @@ key(_Vp, Lit, _K) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec implication_clause(Vp::varc(), Lit::literal()) ->
-				{Cix::integer(),Pos::integer(),Mark::integer()}.
+				Cix::integer().
 implication_clause(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
+-spec implication_level(Vp::varc(), Lit::literal()) ->
+			       Level::integer().
+implication_level(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
+-spec implication_pos(Vp::varc(), Lit::literal()) ->
+			     Pos::integer().
+implication_pos(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec conflicting_clause(Vp::varc()) -> Cix::integer().

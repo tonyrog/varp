@@ -48,7 +48,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     end.
 
 collect(Bs, Count, N, Acc) ->
-    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_EVAL_COUNTER,
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
 	    if N =:= 0; Count < N ->
@@ -87,7 +87,7 @@ collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
     end.
 
 count(Bs, Count, N) ->
-    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_EVAL_COUNTER,
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
 	    if N =:= 0; Count < N ->
