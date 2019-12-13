@@ -22,5 +22,20 @@ win32app:
 	erl -wx -noshell -pa ../varp/ebin -s varp_wx -s servator make_win32app varp -s erlang halt
 	cp priv/Varp.exe Varp-$(VSN)/
 
+
+osxapp:
+	erl -wx -noshell -s varp_wx -s servator make_osxapp varp -s erlang halt
+	mkdir -p tmpdist
+	mv Varp.app tmpdist/
+	cd tmpdist/
+	../../servator/priv/make_icns ../priv/varp.png
+	rm -rf AppIcon.iconset
+	mv AppIcon.icns Varp.app/Contents/Resources/
+	cd ..
+	hdiutil create tmp.dmg -ov -volname "Varp" -fs HFS+ -srcfolder "./tmpdist/"
+	hdiutil convert -format UDZO -o Varp.dmg tmp.dmg
+
+
+
 appimage_nw:
 	erl -noshell -s varp start0 -s servator make_appimage varp
