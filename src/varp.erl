@@ -131,7 +131,7 @@ global_options() ->
 	 key => seed,
 	 spec => integer,
 	 default => -1,
-	 description => "random seed"
+	 description => "Random seed."
        },
       #{ long => "assoc",
 	 key => assoc,

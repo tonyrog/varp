@@ -9,7 +9,6 @@
 
 -include_lib("wx/include/wx.hrl").
 
-
 -export([start/0]).
 -export([main_loop/1]).
 
@@ -825,8 +824,7 @@ solve(Mode, S, Bound) ->
 		Order ++
 		case Backtrack of
 		    0 ->
-			Backjump = #backjump{},
-			BjParams = read_backjump_params(Backjump),
+			BjParams = read_backjump_params(S#s.config_backjump),
 			[{backjump, [{max,Max}]++BjParams}];
 		    1 ->
 			[{backtrack,[{max,Max}]}];
@@ -914,20 +912,37 @@ read_backjump_params(_Backjump) ->
      {stumble_olle, false},
      {max_conflicts, 1},
      {max_learned, 0},
-     {max_learned_factor, 2.0},
-     {keep_factor, 0.5},
+     {max_learned_factor, 10.0},
+     {keep_factor, 0.8},
      {min_keep_clauses, 0},
      {restart_counter, 0},
      {restart_interval, 5.0},
-     {reorder,
-      [
-       {0,{order,[?ORDER_DEGREE bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
-       {1,{order,[?ORDER_ACTIVITY bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
-       {2,{order,[?ORDER_DEGREE bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
-       {3,{order,[?ORDER_ACTIVITY bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}},
-       {4,{order,[?ORDER_RANDOM bor ?ORDER_DESCEND,?ORDER_UNDEFINED,-1]}}
-      ]}
+     {decay, 0.95},
+     {bump, 1.0},
+     {reorder, order_list()}
     ].
+
+order_list() ->
+    [
+     {0,order_opt(?ORDER_ACTIVITY)},
+     {1,order_opt(?ORDER_ACTIVITY)},
+     {2,order_opt(?ORDER_ACTIVITY)},
+     {3,order_opt(?ORDER_ACTIVITY)},
+     {4,order_opt(?ORDER_RANDOM)}
+    ].    
+
+order_list_new() ->
+    [
+     {0,order_opt(?ORDER_DEGREE)},
+     {1,order_opt(?ORDER_ACTIVITY)},
+     {2,order_opt(?ORDER_DEGREE)},
+     {3,order_opt(?ORDER_ACTIVITY)},
+     {4,order_opt(?ORDER_RANDOM)}
+    ].    
+
+order_opt(Ord) ->
+    {order,[{sort,[Ord bor ?ORDER_DESCEND,?ORDER_UNDEFINED]},
+	    {seed,-1}]}.
 
 %% add extension only if there no extension to the name
 add_extension(Path, Ext) ->

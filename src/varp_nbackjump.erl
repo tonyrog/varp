@@ -117,7 +117,13 @@ options() ->
 	key => decay,
 	spec =>  float,
 	default => 0.95,
-	description => "Decay factory"},
+	description => "Decay factor."},
+
+     #{ long => "bump",
+	key => bump,
+	spec =>  float,
+	default => 1.0,
+	description => "Bump value."},
 
      #{ long => "display",
 	short => "d",
@@ -259,7 +265,8 @@ return(What, MR, Bs) ->
     end.
 
 contradiction(Bs,Param,Level,MaxLearned,MR) ->
-    ClauseList0 = varp_conflict:analyze(Bs,Level),
+    ClauseList0 = varp_conflict:analyze(Bs,Level,maps:get(bump,Param)),
+    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ClauseList1 = 
 	case maps:get(minimize,Param) of
 	    true ->
@@ -450,15 +457,25 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 reorder(Bs, Param) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
-	{ok,{order,[Key1,Key2,Arg]}} ->
-	    varp_formula:order_sort(Bs, Key1, Key2, Arg);
-	{ok,{saturate,[Laps,Timeout]}} ->
-	    varp_saturate:saturate(Bs, 1, Timeout, {{Laps},{Laps}}, 0);
+	{ok,{order,Opts}} ->
+	    io:format("Reorder: ~p\n", [Opts]),
+	    Seed = proplists:get_value(seed, Opts, -1),
+	    case proplists:get_value(sort, Opts, []) of
+		[] -> ok;
+		[Key1] ->
+		    varp_formula:order_sort(Bs,Key1,?ORDER_UNDEFINED,Seed);
+		[Key1,Key2] ->
+		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
+	    end;
+	{ok,{saturate,Opts}} ->
+	    io:format("reorder: Saturate: ~p\n", [Opts]),
+	    Laps = proplists:get_value(laps,Opts,0),
+	    Timeout = proplists:get_value(timeout,Opts,infinity),
+	    varp_saturate:saturate(Bs,1,Timeout,{{Laps},{Laps}}, 0);
 	_ ->
-	    io:format("random\n"),
+	    io:format("reorder: Random\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
     end.

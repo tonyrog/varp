@@ -427,8 +427,7 @@ order_sort(Bs,Key1,Key2,Arg)
   when is_integer(Key1), is_integer(Key2), is_integer(Arg) ->
     Arg1 = if Key1 band 16#0f =:= ?ORDER_RANDOM, Arg =:= -1;
 	      Key2 band 16#0f =:= ?ORDER_RANDOM, Arg =:= -1 ->
-		   <<Seed:24>> = crypto:strong_rand_bytes(3),
-		   Seed;
+		   rand:uniform(1 bsl 24)-1;
 	      true ->
 		   Arg
 	   end,

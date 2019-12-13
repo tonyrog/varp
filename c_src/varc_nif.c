@@ -38,7 +38,7 @@
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-#define ASSERTIONS
+// #define ASSERTIONS
 // #define DEBUG
 // #define DEBUG_MEM
 // #define DEBUG_BCP
@@ -197,6 +197,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "find_symbol",         2,  varp_find_symbol ) \
     NIF( "use_clause",          2,  varp_use_clause ) \
     NIF( "decay",               2,  varp_decay ) \
+    NIF( "bump",                3,  varp_bump )     \
+    NIF( "bump",                4,  varp_bump )	     \
     NIF( "subscribe",           2,  varp_subscribe ) \
     NIF( "clauseset_size",      2,  varp_clauseset_size ) \
     NIF( "clauseset_offset",    2,  varp_clauseset_offset ) \
@@ -1864,48 +1866,6 @@ static void keep_level(varp_t* vp, int level)
     vp->undo[level].bs = NULL;
 }
 
-// update activity on one level
-static void activate_lit_level(varp_t* vp, int level, float delta)
-{
-    variable_t* bp = vp->undo[level].bs;
-    while(bp != NULL) {
-	if (get_vv(vp, bp) == I_FALSE)
-	    bp->lit[LIT_NEG].activity += delta;
-	else
-	    bp->lit[LIT_POS].activity += delta;
-	bp = bp->next;
-    }
-}
-
-static void activate_var_level(varp_t* vp, int level, float delta)
-{
-    variable_t* bp = vp->undo[level].bs;
-    while(bp != NULL) {
-      bp->activity += delta;
-      bp = bp->next;
-    }
-}
-
-// update activity on all levels (excluding 0 - that is already bound)
-static void activate_levels(varp_t* vp, float bump)
-{
-    int i;
-
-    switch(vp->atype) {
-    case mvsids:
-      for (i = 1; i <= vp->level; i++)
-	activate_var_level(vp, i, bump);
-      break;
-    case cvsids:
-      for (i = 1; i <= vp->level; i++)
-	activate_lit_level(vp, i, bump);
-      break;
-    case off:
-    default:
-      break;
-    }
-}
-
 static void activity_decay(varp_t* vp, float decay)
 {
   int i;
@@ -3183,10 +3143,6 @@ void qsort_r(void *base, size_t nmemb, size_t size,
 #endif
 
 //
-//   1 2 3 4 5 6 => 1 6 2 5 3 4
-//   6 5 4 3 2 1
-//
-//
 
 static int cmpk(variable_t* ap, variable_t* bp, int k)
 {
@@ -3720,13 +3676,13 @@ static void update_clause_activity(varp_t* vp, clause_t* cp, float value)
     int n = (int)cp->size;
     int i;
 
-    if (vp->atype == cvsids) {
+    if (vp->atype == mvsids) {
       for (i = 0; i < n; i++) {
-	literal_t* lp = l2ll(vp, cp->lit[i]);
-	lp->var->activity += value;
+	variable_t* var = var_l(vp, cp->lit[i]);
+	var->activity += value;
       }
     }
-    else if (vp->atype == mvsids) {
+    else if (vp->atype == cvsids) {
       for (i = 0; i < n; i++) {
 	literal_t* lp = l2ll(vp, cp->lit[i]);
 	lp->activity += value;
@@ -4587,6 +4543,7 @@ static int bcp_clauses(varp_t* vp, literal_t* lp)
 	    case ev_NONE:
 		break;
 	    default:
+		cp->stamp = vp->bcp_counter;
 		if (vp->level == 0) {
 		    vp->cdead++;
 		    cp->flags |= CLAUSE_FLAG_DEAD;
@@ -4734,7 +4691,6 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 	vp->conflict_counter++;
 	lqueue_clear(&vp->q);
 	DBG("num conflicts = %d\r\n", vp->num_conflicting);
-	activate_levels(vp, 1.0);
 	for (i = 0; i < vp->num_conflicting; i++) {
 	    cix_t cix = vp->conflicting_clauses[i];
 	    clause_t* cp = get_clause(vp, cix);
@@ -4847,8 +4803,6 @@ bcp:
 
     lqueue_clear(&vp->q);
     DBG("num conflicts = %d\n", vp->num_conflicting);
-    if (vp->atype == mvsids)
-	activate_levels(vp, 1.0);
     for (i = 0; i < vp->num_conflicting; i++) {
 	cix_t cix = vp->conflicting_clauses[i];
 	clause_t* cp = get_clause(vp, cix);
@@ -5922,6 +5876,32 @@ static ERL_NIF_TERM varp_decay(ErlNifEnv* env, int argc,
     if (!vif_get_number(env, argv[1], &decay))
 	return enif_make_badarg(env);
     activity_decay(vp, decay);
+    return ATOM(ok);
+}
+
+static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    literal_t* lp;
+    double bump;
+    bool_t bump_literal = false;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_ll(env, vp, argv[1], &lp))
+	return enif_make_badarg(env);
+    if (!vif_get_number(env, argv[2], &bump))
+	return enif_make_badarg(env);
+    if (argc == 4) {
+	if (!vif_get_boolean(env, argv[3], &bump_literal))
+	    return enif_make_badarg(env);
+    }
+    if (bump_literal)
+	lp->activity += bump;
+    else
+	lp->var->activity += bump;
     return ATOM(ok);
 }
 

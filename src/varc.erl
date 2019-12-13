@@ -74,6 +74,7 @@
 -export([order_sort_first/2, order_sort_last/2]).
 -export([order_all/1]).
 -export([decay/2]).
+-export([bump/3, bump/4]).
 -export([subscribe/2]).
 -export([clauseset_size/2]).
 -export([clauseset_offset/2, clauseset_offset/3]).
@@ -357,7 +358,16 @@ compress_clause(_Vp,Index)
 use_clause(_Vp,_Index) ->
     ?nif_stub().
 
-decay(_Vp,Decay) when is_number(Decay), Decay >= 1.0 ->
+decay(_Vp,Decay) when is_number(Decay) ->
+    ?nif_stub().
+
+%% bump variable
+bump(_Vp,_Lit,Bump) when is_number(Bump) ->
+    ?nif_stub().
+
+%% bump variable/literal
+bump(_Vp,_Lit,Bump,BumpLiteral) when is_number(Bump),
+				     is_boolean(BumpLiteral) ->
     ?nif_stub().
 
 subscribe(_Vp,Event) when is_atom(Event) ->

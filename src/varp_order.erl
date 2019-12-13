@@ -17,6 +17,12 @@ options() ->
 	default => [?ORDER_IDENTITY],
 	description => "Specifiy variable order."
       },
+      #{ long => "seed",
+	 key => seed,
+	 spec => integer,
+	 default => -1,
+	 description => "Random seed."
+       },
      #{ long => "first",
 	short => "f",
 	key => first,
@@ -44,7 +50,11 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     order_literals(Bs, Param).
 
 order_literals(Bs, Param) ->
-    Seed = varp_formula:getopt(Bs,seed),
+    Seed = case maps:get(seed,Param,undefined) of
+	       undefined -> 
+		   varp_formula:getopt(Bs,seed);
+	       S0 -> S0
+	   end,
     case maps:get(sort,Param) of
 	[Key1,Key2] ->
 	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
