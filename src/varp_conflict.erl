@@ -29,7 +29,6 @@ analyze(Bs, Level, Bump, I) ->
     analyze_clause_(Bs,-P,Trail,I,Cix,Level,Bump).
 
 analyze_clause_(Bs, Lit, Trail, _I, Cix, Level, Bump) ->
-    %% varc:use_clause(Bs#bs.vp, Cix),  %% now builtin in unit propagation
     Conflicting = get_clause(Bs,Cix,Lit),
     ?dbg("reason[~w] cix=~w: ~s,~s\n", 
 	 [_I,Cix,format_lit(Bs,Lit),
@@ -82,7 +81,9 @@ get_clause(Bs, ClauseIndex, SkipLiteral) ->
 reason(Bs,Lit) ->
     case varc:implication_clause(Bs#bs.vp,Lit) of
 	-1 -> [];
-	ClauseIndex -> get_clause(Bs,ClauseIndex,Lit)
+	ClauseIndex ->
+	    varc:use_clause(Bs#bs.vp, ClauseIndex),
+	    get_clause(Bs,ClauseIndex,Lit)
     end.
 
 get_bindings(Bs,Level) ->

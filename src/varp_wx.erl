@@ -2,6 +2,11 @@
 %%% @copyright (C) 2019, Tony Rogvall
 %%% @doc
 %%%    wx GUI for varp
+%%%
+%%%   Note on build wxWidgets-3.0.4 from source
+%%%   ./configure --with-opengl --enable-unicode --enable-graphics_ctx \
+%%%     --enable-gnomeprint --disable-shared 
+%%%
 %%% @end
 %%% Created : 15 Sep 2019 by Tony Rogvall <tony@rogvall.se>
 
@@ -61,18 +66,19 @@
 
 -record(backjump,
 	{
-	 minimize,           %% wxCheckBox
-	 iorder,             %% wxSpinCtrl
-	 stumble,            %% wxSpinCtrl
-	 olle,               %% wxStaticBoxSizer
-	 stumble_olle,       %% wxCheckBox
-	 max_conflicts,      %% wxSpinCtrl
-	 max_learned,        %% wxSpinCtrl
-	 max_learned_factor, %% wxStaticBoxSizer
-	 keep_factor,        %% wxStaticBoxSizer
-	 min_keep_clauses,   %% wxSpinCtrl
-	 restart_counter,    %% wxSpinCtrl
-	 restart_interval    %% wxSpinCtrl
+	 minimize,               %% wxCheckBox
+	 iorder,                 %% wxSpinCtrl
+	 stumble,                %% wxSpinCtrl
+	 olle,                   %% wxStaticBoxSizer
+	 stumble_olle,           %% wxCheckBox
+	 max_conflicts,          %% wxSpinCtrl
+	 max_learned,            %% wxSpinCtrl
+	 max_learned_factor,     %% wxStaticBoxSizer
+	 max_learned_inc,        %% wxStaticBoxSizer
+	 keep_factor,            %% wxStaticBoxSizer
+	 min_keep_clauses,       %% wxSpinCtrl
+	 restart_counter,        %% wxSpinCtrl
+	 restart_interval        %% wxSpinCtrl
 	}).
 
 version() ->
@@ -906,13 +912,14 @@ solve(Mode, S, Bound) ->
 %% add inc_learned_factor - no units found for T seconds
 read_backjump_params(_Backjump) ->
     [{minimize, true},
-     {iorder, 0},
+     {iorder, 5},   %% is max size of clauses installed
      {stumble, 0},
      {olle, 0},
      {stumble_olle, false},
      {max_conflicts, 1},
      {max_learned, 0},
-     {max_learned_factor, 10.0},
+     {max_learned_factor, 1.1},
+     {max_learned_inc, 1.1},
      {keep_factor, 0.8},
      {min_keep_clauses, 0},
      {restart_counter, 0},

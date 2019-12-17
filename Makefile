@@ -1,41 +1,40 @@
 #
 # Simple make release helper
 #
+APP = varp
+APPL = Varp
 VSN = $(shell git describe)
-MACHINE = $(shell uname -a)
+MACHINE = $(shell uname -m)
 
 appimage:
-	erl -wx -noshell -s varp_wx -s servator make_appimage varp -s erlang halt
-	strip varp.AppDir/bin/beam.smp
-	strip varp.AppDir/bin/epmd
-	strip varp.AppDir/bin/erlc
-	strip varp.AppDir/bin/erl_child_setup
-	strip varp.AppDir/bin/erlexec
-	strip varp.AppDir/bin/escript
-	strip varp.AppDir/bin/heart
-	strip varp.AppDir/bin/inet_gethost
-	appimagetool -n varp.AppDir
-	mv Varp-$(MACHINE).AppImage Varp-$(VSN)-$(MACHINE).AppImage
+	erl -wx -noshell -s varp_wx -s servator make_appimage $(APP) -s erlang halt
+	strip $(APP).AppDir/bin/beam.smp
+	strip $(APP).AppDir/bin/epmd
+	strip $(APP).AppDir/bin/erlc
+	strip $(APP).AppDir/bin/erl_child_setup
+	strip $(APP).AppDir/bin/erlexec
+	strip $(APP).AppDir/bin/escript
+	strip $(APP).AppDir/bin/heart
+	strip $(APP).AppDir/bin/inet_gethost
+	appimagetool -n $(APP).AppDir
+	mv $(APPL)-$(MACHINE).AppImage $(APPL)-$(VSN)-$(MACHINE).AppImage
 
 # werl?
 win32app:
-	erl -wx -noshell -pa ../varp/ebin -s varp_wx -s servator make_win32app varp -s erlang halt
-	cp priv/Varp.exe Varp-$(VSN)/
-
+	erl -wx -noshell -pa ../varp/ebin -s varp_wx -s servator make_win32app $(APP) -s erlang halt
+	cp priv/$(APPL).exe $(APPL)-$(VSN)/
 
 osxapp:
-	erl -wx -noshell -s varp_wx -s servator make_osxapp varp -s erlang halt
+	erl -wx -noshell -s varp_wx -s servator make_osxapp $(APP) -s erlang halt
 	mkdir -p tmpdist
-	mv Varp.app tmpdist/
+	mv $(APPL).app tmpdist/
 	cd tmpdist/
-	../../servator/priv/make_icns ../priv/varp.png
+	../../servator/priv/make_icns ../priv/$(APP).png
 	rm -rf AppIcon.iconset
-	mv AppIcon.icns Varp.app/Contents/Resources/
+	mv AppIcon.icns $(APPL).app/Contents/Resources/
 	cd ..
-	hdiutil create tmp.dmg -ov -volname "Varp" -fs HFS+ -srcfolder "./tmpdist/"
-	hdiutil convert -format UDZO -o Varp.dmg tmp.dmg
-
-
+	hdiutil create tmp.dmg -ov -volname "$(APPL)" -fs HFS+ -srcfolder "./tmpdist/"
+	hdiutil convert -format UDZO -o $(APPL).dmg tmp.dmg
 
 appimage_nw:
-	erl -noshell -s varp start0 -s servator make_appimage varp
+	erl -noshell -s $(APP) start0 -s servator make_appimage $(APP)

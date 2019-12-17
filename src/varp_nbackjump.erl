@@ -89,6 +89,12 @@ options() ->
 	default => 0,
 	description => "Factor to calculate number of learned clauses"},
 
+     #{ long => "max-learned-inc",
+	key => max_learned_inc,
+	spec =>  float,
+	default => 0,
+	description => "Factor to increase number of learned clauses"},
+
      #{ long => "keep-factor",
 	key => keep_factor,
 	spec =>  float01,
@@ -154,44 +160,20 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_formula:config(Bs, max_conflicting, MaxConflicting),
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
-    %% Calculate size of lru cache
-    KeepFactor = maps:get(keep_factor, Param),
-    MinKeep    = maps:get(min_keep_clauses, Param),
-    KeepSize   = if MaxLearned =:= 0 ->
-			 0;
-		    KeepFactor > 0, MinKeep > 0 ->
-			 max(MinKeep, trunc(KeepFactor*MaxLearned));
-		    KeepFactor > 0 ->
-			 trunc(KeepFactor*MaxLearned);
-		    MinKeep > 0 ->
-			 MinKeep;
-		    true ->
-			 0
-		 end,
-    Permanent = varc:clauseset_size(Bs#bs.vp, ?DELTA),
-    %% io:format("permanent = |Delta| = ~w\n", [Permanent]),
-    %% io:format("keep-size = ~w\n", [KeepSize]),
-    %% io:format("max-learned = ~w\n", [MaxLearned]),
-    varc:clauseset_offset(Bs#bs.vp, ?GAMMA, KeepSize),  %% sets gamma offset
-
-    case maps:get(display, Param) of
-	true ->
-	    io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
-		      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]);
-	false -> ok
-    end,
-
+    _KeepSize  = keep_size(Bs, Param, MaxLearned),
     case maps:get(restart_counter,Param) of
 	0 -> ok;
 	_ ->
 	    BcpCounter = varp_formula:info(Bs, bcp_counter),
 	    counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, BcpCounter)
     end,
+
     case maps:get(restart_interval,Param) of
 	infinity -> ok;
 	RestartInterval ->
 	    erlang:start_timer(trunc(1000*RestartInterval), self(), restart)
     end,
+
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     M0  = #m { method = varp_formula:getopt(Bs1,method),
 	       max = maps:get(max, Param) },
@@ -417,19 +399,25 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 
     if 
 	DoPurge, JLevel =:= ?TOP_LEVEL ->
-	    if Learned > MaxLearned ->
-		    varp_formula:del_unused_clauses(Bs2),
-		    reorder(Bs2, Param);
-	       true ->
-		    %% but we can re-order literals?
-		    ok
-	    end,
+	    MaxLearned1 = 
+		if Learned > MaxLearned ->
+			varp_formula:del_unused_clauses(Bs2),
+			reorder(Bs2, Param),
+			MaxLearnedFactorInc = maps:get(max_learned_inc,
+						       Param,1.0),
+			%% fixme change clauseset_offset(?GAMMA)
+			
+			trunc(MaxLearned * MaxLearnedFactorInc);
+		   true ->
+			%% but we can re-order literals?
+			MaxLearned
+		end,
 	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
 	    NU = varp_formula:number_of_unbound(Bs2),
 	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", 
-		      [Learned, MaxLearned,Learned1,NU]),
-	    %%
-	    init(Bs,Param,MaxLearned,MR);
+		      [Learned,MaxLearned,Learned1,NU]),
+	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
+	    init(Bs,Param,MaxLearned1,MR);
        DoPurge, Learned > MaxLearned ->
 	    %% restart and purge!
 
@@ -442,7 +430,10 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
 	    reorder(Bs2, Param),
-	    init(Bs2,Param,MaxLearned,MR);
+	    MaxLearnedFactorInc = maps:get(max_learned_inc,Param,1.0),
+	    MaxLearned1 = trunc(MaxLearned * MaxLearnedFactorInc),
+	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
+	    init(Bs2,Param,MaxLearned1,MR);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
@@ -530,13 +521,37 @@ do_stat(Bs, D1, D2) ->
 	    counters:add(Bs#bs.d2, D2+1, 1)
     end.
 
+keep_size(Bs, Param, MaxLearned) ->
+    MinKeep = maps:get(min_keep_clauses, Param),
+    KeepFactor = maps:get(keep_factor, Param),
+    KeepSize = if MaxLearned =:= 0 ->
+		       0;
+		  KeepFactor > 0, MinKeep > 0 ->
+		       max(MinKeep, trunc(KeepFactor*MaxLearned));
+		  KeepFactor > 0 ->
+		       trunc(KeepFactor*MaxLearned);
+		  MinKeep > 0 ->
+		       MinKeep;
+		  true ->
+		       0
+	       end,
+    varc:clauseset_offset(Bs#bs.vp, ?GAMMA, KeepSize),  %% sets gamma offset
+    case maps:get(display, Param) of
+	true ->
+	    io:format("keep: KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
+		      [KeepSize, MaxLearned, KeepFactor, MinKeep]);
+	false -> ok
+    end,
+    KeepSize.
+
+
 max_learned(Bs,Param) ->
     Permanent = varc:clauseset_size(Bs#bs.vp, ?DELTA),
     MaxLearnedClauses = maps:get(max_learned,Param),
     MaxLearnedFactor = maps:get(max_learned_factor,Param),
     case maps:get(display, Param) of
 	true ->    
-	    io:format("Permanent=~w,MaxLearnedClause=~w,MaxLearnedFactor=~w\n",
+	    io:format("learned: Permanent=~w,MaxLearnedClause=~w,MaxLearnedFactor=~w\n",
 		      [Permanent, MaxLearnedClauses, MaxLearnedFactor]);
 	false ->
 	    ok

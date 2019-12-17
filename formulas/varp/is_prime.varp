@@ -1,5 +1,6 @@
 // Check if n (parameter) is prime
-// n=412351270399
+// SAT n=412351270399
+// UNSAT n=412351270421
 //
 declare A:(isize(n)-1);
 declare B:((isize(n)+1)/2);

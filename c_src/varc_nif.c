@@ -4543,7 +4543,7 @@ static int bcp_clauses(varp_t* vp, literal_t* lp)
 	    case ev_NONE:
 		break;
 	    default:
-		cp->stamp = vp->bcp_counter;
+		// cp->stamp = vp->bcp_counter;
 		if (vp->level == 0) {
 		    vp->cdead++;
 		    cp->flags |= CLAUSE_FLAG_DEAD;
@@ -4733,6 +4733,8 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 //  return false  when conflict is found
 //         true   when model is found
 //
+#define INIT_PHASE I_FALSE
+
 static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
 {
@@ -4751,7 +4753,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	vp->undo[level].decision);
     
     if (vp->undo[level].t == 2) { // UNDO+NEG
-	put_l(vp, vp->undo[level].decision, I_TRUE, -1, -1, level);
+	put_l(vp, vp->undo[level].decision, INIT_PHASE, -1, -1, level);
 	vp->undo[level].t = 3;    // NEG+EVAL
 	vp->caller_env = env;
 	vp->num_conflicting = 0;
@@ -4778,7 +4780,7 @@ next:
     vp->undo[level].decision = xp;
     vp->undo[level].t = 1;    // SET+EVAL
     vp->undo[level].ix = ix;
-    put_l(vp, xp, I_TRUE, -1, -1, level);
+    put_l(vp, xp, INIT_PHASE, -1, -1, level);
 bcp:
     vp->bcp_counter++;
     DBG("BCP %ld, level=%d\r\n", vp->bcp_counter, vp->level);
