@@ -3,7 +3,7 @@
 #
 APP = varp
 APPL = Varp
-VSN = $(shell git describe)
+VSN = $(shell git describe --abbrev=0)
 MACHINE = $(shell uname -m)
 
 appimage:
