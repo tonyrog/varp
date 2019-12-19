@@ -221,9 +221,9 @@ add_clause(Bs,Ls,Set) ->
     ?dbg("add clause: ~s\n", [format_clause(Bs,Ls)]),
     case varc:add_clause(Bs#bs.vp,Ls,Set) of
 	{false,_I} ->
-	    error(conflict_clause_error);
+	    throw(contradiction);
 	false ->
-	    error(conflict_clause_error);
+	    throw(contradiction);
 	{true,I} -> %% non conflict
 	    ?dcall(fun() ->
 			   CL = varc:get_clause(Bs#bs.vp, I),
@@ -1019,8 +1019,8 @@ build_({'>>>',A,K},Bs) ->
 
 build_({cnf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
-build_({cnf,{Vars,_Clauses,_Sections,Units,Cs}},Bs) 
-  when is_list(Cs), is_list(Units) ->
+build_({cnf,{Vars,_Clauses,_Sections,Cs}},Bs) 
+  when is_list(Cs) ->
     %% CNF only works as first formula! variables
     %% must be numerated 1..Vars
     lists:foreach(fun(I) ->
@@ -1028,9 +1028,12 @@ build_({cnf,{Vars,_Clauses,_Sections,Units,Cs}},Bs)
 		  end,
 		  lists:seq(1,Vars)),
     %% fixme bind all literals in Ls = TRUE
-    %% io:format("Units = ~p\n", [Units]),
     lists:foreach(fun(CL) ->
 			  try varc:add_clause(Bs#bs.vp, CL) of
+			      {false,_I} ->
+				  throw(contradiction);
+			      false ->
+				  throw(contradiction);
 			      _ -> ok
 			  catch
 			      error:_ ->
@@ -1200,6 +1203,10 @@ build_snf([CL|CLs], Bs) ->
     {Xs,Bs1} = args(CL,Bs),
     Ls = [L || {bool,L} <- Xs],
     try add_clause(Bs1,Ls) of
+	{false,_I} ->
+	    throw(contradiction);
+	false ->
+	    throw(contradiction);
 	_ ->
 	    build_snf(CLs, Bs1)
     catch

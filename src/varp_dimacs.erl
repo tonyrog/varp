@@ -102,7 +102,7 @@ preamble(Bin,Sect,L) ->
 to_cnf(Bin,Sect,L,Vars,Clauses) ->
     case to_cnf_(Bin,Sect,L,[],[]) of
 	{ok,Sect1,Cs} ->
-	    {cnf,{Vars,Clauses,Sect1,[],Cs}};
+	    {cnf,{Vars,Clauses,Sect1,Cs}};
 	Error ->
 	    Error
     end.
@@ -158,7 +158,7 @@ sat(_Bin,_Sect, L, _Vars) ->
 to_snf(Bin,Sect,L,Vars,Clauses) ->
     case to_snf_(Bin,Sect,L,[],[]) of
 	{ok,Sect1,Cs} ->
-	    {snf,{Vars,Clauses,Sect1,[],Cs}};
+	    {snf,{Vars,Clauses,Sect1,Cs}};
 	Error ->
 	    Error
     end.

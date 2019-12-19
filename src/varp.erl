@@ -610,6 +610,7 @@ do_run_(Do, Formula, GOpts) ->
 do([{Plugin,Param}|Do],Acc0,Bs) ->
     S0 = stat(Bs),
     varp_formula:info(Bs, "pass ~p\n", [Plugin]),
+    io:format("pass ~p\n", [Plugin]),
     T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
 	{Result,Acc1,Bs1} ->
@@ -617,6 +618,7 @@ do([{Plugin,Param}|Do],Acc0,Bs) ->
 	    S1 = stat(Bs1),
 	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
 	    Ts = Time/1000000,
+	    io:format("DO ~s = R=~p, Acc=~p\n", [Plugin,Result,Acc1]),
 	    show_info(S1, S0, Ts, Bs1),
 	    Acc = combine_result(Acc0,Acc1),
 	    case Result of
@@ -751,6 +753,8 @@ display_result(?CONTINUE,_,_Bs) ->
 
 
 %% check if there is already a "unique" model
+one_model(Bs) when Bs#bs.main =:= ?F ->
+    false;
 one_model(Bs) ->
     NV = varp_formula:number_of_variables(Bs),
     NB = varp_formula:number_of_bound(Bs),
@@ -818,12 +822,12 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		Error={error,Ln,Reason} ->
 		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
 		    Error;
-		Cnf = {cnf,{_NVars,_NClauses,Sections0,_Ls,_CLs}} ->
+		Cnf = {cnf,{_NVars,_NClauses,Sections0,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Cnf]),
 		    Formula1 = join_f(JoinOp,Cnf,Formula0),
 		    Sections1 = append_sections(Sections, Sections0),
 		    load_files(Fs,Formula1,Sections1,JoinOp,GOpts);
-		Snf = {snf,{_NVars,_NClauses,Sections0,_Ls,_CLs}} ->
+		Snf = {snf,{_NVars,_NClauses,Sections0,_CLs}} ->
 		    %% io:format("% loaded: ~p\n", [Snf]),
 		    Formula1 = join_f(JoinOp,Snf,Formula0),
 		    Sections1 = append_sections(Sections, Sections0),

@@ -4733,7 +4733,7 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 //  return false  when conflict is found
 //         true   when model is found
 //
-#define INIT_PHASE I_FALSE
+#define INIT_PHASE I_TRUE
 
 static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
@@ -4769,12 +4769,18 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     
     if (vp->undo[level].t == 0)  // UNDEF - clear decision
 	vp->undo[level].decision = L_FALSE(vp);
-    if ((ix = order_next(vp, 1, 0)) == 0)
-	return ATOM(true);  // model
+
+    // check if initial bcp is needed. queue is not empty
+    // ix = order_next(vp, 1, 0);
+    // printf("order_next(1) = %d\r\n", ix);
+    // if (ix == 0)
+    // return ATOM(true);  // model
     vp->caller_env = env;
     vp->num_conflicting = 0;
-    if (level == 0)
+    if (level == 0) {
+	ix = 0;
 	goto bcp;
+    }
 next:
     xp = vindex_l(vp, vp->order_map[ix]);
     vp->undo[level].decision = xp;
@@ -4790,10 +4796,13 @@ bcp:
     if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;    
     
     if (vp->num_conflicting == 0) {
-	if ((ix = order_next(vp, ix+1, 0)) == 0) {
+	int ix1 = order_next(vp, ix+1, 0);
+	printf("order_next(%d) = %d\r\n", ix+1, ix1);
+	if (ix1 == 0) {
 	    vp->caller_env = NULL;
 	    return ATOM(true);  // model 
 	}
+	ix = ix1;
 	set_level(vp, level+1);
 	level = vp->level;
 	goto next;

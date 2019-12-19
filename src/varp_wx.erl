@@ -1160,9 +1160,9 @@ parse(String, Meta) ->
 parse_dimacs(String) ->
     Bin = list_to_binary(String), %% utf?
     case varp_dimacs:parse(Bin) of
-	Form={cnf,{_Var,_Clause,SectionMap,_Units,_Cs}} ->
+	Form={cnf,{_Var,_Clause,SectionMap,_Cs}} ->
 	    {ok,{SectionMap,Form}};
-	Form={snf,{_Var,_Clause,SectionMap,_Units,_Cs}} ->
+	Form={snf,{_Var,_Clause,SectionMap,_Cs}} ->
 	    {ok,{SectionMap,Form}};
 	Error ->
 	    Error

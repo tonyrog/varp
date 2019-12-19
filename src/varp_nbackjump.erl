@@ -305,24 +305,15 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
     LClauseList5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
 			      LClauseList4),
 
+    IOrder = maps:get(iorder,Param),
+
     LClauseList6 = 
-	case maps:get(iorder,Param) of
-	    0 -> 
+	if IOrder =:= 0 ->
 		LClauseList5;
-	    IOrder ->
+	   true ->
 		lists:takewhile(fun({La,_}) -> La =< IOrder end, 
 				LClauseList5)
 	end,
-
-    %% LClauseList7 = case maps:get(max_conflicts,Param) of
-    %% 		       0 -> 
-    %% 			   LClauseList6;
-    %% 		       1 ->
-    %% 			   [];
-    %% 		       MaxC ->
-    %% 			   lists:sublist(LClauseList6, MaxC-1)
-    %% 		   end,
-    LClauseList7 = LClauseList6,
 
     L = maps:get(stumble,Param),
     K = maps:get(olle,Param),
@@ -331,7 +322,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
     JLevel =
 	case JClause of
 	    undefined -> ?TOP_LEVEL;
-	    {_L,D1,D2,J2,J3,_} -> 
+	    {_L,D1,D2,J2,J3,_} ->
 		do_stat(Bs,D1,D2),
 		do_jump(Bs,L,K,M,D1,D2,J2,J3)
 	end,
@@ -351,18 +342,18 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	    fun({Len,Clause},Bsi) ->
 		    do_clause_stat(Bsi, Len),
 		    add_conflict_clause(Bsi,Clause)
-	    end, Bs0, LClauseList7),
+	    end, Bs0, LClauseList6),
     
     Bs2 = case JClause of
 	      undefined ->
 		  Bs1;
-	      {_Len,_D1,_D2,_J2,_J3,Clause} ->
-		  do_clause_stat(Bs1, length(Clause)),
+	      {Len,_D1,_D2,_J2,_J3,Clause} ->
+		  do_clause_stat(Bs1, Len),
 		  add_conflict_clause(Bs1,Clause)
 	  end,
 
     Learned0 = varc:clauseset_size(Bs2#bs.vp, ?GAMMA),
-    NewLearnedClauses = length(LClauseList7) +
+    NewLearnedClauses = length(LClauseList6) +
 	if JClause =:= undefined -> 0; true -> 1 end,
     Learned = Learned0 + NewLearnedClauses,
     DoPurge = varc:clauseset_offset(Bs2#bs.vp, ?GAMMA) > 0,
