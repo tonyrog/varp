@@ -124,9 +124,9 @@ test_div() ->
 	       [[]]),
     true = sat({'==', {'/',{uint,6,4},{uint,4,2}}, {uint,4,X}},
 	       [[{X,2}]]),
-%%    true = sat({'==', {'/',{uint,6,X},{uint,4,2}}, {uint,4,5}},
-%%	       [[{X,11}], 
-%%		[{X,10}]]),
+    true = sat({'==', {'/',{uint,6,X},{uint,4,2}}, {uint,4,5}},
+	       [[{X,11}], 
+		[{X,10}]]),
     true = sat({'==', {'/',{uint,4,X},{uint,4,Y}}, {uint,4,5}},
 		    [[{X,15},{Y,3}],
 		     [{X,11},{Y,2}],
@@ -259,6 +259,7 @@ sat(Formula, ExpectedModels) ->
     GDo = varp:parse_do(Do),
     case varp:do_run(GDo,Formula,GOpts) of
 	{?DONE,Ms,_Bs1} ->
+	    %% io:format("Ms = ~p\n", [Ms]),
 	    lists:sort(Ms) == lists:sort(ExpectedModels);
 	{?INCONSISTENT,Ms,_Bs1} ->
 	    Ms == [];

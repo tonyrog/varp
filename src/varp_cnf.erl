@@ -118,12 +118,13 @@ emit_symbols(Fd, true, Bs, VarMap) ->
       fun (Key,_Value,Acc) when is_integer(Key) ->
 	      Acc;
 	  (Key,Value,_Acc) ->
-	      Val = case maps:find(Value, VarMap) of
-			{ok, Value1} -> Value1;
-			error -> Value
-		    end,
-	      io:format(Fd, "c ~s is ~w\n", 
-			[varp_formula:format_symbol(Key),Val])
+	      case maps:find(Value, VarMap) of
+		  {ok, Value1} ->
+		      io:format(Fd, "c ~s is ~w\n", 
+				[varp_formula:format_symbol(Key),Value1]);
+		  error -> 
+		      ok
+	      end
       end, [], Bs#bs.vs).
 
 -if(false).
@@ -162,40 +163,37 @@ edge_list(Bs, X, VarMap) ->
 %% mapping into compact literal numbers
 %%
 renumerate_clauses(Bs, Raw) ->
-    renumerate_clauses(Bs, Raw, #{}, 0, 0).
+    renumerate_clauses(Bs, Raw, #{}, 0).
 
-renumerate_clauses(Bs, Raw, VarMap, NumClauses, NumVars) ->
+renumerate_clauses(Bs, Raw, VarMap, NumClauses) ->
     renumerate_clauses(Bs, varc:clause_first(Bs#bs.vp),
-		       Raw, VarMap, NumClauses, NumVars).
+		       Raw, VarMap, NumClauses).
 
-renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses, NumVars) ->
-    {VarMap, NumClauses, NumVars};
-renumerate_clauses(Bs, I, Raw, VarMap, NumClauses, NumVars) ->
+renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses) ->
+    {VarMap, NumClauses, maps:size(VarMap)};
+renumerate_clauses(Bs, I, Raw, VarMap, NumClauses) ->
     I1 = varc:clause_next(Bs#bs.vp,I),
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw) of
 	true ->
-	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses,NumVars);
+	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses);
 	[] ->
-	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses,NumVars);
+	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses);
 	CL ->
-	    {VarMap1,NumVars1} = renumerate_clause(CL,VarMap, NumVars),
-	    renumerate_clauses(Bs,I1,Raw,VarMap1,NumClauses+1,NumVars1)
+	    VarMap1 = renumerate_clause(CL,VarMap),
+	    renumerate_clauses(Bs,I1,Raw,VarMap1,NumClauses+1)
     end.
 
 %% generate variabel mapping into a compact set of variables
-renumerate_clause([L|Ls], VarMap, NumVars) ->
-    case translate_literal(L, VarMap) of 
+renumerate_clause([L|Ls], VarMap) ->
+    case translate_literal(L,VarMap) of 
 	error ->
 	    N = maps:size(VarMap),
-	    J = if L < 0 -> -(N+1);
-		   L > 0 -> (N+1)
-		end,
-	    renumerate_clause(Ls, maps:put(L, J, VarMap), NumVars+1);
+	    renumerate_clause(Ls, maps:put(abs(L),N+1,VarMap));
 	_M ->
-	    renumerate_clause(Ls, VarMap, NumVars)
+	    renumerate_clause(Ls, VarMap)
     end;
-renumerate_clause([], VarMap, NumVars) ->
-    {VarMap, NumVars}.
+renumerate_clause([], VarMap) ->
+    VarMap.
 
 translate_literal(?T, _VarMap) -> ?T;
 translate_literal(?F, _VarMap) -> ?F;
@@ -227,4 +225,3 @@ count_number_of_clauses_(Bs, I, N) ->
 	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N+1)
     end.
 -endif.
-

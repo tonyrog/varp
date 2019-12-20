@@ -289,16 +289,16 @@ nbcp_p3() ->
     varc:set_level(V, 1),
 
     false = varc:nbcp(V),
-    Bn1 = get_all_bindings(V),
+    Bn1 = varc:get_all_bindings(V),
     io:format("bindings = ~w\n", [Bn1]),
     varc:undo(V),
 
     false = varc:nbcp(V),
-    Bn2 = get_all_bindings(V),
+    Bn2 = varc:get_all_bindings(V),
     io:format("bindings = ~w\n", [Bn2]),
     varc:undo(V),
 
-    BnX = get_all_bindings(V),
+    BnX = varc:get_all_bindings(V),
     io:format("bindings = ~w\n", [BnX]),
     ok.
 
@@ -348,7 +348,7 @@ nbcp_p4() ->
 
 nbcp_loop(V) ->
     false = varc:nbcp(V),
-    Bs = get_all_bindings(V),
+    Bs = varc:get_all_bindings(V),
     io:format("bindings = ~w\n", [Bs]),
     case varc:undo(V) of
 	false ->
@@ -896,10 +896,3 @@ format_clause_flag({watch,{P1,P2}}) -> io_lib:format("w:(~w,~w)",[P1,P2]);
 format_clause_flag({status,inqueue}) -> "s:inqueue";
 format_clause_flag({status,dead}) -> "s:dead";
 format_clause_flag({status,ok}) -> "s:ok".
-    
-get_all_bindings(V) ->
-    Level = varc:info(V, level),
-    [{L,varc:get_decision(V,L),varc:get_bindings(V, L)} ||
-	L <- lists:seq(Level,0,-1)].
-
-     

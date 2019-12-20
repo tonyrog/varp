@@ -15,7 +15,7 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
--define(LEVEL, 1).
+-define(ROOT_LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 options() ->
@@ -41,7 +41,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     varp_formula:config(Bs, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
-    varc:set_level(Bs#bs.vp, ?LEVEL),
+    varc:set_level(Bs#bs.vp, ?ROOT_LEVEL),
     case varp_formula:getopt(Bs1,method) of
 	collect -> collect(Bs1, 0, N, []);
 	count   -> count(Bs1, 0, N)
@@ -65,6 +65,7 @@ collect(Bs, Count, N, Acc) ->
 collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
     case varc:nbcp(Bs#bs.vp) of
 	true ->
+	    %% io:format("model: ~p\n", [varc:get_all_bindings(Bs#bs.vp)]),
 	    Model = varp:output_model(Bs,Count+1),
 	    case varc:undo(Bs#bs.vp) of
 		true ->
@@ -73,6 +74,7 @@ collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
 		    {?DONE, [Model|Acc], Bs}
 	    end;
 	false ->
+	    %% io:format("contradiction: ~p\n", [varc:get_all_bindings(Bs#bs.vp)]),
 	    proof_output(Bs),
 	    case varc:undo(Bs#bs.vp) of
 		true ->

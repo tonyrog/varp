@@ -862,8 +862,9 @@ build1(F, Bs) ->
 
 build__(F, Bs) ->
     %% io:format("build__ ~p\n", [F]),
-    R={_F1,_} = build_(F, Bs),
+    R={_F1,_Bs1} = build_(F, Bs),
     %% io:format("build__ => ~p", [_F1]),
+    %% io:format("Bs1 = ~p\n", [_Bs1]),
     R.
 
 build_(undefined, Bs) ->
@@ -1691,17 +1692,18 @@ alias_vector_(Bs,I,T,N,[X|Xs],V) ->
 alias_vector_(Bs,_I,_T,_N,[],_V) ->
     Bs.
     
-%% generate a variable vector
+%% generate a variable vector, bits 
+%% X[3] X[2] X[1] X[0]  return as little endian [X[0],X[1],X[2],X[3]]
 var_vector(Type,V,Size,Bs) ->
     VV = expand_meta(V,Bs),
-    N = eval_meta(Size,Bs),
-    var_vector_(N-1,Type,N,[],VV,Bs).
+    Size1 = eval_meta(Size,Bs),
+    var_vector_(0,Size1,Type,[],VV,Bs).
 
-var_vector_(-1,Type,N,Xs,_V,Bs) -> 
-    {{Type,N,Xs},Bs};
-var_vector_(I,Type,N,Xs,V,Bs) ->
-    {{bool,Xi},Bs1} = variable({Type,V,N,I},Bs),
-    var_vector_(I-1,Type,N,[Xi|Xs],V,Bs1).
+var_vector_(Size,Size,Type,Xs,_V,Bs) -> 
+    {{Type,Size,lists:reverse(Xs)},Bs};
+var_vector_(I,Size,Type,Xs,V,Bs) ->
+    {{bool,Xi},Bs1} = variable({Type,V,Size,I},Bs),
+    var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector
 vfold_op(Bs,_Op,_D,[A]) ->
@@ -1914,7 +1916,6 @@ xarg(uint,A) -> uarg(A);
 xarg(bool,A={bool,_}) -> A;
 xarg(bit,{bool,X}) -> {bit,1,[X]};
 xarg(bit,A={bit,_,_}) -> A.
-
 
 vconst({uint,_,Xs}) -> vunsigned(Xs);
 vconst({int,_,Xs}) -> vsigned(Xs);

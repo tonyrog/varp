@@ -65,6 +65,7 @@
 -export([get_nbindings/3]).
 -export([get_bindings/2]).
 -export([get_bindings/3]).
+-export([get_all_bindings/1]).
 -export([get_number_of_bindings/2]).
 -export([order_init/1]).
 -export([order_first/1, order_next/2, order_next/3]).
@@ -425,6 +426,11 @@ get_nbindings(Vp,N) when is_integer(N), N>= 0 ->
 
 get_nbindings(_Vp,N,_ClauseInfo) when is_integer(N), N>= 0 ->
     ?nif_stub().
+
+get_all_bindings(V) ->
+    Level = info(V, level),
+    [{L,get_decision(V,L),get_bindings(V, L)} ||
+	L <- lists:seq(Level,0,-1)].
 
 %% get bindings on Level
 get_bindings(Vp, Level) ->

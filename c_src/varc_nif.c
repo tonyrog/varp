@@ -421,13 +421,11 @@ typedef struct _hlink_t
 } hlink_t;
 
 typedef enum {
-    undone ,
-    set_eval,
-    undo_toggle,
-    toggle_eval
+    uNONE    = 0,
+    uSET     = 1,
+    uTOGGLE  = 2,
+    uDONE    = 3
 } undo_state_t;
-// 0=UNDEF, 1=SET+EVAL, 2=UNDO+NEG, 3=NEG+EVAL
-
 
 typedef struct _undo_t
 {
@@ -1788,7 +1786,7 @@ static inline void put_l(varp_t* vp,lit_t l,ival_t ivalue,
 static void init_level(varp_t* vp, int level)
 {
     vp->undo[level].decision = L_FALSE(vp);
-    vp->undo[level].t  = undone;
+    vp->undo[level].t  = uNONE;
     vp->undo[level].ix = 0;	
     vp->undo[level].bs = NULL;    
 }
@@ -3640,7 +3638,7 @@ static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
     default:
 	vp->caller_env = env;
 	vp->undo[level].decision = xp;
-	vp->undo[level].t = undone;
+	vp->undo[level].t = uNONE;
 	vp->undo[level].ix = 0;	
 	put_l(vp, xp, I_TRUE, -1, -1, level);
 	vp->caller_env = NULL; 
@@ -4731,14 +4729,24 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 
     while((level = vp->level) > 0) {
 	unbind_level(vp, level);
-	if (vp->undo[level].t == set_eval) {
+	switch(vp->undo[level].t) {
+	case uSET:
 	    vp->undo[level].decision = neg_l(vp->undo[level].decision);
-	    vp->undo[level].t = undo_toggle;
+	    vp->undo[level].t = uTOGGLE;
 	    return ATOM(true);
-	}
-	else if (vp->undo[level].t == toggle_eval) {
+	case uTOGGLE:
+	    printf("fixme: undo uTOGGLE\r\n");
+	    return ATOM(false);
+	case uDONE:
 	    init_level(vp, level);
+	    break;
+	case uNONE:
+	default:
+	    printf("fixme: undo uNONE\r\n");
+	    return ATOM(false);
 	}
+	if (level == 1)
+	    break;
 	vp->level--;
     }
     return ATOM(false);
@@ -4754,7 +4762,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int i, ix;
+    int i, ix=-1;
     int level;
     lit_t xp;
     
@@ -4762,34 +4770,41 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     
     level = vp->level;
-    DBG("nbcp: level=%d, t=%d, ix=%d, decision=%d\r\n",
+    DBG("nbcp: level=%d, t=%d, ix=%d, decision=%s\r\n",
 	level, vp->undo[level].t, vp->undo[level].ix,
-	vp->undo[level].decision);
-    
-    if (vp->undo[level].t == undo_toggle) {
-        put_l(vp, vp->undo[level].decision, PHASE_INIT, -1, -1, level);
-	vp->undo[level].t = toggle_eval;
-	vp->caller_env = env;
-	vp->num_conflicting = 0;
-	ix = vp->undo[level].ix;
-	goto bcp;
-    }
-    else if (vp->undo[level].t == set_eval) {
-	vp->caller_env = env;
-	vp->num_conflicting = 0;
-	ix = vp->undo[level].ix;
-	goto bcp;
-    }
-    else if (vp->undo[level].t == undone) {
+	format_lit(vp, vp->undo[level].decision));
+
+    switch(vp->undo[level].t) {
+    case uNONE:
         vp->undo[level].decision = L_FALSE(vp);
-	if (level > 0) {
-	    if (vp->undo[level-1].t != undone)
-	        ix = order_next(vp, vp->undo[level-1].ix, 0);
-	    else
-	        ix = 1;
-	    if (ix == 0)
-	      return ATOM(true);  // model
-	}
+	if ((level > 1) && (vp->undo[level-1].t != uNONE))
+	    ix = vp->undo[level-1].ix;
+	else
+	    ix = 1;
+	if ((ix = order_next(vp, ix, 0)) == 0)
+	    return ATOM(true);  // model
+	break;
+	
+    case uSET:
+	vp->caller_env = env;
+	vp->num_conflicting = 0;
+	ix = vp->undo[level].ix;
+	goto bcp;
+	
+    case uTOGGLE:
+        put_l(vp, vp->undo[level].decision, PHASE_INIT, -1, -1, level);
+	vp->undo[level].t = uDONE;
+	vp->caller_env = env;
+	vp->num_conflicting = 0;
+	ix = vp->undo[level].ix;
+	goto bcp;
+
+    case uDONE:
+	printf("try to bcp uDONE state\r\n");
+	return enif_make_badarg(env);	
+    default:
+	printf("unknown bcp state\r\n");
+	return enif_make_badarg(env);
     }
     
     vp->caller_env = env;
@@ -4799,11 +4814,15 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
       ix = 0;
       goto bcp;
     }
+    else if (ix == -1) {
+	printf("ix=-1 bad bcp state\r\n");	
+	return enif_make_badarg(env);
+    }
     
 next:
     xp = vindex_l(vp, vp->order_map[ix]);
     vp->undo[level].decision = xp;
-    vp->undo[level].t = set_eval;
+    vp->undo[level].t = uSET;
     vp->undo[level].ix = ix;
     put_l(vp, xp, PHASE_INIT, -1, -1, level);
 bcp:
@@ -4812,7 +4831,7 @@ bcp:
     bcp(vp);
     if (vp->unwatch) bcp_unwatch(vp);
     if (vp->level > vp->max_level) vp->max_level = vp->level;
-    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;    
+    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;
     
     if (vp->num_conflicting == 0) {
 	int ix1 = order_next(vp, ix+1, 0);
