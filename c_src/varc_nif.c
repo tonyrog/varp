@@ -40,10 +40,10 @@
 #define PACKED_VALUE 1
 // #define ASSERTIONS
 // #define DEBUG
-// #define DEBUG_MEM
 // #define DEBUG_BCP
 // #define DEBUG_EDGE
 // #define DEBUG_ORDER
+// #define DEBUG_MEM
 // #define COUNT(vp, cnt)
 #define COUNT(vp, cnt) vp->counter[(cnt)]++
 
@@ -96,6 +96,9 @@ typedef enum {
     I_TRUE  = 2,  // 010
     I_FALSE = 3   // 011
 } ival_t;
+
+#define PHASE_INIT I_TRUE
+
 
 #define IMPORT(x)      (((x)<0) ? (((-(x))<<1)|1) : ((x)<<1))
 #define EXPORT(y)      (((y)&1) ? -((y)>>1) : ((y)>>1))
@@ -185,7 +188,6 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "get_queue_next",      2,  varp_get_queue_next ) \
     NIF( "get_decision",        2,  varp_get_decision ) \
     NIF( "get_bindings",        3,  varp_get_bindings ) \
-    NIF( "get_decision",        3,  varp_get_decision ) \
     NIF( "get_nbindings",       3,  varp_get_nbindings ) \
     NIF( "get_number_of_bindings", 2,  varp_get_number_of_bindings ) \
     NIF( "order_first",         1,  varp_order_first ) \
@@ -418,10 +420,19 @@ typedef struct _hlink_t
     cix_t cix;
 } hlink_t;
 
+typedef enum {
+    undone ,
+    set_eval,
+    undo_toggle,
+    toggle_eval
+} undo_state_t;
+// 0=UNDEF, 1=SET+EVAL, 2=UNDO+NEG, 3=NEG+EVAL
+
+
 typedef struct _undo_t
 {
     lit_t decision;      // descision literal from bind
-    int   t;             // 0=UNDEF, 1=SET+EVAL, 2=UNDO+NEG, 3=NEG+EVAL
+    undo_state_t t;
     int   ix;            // order index
     variable_t* bs;      // list of bound variables
 } undo_t;
@@ -914,6 +925,7 @@ static inline ival_t get_packed_ival(varp_t* vp, unsigned uix)
 #endif
 }
 
+#ifndef LIT_VALUE
 static inline void set_packed_ival(varp_t* vp, unsigned uix, ival_t ivalue)
 {
 #if PACKED_VALUE == 1
@@ -928,6 +940,7 @@ static inline void set_packed_ival(varp_t* vp, unsigned uix, ival_t ivalue)
     vp->var_value[uix] = (vp->var_value[uix] & ~(0x3<<j)) | (PACK(ivalue) << j);
 #endif
 }
+#endif
 
 #endif
 
@@ -1175,7 +1188,9 @@ char* format_literal(varp_t* vp, literal_t* lp)
 
 char* format_lit(varp_t* vp, lit_t l)
 {
-    return format_literal(vp, l2ll(vp, l));
+    if (l == L_TRUE(vp)) return "t";
+    else if (l == L_FALSE(vp)) return "f";
+    else return format_literal(vp, l2ll(vp, l));
 }
 
 #if defined(DEBUG_BCP)
@@ -1773,7 +1788,7 @@ static inline void put_l(varp_t* vp,lit_t l,ival_t ivalue,
 static void init_level(varp_t* vp, int level)
 {
     vp->undo[level].decision = L_FALSE(vp);
-    vp->undo[level].t  = 0;
+    vp->undo[level].t  = undone;
     vp->undo[level].ix = 0;	
     vp->undo[level].bs = NULL;    
 }
@@ -3625,7 +3640,7 @@ static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
     default:
 	vp->caller_env = env;
 	vp->undo[level].decision = xp;
-	vp->undo[level].t = 0;
+	vp->undo[level].t = undone;
 	vp->undo[level].ix = 0;	
 	put_l(vp, xp, I_TRUE, -1, -1, level);
 	vp->caller_env = NULL; 
@@ -4171,9 +4186,9 @@ static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_uint(env, argv[1], &level))
 	return enif_make_badarg(env);
-    DBG("set_level: level=%d, t=%d, ix=%d, decision=%d\r\n",
+    DBG("set_level: level=%d, t=%d, ix=%d, decision=%s\r\n",
 	level, vp->undo[level].t, vp->undo[level].ix,
-	vp->undo[level].decision); 
+	format_lit(vp, vp->undo[level].decision)); 
     set_level(vp, level);
     return ATOM(true);
 }
@@ -4716,12 +4731,12 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 
     while((level = vp->level) > 0) {
 	unbind_level(vp, level);
-	if (vp->undo[level].t == 1) {  // SET+EVAL
+	if (vp->undo[level].t == set_eval) {
 	    vp->undo[level].decision = neg_l(vp->undo[level].decision);
-	    vp->undo[level].t = 2;     // UNDO+NEG
+	    vp->undo[level].t = undo_toggle;
 	    return ATOM(true);
 	}
-	else if (vp->undo[level].t == 3) {  // NEG+EVAL
+	else if (vp->undo[level].t == toggle_eval) {
 	    init_level(vp, level);
 	}
 	vp->level--;
@@ -4733,7 +4748,6 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 //  return false  when conflict is found
 //         true   when model is found
 //
-#define INIT_PHASE I_TRUE
 
 static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
@@ -4752,41 +4766,46 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	level, vp->undo[level].t, vp->undo[level].ix,
 	vp->undo[level].decision);
     
-    if (vp->undo[level].t == 2) { // UNDO+NEG
-	put_l(vp, vp->undo[level].decision, INIT_PHASE, -1, -1, level);
-	vp->undo[level].t = 3;    // NEG+EVAL
+    if (vp->undo[level].t == undo_toggle) {
+        put_l(vp, vp->undo[level].decision, PHASE_INIT, -1, -1, level);
+	vp->undo[level].t = toggle_eval;
 	vp->caller_env = env;
 	vp->num_conflicting = 0;
 	ix = vp->undo[level].ix;
 	goto bcp;
     }
-    else if (vp->undo[level].t == 1) { // continue SET+EVAL
+    else if (vp->undo[level].t == set_eval) {
 	vp->caller_env = env;
 	vp->num_conflicting = 0;
 	ix = vp->undo[level].ix;
 	goto bcp;
+    }
+    else if (vp->undo[level].t == undone) {
+        vp->undo[level].decision = L_FALSE(vp);
+	if (level > 0) {
+	    if (vp->undo[level-1].t != undone)
+	        ix = order_next(vp, vp->undo[level-1].ix, 0);
+	    else
+	        ix = 1;
+	    if (ix == 0)
+	      return ATOM(true);  // model
+	}
     }
     
-    if (vp->undo[level].t == 0)  // UNDEF - clear decision
-	vp->undo[level].decision = L_FALSE(vp);
-
-    // check if initial bcp is needed. queue is not empty
-    // ix = order_next(vp, 1, 0);
-    // printf("order_next(1) = %d\r\n", ix);
-    // if (ix == 0)
-    // return ATOM(true);  // model
     vp->caller_env = env;
     vp->num_conflicting = 0;
+    
     if (level == 0) {
-	ix = 0;
-	goto bcp;
+      ix = 0;
+      goto bcp;
     }
+    
 next:
     xp = vindex_l(vp, vp->order_map[ix]);
     vp->undo[level].decision = xp;
-    vp->undo[level].t = 1;    // SET+EVAL
+    vp->undo[level].t = set_eval;
     vp->undo[level].ix = ix;
-    put_l(vp, xp, INIT_PHASE, -1, -1, level);
+    put_l(vp, xp, PHASE_INIT, -1, -1, level);
 bcp:
     vp->bcp_counter++;
     DBG("BCP %ld, level=%d\r\n", vp->bcp_counter, vp->level);
@@ -4797,7 +4816,7 @@ bcp:
     
     if (vp->num_conflicting == 0) {
 	int ix1 = order_next(vp, ix+1, 0);
-	printf("order_next(%d) = %d\r\n", ix+1, ix1);
+	// printf("order_next(%d) = %d\r\n", ix+1, ix1);
 	if (ix1 == 0) {
 	    vp->caller_env = NULL;
 	    return ATOM(true);  // model 
@@ -6122,18 +6141,12 @@ static ERL_NIF_TERM varp_get_decision(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int level;
-    int toggle = 3;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &level) || (level<0) || (level > vp->level))
 	return enif_make_badarg(env);
-    if (argc >= 3) {
-	if (!enif_get_int(env, argv[2], &toggle) || (toggle<0))
-	    return enif_make_badarg(env);
-    }
-    if ((vp->undo[level].t >= toggle) ||
-	(vp->undo[level].decision == L_FALSE(vp)))
+    if (vp->undo[level].decision == L_FALSE(vp))
 	return ATOM(f);
     else
 	return enif_make_int(env, export_l(vp->undo[level].decision));

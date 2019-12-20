@@ -61,10 +61,8 @@
 -export([get_queue_next/2]).
 -export([get_latest_binding/1]).
 -export([get_decision/2]).
--export([get_decision/3]).
 -export([get_nbindings/2]).
 -export([get_nbindings/3]).
--export([get_bindings/1]).
 -export([get_bindings/2]).
 -export([get_bindings/3]).
 -export([get_number_of_bindings/2]).
@@ -414,9 +412,6 @@ get_queue_next(_Vp, _Cix) ->
 get_decision(_Vp, _Level) ->
     ?nif_stub().
 
-get_decision(_Vp, _Level, _ToggleValue) ->
-    ?nif_stub().
-
 %% get the very latest binding
 -spec get_latest_binding(Vp::varc()) -> {Var::integer(),Value::integer()}|false.
 get_latest_binding(Vp) ->
@@ -430,10 +425,6 @@ get_nbindings(Vp,N) when is_integer(N), N>= 0 ->
 
 get_nbindings(_Vp,N,_ClauseInfo) when is_integer(N), N>= 0 ->
     ?nif_stub().
-
-%% get all bindings
-get_bindings(Vp) ->
-    get_bindings(Vp, 0, false).
 
 %% get bindings on Level
 get_bindings(Vp, Level) ->

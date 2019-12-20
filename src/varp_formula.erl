@@ -970,7 +970,7 @@ build_({bit_index,A,I},Bs) ->
 	    case maps:find(PSym, Bs#bs.decls) of
 		error ->
 		    variable({index,A,I1}, Bs);
-		{PType,_,PSize} ->
+		{ok,{PType,_,PSize}} ->
 		    case var_vector(PType,A,PSize,Bs) of
 			{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
 			{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};

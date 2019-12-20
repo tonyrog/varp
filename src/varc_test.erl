@@ -19,13 +19,27 @@ all() ->
 	      io:format("< ~w: ", [Test]),
 	      apply(?MODULE, Test, []),
 	      io:format("> ok\n")
-      end, [test1, test2, test3,
-	    or_simplify, or_eval,
+      end, [test1,
+	    test2,
+	    test3,
+	    clause_simplify,
+	    clause_bcp,
 	    watch1,
 	    order,
-	    edge_list0,edge_list1, edge_list2, edge_list3,
-	    subst0a, subst0b, subst0c, subst0d, 
-	    subst1, subst2, subst3, subst4, subst5, subst6
+	    edge_list0,
+	    edge_list1,
+	    edge_list2,
+	    edge_list3,
+	    subst0a,
+	    subst0b,
+	    subst0c,
+	    subst0d, 
+	    subst1,
+	    subst2,
+	    subst3,
+	    subst4,
+	    subst5,
+	    subst6
 	   ]).
 
 test1() ->
@@ -121,7 +135,7 @@ test3() ->
     {varc:get_bindings(V, 1), varc:get_number_of_clauses(V)}.
 
 %% Test all clause simplifications
-or_simplify() ->
+clause_simplify() ->
     V = varc:new(),
     X1 = add_variable(V),
     X2 = add_variable(V),
@@ -153,7 +167,7 @@ or_simplify() ->
     ok.
 
 %% Test eval
-or_eval() ->
+clause_bcp() ->
     V = varc:new(),
     X1 = add_variable(V),
     X2 = add_variable(V),
@@ -200,35 +214,35 @@ or_eval() ->
 %% 
 %% add clause with bindings
 %%
-or_eval_bindings() ->
+or_bcp_bindings() ->
     V = varc:new(),
+    X1 = add_variable(V),
     X2 = add_variable(V),
     X3 = add_variable(V),
     X4 = add_variable(V),
-    X5 = add_variable(V),
 
     varc:set_level(V, 1),
-    add_clause(V, [-X2, -X3, -X4]),
-    add_clause(V, [-X2, -X3,  X5]),
-    add_clause(V, [-X2,  X3, -X4]),
-    add_clause(V, [-X2,  X3,  X4]),
+    add_clause(V, [-X1, -X2, -X3]),
+    add_clause(V, [-X1, -X2,  X4]),
+    add_clause(V, [-X1,  X2, -X3]),
+    add_clause(V, [-X1,  X2,  X3]),
     io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     
     print_clauses(V),
     io:format("2/1\n", []),
-    varc:bind(V, X2),
+    varc:bind(V, X1),
     true = varc:bcp(V),
     io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("watched = ~w\n", [get_watched(V)]),
     print_clauses(V),
 
     varc:set_level(V, 2),
-    add_clause(V, [-X2,  X3,  X4, -X5]),
+    add_clause(V, [-X1,  X2,  X3, -X4]),
     io:format("watched = ~w\n", [get_watched(V)]),
     io:format("3/1\n", []),
-    varc:bind(V, X3),
+    varc:bind(V, X2),
     true = varc:bcp(V),
     io:format("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
     io:format("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
@@ -253,6 +267,98 @@ or_eval_bindings() ->
     print_clauses(V),
     ok.
 
+nbcp_p3() ->
+    V = varc:new(),
+    X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
+    X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
+    X3 = add_variable(V), varc:add_symbol(V, X3, <<"P(2,1)">>),
+    X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,2)">>),
+    X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(3,1)">>),
+    X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(3,2)">>),
+    %% pigeon=3
+    varc:add_clause(V, [X1,X2]),
+    varc:add_clause(V, [X3, X4]),
+    varc:add_clause(V, [X5, X6]),
+    varc:add_clause(V, [-X1, -X3]),
+    varc:add_clause(V, [-X1, -X5]),
+    varc:add_clause(V, [-X3, -X5]),
+    varc:add_clause(V, [-X2, -X4]),
+    varc:add_clause(V, [-X2, -X6]),
+    varc:add_clause(V, [-X4, -X6]),
+
+    varc:set_level(V, 1),
+
+    false = varc:nbcp(V),
+    Bn1 = get_all_bindings(V),
+    io:format("bindings = ~w\n", [Bn1]),
+    varc:undo(V),
+
+    false = varc:nbcp(V),
+    Bn2 = get_all_bindings(V),
+    io:format("bindings = ~w\n", [Bn2]),
+    varc:undo(V),
+
+    BnX = get_all_bindings(V),
+    io:format("bindings = ~w\n", [BnX]),
+    ok.
+
+nbcp_p4() ->
+    V = varc:new(),
+    X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
+    X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
+    X3 = add_variable(V), varc:add_symbol(V, X3, <<"P(1,3)">>),
+    X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,1)">>),
+    X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(2,2)">>),
+    X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(2,3)">>),
+    X7 = add_variable(V), varc:add_symbol(V, X7, <<"P(3,1)">>),
+    X8 = add_variable(V), varc:add_symbol(V, X8, <<"P(3,2)">>),
+    X9 = add_variable(V), varc:add_symbol(V, X9, <<"P(3,3)">>),
+    X10 = add_variable(V), varc:add_symbol(V, X10, <<"P(4,1)">>),
+    X11 = add_variable(V), varc:add_symbol(V, X11, <<"P(4,2)">>),
+    X12 = add_variable(V), varc:add_symbol(V, X12, <<"P(4,3)">>),
+
+    ok = varc:order_sort_first(V, [X2,X4,X6,X8,X10,X12,X1,X3,X5,X7,X9,X11]),
+
+    varc:add_clause(V, [X1,X2,X3]),
+    varc:add_clause(V, [X4,X5,X6]),
+    varc:add_clause(V, [X7,X8,X9]),
+    varc:add_clause(V, [X10,X11,X12]),
+    varc:add_clause(V, [-X1,-X4]),
+    varc:add_clause(V, [-X1,-X7]),
+    varc:add_clause(V, [-X1,-X10]),
+    varc:add_clause(V, [-X4,-X7]),
+    varc:add_clause(V, [-X4,-X10]),
+    varc:add_clause(V, [-X7,-X10]),
+    varc:add_clause(V, [-X2,-X5]),
+    varc:add_clause(V, [-X2,-X8]),
+    varc:add_clause(V, [-X2,-X11]),
+    varc:add_clause(V, [-X5,-X8]),
+    varc:add_clause(V, [-X5,-X11]),
+    varc:add_clause(V, [-X8,-X11]),
+    varc:add_clause(V, [-X3,-X6]),
+    varc:add_clause(V, [-X3,-X9]),
+    varc:add_clause(V, [-X3,-X12]),
+    varc:add_clause(V, [-X6,-X9]),
+    varc:add_clause(V, [-X6,-X12]),
+    varc:add_clause(V, [-X9,-X12]),
+
+    varc:set_level(V, 1),
+
+    nbcp_loop(V).
+
+nbcp_loop(V) ->
+    false = varc:nbcp(V),
+    Bs = get_all_bindings(V),
+    io:format("bindings = ~w\n", [Bs]),
+    case varc:undo(V) of
+	false ->
+	    io:format("bcp_count = ~w\n", [varc:info(V, bcp_counter)]),
+	    contradiction;
+	true ->
+	    nbcp_loop(V)
+    end.
+    
+
 dump_variables(V, List) ->
     lists:foreach(
       fun(X) ->
@@ -260,7 +366,7 @@ dump_variables(V, List) ->
       end, List).
 
 order() ->
-    V = varc:new([{activity, true}]),
+    V = varc:new([{activity, mvsids}]),
     X1 = varc:add_variable(V), varc:add_symbol(V, X1, <<"X1">>),
     X2 = varc:add_variable(V), varc:add_symbol(V, X2, <<"X2">>),
     X3 = varc:add_variable(V), varc:add_symbol(V, X3, <<"X3">>),
@@ -271,14 +377,14 @@ order() ->
     Y2 = varc:add_variable(V),
     Y3 = varc:add_variable(V),
 
-    _Z0 = add_clause(V, [Y2, Y3]),
-    _Z1 = add_clause(V, [Y2, -Y3]),
-    _C0 = add_clause(V, [X1, X2, X3, X4, X5, X6, Y1]),
-    _C1 = add_clause(V, [    X2, X3, X4, X5, X6, Y1]),
-    _C2 = add_clause(V, [        X3, X4, X5, X6, Y1]),
-    _C3 = add_clause(V, [            X4, X5, X6, Y1]),
-    _C4 = add_clause(V, [                X5, X6, Y1]),
-    _C5 = add_clause(V, [                    X6, Y1]),
+    _Z0 = add_clause(V, [Y2, Y3], ?GAMMA),
+    _Z1 = add_clause(V, [Y2, -Y3], ?GAMMA),
+    _C0 = add_clause(V, [X1, X2, X3, X4, X5, X6, Y1], ?GAMMA),
+    _C1 = add_clause(V, [    X2, X3, X4, X5, X6, Y1], ?GAMMA),
+    _C2 = add_clause(V, [        X3, X4, X5, X6, Y1], ?GAMMA),
+    _C3 = add_clause(V, [            X4, X5, X6, Y1], ?GAMMA),
+    _C4 = add_clause(V, [                X5, X6, Y1], ?GAMMA),
+    _C5 = add_clause(V, [                    X6, Y1], ?GAMMA),
     varc:bind(V, Y1),
 
     lists:foreach(
@@ -334,10 +440,10 @@ order() ->
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
     ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_DESCEND),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
 
     ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_ASCEND),
-    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 
     ok = varc:decay(V, 0.1),
 
@@ -641,7 +747,9 @@ watch1() ->
 
     ?T = varc:value(V, X2),
 
-    {C1,_Pos=1,_Lev=4} = varc:implication_clause(V, X2),
+    C1 = varc:implication_clause(V, X2),
+    1 = varc:implication_pos(V, X2),
+    4 = varc:implication_level(V, X2),
 
     %% add clauses under the above bindings
     Y3 = -X5, Y2 = -X4, Y1 = -X2, 
@@ -789,3 +897,9 @@ format_clause_flag({status,inqueue}) -> "s:inqueue";
 format_clause_flag({status,dead}) -> "s:dead";
 format_clause_flag({status,ok}) -> "s:ok".
     
+get_all_bindings(V) ->
+    Level = varc:info(V, level),
+    [{L,varc:get_decision(V,L),varc:get_bindings(V, L)} ||
+	L <- lists:seq(Level,0,-1)].
+
+     

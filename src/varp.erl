@@ -579,7 +579,11 @@ do_run(Do, Formula, GOpts) ->
 do_run_(Do, Formula, GOpts) ->
     {Main,Bs} = case varp_formula:build(Formula,GOpts) of
 		    {{bool,Var0},Bs0} -> {Var0,Bs0};
-		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0}
+		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0};
+		    {{_Type,_N,Vs},Bs0} -> 
+			VsB = [{bool,Vi} || Vi <- Vs],
+			{{bool,M0},Bs00} = varp_formula:any(VsB,Bs0),
+			{M0,Bs00}
 		end,
     Timeout = maps:get(timeout, GOpts, infinity),
     Bs1 = varp:set_global_timeout(Bs, Timeout),
@@ -610,7 +614,6 @@ do_run_(Do, Formula, GOpts) ->
 do([{Plugin,Param}|Do],Acc0,Bs) ->
     S0 = stat(Bs),
     varp_formula:info(Bs, "pass ~p\n", [Plugin]),
-    io:format("pass ~p\n", [Plugin]),
     T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
 	{Result,Acc1,Bs1} ->
@@ -618,7 +621,7 @@ do([{Plugin,Param}|Do],Acc0,Bs) ->
 	    S1 = stat(Bs1),
 	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
 	    Ts = Time/1000000,
-	    io:format("DO ~s = R=~p, Acc=~p\n", [Plugin,Result,Acc1]),
+	    %% io:format("DO ~s = R=~p, Acc=~p\n", [Plugin,Result,Acc1]),
 	    show_info(S1, S0, Ts, Bs1),
 	    Acc = combine_result(Acc0,Acc1),
 	    case Result of
@@ -1403,7 +1406,7 @@ block_clause(Bs) ->
 block_clause_(_Bs, 0, Clause) ->
     Clause;
 block_clause_(Bs, Level, Clause) ->
-    Xi = varc:get_decision(Bs#bs.vp, Level, 4),
+    Xi = varc:get_decision(Bs#bs.vp, Level),
     block_clause_(Bs, Level-1, [-Xi|Clause]).
 
 %% Decision clause, use for proof output
@@ -1414,7 +1417,7 @@ decision_clause(Bs) ->
 decision_clause(_Bs, 0) ->
     [];
 decision_clause(Bs, Level) ->
-    case varc:get_decision(Bs#bs.vp, Level, 3) of
+    case varc:get_decision(Bs#bs.vp, Level) of
 	f -> decision_clause(Bs,Level-1);
 	Xi -> decision_clause__(Bs,Level-1,[-Xi])
     end.
@@ -1422,5 +1425,5 @@ decision_clause(Bs, Level) ->
 decision_clause__(_Bs, 0, Clause) ->
     Clause;
 decision_clause__(Bs, Level, Clause) ->
-    Xi = varc:get_decision(Bs#bs.vp, Level, 4),
+    Xi = varc:get_decision(Bs#bs.vp, Level),
     decision_clause__(Bs, Level-1, [-Xi|Clause]).
