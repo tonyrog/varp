@@ -8,6 +8,7 @@
 -module(varp_wx_layout).
 
 -include_lib("wx/include/wx.hrl").
+-include("varp_wx.hrl").
 
 -export([create/2, create/3]).
 -export([handle_sync_event/2]).
@@ -30,13 +31,13 @@ create(Parent, {radiobox,Param,Choices}, NameMap) ->
 	Value when is_integer(Value), Value >= 0 ->
 	    wxRadioBox:setSelection(W, Value)
     end,
-    {W,add_name(Param, W, {enum,Enums}, NameMap)};
+    {W,add_name(Param, W, #wi { type={enum,Enums}}, NameMap)};
 create(Parent, {checkbox,Param}, NameMap) ->
     W = wxCheckBox:new(Parent,
 		       maps:get(id, Param, ?wxID_ANY),
 		       maps:get(label, Param, ""),
 		       get_options(Param)),
-    {W,add_name(Param, W, boolean, NameMap)};
+    {W,add_name(Param, W, #wi { type=boolean }, NameMap)};
 
 create(Parent, {checkbox3,Param}, NameMap) ->
     W = wxCheckBox:new(Parent,
@@ -53,19 +54,21 @@ create(Parent, {checkbox3,Param}, NameMap) ->
 	false -> ok;
 	{Chk,_Enum} -> wxCheckBox:set3StateValue(W, Chk)
     end,
-    {W,add_name(Param, W, {enum,Enums}, NameMap)};
+    {W,add_name(Param, W, #wi{type={enum,Enums}}, NameMap)};
 create(Parent, {radiobutton,Param}, NameMap) ->
     W = wxRadioButton:new(Parent,
 			  maps:get(id, Param, ?wxID_ANY),
 			  maps:get(label, Param, ""),
 			  get_options(Param)),
-    {W,add_name(Param, W, boolean, NameMap)};
+    {W,add_name(Param, W, #wi{type=boolean}, NameMap)};
 create(Parent, {textctrl, Param}, NameMap) ->
     Type = maps:get(type, Param, string),
+    Min = maps:get(min, Param, undefined),
+    Max = maps:get(max, Param, undefined),
     W = wxTextCtrl:new(Parent, maps:get(id, Param, ?wxID_ANY),
 		       get_options(Param)),
     connect(Param, W),
-    {W,add_name(Param, W, Type, NameMap)};
+    {W,add_name(Param, W, #wi{type=Type,min=Min,max=Max}, NameMap)};
 create(Parent, {spinctrl, Param}, NameMap) ->
     W = wxSpinCtrl:new(Parent, []),
     Min = maps:get(min, Param, 0),
@@ -76,7 +79,7 @@ create(Parent, {spinctrl, Param}, NameMap) ->
 %%    wxSpinCtrl:setSize(W, {Wt,Ht}),
     wxSpinCtrl:setToolTip(W, maps:get(tooltip, Param, "")),
     %% fixme declare range
-    {W,add_name(Param, W, integer, NameMap)};
+    {W,add_name(Param, W, #wi{type=integer,min=Min,max=Max}, NameMap)};
 create(Parent, {listbox, Param}, NameMap) ->
     Choices = maps:get(choices, Param, ?wxID_ANY),
     {List,Enums} = choices(Choices),
@@ -86,7 +89,7 @@ create(Parent, {listbox, Param}, NameMap) ->
 		      maps:get(id, Param, ?wxID_ANY),
 		      get_options(Param) ++ [{choices,List}]),
     wxListBox:setToolTip(W, maps:get(tooltip, Param, "")),
-    {W,add_name(Param, W, {enum,Enums}, NameMap)};
+    {W,add_name(Param, W, #wi{type={enum,Enums}}, NameMap)};
 create(Parent, {choice, Param}, NameMap) ->
     Choices = maps:get(choices, Param, ?wxID_ANY),
     {List,Enums} = choices(Choices),
@@ -94,14 +97,14 @@ create(Parent, {choice, Param}, NameMap) ->
 		     get_options(Param) ++ [{choices,List}]),
     wxChoice:setSelection(W, maps:get(value,Param,0)),
     wxChoice:setToolTip(W, maps:get(tooltip, Param, "")),
-    {W,add_name(Param, W, {enum,Enums}, NameMap)};
+    {W,add_name(Param, W, #wi{type={enum,Enums}}, NameMap)};
 create(Parent, {combobox, Param}, NameMap) ->
     Choices = maps:get(choices, Param, ?wxID_ANY),
     {List,Enums} = choices(Choices),
     W = wxComboBox:new(Parent, maps:get(id, Param, ?wxID_ANY),
 		       get_options(Param) ++ [{choices,List}]),
     wxComboBox:setToolTip(W, maps:get(tooltip, Param, "")),
-    {W,add_name(Param, W, {enum,Enums}, NameMap)};
+    {W,add_name(Param, W, #wi{type={enum,Enums}}, NameMap)};
 create(Parent, {slider, Param}, NameMap) ->
     Min0 = maps:get(min, Param, 0),
     Max0 = maps:get(max, Param, 100),
@@ -112,13 +115,14 @@ create(Parent, {slider, Param}, NameMap) ->
 		     Value, Min, Max,
 		     get_options(Param)),
     %% fixme add range?
-    {W,add_name(Param, W, integer, NameMap)};
+    {W,add_name(Param, W, #wi{type=integer,min=Min,max=Max}, NameMap)};
     
 %% Box wrapping
-create(Parent,{number,Param},NameMap) ->
+create(Parent,{decimal,Param},NameMap) ->
+    Min = maps:get(min, Param, undefined),
     TextFun =
 	fun(#wx{obj=Widget,event=#wxKey{keyCode=Key}},Ref) ->
-		case number_filter(Widget, [Key]) of
+		case decimal_filter(Widget, [Key], Min < 0) of
 		    true ->
 			wxEvent:skip(Ref),
 			ok;
@@ -129,13 +133,13 @@ create(Parent,{number,Param},NameMap) ->
     Layout = 
 	{vertical,#{ label=>maps:get(label,Param,"") },
 	 [
-	  {textctrl,#{ type => number,
-			options => [{value,maps:get(value,Param,0)},
-				    {style,
-				     maps:get(style,Param,default)}
-				   ],
-			name => maps:get(name,Param,undefined),
-			connect => [{key_down,{nospawn,TextFun}}]}}
+	  {textctrl,#{ type => decimal,
+		       options => [{value,maps:get(value,Param,0)},
+				   {style,
+				    maps:get(style,Param,default)}
+				  ],
+		       name => maps:get(name,Param,undefined),
+		       connect => [{key_down,{nospawn,TextFun}}]}}
 	 ]},
     create(Parent,Layout,NameMap);
 create(Parent,{spin,Param},NameMap) ->
@@ -221,11 +225,11 @@ set_enums(Widget, Enums) ->
 	      wxControlWithItems:setClientData(Widget,I,Enum)
       end, Enums).
 
-add_name(Param, Widget, Type, NameMap) ->
+add_name(Param, Widget, WI, NameMap) ->
     case maps:get(name, Param, undefined) of
 	undefined -> NameMap;
 	Name ->
-	    NameMap#{ Name => {Widget,Type} }
+	    NameMap#{ Name => {Widget,WI} }
     end.
 
 connect(Param, Widget) ->
@@ -257,30 +261,34 @@ handle_sync_event(Wx, _State) ->
     io:format(" ~s: handle_sync_event: ~w\n", [?MODULE, Wx]),
     ok.
 
-number_filter(Widget, Codes) ->
+decimal_filter(Widget, Codes, Signed) ->
     Pos  = wxTextCtrl:getInsertionPoint(Widget),
     Text = wxTextCtrl:getValue(Widget),
     %% io:format("Pos=~w, Codes=~w, Text=~w\n", [Pos, Codes, Text]),
     case text_edit(Pos, Text, Codes) of
 	{true, Text1} ->
 	    %% io:format("Text1=~w\n", [Text1]),
-	    is_partial_number(Text1);
+	    is_partial_decimal(Text1, Signed);
 	false ->
 	    false
     end.
 
-%% partial numbers:
+%% partial decimals:
 %% + | - | 3.
 %% 0   0   3.0
+is_partial_decimal(Cs, true) ->
+    is_partial_decimal(Cs);
+is_partial_decimal(Cs, false) ->
+    is_partial_udecimal(Cs).
 
-is_partial_number([$-|Cs]) -> part_d0(Cs);
-is_partial_number([$+|Cs]) -> part_d0(Cs);
-is_partial_number(Cs) -> part_d0(Cs).
+is_partial_decimal([$-|Cs]) -> is_partial_udecimal(Cs);
+is_partial_decimal([$+|Cs]) -> is_partial_udecimal(Cs);
+is_partial_decimal(Cs) -> is_partial_udecimal(Cs).
 
 %% \d+(\.)
-part_d0([C|Cs]) when C >= $0, C =< $9 -> part_d(Cs);
-part_d0([]) -> true;  %% partial ok
-part_d0(_) -> false.
+is_partial_udecimal([C|Cs]) when C >= $0, C =< $9 -> part_d(Cs);
+is_partial_udecimal([]) -> true;  %% partial ok
+is_partial_udecimal(_) -> false.
 
 part_d([C|Cs]) when C >= $0, C =< $9 -> part_d(Cs);
 part_d([$.|Cs]) -> part_f(Cs);
@@ -318,7 +326,7 @@ text_ed([?WXK_DELETE|Cs], Bs, [_|As]) ->
 text_ed([?WXK_LEFT|Cs], [B|Bs], As) ->
     text_ed(Cs, Bs, [B|As]);
 text_ed([?WXK_RIGHT|Cs], Bs, [A|As]) ->
-    text_edit(Cs, [A|Bs], As);
+    text_ed(Cs, [A|Bs], As);
 text_ed([C|Cs], Bs, As) ->
     text_ed(Cs, [C|Bs], As);
 text_ed([], Bs, As) ->

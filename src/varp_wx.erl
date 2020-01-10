@@ -88,7 +88,7 @@ start() ->
 		      register_process(),
 		      case ?MODULE:main_loop(S) of
 			  {_Reason,S1} ->
-			      ok = save_settings(S1);
+			      ok = varp_wx_settings:save(S1#s.setting_values);
 			  error ->
 			      ok
 		      end,
@@ -98,30 +98,6 @@ start() ->
 		      io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)])
 	      end
       end).
-
-settings_file_name() ->
-    Home = os:getenv("HOME"), %% FIXME windows!
-    filename:join(Home, ".varp.settings").
-
-save_settings(S) ->
-    SettingsFilename = settings_file_name(),
-    SettingValues    = S#s.setting_values,
-    Profiles = varp_wx_settings:save_settings(SettingValues),
-    Data = lists:map(
-	     fun(Pi) ->
-		     io_lib:format("~p.\n", [Pi])
-	     end, Profiles),
-    file:write_file(SettingsFilename, Data).
-
-
-load_settings() ->
-    SettingsFilename = settings_file_name(),
-    case file:consult(SettingsFilename) of
-	{ok,Term} ->
-	    varp_wx_settings:load_settings(Term);
-	{error,enoent} ->
-	    #{}
-    end.
 
 create_window(Wx) ->
     Window = wxFrame:new(Wx, -1, "Varp", [{size, {900,600}}]),
@@ -243,7 +219,7 @@ create_window(Wx) ->
     Sizer2 = wxBoxSizer:new(?wxVERTICAL),
 
     %% BUTTONS
-    Run = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label, "run"}]),
+    Run = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label, "Run"}]),
     Satisfy = wxButton:new(Win2, ?wxID_ANY, [{label,"Satisfy"}]),
     wxButton:connect(Satisfy, command_button_clicked),
     wxButton:enable(Satisfy),
@@ -342,7 +318,7 @@ create_window(Wx) ->
 
     wxFrame:setTitle(Window, "Untitled"),
 
-    SettingValues = load_settings(),
+    SettingValues = varp_wx_settings:load(),
     {SettingPanel,Notebook,SettingApply,SettingCancel,SettingWidgets} =
 	varp_wx_settings:create(Window,SettingValues),
     profile_update(Profile, SettingValues),

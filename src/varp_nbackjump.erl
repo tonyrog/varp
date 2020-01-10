@@ -327,7 +327,8 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
     JLevel =
 	case JClause of
 	    undefined -> ?TOP_LEVEL;
-	    {_L,D1,D2,J2,J3,_} ->
+	    {Len0,_,_,_,_,_} when IOrder > 0, Len0 > IOrder -> ?TOP_LEVEL;
+	    {_Len0,D1,D2,J2,J3,_} ->
 		do_stat(Bs,D1,D2),
 		do_jump(Bs,L,K,M,D1,D2,J2,J3)
 	end,
@@ -352,14 +353,20 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
     Bs2 = case JClause of
 	      undefined ->
 		  Bs1;
-	      {Len,_D1,_D2,_J2,_J3,Clause} ->
-		  do_clause_stat(Bs1, Len),
+	      {Len1,_,_,_,_,_} when IOrder > 0, Len1 > IOrder ->
+		  Bs1;
+	      {Len1,_,_,_,_,Clause} ->
+		  do_clause_stat(Bs1, Len1),
 		  add_conflict_clause(Bs1,Clause)
 	  end,
 
     Learned0 = varc:clauseset_size(Bs2#bs.vp, ?GAMMA),
     NewLearnedClauses = length(LClauseList6) +
-	if JClause =:= undefined -> 0; true -> 1 end,
+	case JClause of
+	    undefined -> 0;
+	    {Len2,_,_,_,_,_} when IOrder > 0, Len2 > IOrder -> 0;
+	    _ -> 1
+	end,
     Learned = Learned0 + NewLearnedClauses,
     DoPurge = varc:clauseset_offset(Bs2#bs.vp, ?GAMMA) > 0,
 
@@ -405,10 +412,9 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 		   true ->
 			MaxLearned
 		end,
-	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
-	    NU = varp_formula:number_of_unbound(Bs2),
-	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", 
-		      [Learned,MaxLearned,Learned1,NU]),
+	    %% Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
+	    %% NU = varp_formula:number_of_unbound(Bs2),
+	    %% io:format("UNIT-RESTART Units=~w, Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", [UnitClauses,Learned,MaxLearned,Learned1,NU]),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs,Param,MaxLearned1,MR);
        DoPurge, Learned > MaxLearned ->
@@ -419,17 +425,17 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
 	    ?dbg("del_unused_clauses\n", []),
 	    varp_formula:del_unused_clauses(Bs),
-	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
-	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
-		      [Learned, MaxLearned,Learned1]),
+	    ?dbg("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
+		 [Learned, MaxLearned,
+		  varp_formula:info(Bs2, number_of_learned_clauses)]),
 	    reorder(Bs2, Param),
 	    MaxLearnedFactorInc = maps:get(max_learned_inc,Param,1.0),
 	    MaxLearned1 = trunc(MaxLearned * MaxLearnedFactorInc),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs2,Param,MaxLearned1,MR);
-       DoRestart ->
-	    io:format("RESTART Count=~w, Time=~w\n", 
-		      [DoRestartCount, DoRestartTime]),
+       DoRestart; JLevel =:= ?TOP_LEVEL ->
+	    ?dbg("RESTART Count=~w, Time=~w\n", 
+		 [DoRestartCount, DoRestartTime]),
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
 	    reorder(Bs2, Param),
@@ -444,7 +450,7 @@ reorder(Bs, Param) ->
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
-	    io:format("Reorder: ~p\n", [Opts]),
+	    ?dbg("Reorder: ~p\n", [Opts]),
 	    Seed = proplists:get_value(seed, Opts, -1),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;

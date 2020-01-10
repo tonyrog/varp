@@ -9,22 +9,48 @@
 
 -include_lib("wx/include/wx.hrl").
 
--export([test/0]).
--export([main_loop/1]).
+-export([load/0]).
+-export([save/1]).
+-export([create/2]).
+-export([get_values/2]).
+-export([set_values/2]).
 -export([get_value/1]).
 -export([set_value/2]).
--export([load_settings/0]).
--export([save_settings/1]).
--export([handle_sync_event/3]).
--compile(export_all).
+-export([set_attribute/3, set_attribute/4]).
+-export([settings_filename/0]).
+-export([home_directory/0]).
 
+%% -compile(export_all).
+%% -define(DEBUG, true).
 -include("varp.hrl").
+-include("varp_wx.hrl").
 
-%% Load settings from $HOME/.varp.settings
-load_settings() ->
-    Filename = filename:join(os:getenv("HOME"), ".varp.settings"),
-    {ok,Settings} = file:consult(Filename),
-    load_settings(Settings).
+load() ->
+    case file:consult(settings_filename()) of
+	{ok,Settings} ->
+	    load_settings(Settings);
+	{error,enoent} ->
+	    #{}
+    end.
+
+save(Values) ->
+    Profiles = save_settings(Values),
+    Data = lists:map(
+	     fun(Pi) ->
+		     io_lib:format("~p.\n", [Pi])
+	     end, Profiles),
+    file:write_file(settings_filename(), Data).
+
+settings_filename() ->
+    filename:join(home_directory(), ".varp.settings").
+
+home_directory() ->
+    case os:type() of
+	{win32,_} ->
+	    os:getenv("USERPROFILE");
+	_ ->
+	    os:getenv("HOME")
+    end.
 
 %% FIXME: Better name ???? Load settings from erlang term representation
 load_settings(Settings) ->
@@ -194,39 +220,36 @@ add_page(Notebook,I,NameMap) ->
     NameMap1.
 
 %% setup current widget values!
-set_values(Names, Values) ->
+set_values(NameMap, Values) ->
     maps:fold(
-      fun(Name, {Widget,Type}, _Acc) ->
-	      Value0 = maps:get(Name, Values),
-	      ?dbg("import ~w/~w ~w\n", [Name, Type, Value0]),
-	      try value_import(Value0, Type) of
-		  Value ->
-		      set_value(Widget, Value)
+      fun(Name, {Widget,WI}, _Acc) ->
+	      try maps:get(Name, Values) of
+		  Value0 ->
+		      ?dbg("import ~w/~w ~w\n", [Name, WI, Value0]),
+		      try value_import(Value0, WI#wi.type) of
+			  Value ->
+			      set_value(Widget, Value)
+		      catch
+			  error:_ ->
+			      io:format("Bad type: ~w/~w = ~p\n", 
+					[Name,WI#wi.type,Value0]),
+			      error
+		      end
 	      catch
 		  error:_ ->
-		      io:format("Bad type: ~w/~w = ~p\n", [Name,Type,Value0]),
-		      error
+		      io:format("New Key ~w\n", [Name])
 	      end
-      end, ok, Names).
+      end, ok, NameMap).
 
 %% read all the current values from the widget map
-get_values(Names, Values) ->
+get_values(NameMap, ValueMap) ->
     maps:fold(
-      fun(Name, {Widget,Type}, Map) ->
+      fun(Name, {Widget,WI}, Map) ->
 	      Value0 = get_value(Widget),
-	      ?dbg("export ~w/~w ~w\n", [Name, Type, Value0]),
-	      Value = value_export(Value0, Type),
+	      ?dbg("export ~w/~w ~w\n", [Name, WI, Value0]),
+	      Value = value_export(Value0, WI#wi.type),
 	      Map#{ Name => Value }
-      end, Values, Names).
-
--define(METHOD_BACKJUMP,  0).
--define(METHOD_BACKTRACK, 1).
--define(METHOD_NONE,      2).
-
--define(ASSOC_LEFT,  0).
--define(ASSOC_RIGHT, 1).
--define(ASSOC_MID,   2).
--define(ASSOC_NONE,  3).
+      end, ValueMap, NameMap).
 
 %%
 %% Convert from varp value info "widget" value
@@ -251,11 +274,11 @@ value_import(Value, boolean) when is_boolean(Value) ->
 value_import(Value, integer) when is_integer(Value) ->
     Value;
 %% number is represented as text by wxTextCtrl
-value_import(Value, number) when is_float(Value) ->
+value_import(Value, decimal) when is_float(Value) ->
     io_lib_format:fwrite_g(Value);
-value_import(Value, number) when is_integer(Value) ->
+value_import(Value, decimal) when is_integer(Value) ->
     integer_to_list(Value);
-value_import("", number) ->
+value_import("", decimal) ->
     "0".
 
 %%
@@ -274,10 +297,13 @@ value_export(Value, boolean) when is_boolean(Value) ->
     Value;
 value_export(Value, integer) when is_integer(Value) ->
     Value;
-value_export(Value, number) when is_number(Value) ->
+value_export(Value, decimal) when is_number(Value) ->
     Value;
 %% number is represented as text by wxTextCtrl
-value_export(Text, number) ->
+value_export("", decimal) ->
+    %% default?
+    0;
+value_export(Text, decimal) ->
     try list_to_float(Text) of
 	Value -> Value
     catch
@@ -287,16 +313,17 @@ value_export(Text, number) ->
 
 %%
 %% setup setting  layout given profile number
+%% Maybe put in resource file!
 %%
 -define(HSPACE, 10).
 -define(VSPACE, 4).
 
-varp_layout(I) when is_integer(I) ->  
+varp_layout(I) when is_integer(I) ->
     Backtrack = {radiobox,
 		 #{ label => "Backtrack",
 		    name => [profile,I,method],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Backjump",backjump},
+		 [{"Backjump",backjump}, 
 		  {"Backtrack",backtrack},
 		  {"None",none}]},
 
@@ -326,13 +353,9 @@ varp_layout(I) when is_integer(I) ->
 		{radiobox,
 		 #{ name => [profile,I,options,order,key1,sort],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Deg",     degree}, 
-		  {"Rank",    rank},
-		  {"Activity",activity},
-		  {"User",    user},
-		  {"Rand",    random},
-		  {"Input",   identity},
-		  {"Undef",   undefined}]}
+		 [{"Deg",degree}, {"Rank",rank}, {"Activity",activity},
+		  {"User",user}, {"Rand",random}, {"Input",identity},
+		  {"Undef",undefined}]}
 	       ]},
 	      {horizontal,#{},
 	       [{choice,#{ value => 1,
@@ -341,13 +364,9 @@ varp_layout(I) when is_integer(I) ->
 		{radiobox,
 		 #{ name => [profile,I,options,order,key2,sort],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Deg",     degree}, 
-		  {"Rank",    rank},
-		  {"Activity",activity},
-		  {"User",    user},
-		  {"Rand",    random},
-		  {"Input",   identity},
-		  {"Undef",   undefined}]}
+		 [{"Deg",degree},{"Rank",rank},{"Activity",activity},
+		  {"User",user},{"Rand",random},{"Input",identity},
+		  {"Undef",undefined}]}
 	       ]}
 	     ]},
 
@@ -365,7 +384,7 @@ varp_layout(I) when is_integer(I) ->
 	      expand,
 	      {slider,#{ name => [profile,I,options,backjump,iorder],
 			 value => 3,
-			 min => 0, max => 10,
+			 min => 0, max => 100,
 			 options => [{style,[sl_horizontal,sl_labels]}]
 		       }}
 	     ]},
@@ -385,9 +404,9 @@ varp_layout(I) when is_integer(I) ->
 		     name=>[profile,I,options,backjump,stumble],
 		     min => 0, max => 100 }},
 	    {space, ?VSPACE},
-	    {number, #{ label => "Olle", 
-			name=>[profile,I,options,backjump,olle],
-			min => 0.0, max => 100.0 }}
+	    {decimal, #{ label => "Olle", 
+			 name=>[profile,I,options,backjump,olle],
+			 min => 0.0, max => 100.0 }}
 	   ]},
 
 	  {space, ?HSPACE},
@@ -397,13 +416,15 @@ varp_layout(I) when is_integer(I) ->
 		     name=> [profile,I,options,backjump,max_learned_clause],
 		     min => 0, max => 1000000000 }},
 	    {space, ?VSPACE},
-	    {number,#{ label => "Max learned factor",
+	    {decimal,#{ label => "Max learned factor",
 		       name => [profile,I,options,backjump,max_learned_factor],
+		       default => 0,
 		       min => 0.0, max => 100.0 }},
 	    {space, ?VSPACE},
-	    {number,#{ label => "Max learned inc",
-		       name => [profile,I,options,backjump,max_learned_inc],
-		       min => 0.0, max => 100.0 }}
+	    {decimal,#{ label => "Max learned inc",
+			name => [profile,I,options,backjump,max_learned_inc],
+			default => 0,
+			min => 0.0, max => 100.0 }}
 	   ]},
 
 	  {space, ?HSPACE},
@@ -412,13 +433,28 @@ varp_layout(I) when is_integer(I) ->
 	   [
 	    {spin,#{ label => "Restart counter",
 		     name => [profile,I,options,backjump,restart_counter],
+		     default => 0,
 		     min => 0, max => 1000000000 }},
 	    {space, ?VSPACE},
-	    {number,#{ label => "Restart interval",
-		     name => [profile,I,options,backjump,restart_interval],
-		       min => 0.0, max =>  2592000.0 }}  %% 30days
-	   ]}
+	    {decimal,#{ label => "Restart interval",
+			name => [profile,I,options,backjump,restart_interval],
+			default => 0,
+			min => 0.0, max =>  2592000.0 }}  %% 30days
+	   ]},
 
+	  {space, ?HSPACE},
+
+	  {vertical, #{},
+	   [
+	    {decimal,#{ label => "Activity Decay",
+			name => [profile,I,options,backjump,decay],
+			default => 0.95,
+			min => 0.0, max => 1.0 }},
+	    {decimal,#{ label => "Activity Bump",
+			name => [profile,I,options,backjump,bump],
+			default => 1.0,
+			min => 0.0, max => 10.0 }}
+	   ]}
 	 ]},
 
     {vertical,#{},
@@ -515,7 +551,7 @@ set_value(wxCheckBox, Widget, Value) ->
 %%
 
 set_attribute(Name, Attribute, Value, NameMap) ->
-    Widget = maps:get(Name, NameMap),
+    {Widget,_WI} = maps:get(Name, NameMap),
     set_attribute(Widget, Attribute, Value).
 
 set_attribute(Widget, Attribute, Value) ->
@@ -536,113 +572,3 @@ set_attr_(Class, Widget, help_text, Value) ->
     Class:setHelpText(Widget, Value);
 set_attr_(Class, Widget, tooltip, Value) ->
     Class:setToolTip(Widget, Value).
-
-
--record(s, 
-	{
-	 window,    %% window
-	 settings,  %% panel
-	 names      %% name => widget
-	}).
-	
-test() ->
-    test(wx:new()).
-
-test(Wx) ->
-    Window = wxFrame:new(Wx, -1, "Settings", [{size, {800,600}}]),
-    Path = code:priv_dir(varp),
-    wxFrame:setIcon(Window,  wxIcon:new(filename:join(Path,"varp.png"),
-					[{type, ?wxBITMAP_TYPE_PNG}])),
-    wxFrame:createStatusBar(Window,[]),
-    ok = wxFrame:connect(Window, close_window, [{skip,false}]),
-    ValueMap = load_settings(),
-    {Panel,NameMap} = create(Window, ValueMap),
-    put('_wx_object_', {?MODULE,'_wx_init_'}),
-    S = #s { window = Window,
-	     settings = Panel,
-	     names = NameMap },
-    wxWindow:show(S#s.window),
-    Reason = main_loop(S),
-    ValueMap1 = get_values(NameMap, ValueMap),
-    Settings = save_settings(ValueMap1),
-
-    Data = lists:map(
-	     fun(Profile) ->
-		     io_lib:format("~p.\n", [Profile])
-	     end, Settings),
-    file:write_file("varp.settings.tmp", Data),
-
-    wxFrame:destroy(S#s.window),
-    Reason.
-    
-
-main_loop(S) ->
-    put('_wx_object_', {?MODULE,S}),
-    receive
-	Event when is_record(Event, wx) ->
-	    try handle_event(Event, S) of
-		{noreply, S1} ->
-		    ?MODULE:main_loop(S1);
-		{stop, Reason, _S1} ->
-		    Reason
-	    catch
-		?EXCEPTION(error,Reason,Trace) ->
-		    io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)])
-	    end;
-        _Msg ->
-            io:format("Got ~p ~n", [_Msg]),
-            ?MODULE:main_loop(S)
-    end.
-
-handle_event(Event, S) ->
-    case Event of
-        #wx{event=#wxClose{}} ->
-	    ?dbg("CLOSE\n",[]),
-	    {stop, ok, S};
-
-        _Msg = #wx{} ->
-            io:format("Got ~p ~n", [_Msg]),
-	    {noreply, S}
-    end.
-
-%% using nospawn instead
-handle_sync_event(Event=#wx{obj=Widget}, Ref, _S) ->
-    Class = wx:getObjectType(Widget),
-    %% io:format("SYNC EVENT: ~w ~w\n", [Class, Event]),
-    case Class  of
-	wxTextCtrl ->  %% test number 
-	    case Event of
-		#wx{event=#wxCommand{cmdString=Text}} ->
-		    %% io:format("text updated: ~s\n", [Text]),
-		    case is_partial_number(Text) of
-			true -> ok;
-			false ->
-			    %% io:format("SKIP\n"),
-			    wxEvent:skip(Ref),
-			    %% wxEvent:skip(Sender, [{skip,true}]),
-			    ok
-		    end;
-		_ ->
-		    ok
-	    end;
-	_ ->
-	    ok
-    end.
-
-is_partial_number(Text) ->
-    is_float_number(Text) orelse is_integer_number(Text) orelse
-	is_float_number(Text++"0") orelse is_integer_number(Text++"0").
-
-is_float_number(Text) ->
-    try list_to_float(Text) of
-	_Float -> true
-    catch
-	error:_ -> false
-    end.
-
-is_integer_number(Text) ->
-    try list_to_integer(Text) of
-	_Float -> true
-    catch
-	error:_ -> false
-    end.
