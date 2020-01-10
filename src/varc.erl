@@ -31,6 +31,7 @@
 -export([implication_pos/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
+-export([conflict/4]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -56,24 +57,27 @@
 -export([get_clauses/3]).
 -export([use_clause/2]).
 -export([clause_info/2,clause_info/3]).
--export([get_queue/1]).
--export([get_queue_first/1]).
--export([get_queue_next/2]).
 -export([get_latest_binding/1]).
 -export([get_decision/2]).
+-export([get_undo_state/2]).
 -export([get_nbindings/2]).
 -export([get_nbindings/3]).
 -export([get_bindings/2]).
 -export([get_bindings/3]).
 -export([get_all_bindings/1]).
 -export([get_number_of_bindings/2]).
--export([order_init/1]).
--export([order_first/1, order_next/2, order_next/3]).
+-export([get_queue/1]).
+-export([queue_first/1]).
+-export([queue_next/2]).
+-export([queue_clear/1]).
 -export([order_sort/2, order_sort/3, order_sort/4]).
 -export([order_sort_first/2, order_sort_last/2]).
+-export([next_unbound/1]).
+-export([first_unbound_index/1, next_unbound_index/2]).
+-export([order_map/2]).
 -export([order_all/1]).
 -export([decay/2]).
--export([bump/3, bump/4]).
+-export([bump/3]).
 -export([subscribe/2]).
 -export([clauseset_size/2]).
 -export([clauseset_offset/2, clauseset_offset/3]).
@@ -132,7 +136,7 @@ new() ->
 %%    {size, Size::unsigned()}   -- inital variable tavle size
 %%    {grow, Grow::unsigned()}   -- variable table growth step
 %%    {qtype,lifo|fifo}          -- use lifo/fifo strategy in eval
-%%    {activity,boolean()}       -- use activity in conflicts (false)
+%%    {activity,mvsids|off}      -- use activity in conflicts (off)
 %%
 
 new(Options) when is_list(Options) ->
@@ -256,6 +260,11 @@ conflicting_clause(Vp) ->
 conflicting_clause(_Vp, _Index) ->
     ?nif_stub().
 
+-spec conflict(Vp::varc(), Level::integer(), Bump::float(),
+	       ConflictNum::integer()) -> ClauseIndex::integer().
+conflict(_Vp, _Level, _Bump, _Index) ->
+    ?nif_stub().    
+
 -spec is_variable(Vp::varc(), Lit::literal()) -> boolean().
 is_variable(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
@@ -364,11 +373,6 @@ decay(_Vp,Decay) when is_number(Decay) ->
 bump(_Vp,_Lit,Bump) when is_number(Bump) ->
     ?nif_stub().
 
-%% bump variable/literal
-bump(_Vp,_Lit,Bump,BumpLiteral) when is_number(Bump),
-				     is_boolean(BumpLiteral) ->
-    ?nif_stub().
-
 subscribe(_Vp,Event) when is_atom(Event) ->
     ?nif_stub().
 
@@ -403,14 +407,28 @@ get_clauses(_Vp,Var,How)
        is_integer(Var), Var >= 0 ->
     ?nif_stub().
 
-get_queue_first(_Vp) ->
+-spec queue_first(Vp::varc()) -> literal() | false.
+queue_first(_Vp) ->
     ?nif_stub().
 
-get_queue_next(_Vp, _Cix) ->
+-spec queue_next(Vp::varc(), Literal::integer()) -> literal() | false.
+queue_next(_Vp, _Lit) ->
+    ?nif_stub().
+
+-spec queue_clear(Vp::varc()) -> true.
+
+queue_clear(_Vp) ->
     ?nif_stub().
 
 %% get decision variable (bind) on Level
+-spec get_decision(Vp::varc(), Level::integer()) ->
+			  literal().
 get_decision(_Vp, _Level) ->
+    ?nif_stub().
+
+-spec get_undo_state(Vp::varc(), Level::integer()) ->
+			    'undefined'|'set'|'toggle'|'done'.
+get_undo_state(_Vp, _Level) ->
     ?nif_stub().
 
 %% get the very latest binding
@@ -444,23 +462,6 @@ get_bindings(_Vp, Level, _ClauseInfo)
 get_number_of_bindings(_Vp, _Level) ->
     ?nif_stub().
 
-%% initial index to use if using order_next, instead of order_first
-order_init(_Vp) -> 
-    0.
-
-%% return {Ix,Var} | false
-order_first(_Vp) ->
-    ?nif_stub().
-
-order_next(Vp, Ix) ->
-    order_next(Vp, Ix, 0).
-
-%% return next unbound variable, after skipping Skip number of unbound
--spec order_next(Vp::varc(), Ix::integer(), Skip::integer()) ->
-			integer() | false.
-order_next(_Vp, _Ix, _Skip) ->
-    ?nif_stub().
-
 -spec order_sort(Vp::varc(), Key1::sort_key()) -> integer().
 			
 order_sort(Vp, Key1) ->
@@ -481,7 +482,8 @@ order_sort(_Vp, _Key1, _Key2, _Arg) ->
 order_sort_first(_Vp, _VarList) ->
     ?nif_stub().
 
--spec order_sort_last(Vp::varc(), [literal()]) -> ok.
+-spec order_sort_last(Vp::varc(), ReversedVarList::[literal()]) -> ok.
+%% The list of variables must be reversed!
 order_sort_last(_Vp, _VarList) ->
     ?nif_stub().
 
@@ -508,30 +510,48 @@ set_user_count(_Vp, _Lit, _Value) ->
 
 %% Get all clauses in queue
 get_queue(Vp) ->
-    case get_queue_first(Vp) of
+    case queue_first(Vp) of
 	false -> [];
 	I ->
 	    get_queue_(Vp,I,[I])
     end.
 
 get_queue_(Vp,I,Acc) ->
-    case get_queue_next(Vp,I) of
+    case queue_next(Vp,I) of
 	false -> lists:reverse(Acc);
 	J -> get_queue_(Vp,J,[J|Acc])
     end.
 
-%% utility to get a list of unbound variables
-order_all(V) ->
-    case order_first(V) of
-	false -> [];
-	{I,Var} -> order_all_(V, I, [Var])
-    end.
+%% return next unbound literal or false
+-spec next_unbound(Vp::varc()) ->
+			  integer() | false.
+next_unbound(_Vp) ->
+    ?nif_stub().
 
-order_all_(V, I, Acc) ->
-    case order_next(V,I) of
-	false -> lists:reverse(Acc);
-	{I1,Var} -> order_all_(V, I1, [Var|Acc])
-    end.
+-spec next_unbound_index(Vp::varc(), Index::integer()) ->
+				integer() | false.
+next_unbound_index(_Vp, _Index) ->
+    ?nif_stub().
+
+-spec first_unbound_index(Vp::varc()) ->
+				 integer() | false.
+first_unbound_index(_Vp) ->
+    ?nif_stub().
+
+%% return literal from index
+-spec order_map(Vp::varc(), Index::integer()) -> literal().
+order_map(_Vp, _Index) ->
+    ?nif_stub().
+
+%% utility to get a list of unbound literals
+order_all(Vp) ->
+    order_all_(Vp,[],first_unbound_index(Vp)).
+
+order_all_(_Vp,Acc,false) ->
+    lists:reverse(Acc);
+order_all_(Vp,Acc,Index) ->
+    L = order_map(Vp, Index),
+    order_all_(Vp, [L|Acc], next_unbound_index(Vp, Index)).
 
 info(Vp) ->
     [ {Key,info(Vp, Key)} || Key <- info_keys()].

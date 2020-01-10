@@ -1,6 +1,6 @@
-p snf 52 124
+p snf 52 10
+c https://en.wikipedia.org/wiki/Conflict-driven_clause_learning
 c order !X1, X3, !X2, X7
-
 X1 X4 .
 X1 !X3 !X8 .
 X1 X8 X12 .

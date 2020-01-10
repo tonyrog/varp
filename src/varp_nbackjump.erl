@@ -10,10 +10,10 @@
 -export([run/2]).
 -export([options/0]).
 
--export([minimize/2]).
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
+-define(ROOT_LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 -compile(export_all).
@@ -170,8 +170,10 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 
     case maps:get(restart_interval,Param) of
 	infinity -> ok;
-	RestartInterval ->
-	    erlang:start_timer(trunc(1000*RestartInterval), self(), restart)
+	IVal when IVal == 0 -> ok;
+	IVal ->
+	    IVal1 = max(0.1, IVal),  %% >= 0.1
+	    erlang:start_timer(trunc(1000*IVal1), self(), restart)
     end,
 
     Bs1 = varp:set_local_timeout(Bs, Timeout),
@@ -247,12 +249,15 @@ return(What, MR, Bs) ->
     end.
 
 contradiction(Bs,Param,Level,MaxLearned,MR) ->
+    %% Conflict0 = varc:conflict(Bs#bs.vp, Level, maps:get(bump,Param), 0),
+    %% ClauseList0 = [Conflict0],
     ClauseList0 = varp_conflict:analyze(Bs,Level,maps:get(bump,Param)),
     varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ClauseList1 = 
 	case maps:get(minimize,Param) of
 	    true ->
-		lists:usort([ minimize(Bs,Clause) || Clause <- ClauseList0]);
+		lists:usort([ varp_minimize:clause(Bs,Clause) || 
+				Clause <- ClauseList0]);
 	    false ->
 		ClauseList0
 	end,
@@ -394,13 +399,10 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 		if Learned > MaxLearned ->
 			varp_formula:del_unused_clauses(Bs2),
 			reorder(Bs2, Param),
-			MaxLearnedFactorInc = maps:get(max_learned_inc,
-						       Param,1.0),
-			%% fixme change clauseset_offset(?GAMMA)
-			
+			MaxLearnedFactorInc = 
+			    maps:get(max_learned_inc,Param,1.0),
 			trunc(MaxLearned * MaxLearnedFactorInc);
 		   true ->
-			%% but we can re-order literals?
 			MaxLearned
 		end,
 	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
@@ -564,7 +566,7 @@ display_stat(Bs,Param) ->
 		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
 	    io:format("num conflict ilterals: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS)]),
-	    io:format("num ilterals removed: ~w\n",
+	    io:format("num literals removed: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
 	    io:format("compression saved bits: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
@@ -647,71 +649,3 @@ compress(Bs,Param,Clause) ->
 
 compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
 compress_([_Ln]) -> [].
-
-minimize(_Bs,[]) -> [];
-minimize(_Bs,Clause=[_]) -> Clause;
-minimize(Bs,Clause0) ->
-    Clause = sort_abs_clause(Clause0),
-    %% io:format("minimize: ~p\n", [Clause]),
-    case minimize_(Bs, Clause, Clause, [], 0, 0) of
-	{0,_,_} -> 
-	    %% io:format("  no change\n", []),
-	    Clause;
-	{NumRemoved,_InputClauseLength,Clause1} ->
-	    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
-			 NumRemoved),
-	    %% io:format("minimize: saved ~.2f%\n", [(NumRemoved / _InputClauseLength)*100]),
-	    Clause1
-    end.
-
-minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
-    case varc:implication_clause(Bs#bs.vp, -Li) of
-	-1 ->
-	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
-	I ->
-	    A = varc:get_clause(Bs#bs.vp,I),
-	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
-	    %%    [-Li, A, Clause]),
-	    %% if A-{Li} is a subset of Clause then remove Li from clause
-	    case is_subclause_abs(A, -Li, Clause) of
-		true ->
-		    minimize_(Bs, Ls, Clause, NewClause, Removed+1, Length+1);
-		false ->
-		    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1)
-	    end
-    end;
-minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
-    {Removed,Length,lists:reverse(NewClause)}.
-
-%% check if As is a subset of Bs
-is_subclause(As, Li, Bs) ->
-    case (As--[Li]) -- Bs of
-	[] -> true;
-	_ -> false
-    end.
-
-sort_abs_clause(Clause) ->
-    lists:sort(
-      fun(A,A) -> false;
-	 (A,B) -> 
-	      case abs(A) - abs(B) of
-		  0 -> A < 0;
-		  R -> R > 0
-	      end
-      end, Clause).
-
-%% assume clauses are abs sorted in reversed order
-is_subclause_abs([Li|As],Li,Bs) ->
-    is_subclause_abs(As,Li,Bs);
-is_subclause_abs([X|As],Li,[X|Bs]) ->
-    is_subclause_abs(As,Li,Bs);
-is_subclause_abs(As=[A|_As0],Li,[B|Bs]) ->
-    if abs(A) < abs(B) ->
-	    is_subclause_abs(As,Li,Bs);
-       true ->
-	    false
-    end;
-is_subclause_abs([],_Li,_Bs) ->
-    true;
-is_subclause_abs(_As,_Li,[]) ->
-    false.

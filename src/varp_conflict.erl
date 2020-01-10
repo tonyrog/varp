@@ -61,8 +61,8 @@ conflict_seen(Bs,[Lit|Trail],Level,Bump,Seen,C,CL) ->
     AbsP = abs(Lit),
     case Seen of
 	#{ AbsP := true } ->
-	    if  C =< 1, CL =:= [] ->
-		    [-Lit];
+	    if  %% C =< 1, CL =:= [] ->
+		%%    [-Lit];
 		C =< 1 ->
 		    [-Lit|CL];
 		true ->

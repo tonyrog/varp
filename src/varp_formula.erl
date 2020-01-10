@@ -62,10 +62,11 @@
 -export([order_sort/2, order_sort/4]).
 -export([order_sort_first/2]).
 -export([order_sort_last/2]).
+-export([order_map/2]).
 -export([model/1, model/2]).
--export([first_init/1]).
--export([first_unbound/1]).
--export([next_unbound/2, next_unbound/3]).
+-export([next_unbound/1]).
+-export([first_unbound_index/1]).
+-export([next_unbound_index/2]).
 -export([info/3, debug/3]).
 -export([get_bindings/2]).
 -export([intersect_bindings/3]).
@@ -383,17 +384,14 @@ order_sort_last(Bs, VarList) ->
 
 order_sort_first(Bs, VarList) ->
     {RevFirst,Bs1} = variable_list_(Bs,VarList,[]),
-    InfoList = get_variable_info(Bs, lists:reverse(RevFirst)),
-    ?dbg0("InfoList=~w\n",[InfoList]),
-    InfoList1 = lists:sort(fun({_Xi,Ui},{_Xj,Uj}) -> Ui > Uj end, InfoList),
-    First = [X || {X,_U} <- InfoList1],
-    ?dbg0("first=~w\n",[First]),
-    ok = varc:order_sort_first(Bs#bs.vp, First),
+    ?dbg("first=~w\n",[lists:reverse(RevFirst)]),
+    ok = varc:order_sort_first(Bs#bs.vp, lists:reverse(RevFirst)),
     Bs1.
 
 variable_list_(Bs, [V|Vs], Acc) ->
     case build_(V, Bs) of
 	{{bool,X}, Bs1} ->
+	    ?dbg0("~w = ~w\n", [V, X]),
 	    variable_list_(Bs1, Vs, [X|Acc]);
 	{{bit,_N,Xs}, Bs1} ->
 	    variable_list_(Bs1, Vs, cat(Xs,Acc));
@@ -493,18 +491,17 @@ eval_counter(Bs) ->
 conflict_counter(Bs) ->
     varc:get_conflict_counter(Bs#bs.vp).
 
-first_init(Bs) -> 
-    varc:order_init(Bs#bs.vp).
+next_unbound(Bs) ->
+    varc:next_unbound(Bs#bs.vp).
 
-first_unbound(Bs) -> 
-    I0 = first_init(Bs),
-    varc:order_next(Bs#bs.vp, I0).
+first_unbound_index(Bs) ->
+    varc:first_unbound_index(Bs#bs.vp).
 
-next_unbound(Bs,I) ->
-    varc:order_next(Bs#bs.vp, I).
+next_unbound_index(Bs, Index) ->
+    varc:next_unbound_index(Bs#bs.vp, Index).
 
-next_unbound(Bs,I,Skip) ->
-    varc:order_next(Bs#bs.vp,I,Skip).
+order_map(Bs, Index) ->
+    varc:order_map(Bs#bs.vp, Index).
 
 get_bindings(Bs,Level) when is_integer(Level) ->
     varc:get_bindings(Bs#bs.vp, Level).
@@ -584,6 +581,9 @@ install_(Bs,?TOP_LEVEL,[{X,Y}|Xs]) ->
 	    subst(Bs, X, Y)
     end,
     install_(Bs,?TOP_LEVEL,Xs);
+install_(Bs,_Level,[{_X,_Y}|Xs]) ->
+    %% can not install X=Y on level > 0
+    install_(Bs,_Level,Xs);
 %%install_(Bs,Level,[_B|Xs]) ->
 %%    ?dbg("install: did not handle ~p\n", [_B]),
 %%    install_(Bs,Level,Xs);
@@ -1056,11 +1056,10 @@ build_({cnf,{Vars,_Clauses,_Sections,Cs}},Bs)
 
 build_({snf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
-build_({snf,{_Vars,_Clauses,_Sections,Units,Cs}},Bs) 
-  when is_list(Cs), is_list(Units) ->
+build_({snf,{_Vars,_Clauses,_Sections,Cs}},Bs) 
+  when is_list(Cs) ->
     Bs1 = build_snf(Cs, Bs),
     {{bool,?T}, Bs1};
-
 
 build_({subst,Rx,Py,F},Bs) ->
     Bs1 = Bs#bs { subst = [{Rx,Py}|Bs#bs.subst]},
@@ -2915,25 +2914,27 @@ model_variables(Bs,[]) ->
 model_variables(Bs,Ws) ->
     lists:map(fun(W) -> get_var(W,Bs) end, Ws).
 
-
 each_unbound(Bs, Fun) ->
-    each_unbound_(Bs, Fun, varp_formula:first_unbound(Bs)).
+    each_unbound_(Bs, Fun, first_unbound_index(Bs)).
 
 each_unbound_(_Bs, _Fun, false) ->
     ok;
-each_unbound_(Bs, Fun, {I,X}) ->
-    Fun(X),
-    each_unbound_(Bs, Fun, varp_formula:next_unbound(Bs, I)).
-
+each_unbound_(Bs, Fun, I) ->
+    case next_unbound_index(Bs, I) of
+	false -> ok;
+	I -> 
+	    Fun(order_map(Bs, I)),
+	    each_unbound_(Bs, Fun, I)
+    end.
 
 fold_unbound(Bs, Fun, Acc) ->
-    fold_unbound_(Bs, Fun, Acc, varp_formula:first_unbound(Bs)).
+    fold_unbound_(Bs, Fun, Acc, first_unbound_index(Bs)).
 
 fold_unbound_(_Bs, _Fun, Acc, false) ->
     Acc;
-fold_unbound_(Bs, Fun, Acc, {I,X}) ->
-    Acc1 = Fun(X, Acc),
-    fold_unbound_(Bs, Fun, Acc1, varp_formula:next_unbound(Bs, I)).
+fold_unbound_(Bs, Fun, Acc, I) ->
+    Acc1 = Fun(order_map(Bs, I), Acc),
+    fold_unbound_(Bs, Fun, Acc1, next_unbound_index(Bs, I)).
 
 each_variable(Bs, Fun) ->
     each_variable_(Bs, Fun, 1, varc:info(Bs#bs.vp, number_of_variables)+1).
@@ -2966,12 +2967,14 @@ collect_model(Vp,Vs) ->
     case maps:size(Vs) of
 	0 -> %% fixme mixed model! CNF with is declarations
 	    N = varc:get_number_of_variables(Vp),
-	    [{{p,'x',[I]},
-	      case varc:value(Vp,I) of
-		  ?T -> true;
-		  ?F -> false
-	      end} || 
-		I <- lists:seq(1, N)];
+	    lists:foldr(
+	      fun(I,Acc) ->
+		      case varc:value(Vp,I) of
+			  ?T -> [{{p,'x',[I]}, true}|Acc];
+			  ?F -> [{{p,'x',[I]},false}|Acc];
+			  _ -> Acc
+		      end
+	      end, [], lists:seq(1, N));
 	_ ->
 	    maps:fold(
 	      fun (?T,_,Ms) -> Ms;
@@ -2988,14 +2991,18 @@ model_vars(Vp,Vs,[{bit,X,N,I}|Xs],Y,Ms) ->
 	?T ->
 	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,1,Ms));
 	?F ->
-	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,0,Ms))
+	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,0,Ms));
+	_ ->
+	    model_vars(Vp,Vs,Xs,Y,Ms)
     end;
 model_vars(Vp,Vs,[{uint,X,_N,I}|Xs],Y,Ms) ->
     case varc:value(Vp,Y) of
 	?T ->
 	    model_vars(Vp,Vs,Xs,Y,model_bor({X,(1 bsl I)}, Ms));
 	?F ->
-	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms))
+	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms));
+	_ ->
+	    model_vars(Vp,Vs,Xs,Y,Ms)
     end;
 model_vars(Vp,Vs,[{int,X,N,I}|Xs],Y,Ms) ->
     case varc:value(Vp,Y) of
@@ -3006,11 +3013,13 @@ model_vars(Vp,Vs,[{int,X,N,I}|Xs],Y,Ms) ->
 		    model_vars(Vp,Vs,Xs,Y,model_bor({X,(1 bsl I)}, Ms))
 	    end;
 	?F ->
-	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms))
+	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms));
+	_ ->
+	    model_vars(Vp,Vs,Xs,Y,Ms)
     end;
 model_vars(Vp,Vs,[X|Xs],Y,Ms) when is_integer(Y) ->
     case varc:value(Vp,Y) of
-	?T -> 
+	?T ->
 	    model_vars(Vp,Vs,Xs,Y,[{X,true}|Ms]);
 	?F ->
 	    model_vars(Vp,Vs,Xs,Y,[{X,false}|Ms]);

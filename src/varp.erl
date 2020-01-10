@@ -43,7 +43,7 @@
 
 -include_lib("stdlib/include/zip.hrl").
 
--define(DEBUG, true).
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
 -record(stat,
@@ -251,6 +251,18 @@ global_options() ->
 	 default => vsn(),
 	 description => "Report current version."
        },
+     #{ long => "cprof",
+	key => cprof,
+	spec =>  {enum,[?BOOL]},
+	default => false,
+	description => "Use Call Count Profiling"
+      },
+     #{ long => "fprof",
+	key => fprof,
+	spec =>  {enum,[?BOOL]},
+	default => false,
+	description => "Use Time Profiling"
+      },
       #{ long => "help",
 	 short => "h", 
 	 key => help,
@@ -345,9 +357,9 @@ main(Args) ->
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
 	    {ok,R0} -> {false,R0}
 	catch
-	    ?EXCEPTION(error,Error0,Trace0) ->
+	    ?EXCEPTION(error,Error0,_Trace0) ->
 		io:format("~s\n", [format_error(Error0)]),
-		?dbg("~p\n", [?GET_STACK(Trace0)]),
+		?dbg("~p\n", [?GET_STACK(_Trace0)]),
 		halt(1)
 	end,
 
@@ -368,9 +380,9 @@ main(Args) ->
 			    GOpts4 = section_opts(Sections,GOpts3),
 			    varp_run(Do,Formula1,GOpts4)
 		    catch
-			?EXCEPTION(error,Error1,Trace1) ->
+			?EXCEPTION(error,Error1,_Trace1) ->
 			    io:format("~s\n", [format_error(Error1)]),
-			    ?dbg("~p\n", [?GET_STACK(Trace1)]),
+			    ?dbg("~p\n", [?GET_STACK(_Trace1)]),
 			    halt(1)
 		    end;
 		_Error ->
@@ -386,9 +398,9 @@ main(Args) ->
 			_Error ->
 			    halt(1)
 		    catch
-			?EXCEPTION(error,Error2,Trace2) ->
+			?EXCEPTION(error,Error2,_Trace2) ->
 			    io:format("~s\n", [format_error(Error2)]),
-			    ?dbg("~p\n", [?GET_STACK(Trace2)]),
+			    ?dbg("~p\n", [?GET_STACK(_Trace2)]),
 			    halt(1)
 		    end;
 		Type -> %% with formula?
@@ -402,9 +414,9 @@ main(Args) ->
 		_Error ->
 		    halt(1)
 	    catch
-		?EXCEPTION(error,Error3,Trace3) ->
+		?EXCEPTION(error,Error3,_Trace3) ->
 		    io:format("~s\n", [format_error(Error3)]),
-		    ?dbg("~p\n", [?GET_STACK(Trace3)]),
+		    ?dbg("~p\n", [?GET_STACK(_Trace3)]),
 		    halt(1)
 	    end
     end,
@@ -471,6 +483,7 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 	    OptMap1 =
 		lists:foldl(
 		  fun({Key,Value}, Mi) ->
+			  ?dbg("setopt(~p, ~p)\n", [Key,Value]),
 			  varp_option:setopt(Key,Value,Mi,OptionSpec)
 		  end, OptMap, OptionList),
 	    parse_do_(Ps, PluginMap, [{Mod, OptMap1}|Acc])
@@ -538,15 +551,83 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
 
 %% command line - display errors and exception as well as results
 varp_run(Do, Formula, GOpts) ->
+    start_cprof(GOpts),
+    start_fprof(GOpts),
     R = (catch do_run(Do, Formula, GOpts)),
     case R of
 	{'EXIT',{Error, _Where}} ->
 	    io:format("~s\n", [format_error(Error)]),
 	    ?dbg("~p\n", [_Where]),
+	    stop_cprof(GOpts, false),
+	    stop_fprof(GOpts, false),
 	    ok;
 	_ ->
+	    stop_cprof(GOpts, true),
+	    stop_fprof(GOpts, true),
 	    R
     end.
+
+start_cprof(GOpts) ->
+    case maps:get(cprof, GOpts) of
+	false ->
+	    ok;
+	true ->
+	    cprof:start()
+    end.
+    
+stop_cprof(GOpts, Analyse) ->
+    case maps:get(cprof, GOpts) of
+	false ->
+	    ok;
+	true ->
+	    if Analyse ->
+		    CProf = cprof:analyse(),
+		    display_cprof(CProf);
+	       true ->
+		    ok
+	    end,
+	    cprof:stop()
+    end.
+
+start_fprof(GOpts) ->
+    case maps:get(fprof, GOpts) of
+	false ->
+	    ok;
+	true ->
+	    fprof:start(),
+	    fprof:trace(start)
+    end.
+
+stop_fprof(GOpts, Analys) ->
+    case maps:get(fprof, GOpts) of
+	false ->
+	    ok;
+	true ->
+	    fprof:trace(stop),
+	    if Analys ->
+		    %% FIXME output in file...?
+		    fprof:profile(),
+		    ok = fprof:analyse();
+	       true ->
+		    ok
+	    end,
+	    fprof:stop()
+    end.    
+
+display_cprof({TCalls,Ms}) ->    
+    io:format("total calls: ~w\n", [TCalls]),
+    lists:foreach(
+      fun({Mod,MCalls,Fs}) when MCalls > 1 ->
+	      io:format("  ~s calls: ~w\n", [Mod,MCalls]),
+	      lists:foreach(
+		fun({{_Mod,Fun,Ari},FCalls}) when FCalls > 1 ->
+			io:format("    ~s/~w: ~w\n", [Fun,Ari,FCalls]);
+		   (_) ->
+			ok
+		end, Fs);
+	 (_) ->
+	      ok
+      end, Ms).
 
 format_error(Err) ->
     case Err of
@@ -602,6 +683,11 @@ do_run_(Do, Formula, GOpts) ->
 	    N = if is_list(Acc) -> length(Acc);
 		   is_integer(Acc) -> Acc
 		end,
+	    if R =/= ?INCONSISTENT, N =:= 0 ->
+		    output_partial_model(Bs2);
+	       true ->
+		    ok
+	    end,
 	    M = case R of
 		    ?DONE -> N;
 		    ?CONTINUE when N>0 -> N;
@@ -772,16 +858,6 @@ one_model(Bs) ->
     end.
 
 no_models(Bs) ->
-    case varp_formula:getopt(Bs,partial) of
-	true ->
-	    %% print partial model, the variables bound
-	    Mdl = varp_formula:model(Bs),
-	    Mdl1 = varp_formula:filter_bindings(Mdl),
-	    io:format("partial: ~s\n",
-		      [lists:join(",",[varp_formula:format_binding(Bound) || Bound <- Mdl1 ])]);
-	false ->
-	    ok
-    end,
     case varp_formula:getopt(Bs,method) of
 	collect ->
 	    {?INCONSISTENT,[],Bs};
@@ -920,6 +996,27 @@ mfa_arg({M,F,A},_Func) when is_atom(M), is_atom(F), is_list(A) ->
     {M,F,A}.
 
 %% possibly emit a model
+output_partial_model(Bs) ->
+    case varp_formula:getopt(Bs,partial) of
+	true ->
+	    Model = varp_formula:model(Bs),
+	    case varp_formula:getopt(Bs,print) of
+		false ->
+		    Model;
+		Flavour ->
+		    case varp_output(Bs#bs.output, user, Model) of
+			{error, no_output} ->
+			    varp_formula:print_model(Flavour,0,Model),
+			    Model;
+			_ ->
+			    Model
+		    end
+	    end;
+	false ->
+	    ok
+    end.
+
+
 
 output_model(Bs,I) ->
     output_model_header(Bs, I),

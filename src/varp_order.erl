@@ -37,6 +37,13 @@ options() ->
 	default => [],
 	description => "Literals sorted last."
       },
+     #{ override => "override",
+	short => "x",
+	key => override,
+	spec => {enum,[{"file",file},{"cmdline",cmdline}]},
+	default => cmdline,
+	description => "Selected order from command line or file"
+      },
      #{ long => "display",
 	short => "d",
 	key => display,
@@ -45,11 +52,30 @@ options() ->
 	description => "Display declared variable order."
       }].
 
-run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    ?dbg0("order Param=~p\n", [Param]),
-    order_literals(Bs, Param).
+run(Bs, Param0) when is_record(Bs, bs), is_map(Param0) ->
+    ?dbg("file order=~p\n", [maps:get(order,Bs#bs.option,[])]),
+    case maps:get(override, Param0) of
+	file ->
+	    FileOrder = maps:get(order, Bs#bs.option, []),
+	    Param1 = case proplists:get_value(first, FileOrder) of
+			 undefined -> Param0;
+			 First -> maps:put(first, First, Param0)
+		     end,
+	    Param2 = case proplists:get_value(last, FileOrder) of
+			 undefined -> Param1;
+			 Last -> maps:put(last, Last, Param1)
+		     end,
+	    Param3 = case proplists:get_value(sort, FileOrder) of
+			 undefined -> Param2;
+			 Sort -> maps:put(sort, Sort, Param2)
+		     end,
+	    order_literals(Bs, Param3);
+	cmdline ->
+	    order_literals(Bs, Param0)
+    end.
 
 order_literals(Bs, Param) ->
+    ?dbg("order params=~p\n", [Param]),
     Seed = case maps:get(seed,Param,undefined) of
 	       undefined -> 
 		   varp_formula:getopt(Bs,seed);

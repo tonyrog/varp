@@ -5,7 +5,7 @@
 %%%
 %%%   Note on build wxWidgets-3.0.4 from source
 %%%   ./configure --with-opengl --enable-unicode --enable-graphics_ctx \
-%%%     --enable-gnomeprint --disable-shared 
+%%%     --enable-gnomeprint --disable-shared
 %%%
 %%% @end
 %%% Created : 15 Sep 2019 by Tony Rogvall <tony@rogvall.se>
@@ -37,6 +37,7 @@
 -record(s,
 	{
 	 window,
+	 splitter,
 	 meta,
 	 formula,
 	 modified = false, %% formula modified
@@ -45,40 +46,27 @@
 	 satisfy,
 	 falsify,
 	 cancel,
+	 settings,
 	 dir = "",
 	 export_dir = "",
 	 filename = undefined,
 	 path = undefined,
-	 wx_env,            %% environment passed to plugin 
+	 wx_env,            %% environment passed to plugin
 	 %% menus
 	 menu_save,         %% wxMenu
+	 %% settings map
+	 setting_widgets,   %% Name => Widget
+	 setting_values,    %% Name => Value
 	 %% config
+	 setting_panel,     %% NoteBook/Frame
+	 setting_apply,     %% wxButton apply settings
+	 setting_cancel,    %% wxButton cancel settings
 	 config_max_models, %% wxSpinCtrl
 	 config_timeout,    %% wxSpinCtrl
 	 config_saturate,   %% wxSpinCtrl (saturate=1 or none=0)
-	 config_backtrack,  %% wxRadioBox (backtrack|backjump|none)
-	 config_order_1,    %% [wxRadioButton (deg|rnk|usr|rnd|non)]
-	 config_order_2,    %% [wxRadioButton (deg|rnk|usr|rnd|non)]
-	 config_assoc,      %% wxRadioBox (left|right|balanced|none)
+	 config_profile,    %% wxChoice 0..9
  	 config_nbound,     %% wxGauge
-	 config_backjump    %% #backjump{}
-	}).
-
--record(backjump,
-	{
-	 minimize,               %% wxCheckBox
-	 iorder,                 %% wxSpinCtrl
-	 stumble,                %% wxSpinCtrl
-	 olle,                   %% wxStaticBoxSizer
-	 stumble_olle,           %% wxCheckBox
-	 max_conflicts,          %% wxSpinCtrl
-	 max_learned,            %% wxSpinCtrl
-	 max_learned_factor,     %% wxStaticBoxSizer
-	 max_learned_inc,        %% wxStaticBoxSizer
-	 keep_factor,            %% wxStaticBoxSizer
-	 min_keep_clauses,       %% wxSpinCtrl
-	 restart_counter,        %% wxSpinCtrl
-	 restart_interval        %% wxSpinCtrl
+	 config_notebook
 	}).
 
 version() ->
@@ -91,13 +79,19 @@ start() ->
     start_win_reg(),
     spawn(
       fun() ->
+	      %% put('_wx_object_', {?MODULE,'_wx_init_'}),
 	      Wx = wx:new(),
 	      %% try wx:batch(fun() -> create_window(Wx) end) of
 	      try create_window(Wx) of
 		  S ->
 		      wxWindow:show(S#s.window),
 		      register_process(),
-		      ?MODULE:main_loop(S),
+		      case ?MODULE:main_loop(S) of
+			  {_Reason,S1} ->
+			      ok = save_settings(S1);
+			  error ->
+			      ok
+		      end,
 		      wx:destroy()
 	      catch
 		  ?EXCEPTION(error,Reason,Trace) ->
@@ -105,9 +99,32 @@ start() ->
 	      end
       end).
 
+settings_file_name() ->
+    Home = os:getenv("HOME"), %% FIXME windows!
+    filename:join(Home, ".varp.settings").
+
+save_settings(S) ->
+    SettingsFilename = settings_file_name(),
+    SettingValues    = S#s.setting_values,
+    Profiles = varp_wx_settings:save_settings(SettingValues),
+    Data = lists:map(
+	     fun(Pi) ->
+		     io_lib:format("~p.\n", [Pi])
+	     end, Profiles),
+    file:write_file(SettingsFilename, Data).
+
+
+load_settings() ->
+    SettingsFilename = settings_file_name(),
+    case file:consult(SettingsFilename) of
+	{ok,Term} ->
+	    varp_wx_settings:load_settings(Term);
+	{error,enoent} ->
+	    #{}
+    end.
 
 create_window(Wx) ->
-    Window = wxFrame:new(Wx, -1, "Varp", [{size, {800,600}}]),
+    Window = wxFrame:new(Wx, -1, "Varp", [{size, {900,600}}]),
 
     Path = code:priv_dir(varp),
     wxFrame:setIcon(Window,  wxIcon:new(filename:join(Path,"varp.png"),
@@ -122,7 +139,7 @@ create_window(Wx) ->
     EditM    = wxMenu:new([]),
     HelpM    = wxMenu:new([]),
 
-    % unlike wxwidgets the stock menu items still need text to be given, 
+    % unlike wxwidgets the stock menu items still need text to be given,
     % although help text does appear
 
     %% FileMenu
@@ -157,28 +174,6 @@ create_window(Wx) ->
     wxMenuBar:append(MenuBar, HelpM, "&Help"),
     wxFrame:setMenuBar(Window, MenuBar),
 
-    %% Create varp GUI
-    %%  +-----------------------------+
-    %%  |  Meta (input)               |
-    %%  +-----------------------------+
-    %%  |  Formula (input)            |
-    %%  |                             |
-    %%  |                             |
-    %%  |                             |
-    %%  +-----------------------------+
-    %%  +-----------------------------+
-    %%  | |Satisfy| |Falsify| |Cancel |
-    %%  |  Config ...                 |
-    %%  +-----------------------------+
-    %%  |  Model (output)             |
-    %%  |                             |
-    %%  +-----------------------------+
-    %%
-    %%  Config = spin-max-model, spin-timeout, backjump/backtrack backjump ...
-    %%  +-----+--------+
-    %%  | max | timeout|
-    %%  +-----+--------+
-
     FixedFont = wxFont:new(10, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
     %SmallFont = wxFont:new(8, ?wxFONTFAMILY_TELETYPE, ?wxNORMAL, ?wxNORMAL,[]),
 
@@ -209,7 +204,7 @@ create_window(Wx) ->
     wxStyledTextCtrl:setSelectionMode(Formula, ?wxSTC_SEL_LINES),
     wxStyledTextCtrl:setScrollWidth(Formula, 1),
     wxStyledTextCtrl:setCaretLineBackAlpha(Formula, 127),
-
+    %% FIXME! Find better mode for VARP!
     Styles =  [{?wxSTC_C_DEFAULT,     {0,0,0}},
 	       {?wxSTC_C_COMMENT,     {160,53,35}},
 	       {?wxSTC_C_COMMENTLINE, {160,53,35}},
@@ -226,7 +221,7 @@ create_window(Wx) ->
 
     wxStyledTextCtrl:setKeyWords(Formula, 1, keyWords()),
 
-    Policy = ?wxSTC_CARET_SLOP bor ?wxSTC_CARET_JUMPS bor ?wxSTC_CARET_EVEN, 
+    Policy = ?wxSTC_CARET_SLOP bor ?wxSTC_CARET_JUMPS bor ?wxSTC_CARET_EVEN,
     wxStyledTextCtrl:setYCaretPolicy(Formula, Policy, 3),
     wxStyledTextCtrl:setVisiblePolicy(Formula, Policy, 3),
     wxStyledTextCtrl:setReadOnly(Formula, false),
@@ -261,7 +256,7 @@ create_window(Wx) ->
     SELF = self(),
     wxButton:connect(Cancel, command_button_clicked,
 		     [{callback,
-		       fun(_Event,_Object) -> 
+		       fun(_Event,_Object) ->
 			       SELF ! {cancel, self()}
 		       end }]),
     wxButton:disable(Cancel),
@@ -271,80 +266,52 @@ create_window(Wx) ->
     wxSizer:add(Run, Cancel, []),
 
     %% CONFIG max models
-    MaxBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label, "max"}]),
-    MaxModels = wxSpinCtrl:new(Win2, []),
-    wxSpinCtrl:setRange(MaxModels, 1, 1000),
-    wxSizer:add(MaxBox, MaxModels),
+    MaxBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label, "Max"}]),
+    MaxModels = wxSpinCtrl:new(Win2, [{min,1},{max,1000}]),
+    %% wxSpinCtrl:setRange(MaxModels, 1, 1000),
+    wxSizer:add(MaxBox, MaxModels, [{flag, ?wxEXPAND}]),
 
-    TimeBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"timeout"}]),
+    TimeBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"Timeout"}]),
     Timeout = wxSpinCtrl:new(Win2, []),
     wxSpinCtrl:setRange(Timeout, 0, 100000),
-    wxSizer:add(TimeBox, Timeout),
+    wxSizer:add(TimeBox, Timeout, [{flag, ?wxEXPAND}]),
 
-    SaturateBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"saturate"}]),
+    SaturateBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"Saturate"}]),
     Saturate = wxSpinCtrl:new(Win2, []),
     wxSpinCtrl:setRange(Saturate, 0, 3),
-    wxSizer:add(SaturateBox, Saturate),
+    wxSizer:add(SaturateBox, Saturate, [{flag, ?wxEXPAND}]),
 
-    Backtrack = wxRadioBox:new(Win2, ?wxID_ANY, "backtrack",
-			       ?wxDefaultPosition,
-			       ?wxDefaultSize,
-			       ["bj","bt","none"],
-			       [{majorDim, 1}, {style, ?wxVERTICAL}]),
+    ProfileBox = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label,"Profile"}]),
+    Profile = wxChoice:new(Win2, ?wxID_ANY,
+			   [{choices,
+			     ["1","2","3","4","5","6","7","8","9","10"]}
+			   ]),
+    wxChoice:setSelection(Profile, 0),
+    wxChoice:connect(Profile, command_choice_selected),
+    wxChoice:enable(Profile),
+    wxSizer:add(ProfileBox, Profile,[{flag, ?wxEXPAND}]),
 
-    Order = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"order"}]),
-    Order1 = wxBoxSizer:new(?wxHORIZONTAL),
-    B10 = wxCheckBox:new(Win2,?wxID_ANY,"",
-			 [{style, ?wxCHK_3STATE bor
-			       ?wxCHK_ALLOW_3RD_STATE_FOR_USER}]),
-    wxCheckBox:set3StateValue(B10, ?wxCHK_UNDETERMINED),
-    B11 = wxRadioButton:new(Win2,?wxID_ANY,"deg",[{style,?wxRB_GROUP}]),
-    B12 = wxRadioButton:new(Win2,?wxID_ANY,"rnk",[]),
-    B13 = wxRadioButton:new(Win2,?wxID_ANY,"usr",[]),
-    B14 = wxRadioButton:new(Win2,?wxID_ANY,"rnd",[]),
-    B15 = wxRadioButton:new(Win2,?wxID_ANY,"id",[]),
-    Order1List = [B10,B11,B12,B13,B14,B15],
-    [wxSizer:add(Order1, Bi) || Bi <- Order1List],
+    SettingsBox = wxStaticBoxSizer:new(?wxHORIZONTAL,Win2,[{label,"Settings"}]),
+    Settings = wxButton:new(Win2, ?wxID_ANY, [{label,"..."}]),
+    wxButton:connect(Settings, command_button_clicked),
+    wxButton:enable(Settings),
+    wxSizer:add(SettingsBox, Settings, [{flag, ?wxEXPAND}]),
 
-    Order2 = wxBoxSizer:new(?wxHORIZONTAL),
-    B20 = wxCheckBox:new(Win2,?wxID_ANY,"",
-			 [{style, ?wxCHK_3STATE bor
-			       ?wxCHK_ALLOW_3RD_STATE_FOR_USER}]),
-    wxCheckBox:set3StateValue(B20, ?wxCHK_UNDETERMINED),
-    B21 = wxRadioButton:new(Win2,?wxID_ANY,"deg",[{style,?wxRB_GROUP}]),
-    B22 = wxRadioButton:new(Win2,?wxID_ANY,"rnk",[]),
-    B23 = wxRadioButton:new(Win2,?wxID_ANY,"usr",[]),
-    B24 = wxRadioButton:new(Win2,?wxID_ANY,"rnd",[]),
-    B25 = wxRadioButton:new(Win2,?wxID_ANY,"id",[]),
-    Order2List = [B20,B21,B22,B23,B24,B25],
-    [wxSizer:add(Order2, Bi) || Bi <- Order2List],
-
-    wxSizer:add(Order, Order1),
-    wxSizer:add(Order, Order2),
-
-    Assoc = wxRadioBox:new(Win2, ?wxID_ANY, "assoc",
-			   ?wxDefaultPosition,
-			   ?wxDefaultSize,
-			   ["left", "right", "mid", "none"],
-			   [{majorDim, 1},{style,  ?wxVERTICAL}]),
-
+    %% View number of bound variables
     NBound = wxGauge:new(Win2, ?wxID_ANY, 100, [{size,{800,10}},
-					 {style, 
-					  ?wxGA_HORIZONTAL+?wxGA_SMOOTH}]),
-
+						{style,
+						 ?wxGA_HORIZONTAL+
+						     ?wxGA_SMOOTH}]),
     Config = wxBoxSizer:new(?wxVERTICAL),
     Config1 = wxBoxSizer:new(?wxHORIZONTAL),
-    Config2 = wxBoxSizer:new(?wxHORIZONTAL),
     wxSizer:add(Config, Config1, []),
-    wxSizer:add(Config, Config2, []),
     wxSizer:add(Config, NBound, []),
-    wxSizer:add(Config1, Run, []),
-    wxSizer:add(Config1, MaxBox, []),
-    wxSizer:add(Config1, TimeBox, []),
-    wxSizer:add(Config1, SaturateBox, []),    
-    wxSizer:add(Config2, Backtrack, []),
-    wxSizer:add(Config2, Order, []),
-    wxSizer:add(Config2, Assoc, []),
+    wxSizer:add(Config1, Run, [{proportion,3}]),
+    wxSizer:add(Config1, MaxBox, [{proportion,1}]),
+    wxSizer:add(Config1, TimeBox, [{proportion,1}]),
+    wxSizer:add(Config1, SaturateBox, [{proportion,1}]),
+    wxSizer:add(Config1, ProfileBox, [{proportion,1}]),
+    wxSizer:add(Config1, SettingsBox, [{proportion,1}]),
 
     %% MODEL output window
     Model = wxStyledTextCtrl:new(Win2),
@@ -356,7 +323,7 @@ create_window(Wx) ->
     wxStyledTextCtrl:setMarginWidth(Model, 1, 0),
     wxStyledTextCtrl:setScrollWidth(Model, 1),
     wxStyledTextCtrl:setSelectionMode(Model, ?wxSTC_SEL_LINES),
-    Policy = ?wxSTC_CARET_SLOP bor ?wxSTC_CARET_JUMPS bor ?wxSTC_CARET_EVEN, 
+    Policy = ?wxSTC_CARET_SLOP bor ?wxSTC_CARET_JUMPS bor ?wxSTC_CARET_EVEN,
     wxStyledTextCtrl:setYCaretPolicy(Model, Policy, 3),
     wxStyledTextCtrl:setVisiblePolicy(Model, Policy, 3),
     wxStyledTextCtrl:setReadOnly(Model, true),
@@ -372,30 +339,44 @@ create_window(Wx) ->
 
     ok = wxFrame:setStatusText(Window,lists:flatten(["Varp-",version()]),[]),
     wxFrame:connect(Window, command_splitter_sash_pos_changed),
-    wxFrame:setSizer(Window, MainSizer),
 
     wxFrame:setTitle(Window, "Untitled"),
 
+    SettingValues = load_settings(),
+    {SettingPanel,Notebook,SettingApply,SettingCancel,SettingWidgets} =
+	varp_wx_settings:create(Window,SettingValues),
+    profile_update(Profile, SettingValues),
+    wxSizer:add(MainSizer, SettingPanel, [{flag,?wxEXPAND},{proportion,1}]),
+    wxPanel:hide(SettingPanel),
+
+    wxFrame:setSizer(Window, MainSizer),
+
     {ok, DefaultDir} = file:get_cwd(), %% fixme: save dir?
-    #s { window = Window, 
+
+    #s { window = Window,
+	 splitter = Splitter,
 	 meta = Meta,
 	 formula = Formula,
 	 model = Model,
 	 falsify = Falsify,
 	 satisfy = Satisfy,
-	 cancel = Cancel,
+	 cancel  = Cancel,
+	 settings = Settings,
 	 filename = undefined,
 	 path = undefined,
 	 dir = DefaultDir,
+	 setting_widgets   = SettingWidgets,
+	 setting_values    = SettingValues,
 	 config_max_models = MaxModels,
 	 config_timeout    = Timeout,
 	 config_saturate   = Saturate,
-	 config_backtrack  = Backtrack,
-	 config_order_1    = Order1List,
-	 config_order_2    = Order2List,
-	 config_assoc      = Assoc,
+	 config_profile    = Profile,	 
 	 config_nbound     = NBound,
 	 wx_env            = wx:get_env(),
+	 setting_panel     = SettingPanel,
+	 config_notebook   = Notebook,
+	 setting_apply     = SettingApply,
+	 setting_cancel    = SettingCancel,
 	 menu_save         = SaveMenuItem
        }.
 
@@ -405,11 +386,12 @@ main_loop(S) ->
 	    try handle_event(Event, S) of
 		{noreply, S1} ->
 		    ?MODULE:main_loop(S1);
-		{stop, Reason, _S1} ->
-		    Reason
+		{stop, Reason, S1} ->
+		    {Reason, S1}
 	    catch
 		?EXCEPTION(error,Reason,Trace) ->
-		    io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)])
+		    io:format("error:~w\n~p\n", [Reason,?GET_STACK(Trace)]),
+		    error
 	    end;
         _Msg ->
             ?dbg("Got ~p ~n", [_Msg]),
@@ -460,7 +442,7 @@ handle_event(Event, S) ->
 		{cancel,S1} ->
 		    {noreply, S1}
 	    end;
-	       
+
         #wx{id=?wxID_SAVEAS, event=#wxCommand{type=command_menu_selected}} ->
 	    ?dbg("SAVEAS\n",[]),
 	    Dialog = wxFileDialog:new(S#s.window,
@@ -481,7 +463,7 @@ handle_event(Event, S) ->
 		    wxDialog:destroy(Dialog),
 		    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
 		    {noreply, S#s { dir=Dir,
-				    filename=Filename, 
+				    filename=Filename,
 				    path = Path,
 				    modified = false }};
 		?wxID_CANCEL ->
@@ -493,7 +475,7 @@ handle_event(Event, S) ->
 	    ?dbg("EXPORT_CNF\n",[]),
 	    Dialog = wxFileDialog:new(S#s.window,
 				      [{message, "Export CNF"},
-				       {style,?wxFD_SAVE bor 
+				       {style,?wxFD_SAVE bor
 					    ?wxFD_OVERWRITE_PROMPT},
 				       {defaultDir,S#s.export_dir},
 				       {wildCard,"*.cnf"}]),
@@ -514,7 +496,7 @@ handle_event(Event, S) ->
 	    ?dbg("EXPORT_SNF\n",[]),
 	    Dialog = wxFileDialog:new(S#s.window,
 				      [{message, "Export SNF"},
-				       {style,?wxFD_SAVE bor 
+				       {style,?wxFD_SAVE bor
 					    ?wxFD_OVERWRITE_PROMPT},
 				       {defaultDir,S#s.export_dir},
 				       {wildCard,"*.snf"}]),
@@ -535,7 +517,7 @@ handle_event(Event, S) ->
 	    ?dbg("OPEN\n",[]),
 	    if S#s.modified ->
 		    case save_before(S, "Save before open new") of
-			{ok,S1} -> 
+			{ok,S1} ->
 			    case open_new(S1) of
 				{ok,S2} -> {noreply, S2};
 				{cancel,S2} -> {noreply, S2}
@@ -549,7 +531,7 @@ handle_event(Event, S) ->
 			{cancel,S1} -> {noreply, S1}
 		    end
 	    end;
-	
+
         #wx{id=?wxID_CUT,event=#wxCommand{type=command_menu_selected}} ->
 	    case wxStyledTextCtrl:getSelection(S#s.formula) of
 		{N,N} -> {noreply, S};
@@ -634,6 +616,31 @@ handle_event(Event, S) ->
 	       S#s.falsify =:= Obj ->
 		    S1 = solve(falsify, S),
 		    {noreply, S1};
+	       S#s.settings =:= Obj ->
+		    P = wxChoice:getSelection(S#s.config_profile),
+		    wxNotebook:setSelection(S#s.config_notebook, P),
+		    wxSplitterWindow:hide(S#s.splitter),
+		    wxPanel:show(S#s.setting_panel),
+		    wxWindow:layout(S#s.window),
+		    {noreply, S};
+	       S#s.setting_apply =:= Obj ->
+		    P = wxNotebook:getSelection(S#s.config_notebook),
+		    wxChoice:setSelection(S#s.config_profile, P),
+		    wxPanel:hide(S#s.setting_panel),
+		    wxSplitterWindow:show(S#s.splitter),
+		    wxWindow:layout(S#s.window),
+		    ValueMap = varp_wx_settings:get_values(
+				 S#s.setting_widgets, S#s.setting_values),
+		    profile_update(S#s.config_profile, ValueMap),
+		    {noreply, S#s { setting_values = ValueMap }};
+	       S#s.setting_cancel =:= Obj ->
+		    wxPanel:hide(S#s.setting_panel),
+		    wxSplitterWindow:show(S#s.splitter),
+		    wxWindow:layout(S#s.window),
+		    %% restore values (fixme only if changed)
+		    varp_wx_settings:set_values(S#s.setting_widgets,
+						S#s.setting_values),
+		    {noreply, S};
 	       true ->
 		    ?dbg("Got command_button_clicked ~p ~n", [_Msg]),
 		    {noreply, S}
@@ -643,13 +650,12 @@ handle_event(Event, S) ->
 	    {noreply, S}
     end.
 
-
 open_new(S) ->
     Dialog = wxFileDialog:new(S#s.window,
 			      [{message, "Open a file"},
 			       {style, ?wxFD_OPEN},
 			       {defaultDir,S#s.dir},
-			       {wildCard, 
+			       {wildCard,
 				"*.varp;*.cnf;*.snf;*.txt"}]),
     case wxFileDialog:showModal(Dialog) of
 	?wxID_OK ->
@@ -674,7 +680,7 @@ open_new(S) ->
 		    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
 		    wxDialog:destroy(Dialog),
 		    {ok, S#s { dir=Dir,
-			       filename=Filename, 
+			       filename=Filename,
 			       path = Path,
 			       modified = false }};
 		{error,Reason} ->
@@ -711,7 +717,7 @@ save(S, Overwrite) ->
 				      [{message,"Save file"},
 				       {style, ?wxFD_SAVE bor Overwrite},
 				       {defaultDir,S#s.dir},
-				       {wildCard, 
+				       {wildCard,
 					"*.varp;*.cnf;*.snf;*.txt"}]),
 	    case wxFileDialog:showModal(Dialog) of
 		?wxID_OK ->
@@ -725,8 +731,8 @@ save(S, Overwrite) ->
 		    wxStyledTextCtrl:connect(S#s.formula,?STCMOD),
 		    wxMenuItem:enable(S#s.menu_save,[{enable,false}]),
 		    wxDialog:destroy(Dialog),
-		    {ok,S#s { dir=Dir, 
-			      filename=Filename, 
+		    {ok,S#s { dir=Dir,
+			      filename=Filename,
 			      path = Path,
 			      modified = false }};
 		?wxID_CANCEL ->
@@ -743,19 +749,16 @@ save(S, Overwrite) ->
 	    {ok, S#s { modified = false}}
     end.
 
-
-    
-
 %% FIXME block interface while running
 solve(Mode, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp_scan:string(Meta) of
 	{ok,Ts,_Ln} ->
 	    case parse_bindings(Ts) of
-		{ok,L} -> 
+		{ok,L} ->
 		    solve(Mode, S, L);
 		{error,{_Ln,Reason,Mess1}} ->
-		    Err = io_lib:format("~w ~p\n", 
+		    Err = io_lib:format("~w ~p\n",
 					[Reason,Mess1]),
 		    output_error(S, Err)
 	    end;
@@ -764,31 +767,51 @@ solve(Mode, S) ->
 	    output_error(S, Err)
     end.
 
+%% Update profile labels to the assigned names, use index
+%% if not set
+profile_update(Profile, Values) ->
+    lists:foreach(
+      fun(I) ->
+	      case read_p([profile,I,name],Values,[]) of
+		  [] ->
+		      Name = integer_to_list(I),
+		      wxChoice:setString(Profile,I-1,Name);
+		  Name ->
+		      wxChoice:setString(Profile,I-1,Name)
+	      end
+      end, lists:seq(1, 10)).
+
+profile_number(S) ->
+    wxChoice:getSelection(S#s.config_profile) + 1.
+
 solve(Mode, S, Bound) ->
+    I = profile_number(S),
+    Pfx = [profile,I,options],
+
     Max       = wxSpinCtrl:getValue(S#s.config_max_models),
     Timeout   = case wxSpinCtrl:getValue(S#s.config_timeout) of
 		    0 -> infinity;
 		    T -> T
 		end,
     Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
-    Backtrack = wxRadioBox:getSelection(S#s.config_backtrack),
-    
-    Order_1    = get_order(S#s.config_order_1),
-    Order_2    = get_order(S#s.config_order_2),
 
-    Assoc     = case wxRadioBox:getSelection(S#s.config_assoc) of
-		    0 -> left;
-		    1 -> right;
-		    2 -> balanced;
-		    3 -> none
-		end,
-    QType = recursive,
-    AType = mvsids,
+    Method = read_param([profile,I],method,S,backjump),
+
+    Order_1 = read_param(Pfx,[order,key1,sort],S,degree),
+    Dir_1   = read_param(Pfx,[order,key1,dir],S,descend),
+    Order_2 = read_param(Pfx,[order,key2,sort],S,degree),
+    Dir_2   = read_param(Pfx,[order,key2,dir],S,descend),
+    Assoc   = read_param(Pfx,[varp,assoc],S,none),
+    QType   = read_param(Pfx,[varp,qtype],S,recursive),
+    AType = if Order_1 =:= activity;
+	       Order_2 =:= activity -> mvsids;
+	       true -> off
+	    end,
     %% _EdgeList = true,
     ?dbg("max  = ~p\n", [Max]),
     ?dbg("saturate = ~w\n", [Saturate]),
-    ?dbg("backtrack = ~w\n", [Backtrack]),
-    ?dbg("order = ~w\n", [Order]),
+    ?dbg("method = ~w\n", [Method]),
+    ?dbg("order = ~w\n", [[{Order_1,Dir_1},{Order_2,Dir_2}]]),
     ?dbg("assoc = ~w\n", [Assoc]),
     ?dbg("qtype = ~w\n", [QType]),
     ?dbg("activity = ~w\n", [AType]),
@@ -799,25 +822,28 @@ solve(Mode, S, Bound) ->
     case parse(Formula, Meta) of
 	{ok,{Sections,Form}} ->
 	    Options = [{method,count},{print,true},{timeout,Timeout},
-		       {assoc,Assoc},{qtype,QType},
-		       {activity,AType}
+		       {assoc,Assoc},{qtype,QType},{xref,true},
+		       {activity,AType},
+		       {partial,Method =:= none}
 		      ],
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),
 
-	    Order = 
-		if Order_1 =:= 0, Order_2 =:= 0 ->
+	    Order =
+		if Order_1 =:= undefined, Order_2 =:= undefined ->
 			case maps:find(order, GOpts1) of
 			    {ok, FileOrder} ->
 				[{order, FileOrder}];
-			    _ -> 
+			    _ ->
 				[]
 			end;
-		   Order_2 =:= 0 -> [{order,[{sort,[Order_1]}]}];
-		   Order_1 =:= 0 -> [{order,[{sort,[Order_2]}]}];
-		   true -> [{order,[{sort,[Order_1,Order_2]}]}]
+		   Order_2 =:= undefined ->
+			[{order,[{sort,[order(Dir_1,Order_1)]}]}];
+		   Order_1 =:= undefined ->
+			[{order,[{sort,[order(Dir_2,Order_2)]}]}];
+		   true -> [{order,[{sort,[order(Dir_1,Order_1),
+					   order(Dir_2,Order_2)]}]}]
 		end,
-	    %% io:format("Order = ~w\n", [Order]),
 	    Do =
 		[{wx,[{nbound,S#s.config_nbound},
 		      {window,S#s.window},
@@ -828,13 +854,13 @@ solve(Mode, S, Bound) ->
 		    _K -> [{saturate,[{level,1}]}]
 		end ++
 		Order ++
-		case Backtrack of
-		    0 ->
-			BjParams = read_backjump_params(S#s.config_backjump),
+		case Method of
+		    backjump ->
+			BjParams = read_backjump_params(S, I),
 			[{backjump, [{max,Max}]++BjParams}];
-		    1 ->
+		    backtrack ->
 			[{backtrack,[{max,Max}]}];
-		    2 ->
+		    none ->
 			[]
 		end,
 
@@ -849,6 +875,7 @@ solve(Mode, S, Bound) ->
 	    wxButton:disable(S#s.satisfy),
 	    wxButton:disable(S#s.falsify),
 	    wxButton:enable(S#s.cancel),
+	    wxButton:disable(S#s.settings),
 
 	    try varp:do_run(GDo,Form,GOpts2) of
 		{?INCONSISTENT,_,_Bs} ->
@@ -884,6 +911,7 @@ solve(Mode, S, Bound) ->
 		wxButton:enable(S#s.satisfy),
 		wxButton:enable(S#s.falsify),
 		wxButton:disable(S#s.cancel),
+		wxButton:enable(S#s.settings),
 
 		call(get(mon_proc), flush),
 		call(get(mon_proc), stop)
@@ -909,25 +937,55 @@ solve(Mode, S, Bound) ->
 	    output_error(S, varp:format_error(Message))
     end.
 
+order(Dir, Ord) ->
+    case Dir of
+	ascend  -> ?ORDER_ASCEND;
+	descend -> ?ORDER_DESCEND
+    end
+	bor
+    case Ord of
+	degree -> ?ORDER_DEGREE;
+	rank -> ?ORDER_RANK;
+	activity -> ?ORDER_ACTIVITY;
+	user -> ?ORDER_USER;
+	random -> ?ORDER_RANDOM;
+	identity -> ?ORDER_IDENTITY;
+	undefined -> ?ORDER_UNDEFINED
+    end.
+
+
+-define(BJK(I,Name), [profile,(I),options,backjump,Name]).
+
 %% add inc_learned_factor - no units found for T seconds
-read_backjump_params(_Backjump) ->
-    [{minimize, true},
-     {iorder, 5},   %% is max size of clauses installed
-     {stumble, 0},
-     {olle, 0},
-     {stumble_olle, false},
-     {max_conflicts, 1},
-     {max_learned, 0},
-     {max_learned_factor, 1.1},
-     {max_learned_inc, 1.1},
-     {keep_factor, 0.8},
-     {min_keep_clauses, 0},
-     {restart_counter, 0},
-     {restart_interval, 5.0},
-     {decay, 0.95},
-     {bump, 1.0},
+read_backjump_params(S,I) ->
+    [{minimize,   read_param(?BJK(I,minimize), S, true)},
+     {iorder,     read_param(?BJK(I,iorder), S, 0)},
+     {stumble,    read_param(?BJK(I,stumble), S, 0)},
+     {olle,               read_param(?BJK(I,olle), S, 0)},
+     {stumble_olle,       read_param(?BJK(I,stumble_olle), S, false)},
+     {max_conflicts,      read_param(?BJK(I,max_conflicts), S, 1) },
+     {max_learned,        read_param(?BJK(I,max_learned), S, 0) },
+     {max_learned_factor, read_param(?BJK(I,max_learned_factor), S, 0) },
+     {max_learned_inc,    read_param(?BJK(I,max_learned_inc), S, 0)},
+     {keep_factor, read_param(?BJK(I,keep_factor), S, 0.8) },
+     {min_keep_clauses, read_param(?BJK(I,min_keep_clauses), S, 0)},
+     {restart_counter, read_param(?BJK(I,restart_counter), S, 0) },
+     {restart_interval, read_param(?BJK(I,restart_interval), S, 0)},
+     {decay, read_param(?BJK(I,decay), S, 0.95) },
+     {bump, read_param(?BJK(I,bump), S, 1.0) },
      {reorder, order_list()}
     ].
+
+read_param(Pfx, Key, S, Default) when is_atom(Key) ->
+    read_param(Pfx++[Key], S, Default);
+read_param(Pfx, Key, S, Default) when is_list(Key) ->
+    read_param(Pfx++Key, S, Default).
+
+read_param(Key, #s{ setting_values=ValueMap}, Default) when is_list(Key) ->
+    read_p(Key, ValueMap, Default).
+
+read_p(Key, ValueMap, Default) when is_list(Key), is_map(ValueMap) ->
+    maps:get(Key, ValueMap, Default).
 
 order_list() ->
     [
@@ -936,16 +994,7 @@ order_list() ->
      {2,order_opt(?ORDER_ACTIVITY)},
      {3,order_opt(?ORDER_ACTIVITY)},
      {4,order_opt(?ORDER_RANDOM)}
-    ].    
-
-order_list_new() ->
-    [
-     {0,order_opt(?ORDER_DEGREE)},
-     {1,order_opt(?ORDER_ACTIVITY)},
-     {2,order_opt(?ORDER_DEGREE)},
-     {3,order_opt(?ORDER_ACTIVITY)},
-     {4,order_opt(?ORDER_RANDOM)}
-    ].    
+    ].
 
 order_opt(Ord) ->
     {order,[{sort,[Ord bor ?ORDER_DESCEND,?ORDER_UNDEFINED]},
@@ -958,39 +1007,15 @@ add_extension(Path, Ext) ->
 	_ -> Path
     end.
 
-get_order([Ascend|Radios]) ->
-    case wxCheckBox:get3StateValue(Ascend) of
-	?wxCHK_CHECKED -> ?ORDER_DESCEND + get_radio_order(Radios);
-	?wxCHK_UNCHECKED -> 0;
-	?wxCHK_UNDETERMINED -> ?ORDER_ASCEND + get_radio_order(Radios)
-    end.
-
-get_radio_order([R|Rs]) ->
-    case wxRadioButton:getValue(R) of
-	true ->
-	    case wxRadioButton:getLabel(R) of
-		"deg" -> ?ORDER_DEGREE;
-		"rnk" -> ?ORDER_RANK;
-		"usr" -> ?ORDER_USER;
-		"rnd" -> ?ORDER_RANDOM;
-		"id"  -> ?ORDER_IDENTITY
-	    end;
-	false ->
-	    get_radio_order(Rs)
-    end;
-get_radio_order([]) ->
-    ?ORDER_UNDEFINED.
-    
-
 export(Type, File, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp_scan:string(Meta) of
 	{ok,Ts,_Ln} ->
 	    case parse_bindings(Ts) of
-		{ok,L} -> 
+		{ok,L} ->
 		    export(Type, File, S, L);
 		{error,{_Ln,Reason,Mess1}} ->
-		    Err = io_lib:format("~w ~p\n", 
+		    Err = io_lib:format("~w ~p\n",
 					[Reason,Mess1]),
 		    output_error(S, Err)
 	    end;
@@ -999,14 +1024,12 @@ export(Type, File, S) ->
 	    output_error(S, Err)
     end.
 
+-define(VKEY(I,Name), [profile,(I),options,varp,(Name)]).
+
 export(Type, File, S, Bound) ->
+    I = profile_number(S),
     Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
-    Assoc     = case wxRadioBox:getSelection(S#s.config_assoc) of
-		    0 -> left;
-		    1 -> right;
-		    2 -> balanced;
-		    3 -> none
-		end,
+    Assoc     = read_param(?VKEY(I,assoc),S,none),
     Formula = wxStyledTextCtrl:getText(S#s.formula),
     Meta = maps:from_list(Bound),
     case parse(Formula, Meta) of
@@ -1098,7 +1121,7 @@ output_clear(S) ->
 %% is passed in the output parameter list
 output_model(_Fd, Model, S) ->
     wxStyledTextCtrl:setReadOnly(S#s.model, false),
-    List = [ varp_formula:format_binding(B) || 
+    List = [ varp_formula:format_binding(B) ||
 	       B <- varp_formula:filter_bindings(Model),
 	       element(2,B) =/= false ],
     Chars = lists:join(",", List),
@@ -1109,17 +1132,23 @@ output_model(_Fd, Model, S) ->
 parse_bindings(Ts) ->
     parse_bindings_(Ts, []).
 
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{decnum,_Ln3,Int}|Ts], Acc) ->
+parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{decnum,_Ln3,Int}|Ts],
+		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,10)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{hexnum,_Ln3,Int}|Ts], Acc) ->
+parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{hexnum,_Ln3,Int}|Ts],
+		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,16)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{octnum,_Ln3,Int}|Ts], Acc) ->
+parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{octnum,_Ln3,Int}|Ts],
+		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,8)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{binnum,_Ln3,Int}|Ts], Acc) ->
+parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{binnum,_Ln3,Int}|Ts],
+		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,2)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{string,_Ln3,Str}|Ts], Acc) ->
+parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{string,_Ln3,Str}|Ts],
+		Acc) ->
     parse_bindings_(Ts, [{Name, Str}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{identifier,_Ln3,Str}|Ts], Acc) ->
+parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{identifier,_Ln3,Str}|Ts],
+		Acc) ->
     %% lookup value? is this done later?
     parse_bindings_(Ts, [{Name,Str}|Acc]);
 parse_bindings_([{',',_ln}|Ts], Acc) ->
@@ -1173,11 +1202,11 @@ dialog(?wxID_ABOUT,  Frame) ->
 		       " is a propositional theorem prover\n",
                        "running under ",
 		       wx_misc:getOsDescription(),
-                       "."], 
+                       "."],
                       ""),
     MD = wxMessageDialog:new(Frame,
                              Str,
-                             [{style, ?wxOK bor ?wxICON_INFORMATION}, 
+                             [{style, ?wxOK bor ?wxICON_INFORMATION},
                               {caption, "About varp"}]),
 
     wxDialog:showModal(MD),
@@ -1190,10 +1219,10 @@ keyWords() ->
 	 "symbol", "true", "false", "define", "declare", "literals",
 	 "assert", "input", "output", "order", "rank", "degree",
 	 "random", "identity",
-	 "and", "or", "xor", "not", 
-	 "implies", "imp", 
-	 "equivalent", "equ", 
-	 "A", "ALL", 
+	 "and", "or", "xor", "not",
+	 "implies", "imp",
+	 "equivalent", "equ",
+	 "A", "ALL",
 	 "E", "ANY",
 	 "SUM", "PROD"],
     lists:flatten([K ++ " " || K <- L] ++ [0]).
@@ -1269,20 +1298,22 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 		 [_Y,_X, varp_formula:format_lit(Bs,_Y),
 		  varp_formula:format_lit(Bs,_X),Info]),
 	    Info1 = mon_loop_collect(Info),
-	    update_info(Param,StartTime,Info1),
-	    mon_loop(Bs,Param,Mon,StartTime,Info1);
+	    Info2 = merge_info(Info1, PrevInfo),
+	    update_info(Param,StartTime,Info2),
+	    mon_loop(Bs,Param,Mon,StartTime,Info2);
 	{varp, _X, Info} ->
-	    ?dbg("varp_wx monitor: permanent (~w=1) ~s = ~w,info=~w\n", 
+	    ?dbg("varp_wx monitor: permanent (~w=1) ~s = ~w,info=~w\n",
 		 [_X,varp_formula:format_lit(Bs,_X), 1, Info]),
 	    Info1 = mon_loop_collect(Info),
-	    update_info(Param,StartTime,Info1),
-	    mon_loop(Bs,Param,Mon,StartTime,Info1);
+	    Info2 = merge_info(Info1, PrevInfo),
+	    update_info(Param,StartTime,Info2),
+	    mon_loop(Bs,Param,Mon,StartTime,Info2);
 	Other ->
 	    io:format("varp_wx monitor: got ~p\n", [Other]),
 	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
     after 1000 ->
 	    Info1 = get_info(Bs),
-	    Info2 = merge_info(Info1, PrevInfo),
+	    Info2 = merge_info_no_bound(Info1, PrevInfo),
 	    update_info(Param,StartTime,Info2),
 	    mon_loop(Bs,Param,Mon,StartTime,Info2)
     end.
@@ -1301,18 +1332,21 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
 	    #{number_of_variables:=NV,
 	      number_of_bound_variables:=NB,
 	      number_of_clauses:=NC,
-	      number_of_dead_clauses:=ND }) ->
+	      number_of_dead_clauses:=ND,
+	      number_of_bcp:=NE
+	     }) ->
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
     Status = io_lib:format(
-	       "#Var: ~-8w #Bound: ~-8w #Clauses: ~-8w #Dead: ~-8w #Time: ~s",
-	       [NV, NB, NC, ND, format_time(Time)]),
+	       "#Var: ~-8w #Bound: ~-8w #Clauses: ~-8w"
+	       "#Dead: ~-8w #Bcp: ~-10w #Time: ~s",
+	       [NV, NB, NC, ND, NE, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 
 format_time(Ms) ->
-    S0 = Ms div 1000,    
+    S0 = Ms div 1000,
     S = S0 rem 60,
     F = Ms rem 1000,  %% decimal fraction 3 digits
     %% F = round(((Ms rem 1000)/1000)*100),  decimal fraction 2digits
@@ -1342,14 +1376,27 @@ f3i(N) when N >= 0, N < 1000 ->
 f2i(N) when N >= 0, N < 100 ->
     tl(integer_to_list(100 + N)).
 
-merge_info(#{ number_of_clauses := NC,
-	      number_of_dead_clauses := ND}, Info2) ->
-    %% max_level := L, max_bound := B
-    Info2#{ number_of_clauses => NC,
-	    number_of_dead_clauses => ND }.
-%%	    max_level => L,
-%%	    max_bound => B }.
-    
+merge_info(Info1, Info2) ->
+    minfo([number_of_bound_variables,
+	   number_of_clauses,
+	   number_of_dead_clauses,
+	   number_of_bcp],
+	  Info1, Info2).
+
+merge_info_no_bound(Info1, Info2) ->
+    minfo([number_of_clauses,
+	   number_of_dead_clauses,
+	   number_of_bcp],
+	  Info1, Info2).
+
+minfo([Key|Ks], Src, Dst) ->
+    case maps:get(Key, Src, undefined) of
+	undefined -> minfo(Ks, Src, Dst);
+	Value -> minfo(Ks, Src, maps:put(Key, Value, Dst))
+    end;
+minfo([], _Src, Dst) ->
+    Dst.
+	
 get_info(Bs) ->
     #{ number_of_variables =>
 	   varc:info(Bs#bs.vp,  number_of_variables),
@@ -1358,7 +1405,9 @@ get_info(Bs) ->
        number_of_clauses =>
 	   varc:info(Bs#bs.vp,number_of_clauses),
        number_of_dead_clauses =>
-	   varc:info(Bs#bs.vp,number_of_dead_clauses)
+	   varc:info(Bs#bs.vp,number_of_dead_clauses),
+       number_of_bcp =>
+	   varc:info(Bs#bs.vp,bcp_counter)
      }.
        
 call(undefined, _Request) ->

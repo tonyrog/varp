@@ -1,6 +1,6 @@
 //
-// Pigeon hole formula
-// input n
+// Pigeon hole formula 
+// NOTE n is number of pigeon in this formula
 //
 ( ([A p=1..n] [E h=1..(n-1)] P(p,h)) and
   ([A h=1..(n-1)] [A p=1..n] [A q=1..n,p<q] not (P(p,h) and P(q,h))) )

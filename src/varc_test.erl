@@ -358,7 +358,6 @@ nbcp_loop(V) ->
 	    nbcp_loop(V)
     end.
     
-
 dump_variables(V, List) ->
     lists:foreach(
       fun(X) ->
@@ -409,7 +408,16 @@ order() ->
     varc:bind(V, Y3),
 
     dump_variables(V, [X1,X2,X3,X4,X5,X6]),
-    
+
+    Index = varc:first_unbound_index(V),
+    io:format("First unbound index = ~w\n", [Index]),
+    if Index =:= false ->
+	    ok;
+       true ->
+	    Index1 = varc:next_unbound_index(V, Index),
+	    io:format("Next unbound index = ~w\n", [Index1])
+    end,
+
     ok = varc:order_sort(V, ?ORDER_IDENTITY),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
 

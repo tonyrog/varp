@@ -73,8 +73,8 @@ emit_fd(Fd, Type, Symbols, Raw, Bs) ->
     {VarMap, NumClauses, NumVars} = renumerate_clauses(Bs, Raw),
     case Type of
 	cnf ->
-	    io:format(Fd, "p cnf ~w ~w\n", [NumVars, NumClauses]),
-	    emit_symbols(Fd, Symbols, Bs, VarMap);
+	    emit_symbols(Fd, Symbols, Bs, VarMap),
+	    io:format(Fd, "p cnf ~w ~w\n", [NumVars, NumClauses]);
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [NumVars, NumClauses])
     end,
