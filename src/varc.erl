@@ -32,6 +32,7 @@
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/4]).
+-export([minimize/2]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -49,6 +50,7 @@
 -export([get_clause/3]).
 -export([get_clause/4]).
 -export([del_clause/2]).
+-export([move_clause/3]).
 -export([compress_clause/2]).
 -export([clean_clause/2]).
 -export([clean_edges/2]).
@@ -265,6 +267,11 @@ conflicting_clause(_Vp, _Index) ->
 conflict(_Vp, _Level, _Bump, _Index) ->
     ?nif_stub().    
 
+-spec minimize(Vp::varc(), ClauseIndex::integer()) -> integer().
+%% minimize the clause and return number of literals removed
+minimize(_Vp, _CluseIndex) ->
+    ?nif_stub().    
+
 -spec is_variable(Vp::varc(), Lit::literal()) -> boolean().
 is_variable(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
@@ -386,6 +393,12 @@ clause_info(Vp,Index) ->
 -spec del_clause(Vp::varc(), integer()|[literal()]) -> ok.
 del_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+-spec move_clause(Vp::varc(),ClauseIndex::integer(),SI::integer()) ->
+			 integer().
+move_clause(_Vp,_Index,_Si) when
+      is_integer(_Index), _Index >= 0, is_integer(_Si), _Si >= 0, _Si =< 3 ->
     ?nif_stub().
 
 clean_clause(_Vp,Index)

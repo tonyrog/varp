@@ -52,9 +52,6 @@
 // #define COUNT(vp, cnt)
 #define COUNT(vp, cnt) vp->counter[(cnt)]++
 
-// #define USE_CLAUSE_SHUFFLE
-// #define USE_CLAUSE_FIND
-
 #ifdef ASSERTIONS
 // #define NDEBUG
 #include <assert.h>
@@ -228,7 +225,9 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "clause_first",        2,  varp_clause_first ) \
     NIF( "clause_next",         2,  varp_clause_next ) \
     NIF( "set_user_count",      3,  varp_set_user_count ) \
-    NIF( "conflict",            4,  varp_conflict )
+    NIF( "conflict",            4,  varp_conflict ) \
+    NIF( "minimize",            2,  varp_minimize ) \
+    NIF( "move_clause",         3,  varp_move_clause )
 
 // Declare all nif functions
 #ifdef NIF_TRACE
@@ -333,7 +332,9 @@ typedef struct _literal_t
 
 typedef uint32_t cix_t;             // clause index type <<set:2,index:30>>
 typedef int32_t  pos_t;             // literal position type (-1 = invalid)
-#define CLAUSE_NONE ((cix_t) -1)
+#define CLAUSE_NONE  ((cix_t) -1)
+#define CLAUSE_TRUE  ((cix_t) -2)
+#define CLAUSE_FALSE ((cix_t) -3)
 #define MAKE_CIX(si,ix)  (((si)<<30)|(ix))
 #define GET_SI(cix)      ((cix)>>30)
 #define GET_IX(cix)      ((cix)&0x3FFFFFFF)
@@ -577,9 +578,10 @@ typedef struct _varp_t {
     } while(0)
 
 ErlNifResourceType* varp_res;
+ErlNifTSDKey varp_tsd;
 
-static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
-				     int si, lit_t* lit, size_t size);
+static cix_t add_clause_array(varp_t* vp, int si,
+			      lit_t* lit, size_t size, bool_t put_unit);
 
 #ifdef NIF_TRACE
 #define NIF(name,arity,func) NIF_FUNC(name, arity, trace##_##func##_##arity),
@@ -1451,6 +1453,36 @@ static void varp_free(allocator_t* ap, void* ptr)
     ap->free_list = (object_t*)ptr;
 }
 
+typedef struct
+{
+    size_t asize;  // allocated size
+    lit_t  lit[];
+} dyn_clause_t;
+
+static lit_t* get_dynamic_clause(size_t size)
+{
+    dyn_clause_t* dp = enif_tsd_get(varp_tsd);
+    
+    if (dp == NULL) {  // alloc
+	size_t first_size = size < 256 ? 256 : 2*size;
+	size_t memsize = sizeof(dyn_clause_t)+sizeof(lit_t)*first_size;
+	if ((dp = VARP_ALLOC(memsize)) == NULL)
+	    return NULL;
+	dp->asize = first_size;
+	enif_tsd_set(varp_tsd, dp);
+    }
+    else if (dp->asize < size) {  // realloc
+	size_t next_size = 2*size;
+	size_t memsize = sizeof(dyn_clause_t)+sizeof(lit_t)*next_size;
+	if ((dp = VARP_REALLOC(dp, memsize)) == NULL)
+	    return NULL;
+	dp->asize = next_size;
+	enif_tsd_set(varp_tsd, dp);	
+    }
+    return dp->lit;
+}
+
+
 static void arc4_init(arc4_stream_t *as)
 {
     int n;
@@ -2103,9 +2135,11 @@ static void clause_free(varp_t* vp, clause_t* cp)
     if (cp != NULL) {
 	cix_t cix;
 	if ((cix = cp->cix) != CLAUSE_NONE) {
-	    clause_hash_unlink(vp, cp);
+	    int si = GET_SI(cix);
+	    if (si != BETA)
+		clause_hash_unlink(vp, cp);
 	    set_clause(vp, cix, NULL);
-	    vp->cnum[GET_SI(cix)]--;
+	    vp->cnum[si]--;
 	}
 #if defined(__WIN32__)
 	_aligned_free(cp);
@@ -2261,8 +2295,8 @@ static cix_t clause_insert(varp_t* vp, int si, clause_t* cp, uint32_t hvalue)
     vp->cnum[si]++;
     set_clause(vp, cix, cp);
 
-    clause_hash_link(vp, cp);
-
+    if (si != BETA) // betas are not hashed
+	clause_hash_link(vp, cp);
     return cix;
 }
 
@@ -3803,15 +3837,14 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    ERL_NIF_TERM list;
     ERL_NIF_TERM result;
     int i;
     int level;
     double bump;
-    lit_t lit[1024];  // fixme: temporary (multi threaded) dynamic array!
-    size_t csize = 0;
+    size_t csize, dsize;
     variable_t* trail;
     literal_t* lp;
+    lit_t* dlit;
     cix_t cix;
     int step;
     
@@ -3833,6 +3866,10 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     cix = vp->conflicting_clauses[i];
     step = 1;
 
+    dsize = 1024;
+    dlit = get_dynamic_clause(dsize);
+    csize = 0;
+    
     while(trail) {
 	int i;
 	lit_t u = ll2l(vp, lp);
@@ -3855,8 +3892,13 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 		    mark_variable(vp, qp->var);
 		    if ((qlevel = qp->var->level) == level)
 			step++;
-		    else if (qlevel > 0)
-			lit[csize++] = q;
+		    else if (qlevel > 0) {
+			if (csize >= dsize) {
+			    dsize = 2*dsize;
+			    dlit = get_dynamic_clause(dsize);
+			}
+			dlit[csize++] = q;
+		    }
 		}
 	    }
 	}
@@ -3868,7 +3910,11 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    step--;
 	    if (step == 0) {
 		lp = literal_neg_vv(vp, trail);
-		lit[csize++] = ll2l(vp, lp);
+		if (csize >= dsize) {
+		    dsize = 2*dsize;
+		    dlit = get_dynamic_clause(dsize);
+		}
+		dlit[csize++] = ll2l(vp, lp);
 		goto make_clause;
 	    }
 	    cix = trail->implication_clause;
@@ -3880,20 +3926,95 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     goto done;
     
 make_clause:
+    if ((cix = add_clause_array(vp, BETA, dlit, csize, false)) == CLAUSE_NONE)
+	result = enif_make_badarg(env);
+    else if (cix == CLAUSE_TRUE)
+	result = ATOM(true);
+    else if (cix == CLAUSE_FALSE)
+	result = ATOM(false);
+    else
+	result = make_cix(env, cix);
+
     // now we return the clause and let erlang code do the minimize
     // and install after undo
     // later save the clause in special heap and do minimization etc
     // before install the clause
-    list = enif_make_list(env, 0);
-
-    for (i = (int)csize-1; i >= 0; i--) {
-	ERL_NIF_TERM elem = external_l(env, lit[i]);
+    /*
+    {
+      ERL_NIF_TERM list = enif_make_list(env, 0);
+      for (i = (int)csize-1; i >= 0; i--) {
+        ERL_NIF_TERM elem = external_l(env, dlit[i]);
 	list = enif_make_list_cell(env, elem, list);
-    }
-    result = list;
+      }
+      result = list;
+     }
+    */
 done:
     unmark_all_variables(vp);
     return result;
+}
+
+// check if dp - l is a sub-clause of cp
+static int is_subclause(clause_t* dp, lit_t l, clause_t* cp)
+{
+    int i, j;
+    
+    if (dp->size >= cp->size)
+	return 0;
+    i = j = 0;
+    while((i < (int)dp->size) && (j < (int)cp->size)) {
+	if (dp->lit[i] == l)
+	    i++;
+	else if (dp->lit[i] == cp->lit[j]) {
+	    i++;
+	    j++;
+	}
+	else {
+	    if (abs(export_l(dp->lit[i])) > abs(export_l(cp->lit[j])))
+		return 0;
+	    j++;
+	}
+    }
+    return 1;
+}
+
+
+// Minimize a clause wrt implication clauses as subclauses
+static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
+				  const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    cix_t  cix;
+    clause_t* cp;
+    lit_t* dlit;
+    size_t csize;
+    int i,n;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_cix(env, vp, argv[1], &cix))
+	return enif_make_badarg(env);
+    if ((cp = get_clause(vp, cix)) == NULL)
+	return enif_make_badarg(env);
+    
+    dlit = get_dynamic_clause(cp->size);
+    csize = 0;
+    n = (int) cp->size;
+    for (i = 0; i < n; i++) {
+	lit_t li = cp->lit[i];
+	variable_t* var = var_l(vp, li);
+	if ((cix = var->implication_clause) != CLAUSE_NONE) {
+	    if (!is_subclause(get_clause(vp, cix), neg_l(li), cp))
+		dlit[csize++] = li;
+	}
+    }
+    if (csize < cp->size) {
+	memcpy(cp->lit, dlit, sizeof(lit_t)*csize);
+	cp->size = csize;
+	return enif_make_int(env, csize);
+    }
+    return enif_make_int(env, 0);
 }
 
 // update degree for all literals in a clause
@@ -4733,13 +4854,13 @@ static int bcp_clauses(varp_t* vp, literal_t* lp)
 	    wlink_t* wl0 = &cp->wl[i];
 	    wlink_t* wl1 = &cp->wl[1-i];
 	    switch(cp->select) {
-	    case 0:
+	    case 1:
 		lp = bcp_2_clause(vp, cp, wl1);
 		break;
-	    case 1:
+	    case 2:
 		lp = bcp_3_clause(vp, cp, wl0, wl1, wlp);
 		break;
-	    case 2:
+	    case 3:
 		lp = bcp_n_clause(vp, cp, wl0, wl1, wlp, cp->size);
 		break;
 	    default:
@@ -5339,9 +5460,8 @@ static size_t sort_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
     return size;
 }
 
-
-static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
-				     int si, lit_t* lit, size_t size)
+static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
+			      size_t size, bool_t put_unit)
 {
     clause_t* cp;
     cix_t cix;
@@ -5349,63 +5469,46 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
     
     size = sort_clause_array(vp, lit, size, false);
     
-    // set watch points
     if (lit[size-1] == L_TRUE(vp))
-	return ATOM(true);
+	return CLAUSE_TRUE;
 
     if (size == 1) {  // unit
 	if (lit[0] == L_FALSE(vp))
-	    return ATOM(false);
-	put_l(vp, lit[0], I_TRUE, -1, -1, 0);
-	return ATOM(true);
-    }
-
-#ifdef USE_CLAUSE_FIND
-    // check if clause is already installed!!!
-    // FIXME: allow only if clause_hash is set?
-    if ((cix = clause_find(vp, lit, size)) >= 0) {
-	enif_fprintf(stdout, "Found clause %d size=%ld\r\n", cix, size);
-	return enif_make_tuple2(env, ATOM(true),
-				enif_make_int(env, cix));
-    }
-#endif
-
-    // shuffle literals - possibly make watch literal chains shorter?
-#ifdef USE_CLAUSE_SHUFFLE
-    {
-	int i;
-	shuffle_key_t skey[size];
-	for (i = 0; i < (int)size; i++) {
-	    skey[i].lit = lit[i];
-	    skey[i].key = arc4_random(&vp->as);
+	    return CLAUSE_FALSE;
+	if (put_unit) { // else make a real clause of the unit
+	    put_l(vp, lit[0], I_TRUE, -1, -1, 0);
+	    return CLAUSE_TRUE;
 	}
-	QSORT(skey, size, sizeof(shuffle_key_t), cmp_shuffle, 0);
-	for (i = 0; i < (int)size; i++)
-	    lit[i] = skey[i].lit;
     }
-    PRINT_LIT_ARRAY("shuffle", lit, size);
-#endif
+
     if ((cp = clause_alloc(vp, size)) == NULL)
-	goto error;
+	return CLAUSE_NONE;
     hvalue = (uint32_t) literal_array_hash(vp, lit, size);
     if ((cix = clause_insert(vp, si, cp, hvalue)) == CLAUSE_NONE)
-	goto error;
+	return CLAUSE_NONE;
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
-    
     switch(size) {
-    case 2: cp->select = 0; break; // 0 = 2 clause
-    case 3: cp->select = 1; break; // 1 = 3 clause
-    default: cp->select = 2; break; // 2 = n clause
+    case 1: cp->select = 0; break; // 0 = 1 clause
+    case 2: cp->select = 1; break; // 1 = 2 clause
+    case 3: cp->select = 2; break; // 2 = 3 clause
+    default: cp->select = 3; break; // 3 = n clause
     }
-	
+    return cix;
+}
+
+// Install watch points, optionally setup cross reference and
+// handle edges. Then update degree and activity stats
+static int clause_install(varp_t* vp, clause_t* cp)
+{
+    int si = GET_SI(cp->cix);
     switch (link_clause(vp, cp)) {
     case -1:
-	goto error;
+	return -1;      
     case 0:
 	update_clause_degree(vp, cp, 1);
 	if ((vp->atype != off) && (si > 0))
 	    update_clause_activity(vp, cp, 1.0f);
-	return enif_make_tuple2(env, ATOM(false), make_cix(env, cix));
+	return 0;
     case 1:
 	update_clause_degree(vp, cp, 1);
 	if ((vp->atype != off) && (si > 0))
@@ -5416,14 +5519,10 @@ static ERL_NIF_TERM add_clause_array(ErlNifEnv* env, varp_t* vp,
 	    print_sym_clause(vp, "", cp);
 	}
 #endif
-	return enif_make_tuple2(env, ATOM(true), make_cix(env, cix));
+	return 1;
     default:
-	goto error;
+	return -1;
     }
-
-error:
-    if (cp != NULL) clause_free(vp, cp);
-    return enif_make_badarg(env);
 }
 
 //
@@ -5437,8 +5536,9 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
     varp_t* vp;
     int size;
     unsigned int si = 0;
+    cix_t cix;
     ERL_NIF_TERM list;
-    ERL_NIF_TERM head, tail;    
+    ERL_NIF_TERM head, tail;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -5458,8 +5558,11 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     else {
 	ERL_NIF_TERM ret;
-	lit_t literals[size];
-	lit_t* lpp = &literals[0];
+	lit_t* dlit;
+	lit_t* lpp;
+
+	dlit = get_dynamic_clause(size);
+	lpp = dlit;
 	
 	list = argv[1];
 	while(enif_get_list_cell(env, list, &head, &tail)) {
@@ -5469,7 +5572,25 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 	    list = tail;
 	}
 	vp->caller_env = env;
-	ret = add_clause_array(env, vp, si, literals, size);
+	if ((cix = add_clause_array(vp, si, dlit, size, true)) == CLAUSE_NONE)
+	    ret = enif_make_badarg(env);
+	else if (cix == CLAUSE_TRUE)
+	    ret = ATOM(true);
+	else if (cix == CLAUSE_FALSE)
+	    ret = ATOM(false);
+	else {
+	    switch (clause_install(vp, get_clause(vp,cix))) {
+	    case 0:
+		ret = enif_make_tuple2(env,ATOM(false),make_cix(env,cix));
+		break;
+	    case 1:
+		ret = enif_make_tuple2(env,ATOM(true),make_cix(env,cix));
+		break;
+	    default:
+		ret = enif_make_badarg(env);
+		break;
+	    }
+	}
 	vp->caller_env = NULL;
 	return ret;
     }
@@ -5607,6 +5728,54 @@ static void remove_clause(varp_t* vp, clause_t* cp)
 	clause_free(vp, cp);
     }
 }
+
+// Move clause from one clause set to another,
+// right now only BETA => GAMMA is possible!
+static ERL_NIF_TERM varp_move_clause(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    cix_t cix0, cix;
+    clause_t* cp;
+    unsigned si, si0;
+    int ix;
+    clause_t** cm;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_cix(env, vp, argv[1], &cix0))
+	return enif_make_badarg(env);
+    if (!enif_get_uint(env, argv[2], &si) || (si > NUM_CSET))
+	return enif_make_badarg(env);
+    if ((cp = get_clause(vp, cix0)) == NULL)
+	return enif_make_badarg(env);
+    si0 = GET_SI(cix0);
+    if ((si != GAMMA) || (si0 != BETA))
+	return enif_make_badarg(env);
+
+    cix = clause_insert(vp, si, cp, cp->hvalue);
+    
+    set_clause(vp, cix0, NULL);  // kill original position
+    // check if we have a hole at the end, update cnext
+    ix = GET_IX(cix0);
+    cm = vp->clause_map[si0];
+    if (ix+1 == (int)vp->cnext[si0]) {  // we remove the last clause
+	while((ix>0) && (cm[ix-1] == NULL))
+	    ix--;
+	vp->cnext[si0] = ix;
+    }
+    // setup TWL etc
+    switch (clause_install(vp, get_clause(vp,cix))) {
+    case 0:
+	return enif_make_tuple2(env,ATOM(false),make_cix(env,cix));
+    case 1:
+	return enif_make_tuple2(env,ATOM(true),make_cix(env,cix));
+    default:
+	return enif_make_badarg(env);
+    }    
+}
+    
 
 // delete a clause by index or literal list
 // may only delete clauses on level 0!
@@ -6678,6 +6847,10 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     varp_res = enif_open_resource_type_x(env, "varp", &rinit,
 					 ERL_NIF_RT_CREATE,
 					 &tried);
+    
+    // Create thread safe "static" resizable clause buffer
+    enif_tsd_key_create("varp_dyn_clause", &varp_tsd);
+    
     load_atoms(env);
     *priv_data = 0;
     return 0;

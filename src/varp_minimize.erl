@@ -34,7 +34,7 @@ clause_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
 	    A = varc:get_clause(Bs#bs.vp,I),
 	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
 	    %%    [-Li, A, Clause]),
-	    %% if A-{Li} is a subset of Clause then remove Li from clause
+	    %% if A-{~Li} is a subset of Clause then remove Li from clause
 	    case is_subclause_abs(A, -Li, Clause) of
 		true ->
 		    clause_(Bs, Ls, Clause, NewClause, Removed+1, Length+1);
