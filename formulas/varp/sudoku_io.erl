@@ -1,7 +1,7 @@
 -module(sudoku_io).
 -export([file/1, file/2]).
 -export([input/2]).
--export([output/2]).
+-export([output/3]).
 
 input(Line, _Acc) ->
     Ns = [(I-$0) || I <- lists:sublist(Line,81)],
@@ -10,7 +10,7 @@ input(Line, _Acc) ->
     %% remove all zeros and inject indices
     {true,{'ALL',[{p,'S',[I,J,K]} || {{p,'S',[I,J]},K} <- NsSs, K =/= 0]}}.
 
-output(Fd, Model) ->
+output(Fd, _Partial, Model) ->
     %% io:format(Fd, "~p\n", [Model]).
     io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n", []),
     lists:foreach(

@@ -40,7 +40,7 @@
 	 dir = #{} :: #{ integer() => 'Left'|'Right'|'Up'|'Down' }
 	}).
 	 
-output(_Fd, Model) ->
+output(_Fd, _Partial, Model) ->
     Out = lists:foldl(
 	     fun({{p,'Wall',[I,J]},true}, Out) ->
 		     Out#out { maze = maps:put({I,J}, $X, Out#out.maze) };

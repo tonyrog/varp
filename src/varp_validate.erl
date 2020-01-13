@@ -76,7 +76,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    io:format("\nREAD ERROR\n"),
 	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
-	    %% io:format("check clause ~w\n", [Clause]),
+	    io:format("add clause ~w\n", [Clause]),
 	    varc:set_level(Bs#bs.vp,1),
 	    Res = eval_neg_literal_list(Bs, Clause),
 	    varc:undo_level(Bs#bs.vp,1),
@@ -103,6 +103,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    end;
 	{d,Clause} ->
 	    %% what tests must be done?
+	    io:format("delete clause ~w\n", [Clause]),
 	    ok = varp_formula:del_clause(Bs, Clause),
 	    validate_loop(Fd,Type,Bs,I1)	    
     end.
@@ -119,60 +120,107 @@ read_clause(_Fd, binary,_Bs) ->
     %% read compressed clause
     eof;
 read_clause(Fd, _, Bs) ->  %% text/user
-    read_text_clause(Fd, Bs, []).
+    read_text_clause(Fd, Bs).
 
-read_text_clause(Fd, Bs, Acc) ->
+read_text_clause(Fd, Bs) ->
     case file:read_line(Fd) of
-	eof -> 
-	    if Acc =:= [] -> eof;
-	       true -> Acc
-	    end;
+	eof -> eof;
 	{ok,Line} ->
-	    case string:tokens(binary_to_list(Line), " \n") of
-		["d" | Ts] ->
-		    case scan_clause(Ts, Bs, Acc) of
-			{true, Clause} -> 
-			    {d, Clause};
-			{false, Acc1} ->
-			    read_text_clause(Fd, Bs, Acc1);
-			error ->
-			    error
-		    end;
-		["a" | Ts] ->
-		    case scan_clause(Ts, Bs, Acc) of
-			{true, Clause} -> 
-			    {a, Clause};
-			{false, Acc1} ->
-			    read_text_clause(Fd, Bs, Acc1);
-			error ->
-			    error
-		    end;
-		Ts ->
-		    case scan_clause(Ts, Bs, Acc) of
-			{true, Clause} -> 
-			    {a, Clause};
-			{false, Acc1} ->
-			    read_text_clause(Fd, Bs, Acc1);
-			error ->
-			    error
-		    end
+	    case varp_scan:string(binary_to_list(Line)) of
+		{ok,[{identifier,_Ln,"d"}|Ts],Ln1} ->
+		    text_clause(Fd, Bs, Ts, Ln1, [], d);
+		{ok,[{identifier,_Ln,"a"}|Ts],Ln1} ->
+		    text_clause(Fd, Bs, Ts, Ln1, [], a);
+		{ok,Ts,Ln1} ->
+		    text_clause(Fd, Bs, Ts, Ln1, [], a)
 	    end
     end.
 
-scan_clause([L|Ls], Bs, Acc) ->
-    case list_to_integer(L) of
-	0 ->
-	    {true, lists:reverse(Acc)};
-	Li -> 
-	    scan_clause(Ls, Bs, [dimacs_literal(Li,Bs)|Acc])
-    end;
-scan_clause([], _Bs, Acc) ->
-    {false, Acc}.
+read_text_clause(Fd, Bs, Acc, Type) ->
+    case file:read_line(Fd) of
+	eof -> eof;
+	{ok,Line} ->
+	    case varp_scan:string(binary_to_list(Line)) of
+		{ok,Ts,Ln1} ->
+		    text_clause(Fd, Bs, Ts, Ln1, Acc, Type)
+	    end
+    end.
+
+text_clause(Fd, Bs, Ts, Ln, Acc, Type) ->
+    case take_eol(Ts) of
+	false -> 
+	    read_text_clause(Fd, Bs, Acc++Ts, Type);
+	{true, Ts1} ->
+	    parse_clause(Bs, Acc++Ts1, Ln, Type)
+    end.
+
+
+take_eol(Ts) ->
+    take_eol(Ts,[]).
+
+take_eol([{decnum,_,"0"}],Acc) ->
+    {true, lists:reverse(Acc)};
+take_eol([T|Ts], Acc) ->
+    take_eol(Ts, [T|Acc]);
+take_eol([], _Acc) ->
+    false.
+
+parse_clause(Bs, Ts, Ln, Type) ->
+    case scan_clause(Ts, Ln, Bs, []) of
+	{ok, Clause} ->
+	    {Type, Clause};
+	error ->
+	    error
+    end.
+
+scan_clause([], _Ln, _Bs, Acc) ->
+    {ok, lists:reverse(Acc)};
+scan_clause([{decnum,_Ln,Dec}|Ts], Ln, Bs, Acc) ->
+    Li = list_to_integer(Dec),
+    scan_clause(Ts, Ln, Bs, [dimacs_literal(Li,Bs)|Acc]);
+scan_clause([{'-',_Ln0},{decnum,_Ln,Dec}|Ts], Ln, Bs, Acc) ->
+    Li = -list_to_integer(Dec),
+    scan_clause(Ts, Ln, Bs, [dimacs_literal(Li,Bs)|Acc]);
+scan_clause(Ts, Ln, Bs, Acc) ->
+    case varp_snf:parse(Ts++[{'.',Ln}]) of
+	{ok, CL} ->
+	    {ok, Acc ++ snf_literals(CL, Bs)};
+	{error, _Reason} ->
+	    error
+    end.
+
+%% translate SNF symbols and reverse list
+snf_literals(CL, Bs) ->
+    snf_literals(CL, Bs, []).
+
+snf_literals([{'not',X}|CL], Bs, Acc) ->
+    snf_literals(CL, Bs, [-variable(eval_sym(X), Bs)|Acc]);
+snf_literals([X|CL], Bs, Acc) ->
+    snf_literals(CL, Bs, [variable(eval_sym(X), Bs)|Acc]);
+snf_literals([], _Bs, Acc) ->
+    Acc.
+
+eval_sym({p,S,Args}) ->
+    {p,S,[eval_arg(A)||A<-Args]};
+eval_sym({bit_index,Sym,Index}) ->
+    {bit_index,eval_sym(Sym),eval_arg(Index)}.
+
+eval_arg(V) when is_integer(V) -> V;
+eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).
+
+empty_vs(Bs) ->    
+    (Bs#bs.vs =:= undefined) orelse  (maps:size(Bs#bs.vs) =:= 0).
 
 dimacs_literal(Li,Bs) when Li < 0 ->
-    -variable({p,x,[-Li]},Bs);
+    case empty_vs(Bs) of
+	true -> Li;
+	false -> -variable({p,x,[-Li]},Bs)
+    end;
 dimacs_literal(Li,Bs) when Li > 0 ->
-    variable({p,x,[Li]},Bs).
+    case empty_vs(Bs) of
+	true -> Li;
+	false -> variable({p,x,[Li]},Bs)
+    end.
 
 variable(V, Bs) ->
     I = maps:get(V, Bs#bs.vs),

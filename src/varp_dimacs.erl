@@ -176,13 +176,11 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 	{ok,Line,Bin1} ->
 	    case varp_scan:string(Line) of
 		{ok,Ts1,Ln1} ->
-		    %% io:format("Ts0=~p, Ts1=~p\n", [Ts0,Ts1]),
 		    Ts2 = Ts0 ++ Ts1,
 		    Eol = lists:keymember('.',1,Ts1),
 		    if Eol =:= true ->
 			    case varp_snf:parse(Ts2) of
 				{ok,CL} ->
-				    %% CL1 = rewrite_snf_claus(CL,Vs),
 				    to_snf_(Bin1,Sect,Ln1,[],[CL|CLs]);
 				{error,{Ln1,Mod,Message}} ->
 				    {error,{Ln1-1+Ln,Mod,Message}};
@@ -198,33 +196,6 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 		    Error
 	    end
     end.
-
-%% translate symbolic literals etc
-%% rewrite_snf_claus(CL,Vs) ->
-%%     [rewrite_literal(L,Vs) || L <- CL].
-
-%% rewrite_literal({'not',V},Vs) -> rewrite_variable(V,Vs);
-%% rewrite_literal(V,Vs) -> rewrite_variable(V,Vs).
-
-%% rewrite_variable({uint,V,Size,#cconst{base=B,value=V}},Vs) ->
-%%     case lookup(V, Vs) of
-%% 	{{V,uint,Sz},_} -> {uint,V,Sz,integer_to_list(V,B)};
-%% 	false -> {uint,V,Size,integer_to_list(V,B)}
-%%     end;
-%% rewrite_variable({int,V,Size,#cconst{base=B,value=V}},Vs) ->
-%%     case lookup(V, Vs) of
-%% 	{{V,int,Sz},_} -> {int,V,Sz,integer_to_list(V,B)};
-%% 	false -> {uint,V,Size,integer_to_list(V,B)}
-%%     end;
-%% rewrite_variable(V,_Vs) -> V.
-
-%% lookup(V, [E={{V,_Type,_Size},_Ys}|_]) ->
-%%     E;
-%% lookup(V, [_|Vs]) ->
-%%     lookup(V, Vs);
-%% lookup(_V, []) ->
-%%     false.
-    
 
 save(File, Cs) ->
     file:write_file(File, format(Cs, File)).

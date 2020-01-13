@@ -17,7 +17,7 @@
 -export([start/0]).
 -export([main_loop/1]).
 
--export([output_model/3]).  %% varp callback
+-export([output_model/4]).  %% varp callback
 
 %% warp_wx is also a plugin (monitor assignment etc)
 -export([options/0, run/2]).
@@ -68,6 +68,28 @@
  	 config_nbound,     %% wxGauge
 	 config_notebook
 	}).
+
+-define(ORDER_OPT(Ord,Ord2),
+	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
+		{seed,-1}]}).
+
+-define(REORDER_0,
+	[
+	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_RANDOM)},
+	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
+	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
+	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	]).
+
+-define(REORDER_1,
+	[
+	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	]).
+
 
 version() ->
     {ok,Vsn} = application:get_key(varp, vsn),
@@ -531,6 +553,7 @@ handle_event(Event, S) ->
 	    end;
 
         #wx{id=?wxID_PASTE,event=#wxCommand{type=command_menu_selected}} ->
+	    %% FIXME: check focus!
             wxStyledTextCtrl:paste(S#s.formula),
 	    {noreply,S};
 
@@ -779,8 +802,7 @@ solve(Mode, S, Bound) ->
     Dir_2   = read_param(Pfx,[order,key2,dir],S,descend),
     Assoc   = read_param(Pfx,[varp,assoc],S,none),
     QType   = read_param(Pfx,[varp,qtype],S,recursive),
-    AType = if Order_1 =:= activity;
-	       Order_2 =:= activity -> mvsids;
+    AType = if Order_1 =:= activity; Order_2 =:= activity -> mvsids;
 	       true -> off
 	    end,
     %% _EdgeList = true,
@@ -934,7 +956,9 @@ order(Dir, Ord) ->
 
 %% add inc_learned_factor - no units found for T seconds
 read_backjump_params(S,I) ->
-    [{minimize,   read_param(?BJK(I,minimize), S, true)},
+    [
+     %% {display,    true},
+     {minimize,   read_param(?BJK(I,minimize), S, true)},
      {iorder,     read_param(?BJK(I,iorder), S, 0)},
      {stumble,    read_param(?BJK(I,stumble), S, 0)},
      {olle,               read_param(?BJK(I,olle), S, 0)},
@@ -949,7 +973,7 @@ read_backjump_params(S,I) ->
      {restart_interval, read_param(?BJK(I,restart_interval), S, 0)},
      {decay, read_param(?BJK(I,decay), S, 0.95) },
      {bump, read_param(?BJK(I,bump), S, 1.0) },
-     {reorder, order_list()}
+     {reorder, ?REORDER_1}
     ].
 
 read_param(Pfx, Key, S, Default) when is_atom(Key) ->
@@ -962,19 +986,6 @@ read_param(Key, #s{ setting_values=ValueMap}, Default) when is_list(Key) ->
 
 read_p(Key, ValueMap, Default) when is_list(Key), is_map(ValueMap) ->
     maps:get(Key, ValueMap, Default).
-
-order_list() ->
-    [
-     {0,order_opt(?ORDER_ACTIVITY)},
-     {1,order_opt(?ORDER_ACTIVITY)},
-     {2,order_opt(?ORDER_ACTIVITY)},
-     {3,order_opt(?ORDER_ACTIVITY)},
-     {4,order_opt(?ORDER_RANDOM)}
-    ].
-
-order_opt(Ord) ->
-    {order,[{sort,[Ord bor ?ORDER_DESCEND,?ORDER_UNDEFINED]},
-	    {seed,-1}]}.
 
 %% add extension only if there no extension to the name
 add_extension(Path, Ext) ->
@@ -1095,11 +1106,16 @@ output_clear(S) ->
 
 %% varp output function, first two arguments are fixed, reset
 %% is passed in the output parameter list
-output_model(_Fd, Model, S) ->
+output_model(_Fd, Partial, Model, S) ->
     wxStyledTextCtrl:setReadOnly(S#s.model, false),
+    if Partial ->
+	    wxStyledTextCtrl:addText(S#s.model, ["PARTIAL\n"]);
+       true ->
+	    ok
+    end,
     List = [ varp_formula:format_binding(B) ||
 	       B <- varp_formula:filter_bindings(Model),
-	       element(2,B) =/= false ],
+	       Partial orelse (element(2,B) =/= false) ],
     Chars = lists:join(",", List),
     wxStyledTextCtrl:addText(S#s.model, [Chars,"\n"]),
     wxStyledTextCtrl:setReadOnly(S#s.model, true),
@@ -1231,8 +1247,12 @@ options() ->
 
 run(Bs, Param) ->
     SELF = self(),
-    Info = [atom,variable,number_of_variables,number_of_bound_variables,
-	    number_of_clauses, number_of_dead_clauses],
+    Info = [atom,variable,
+	    number_of_variables,
+	    number_of_bound_variables,
+	    number_of_subst_variables,
+	    number_of_clauses,
+	    number_of_dead_clauses],
     Ref = make_ref(),
     {Pid,Mon} =
 	spawn_monitor(
@@ -1307,6 +1327,7 @@ mon_loop_collect(Info) ->
 update_info(#{nbound:=NBound,window:=Window},StartTime,
 	    #{number_of_variables:=NV,
 	      number_of_bound_variables:=NB,
+	      number_of_subst_variables:=NS,
 	      number_of_clauses:=NC,
 	      number_of_dead_clauses:=ND,
 	      number_of_bcp:=NE
@@ -1315,9 +1336,9 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
     Status = io_lib:format(
-	       "#Var: ~-8w #Bound: ~-8w #Clauses: ~-8w"
+	       "#Var: ~-8w #Bound: ~-8w/~8w #Clauses: ~-8w"
 	       "#Dead: ~-8w #Bcp: ~-10w #Time: ~s",
-	       [NV, NB, NC, ND, NE, format_time(Time)]),
+	       [NV, NB, NS, NC, ND, NE, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 
@@ -1354,6 +1375,7 @@ f2i(N) when N >= 0, N < 100 ->
 
 merge_info(Info1, Info2) ->
     minfo([number_of_bound_variables,
+	   number_of_subst_variables,
 	   number_of_clauses,
 	   number_of_dead_clauses,
 	   number_of_bcp],
@@ -1378,6 +1400,8 @@ get_info(Bs) ->
 	   varc:info(Bs#bs.vp,  number_of_variables),
        number_of_bound_variables => 
 	   varc:info(Bs#bs.vp,number_of_bound_variables),
+       number_of_subst_variables => 
+	   varc:info(Bs#bs.vp,number_of_subst_variables),
        number_of_clauses =>
 	   varc:info(Bs#bs.vp,number_of_clauses),
        number_of_dead_clauses =>

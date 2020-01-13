@@ -22,6 +22,27 @@
 -import(varp_formula, [format_clause/2, format_clause/3]).
 -import(varp_formula, [format_literals/2]).
 
+-define(ORDER_OPT(Ord,Ord2),
+	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
+		{seed,-1}]}).
+
+-define(REORDER_0,
+	[
+	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_RANDOM)},
+	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
+	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
+	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	]).
+
+-define(REORDER_1,
+	[
+	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	]).
+
 options() ->
     [#{ long  => "timeout",
 	short => "t",
@@ -143,7 +164,7 @@ options() ->
      #{ key => reorder,
 	spec => {list,
 		 {integer,{atom,{list,term}}}},
-	default => [],
+	default => ?REORDER_1,
 	description => "Internal reorder list"}
     ].
      
@@ -196,7 +217,7 @@ loop(Bs, Param, MaxLearned, MR) ->
     end.
 
 loop_(Bs,Param,MaxLearned,MR) ->
-    ?dbg("loop_: nbcp\n",[]),
+    ?dbg("loop_: nbcp Q=~w\n",[ [{L, varc:value(Bs#bs.vp,L)} || L <- varc:get_queue(Bs#bs.vp)]]),
     case varc:nbcp(Bs#bs.vp) of
 	false ->  %% contradiction
 	    Level = varc:info(Bs#bs.vp, level),
@@ -206,27 +227,29 @@ loop_(Bs,Param,MaxLearned,MR) ->
 		    display_stat(Bs,Param),
 		    return(?INCONSISTENT,MR,Bs);
 		0 ->
-		    return(?CONTINUE,MR,Bs);
+		    return(?DONE,MR,Bs);
 		_ ->
 		    contradiction(Bs,Param,Level,MaxLearned,MR)
 	    end;
 	true ->  %% model
 	    N = MR#m.n + 1,
-	    Model = varp:output_model(Bs, N),
+	    Model = varp:output_model(Bs,false,N),
 	    Level = varc:info(Bs#bs.vp, level),
 	    if N >= MR#m.max, MR#m.max > 0; Level =:= 0 -> %%?
 		    display_stat(Bs,Param),
+		    R = if Level =:= 0 -> ?DONE; true -> ?CONTINUE end,
 		    case MR#m.method of
 			collect ->
-			    {?CONTINUE,[Model|MR#m.ms],Bs};
+			    {R,[Model|MR#m.ms],Bs};
 			count ->
-			    {?CONTINUE,N,Bs}
+			    {R,N,Bs}
 		    end;
 	       true ->
 		    Block = varp:block_clause(Bs),
 		    %% FIXME: minimize Block clause and find
 		    %% a working jump level (maybe just one up?)
 		    undo_until(Bs, ?TOP_LEVEL),
+		    %% FIXME: DELTA is maybe not the correct place!?
 		    varp_formula:add_clause(Bs, Block, ?DELTA),
 		    %% we start with simple restart
 		    case MR#m.method of
@@ -349,7 +372,8 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 		    do_clause_stat(Bsi, Len),
 		    add_conflict_clause(Bsi,Clause)
 	    end, Bs0, LClauseList6),
-    
+
+    %% install "the" conflict clause
     Bs2 = case JClause of
 	      undefined ->
 		  Bs1;
@@ -360,14 +384,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 		  add_conflict_clause(Bs1,Clause)
 	  end,
 
-    Learned0 = varc:clauseset_size(Bs2#bs.vp, ?GAMMA),
-    NewLearnedClauses = length(LClauseList6) +
-	case JClause of
-	    undefined -> 0;
-	    {Len2,_,_,_,_,_} when IOrder > 0, Len2 > IOrder -> 0;
-	    _ -> 1
-	end,
-    Learned = Learned0 + NewLearnedClauses,
+    Learned = varc:clauseset_size(Bs2#bs.vp, ?GAMMA),
     DoPurge = varc:clauseset_offset(Bs2#bs.vp, ?GAMMA) > 0,
 
     DoRestartCount =
@@ -471,11 +488,11 @@ reorder(Bs, Param) ->
     end.
 
 undo_until(Bs, NewLevel) ->
+    ?dbg("undo_until: ~w\n", [NewLevel]),
     Level = varc:info(Bs#bs.vp, level),
     undo_until(Bs, Level, NewLevel).
 
 undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
-    ?dbg("undo: ~w\n", [Level]),
     varc:undo_level(Bs#bs.vp, Level),
     undo_until(Bs, Level-1, NewLevel);
 undo_until(Bs, Level, Level) ->

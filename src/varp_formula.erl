@@ -20,7 +20,7 @@
 -export([fmt_bind/4]).
 -export([fmt_bind/3]).
 -export([fmt_bind_list/2]).
--export([print_model/3]).
+-export([print_model/4]).
 -export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 -export([format_p/1]).
@@ -109,12 +109,14 @@ new() ->
 new(Options) when is_list(Options) ->
     new(maps:from_list(Options));  %% fixme validate?
 new(OptMap) when is_map(OptMap) ->
-    Vp  = varc:new([{qtype,maps:get(qtype,OptMap)},
+    NewOpts = [{qtype,maps:get(qtype,OptMap)},
 		    {xref,maps:get(xref,OptMap)},
 		    {clause_hash,maps:get(clause_hash,OptMap)},
 		    {edge,maps:get(edge,OptMap)},
 		    {activity, maps:get(activity,OptMap)}
-		   ]),
+	      ],
+    %% io:format("new(~w)\n", [NewOpts]),
+    Vp  = varc:new(NewOpts),
     Symbols  = maps:get(syms,OptMap),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
@@ -2954,8 +2956,12 @@ clear_user_count(Bs) ->
 		 end).
 %%
 %% collect the model
-%% Boolean:  [{x,true},{y,false}]
-%% Integer:  [{a,15},{b,-7},{c,0}]
+%% Boolean: {x,true} | {y,false}]
+%% Integer: {a,{uint,{$1,$1,$1,$1}}} |  (a = 15)
+%%          {b,{int,{$1,$0,$0,$1}}}  |  (b = -7)
+%%          {c,{int,{$0,$0,$0}}}     |  (c = 0)
+%% 
+%% Partial numbers look like {x,{int,{$*,$1,$0,..,$*,$1}}}
 %%
 model(Bs) ->
     model(Bs#bs.vp, Bs#bs.vs).
@@ -2985,102 +2991,66 @@ collect_model(Vp,Vs) ->
 	      end, [], Vs)
     end.
 
-%% collect all alias variables    
-model_vars(Vp,Vs,[{bit,X,N,I}|Xs],Y,Ms) ->
+model_vars(Vp,Vs,[{Type,X,N,I}|Xs],Y,Ms) ->
+    V = case varc:value(Vp, Y) of
+	    ?T -> $1;
+	    ?F -> $0;
+	    _  -> $*
+	end,
+    model_vars(Vp,Vs,Xs,Y,model_setvec(Type,X,N,I,V,Ms));
+model_vars(Vp,Vs,[X|Xs],Y,Ms) ->
     case varc:value(Vp, Y) of
-	?T ->
-	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,1,Ms));
-	?F ->
-	    model_vars(Vp,Vs,Xs,Y,model_bitset(X,N,I,0,Ms));
-	_ ->
-	    model_vars(Vp,Vs,Xs,Y,Ms)
-    end;
-model_vars(Vp,Vs,[{uint,X,_N,I}|Xs],Y,Ms) ->
-    case varc:value(Vp,Y) of
-	?T ->
-	    model_vars(Vp,Vs,Xs,Y,model_bor({X,(1 bsl I)}, Ms));
-	?F ->
-	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms));
-	_ ->
-	    model_vars(Vp,Vs,Xs,Y,Ms)
-    end;
-model_vars(Vp,Vs,[{int,X,N,I}|Xs],Y,Ms) ->
-    case varc:value(Vp,Y) of
-	?T ->
-	    if I =:= N-1 ->
-		    model_vars(Vp,Vs,Xs,Y,model_bor({X,(-1 bsl I)}, Ms));
-	       true ->
-		    model_vars(Vp,Vs,Xs,Y,model_bor({X,(1 bsl I)}, Ms))
-	    end;
-	?F ->
-	    model_vars(Vp,Vs,Xs,Y,model_bor({X,0}, Ms));
-	_ ->
-	    model_vars(Vp,Vs,Xs,Y,Ms)
-    end;
-model_vars(Vp,Vs,[X|Xs],Y,Ms) when is_integer(Y) ->
-    case varc:value(Vp,Y) of
 	?T ->
 	    model_vars(Vp,Vs,Xs,Y,[{X,true}|Ms]);
 	?F ->
 	    model_vars(Vp,Vs,Xs,Y,[{X,false}|Ms]);
-	_Z -> %% unbound...
-	    %%model_vars(Xs,Y,Bs,[{X,Z} | Ms])
+	_ ->
 	    model_vars(Vp,Vs,Xs,Y,Ms)
     end;
 model_vars(_Vp,_Vs,[],_Y,Ms) ->
     Ms.
 
-model_bitset(X,N,I,V,Ms) ->
+%% int/uint/bit is represented as ascii vector {Type,{$0|$1|$*,...}}
+%% where the bit tuple is MSB (high to low) 
+model_setvec(Type,X,N,I,V,Ms) ->
     case lists:keytake(X, 1, Ms) of
-	{value,{_,Bits},Ms1} ->
-	    <<A:I,_:1,B/bitstring>> = Bits,
-	    [{X,<<A:I,V:1,B/bitstring>>} | Ms1];
+	{value,{X,{Type,Bits}},Ms1} ->
+	    Bits1 = setelement(N-I,Bits,V),
+	    [{X,{Type,Bits1}} | Ms1];
 	false ->
-	    J = (N-I)-1,
-	    [{X,<<0:I,V:1,0:J>>}, Ms]
-    end.    
-    
-model_bor({X,Bit}, Ms) ->
-    case lists:keytake(X, 1, Ms) of
-	{value,{_,Bits},Ms1} ->
-	    try Bit bor Bits of
-		Bits1 -> [{X,Bits1} | Ms1]
-	    catch
-		error:_ ->
-		    error({internal_error, {'bor',Bit,{X,Bits}}})
-	    end;
-	false ->
-	    [{X,Bit} | Ms]
+	    [{X,{Type,erlang:make_tuple(N,$*,[{N-I,V}])}} | Ms]
     end.
 
-print_model(true,I,Bindings) ->
+print_model(true,I,_Partial,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
 	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
-print_model(literal,I,Bindings) ->
+print_model(literal,I,_Partial,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
 	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
-print_model(model,I,Bindings) ->
+print_model(model,I,false,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
 	      [I,lists:join(",",
 			    [ format_binding(Bound) || 
 				Bound <- Bindings1,
 				element(2,Bound) =/= false ])]);
-print_model(umodel,I,Bindings) ->
+print_model(model,I,true,Bindings) ->
+    Bindings1 = filter_bindings(Bindings),
     io:format("~w: ~s\n",
-	      [I,lists:join(",",[ format_binding(Bound) || 
-				    Bound <- Bindings,
-				    element(2,Bound) =/= false ])]);
-print_model(erlang,_I,Bindings) ->
+	      [I,lists:join(",",[format_binding(Bound) || Bound <- Bindings1 ])]);
+%% print_model(umodel,I,_Partial,Bindings) ->
+%%    io:format("~w: ~s\n",
+%%	      [I,lists:join(",",[ format_binding(Bound) || 
+%%				    Bound <- Bindings,
+%%				    element(2,Bound) =/= false ])]);
+print_model(erlang,_I,_Partial,Bindings) ->
     Bindings1 = filter_bindings(Bindings),
     io:format("~w.\n", [Bindings1]);
-
-print_model(dimacs,_I,Bindings) ->
+print_model(dimacs,_I,_Partial,Bindings) ->
     print_dimacs_rows(Bindings, 78);
-
-print_model(false,_I,_Bindings) ->
+print_model(false,_I,_PArtial,_Bindings) ->
     ok.
 
 %% output model in DIMACS format
@@ -3117,6 +3087,7 @@ print_dimacs_rows_([], _I, _N, []) ->
 print_dimacs_rows_([], _I, _N, Acc) ->
     io:format("v~s 0\n", [Acc]).
 
+%% remove bindings on form _Var (hidden)
 filter_bindings([B={{p,V,_},_}|Bs]) when is_atom(V) ->
     case hd(atom_to_list(V)) of
 	$_ -> filter_bindings(Bs);
@@ -3129,10 +3100,41 @@ filter_bindings([]) ->
 
 format_binding({Var,Value}) ->
     VarFmt = format_p(Var),
-    if Value =:= true -> VarFmt;
-       Value =:= false -> [$!|VarFmt];
-       is_integer(Value) -> [VarFmt,"=",integer_to_list(Value)]
+    case Value of
+	true -> VarFmt;
+	false -> [$!|VarFmt];
+	{uint,Vec} -> [VarFmt,"=",format_uint(Vec)];
+	{int,Vec} -> [VarFmt,"=",format_int(Vec)];
+	{bit,Vec} -> [VarFmt,"=",format_bit(Vec)]
     end.
+
+format_uint(Tuple) when is_tuple(Tuple) ->
+    List = tuple_to_list(Tuple),
+    try list_to_integer(List, 2) of
+	UInt -> integer_to_list(UInt)
+    catch
+	error:_ ->
+	    "0b"++List
+    end.
+
+format_int(Tuple) when is_tuple(Tuple) ->
+    List = tuple_to_list(Tuple),
+    try list_to_integer(List, 2) of
+	UInt ->
+	    if element(1,Tuple) =:= $1 -> %% signed
+		    Abs=(((bnot UInt) band ((1 bsl tuple_size(Tuple))-1))+1),
+		    [$-|integer_to_list(Abs)];
+	       true ->
+		    integer_to_list(UInt)
+	    end
+    catch
+	error:_ ->
+	    "0b"++List
+    end.
+
+format_bit(Tuple) when is_tuple(Tuple) ->
+    "{"++tuple_to_list(Tuple)++"}".
+
 
 log_clause(Bs, Clause) ->
     io:format("~s\n", [format_clause(Bs,Clause)]).
@@ -3166,10 +3168,14 @@ proof_output_text(Fd, Bs, Prefix, Clause) ->
        true ->
 	    file:write(Fd, Chars)
     end.
-    
+
+empty_vs(Bs) ->    
+    (Bs#bs.vs =:= undefined) orelse  (maps:size(Bs#bs.vs) =:= 0).
 
 proof_literal(Bs,Li) ->
-    if Li < 0 ->
+    EmptyVs = empty_vs(Bs),
+    if EmptyVs -> integer_to_list(Li);	    
+       Li < 0 ->
 	    case maps:find(-Li, Bs#bs.vs) of
 		error -> [$!,$$|integer_to_list(-Li)];
 		{ok,[{p,x,[I]}]} -> integer_to_list(-I);
@@ -3184,8 +3190,8 @@ proof_literal(Bs,Li) ->
     end.
 
 lookup_literal(Bs,Li) when is_integer(Li) ->
-    if Bs#bs.vs =:= undefined ->
-	    Li;
+    EmptyVs = empty_vs(Bs),
+    if EmptyVs -> Li;
        Li < 0 ->
 	    case maps:find(-Li, Bs#bs.vs) of
 		error -> Li;

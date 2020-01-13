@@ -16,7 +16,7 @@
 -export([scan_file/1]).
 -export([file/1, string/1]).
 -export([archive_path/1]).
--export([output_model/2]).
+-export([output_model/3]).
 -export([empty_sections/0]).
 -export([split_sections/1, split_sections/2]).
 -export([section_opts/2]).
@@ -420,7 +420,7 @@ main(Args) ->
 		    halt(1)
 	    end
     end,
-    halt(0).
+    halt(get(exit_code)).
 
 global_option_spec() ->
     GlobalOptionList = global_options(),
@@ -551,6 +551,7 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
 
 %% command line - display errors and exception as well as results
 varp_run(Do, Formula, GOpts) ->
+    put(exit_code, 0),
     start_cprof(GOpts),
     start_fprof(GOpts),
     R = (catch do_run(Do, Formula, GOpts)),
@@ -657,7 +658,9 @@ do_run(Do, Formula, GOpts) ->
     garbage_collect(self(),[{type,major}]),
     R.
 
-do_run_(Do, Formula, GOpts) ->
+do_run_(Do, Formula, GOpts0) ->
+    %% special check to see if we need to set activate
+    GOpts = add_activity(Do, GOpts0),
     {Main,Bs} = case varp_formula:build(Formula,GOpts) of
 		    {{bool,Var0},Bs0} -> {Var0,Bs0};
 		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0};
@@ -683,8 +686,8 @@ do_run_(Do, Formula, GOpts) ->
 	    N = if is_list(Acc) -> length(Acc);
 		   is_integer(Acc) -> Acc
 		end,
-	    if R =/= ?INCONSISTENT, N =:= 0 ->
-		    output_partial_model(Bs2);
+	    if N =:= 0 ->
+		    output_partial_model(Bs2,R);
 	       true ->
 		    ok
 	    end,
@@ -746,6 +749,44 @@ do([{Plugin,Param}|Do],Acc0,Bs) ->
     end;
 do([], Acc, Bs) ->
     {?CONTINUE, Acc, Bs}.
+
+add_activity(Do, GOpts) ->
+    case maps:get(activity, GOpts, off) of
+	off ->
+	    case need_activity(Do) of
+		true ->
+		    %% io:format("activity mvsids added\n"),
+		    GOpts#{ activity => mvsids };
+		false -> GOpts
+	    end;
+	_ -> GOpts
+    end.
+
+-define(NEED_ACT(Key), (((Key) band ?ORDER_MASK) =:= ?ORDER_ACTIVITY) ).
+%% Check if any order plugin contain ORDER_ACTIVITY then
+%% activate activity processing
+need_activity([{varp_order,Param}|Do]) ->
+    case maps:get(sort, Param, undefined) of
+	[Key1] ->
+	    ?NEED_ACT(Key1) orelse need_activity(Do);
+	[Key1,Key2] ->
+	    ?NEED_ACT(Key1) orelse ?NEED_ACT(Key2) orelse need_activity(Do)
+    end;
+need_activity([{varp_nbackjump,Param}|Do]) ->
+    Reorder = maps:get(reorder,Param,[]),
+    lists:any(
+      fun({_,{order,Order}}) ->
+	      case lists:keyfind(sort,1,Order) of
+		  {_,[Key1]} ->
+		      ?NEED_ACT(Key1);
+		  {_,[Key1,Key2]} ->
+		      ?NEED_ACT(Key1) orelse ?NEED_ACT(Key2)
+	      end
+      end, Reorder) orelse need_activity(Do);
+need_activity([_ | Do]) ->
+    need_activity(Do);
+need_activity([]) ->
+    false.
 
 combine_result(N, M) when is_integer(N), is_integer(M) ->
     N+M;
@@ -819,6 +860,7 @@ display_result(N, none,_Bs) when is_integer(N), N>0 ->
 display_result(?INCONSISTENT, satisfy, Bs) ->
     case varp_formula:getopt(Bs, starexec) of
 	true ->
+	    put(exit_code, 20),
 	    io:format("s UNSATISFIABLE\n");
 	false ->
 	    io:format("% 0\n", [])
@@ -848,7 +890,7 @@ one_model(Bs) ->
     NV = varp_formula:number_of_variables(Bs),
     NB = varp_formula:number_of_bound(Bs),
     if NV =:= NB ->
-	    Model = output_model(Bs,1),
+	    Model = output_model(Bs,false,1),
 	    case varp_formula:getopt(Bs,method) of
 		collect -> [Model];
 		count -> 1
@@ -971,21 +1013,21 @@ varp_input([], _FileName, _Meta) ->
     {error, no_input}.
 
 %% special output format
-varp_output([Out | OutputList], Fd, Model) ->
+varp_output([Out | OutputList], Fd, Partial, Model) ->
     {M,F,A} = mfa_arg(Out, output),
     case code:ensure_loaded(M) of
 	{module,Mod} ->
-	    case erlang:function_exported(Mod, F, length(A)+2) of
+	    case erlang:function_exported(Mod, F, length(A)+3) of
 		true ->
-		    apply(Mod, F, [Fd, Model]++A);
+		    apply(Mod, F, [Fd, Partial, Model]++A);
 		false ->
-		    varp_output(OutputList, Fd, Model)
+		    varp_output(OutputList, Fd, Partial, Model)
 	    end;
 	{error,Err} ->
 	    io:format("varp_output module error ~p\n", [Err]),
-	    varp_output(OutputList, Fd, Model)
+	    varp_output(OutputList, Fd, Partial, Model)
     end;
-varp_output([], _Fd, _Model) ->
+varp_output([], _Fd, _Partial, _Model) ->
     {error, no_output}.
 
 mfa_arg(#cid{name=Name},Func) ->
@@ -996,56 +1038,43 @@ mfa_arg({M,F,A},_Func) when is_atom(M), is_atom(F), is_list(A) ->
     {M,F,A}.
 
 %% possibly emit a model
-output_partial_model(Bs) ->
-    case varp_formula:getopt(Bs,partial) of
-	true ->
-	    Model = varp_formula:model(Bs),
-	    case varp_formula:getopt(Bs,print) of
-		false ->
-		    Model;
-		Flavour ->
-		    case varp_output(Bs#bs.output, user, Model) of
-			{error, no_output} ->
-			    varp_formula:print_model(Flavour,0,Model),
-			    Model;
-			_ ->
-			    Model
-		    end
-	    end;
-	false ->
-	    ok
-    end.
+output_partial_model(Bs, _R) ->
+%%    case varp_formula:getopt(Bs,partial) of
+%%	true ->
+	    output_model(Bs,true,0).
 
-
-
-output_model(Bs,I) ->
-    output_model_header(Bs, I),
+output_model(Bs,Partial,I) ->
+    output_model_header(Bs,Partial,I),
     Model = varp_formula:model(Bs),
     case varp_formula:getopt(Bs,print) of
 	false ->
 	    Model;
 	Flavour ->
-	    case varp_output(Bs#bs.output, user, Model) of
+	    case varp_output(Bs#bs.output, user, Partial, Model) of
 		{error, no_output} ->
-		    varp_formula:print_model(Flavour,I,Model),
+		    varp_formula:print_model(Flavour,I,Partial,Model),
 		    Model;
 		_ ->
 		    Model
 	    end
     end.
 
-output_model_header(Bs,_I) ->
-    case varp_formula:getopt(Bs,starexec) of
-	true ->
-	    case get(answer) of
-		true ->
-		    ok;
-		_ ->
-		    io:format("s SATISFIABLE\n"),
-		    put(answer, true)
-	    end;
+output_model_header(Bs,Partial,_I) ->
+    case get(output_model_header) of
 	false ->
-	    ok
+	    ok;  %% already outputed or ignored
+	_ ->
+	    put(output_model_header, false),
+	    if Partial -> io:format("PARTIAL\n");
+	       true ->
+		    case varp_formula:getopt(Bs,starexec) of
+			true ->
+			    put(exit_code, 10),
+			    io:format("s SATISFIABLE\n");
+			false ->
+			    ok
+		    end
+	    end
     end.
 
 %% fixme analyze the path to see if there are 

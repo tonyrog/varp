@@ -197,13 +197,14 @@
 	{"1",true},
 	{"0",false}).
 
--define(ORDER_UNDEFINED, 16#00).   %% "zero" order
--define(ORDER_IDENTITY,  16#01).   %% "input" order
--define(ORDER_RANDOM,    16#02).   %% "random" order
--define(ORDER_DEGREE,    16#03).   %% order according to occurence
--define(ORDER_RANK,      16#04).   %% 1/n1+...1/nk where ni is size of clause i
--define(ORDER_ACTIVITY,  16#05).   %% order according to conflict activity
--define(ORDER_USER,      16#06).   %% order according to user count
+-define(ORDER_UNDEFINED,  16#00).   %% "zero" order
+-define(ORDER_IDENTITY,   16#01).   %% "input" order
+-define(ORDER_RANDOM,     16#02).   %% "random" order
+-define(ORDER_DEGREE,     16#03).   %% order according to occurence
+-define(ORDER_RANK,       16#04).   %% 1/n1+...1/nk where ni is size of clause i
+-define(ORDER_ACTIVITY,   16#05).   %% order according to conflict activity
+-define(ORDER_USER,       16#06).   %% order according to user count
+-define(ORDER_MASK,       16#3f).
 
 -define(ORDER_ASCEND,     16#00).  %% ascending order
 -define(ORDER_DESCEND,    16#80).  %% descending order

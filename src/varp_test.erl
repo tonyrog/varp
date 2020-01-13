@@ -247,19 +247,20 @@ test_equation2() ->
 	      [{Xv,16},{Yv,1},{Zv,0}]
 	     ]),
     ok.
-        
 
 sat(Formula, ExpectedModels) ->
+    sat_(Formula, ExpectedModels, backtrack) andalso
+    sat_(Formula, ExpectedModels, backjump).
+
+sat_(Formula, ExpectedModels, Method) ->
     application:start(varp),
-    %% io:format("run: ~p\n", [Formula]),
-    %% _N = length(ExpectedModels),
     Options = [{print,false}],
-    Do = [{satisfy,[]}, {backtrack,[{max,0}]}],
+    Do = [{satisfy,[]}, {Method,[{max,0}]}],
     GOpts = varp:load_option_list(Options),
     GDo = varp:parse_do(Do),
     case varp:do_run(GDo,Formula,GOpts) of
-	{?DONE,Ms,_Bs1} ->
-	    %% io:format("Ms = ~p\n", [Ms]),
+	{?DONE,Ms0,_Bs1} ->
+	    Ms = [int_model(Mi) || Mi <- Ms0],
 	    lists:sort(Ms) == lists:sort(ExpectedModels);
 	{?INCONSISTENT,Ms,_Bs1} ->
 	    Ms == [];
@@ -267,3 +268,22 @@ sat(Formula, ExpectedModels) ->
 	    io:format("Res=~w\n", [Res]),
 	    false
     end.
+
+%% translate Model so that int vectors are translated to integers
+int_model([{X,{uint,Vec}} | Ms]) ->
+    [{X,list_to_integer(tuple_to_list(Vec), 2)} | int_model(Ms)];
+int_model([{X,{int,Vec}} | Ms]) ->
+    U = list_to_integer(tuple_to_list(Vec), 2),
+    V = if element(1,Vec) =:= $1 -> %% signed
+		-(((bnot U) band ((1 bsl tuple_size(Vec))-1))+1);
+	   true ->
+		U
+	end,
+    [{X,V} | int_model(Ms)];
+int_model([{X,{bit,Vec}} | Ms]) ->
+    [{X,Vec} | int_model(Ms)];
+int_model([ M | Ms]) ->
+    io:format("did not match ~w\n", [M]),
+    [M | int_model(Ms)];
+int_model([]) ->
+    [].
