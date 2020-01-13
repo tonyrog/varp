@@ -147,58 +147,30 @@ read_text_clause(Fd, Bs, Acc, Type) ->
     end.
 
 text_clause(Fd, Bs, Ts, Ln, Acc, Type) ->
-    case take_eol(Ts) of
-	false -> 
-	    read_text_clause(Fd, Bs, Acc++Ts, Type);
-	{true, Ts1} ->
-	    parse_clause(Bs, Acc++Ts1, Ln, Type)
-    end.
-
-
-take_eol(Ts) ->
-    take_eol(Ts,[]).
-
-take_eol([{decnum,_,"0"}],Acc) ->
-    {true, lists:reverse(Acc)};
-take_eol([T|Ts], Acc) ->
-    take_eol(Ts, [T|Acc]);
-take_eol([], _Acc) ->
-    false.
-
-parse_clause(Bs, Ts, Ln, Type) ->
-    case scan_clause(Ts, Ln, Bs, []) of
-	{ok, Clause} ->
-	    {Type, Clause};
-	error ->
-	    error
-    end.
-
-scan_clause([], _Ln, _Bs, Acc) ->
-    {ok, lists:reverse(Acc)};
-scan_clause([{decnum,_Ln,Dec}|Ts], Ln, Bs, Acc) ->
-    Li = list_to_integer(Dec),
-    scan_clause(Ts, Ln, Bs, [dimacs_literal(Li,Bs)|Acc]);
-scan_clause([{'-',_Ln0},{decnum,_Ln,Dec}|Ts], Ln, Bs, Acc) ->
-    Li = -list_to_integer(Dec),
-    scan_clause(Ts, Ln, Bs, [dimacs_literal(Li,Bs)|Acc]);
-scan_clause(Ts, Ln, Bs, Acc) ->
     case varp_snf:parse(Ts++[{'.',Ln}]) of
-	{ok, CL} ->
-	    {ok, Acc ++ snf_literals(CL, Bs)};
-	{error, _Reason} ->
-	    error
+	{ok,CL} ->
+	    case lists:last(CL) of
+		0 ->
+		    {ok,snf_literals(CL--[0], Bs)};
+		_ ->
+		    read_text_clause(Fd, Bs, Acc+Ts, Type)
+	    end;
+	Error -> 
+	    Error
     end.
 
-%% translate SNF symbols and reverse list
+%% translate SNF symbols
 snf_literals(CL, Bs) ->
     snf_literals(CL, Bs, []).
 
+snf_literals([Li|CL], Bs, Acc) when is_integer(Li) ->
+    snf_literals(CL, Bs, [Li|Acc]);
 snf_literals([{'not',X}|CL], Bs, Acc) ->
     snf_literals(CL, Bs, [-variable(eval_sym(X), Bs)|Acc]);
 snf_literals([X|CL], Bs, Acc) ->
     snf_literals(CL, Bs, [variable(eval_sym(X), Bs)|Acc]);
 snf_literals([], _Bs, Acc) ->
-    Acc.
+    lists:reverse(Acc).
 
 eval_sym({p,S,Args}) ->
     {p,S,[eval_arg(A)||A<-Args]};
@@ -211,21 +183,14 @@ eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).
 empty_vs(Bs) ->    
     (Bs#bs.vs =:= undefined) orelse  (maps:size(Bs#bs.vs) =:= 0).
 
-dimacs_literal(Li,Bs) when Li < 0 ->
-    case empty_vs(Bs) of
-	true -> Li;
-	false -> -variable({p,x,[-Li]},Bs)
-    end;
-dimacs_literal(Li,Bs) when Li > 0 ->
-    case empty_vs(Bs) of
-	true -> Li;
-	false -> variable({p,x,[Li]},Bs)
-    end.
-
 variable(V, Bs) ->
-    I = maps:get(V, Bs#bs.vs),
-    %% io:format("~w => ~w\n", [V,I]),
-    I.
+    case empty_vs(Bs) of
+	true ->
+	    io:format("Error: Symbols are not present for ~p\n", [V]),
+	    throw({error,{symbol, V}});
+	false ->
+	    maps:get(V, Bs#bs.vs)
+    end.
 
 close_proof_output(Bs) ->
     case Bs#bs.proof_fd of

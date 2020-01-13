@@ -164,6 +164,7 @@ to_snf(Bin,Sect,L,Vars,Clauses) ->
     end.
 
 %% collect tokens until . is found then call varp_snf parse
+%% may be terminated by . or 0!
 to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
     case binary_line(Bin) of
 	eof ->
@@ -177,8 +178,8 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 	    case varp_scan:string(Line) of
 		{ok,Ts1,Ln1} ->
 		    Ts2 = Ts0 ++ Ts1,
-		    Eol = lists:keymember('.',1,Ts1),
-		    if Eol =:= true ->
+		    case has_eol(Ts2) of
+			true ->
 			    case varp_snf:parse(Ts2) of
 				{ok,CL} ->
 				    to_snf_(Bin1,Sect,Ln1,[],[CL|CLs]);
@@ -187,8 +188,22 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 				Error ->
 				    Error
 			    end;
-		       true ->
-			    to_snf_(Bin1,Sect,Ln1,Ts2,CLs)
+			false ->
+			    %% check if line is terminated by 0
+			    case varp_snf:parse(Ts2++[{'.',Ln1}]) of
+				{ok,CL} ->
+				    case lists:last(CL) of
+					0 ->
+					    to_snf_(Bin1,Sect,Ln1,[],
+						    [(CL--[0])|CLs]);
+					_ ->
+					    to_snf_(Bin1,Sect,Ln1,Ts2,CLs)
+				    end;
+				{error,{Ln1,Mod,Message}} ->
+				    {error,{Ln1-1+Ln,Mod,Message}};
+				Error ->
+				    Error
+			    end
 		    end;
 		{error,{Ln1,Mod,Message}} ->
 		    {error,{Ln1-1+Ln,Mod,Message}};
@@ -196,6 +211,9 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 		    Error
 	    end
     end.
+
+has_eol(Ts) ->
+    lists:keymember('.',1,Ts).
 
 save(File, Cs) ->
     file:write_file(File, format(Cs, File)).

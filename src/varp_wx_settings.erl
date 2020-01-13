@@ -237,7 +237,8 @@ set_values(NameMap, Values) ->
 		      end
 	      catch
 		  error:_ ->
-		      io:format("New Key ~w\n", [Name])
+		      %% io:format("New Key ~w\n", [Name]),
+		      ok
 	      end
       end, ok, NameMap).
 

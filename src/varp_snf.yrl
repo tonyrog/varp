@@ -34,6 +34,8 @@ literal -> '!' pexpr : {'not','$2'}.
 literal -> true  : true.
 literal -> false : false.
 literal -> pexpr : '$1'.
+literal -> decnum : to_integer('$1').
+literal -> '-' decnum : -to_integer('$1').
 
 bor_op  -> '|' : '$1'.
 band_op -> '&' : '$1'.
@@ -106,7 +108,7 @@ exprs -> expr ',' exprs : ['$1' | '$3'].
 pexpr -> psymbol                    : { p, '$1', []}.
 pexpr -> psymbol '(' ')'            : { p, '$1', []}.
 pexpr -> psymbol '(' exprs ')'      : { p, '$1', '$3'}.
-pexpr -> pexpr '[' expr ']' : {bit_index,'$1','$3'}.
+pexpr -> pexpr   '[' expr ']'       : {bit_index,'$1','$3'}.
 
 psymbol -> 'A' : 'A'.
 psymbol -> 'E' : 'E'.
@@ -144,3 +146,10 @@ chr({chrnum,Line,Val}) ->
 
 flo({flonum,Line,Val}) ->
     #cconst { line=Line, base=float, value=Val}.
+
+to_integer({binnum,_,List}) -> list_to_integer(List,2);
+to_integer({octnum,_,List}) -> list_to_integer(List,8);
+to_integer({decnum,_,List}) -> list_to_integer(List,10);
+to_integer({hexnum,_,List}) -> list_to_integer(List,16).
+
+    
