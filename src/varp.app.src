@@ -11,6 +11,8 @@
 		    {"ord",   "order",       varp_order},
 		    {"bt",    "backtrack",   varp_nbacktrack},
 		    {"bj",    "backjump",    varp_nbackjump},
+		    {"bt0",   "backtrack0",  varp_backtrack},
+		    {"bj0",   "backjump0",   varp_backjump},
 		    {"s",     "saturate",    varp_saturate},
 		    {"red",   "reduction",   varp_reduction},
 		    {"rat",   "rat",         varp_rat},

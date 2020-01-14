@@ -56,7 +56,6 @@
 -export([compress_clause/2]).
 -export([clean_clause/2]).
 -export([clean_edges/2]).
--export([sort_clauses/2]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
 -export([use_clause/2]).
@@ -85,10 +84,9 @@
 -export([subscribe/2]).
 -export([clauseset_size/2]).
 -export([clauseset_offset/2, clauseset_offset/3]).
--export([clauseset_xref/2]).
--export([clauseset_xref/3]).
--export([clause_first/1, clause_first/2]).
--export([clause_next/2]).
+-export([clauseset_sort/2]).
+-export([clauseset_first/1, clauseset_first/2]).
+-export([clauseset_next/2]).
 -export([set_user_count/3]).
 
 -export([info/1, info_keys/0]).
@@ -159,6 +157,7 @@ info(_Vp, Key) when is_atom(Key) ->
     ?nif_stub().
 
 %% set config
+%%    xref            -- turn on/off xref
 %%    permanent       -- number of clauses that are permanent
 %%    max_conflicting -- max number of conflicting <= MAX_CONFLICTING
 %% 
@@ -328,23 +327,6 @@ nbcp(_Vp) ->
 clauseset_size(_Vp, _Si) ->
     ?nif_stub().    
 
--spec clauseset_xref(Vp::varc(),Enable::boolean()) -> boolean().
-clauseset_xref(Vp, Enable) ->
-    clauseset_xref(Vp, ?DELTA, Enable),
-    clauseset_xref(Vp, ?GAMMA, Enable),
-    clauseset_xref(Vp, ?ALPHA, Enable),
-    clauseset_xref(Vp, ?BETA, Enable).
-
-
--spec clauseset_xref(Vp::varc(),Si::integer(),Enable::boolean()) -> boolean().
-%% return previous status of enable
-%% example
-%%   Restore = clauseset_xref(Vp, ?GAMMA, true),
-%%   do_something(),
-%%   clauseset_xref(Vp, ?GAMMA, Restore)
-clauseset_xref(_Vp, _Si, _Enable) ->
-    ?nif_stub().
-
 -spec add_clause(Vp::varc(),Ls::[literal()]) ->
 			false | error | integer().
 add_clause(_Vp,Ls) when is_list(Ls) ->
@@ -419,9 +401,6 @@ clean_clause(_Vp,Index)
 clean_edges(_Vp,Lit)
   when is_integer(Lit), Lit >= 1 ->
     ?nif_stub().
-
-sort_clauses(_Vp, _Si) ->
-    ?nif_stub().    
 
 get_clauses(Vp,Var) ->
     get_clauses(Vp,Var,literal).
@@ -517,15 +496,18 @@ clauseset_offset(_Vp, _Si) ->
 clauseset_offset(_Vp, _Si, _Offset) ->
     ?nif_stub().
 
-%% return index to first clause | false
-clause_first(Vp) ->
-    clause_first(Vp, ?DELTA).
+clauseset_sort(_Vp, _Si) ->
+    ?nif_stub().    
 
-clause_first(_Vp, _Si) ->
+%% return index to first clause | false
+clauseset_first(Vp) ->
+    clauseset_first(Vp, ?DELTA).
+
+clauseset_first(_Vp, _Si) ->
     ?nif_stub().
 
 %% return index to next clause | false
-clause_next(_Vp, _Ix) ->
+clauseset_next(_Vp, _Ix) ->
     ?nif_stub().
 
 %% set user count (unsigned 32-bit) for sorting

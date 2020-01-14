@@ -111,7 +111,7 @@ new(Options) when is_list(Options) ->
 new(OptMap) when is_map(OptMap) ->
     NewOpts = [{qtype,maps:get(qtype,OptMap)},
 		    {xref,maps:get(xref,OptMap)},
-		    {clause_hash,maps:get(clause_hash,OptMap)},
+		    {hash,maps:get(hash,OptMap)},
 		    {edge,maps:get(edge,OptMap)},
 		    {activity, maps:get(activity,OptMap)}
 	      ],
@@ -264,19 +264,27 @@ del_clause(Bs, IndexOrClause) ->
 
 del_unused_clauses(Bs) ->
     V = Bs#bs.vp,
-    varc:sort_clauses(V, ?GAMMA),  %% learned clauses
+    ?dbg0("del_unused_clause gamma offset=~w, size=~w\n", 
+	  [varc:clauseset_offset(V, ?GAMMA), 
+	   varc:clauseset_size(V, ?GAMMA)]),
+    varc:clauseset_sort(V, ?GAMMA),  %% learned clauses
     case want_proof_output(Bs) of
 	false ->
-	    del_clauses(V, varc:clause_first(V, ?GAMMA));
+	    del_clauses(V, varc:clauseset_first(V, ?GAMMA));
 	_ ->
-	    del_proof_clauses(Bs, V, varc:clause_first(V, ?GAMMA))
-    end.
+	    del_proof_clauses(Bs, V, varc:clauseset_first(V, ?GAMMA))
+    end,
+    ?dbg0("del_unused_clause size=~w\n", 
+	  [varc:clauseset_size(V, ?GAMMA)]),
+    ok.
+    
 
 del_clauses(_V, false) ->
     ok;
 del_clauses(V, I) ->
+    ?dbg0("  del ~w:~w\n", [(I bsr 30),(I band 16#3FFFFFFF)]),
     varc:del_clause(V, I),
-    del_clauses(V, varc:clause_next(V, I)).
+    del_clauses(V, varc:clauseset_next(V, I)).
 
 del_proof_clauses(_Bs, _V, false) ->
     ok;

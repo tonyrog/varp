@@ -219,8 +219,8 @@ global_options() ->
 	 default => recursive,
 	 description => "lifo, fifo or depth first queue type."
        },
-      #{ long => "clause-hash",
-	 key => clause_hash,
+      #{ long => "hash",
+	 key => hash,
 	 spec =>  {enum,[?BOOL]},
 	 default => false,
 	 description => "use clause hash, speed up validate."
