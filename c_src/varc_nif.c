@@ -41,7 +41,7 @@
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-#define ASSERTIONS
+// #define ASSERTIONS
 // #define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
@@ -161,6 +161,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
 
 #define NIF_LIST \
     NIF( "new",                 1,  varp_new ) \
+    NIF( "clone",               2,  varp_clone ) \
     NIF( "info",                2,  varp_info ) \
     NIF( "config",              3,  varp_config ) \
     NIF( "add_variable",        2,  varp_add_variable ) \
@@ -486,6 +487,17 @@ typedef struct _subscription_t { // :object_t
 #define BETA  3    // temporary clause set
 
 #define NUM_CSET 4
+
+typedef struct _varp_args_t {
+    qtype_t  qtype;     // literal queue is fifo/lifo/recursive
+    atype_t  atype;     // conflict activity in use
+    bool_t   xref;      // xref used or not
+    bool_t   hash;      // clause has or not
+    bool_t   edge;      // keep edge list for 2-clauses
+    unsigned int grow;
+    unsigned int vsize;
+    unsigned int csize;    
+} varp_args_t;
 
 typedef struct _varp_t {
     // lit_t ltrue;
@@ -1013,17 +1025,21 @@ static inline void write_vv(varp_t* vp, variable_t* var, ival_t v)
 
 static inline void clr_vv(varp_t* vp, variable_t* var)
 {
+    // enif_fprintf(stderr, "clr_vv %d\r\n", var->vix);        
     write_vv(vp, var, I_UNDEF);
 }
 
 static inline void bnd_vv(varp_t* vp, variable_t* var)
 {
+    // enif_fprintf(stderr, "bnd_vv %d\r\n", var->vix);    
     write_vv(vp, var, I_BOUND);
 }
 
 
 static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
 {
+    // enif_fprintf(stderr, "set_vv %d=%d\r\n", var->vix, !(ivalue&1));
+    {
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
 #if BYTE_ORDER == LITTLE_ENDIAN
@@ -1044,6 +1060,7 @@ static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
     var->ivalue = ivalue;
 #endif
 #endif
+    }
 }
 
 // return literal match variables value (only when bound)
@@ -1837,7 +1854,9 @@ static int order_next(varp_t* vp, int i, int skip)
 {
     while(i < (int)vp->vnext) {
 	if (!vis_bound(vp, vp->order_map[i])) {
-	    if (!skip) return i;
+	    if (!skip) {
+		return i;
+	    }
 	    skip--;
 	}
 	i++;
@@ -1924,7 +1943,7 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
 {
     variable_t* var = lp->var;
     int i;
-    
+
     DBG_BCP("%sPut %s=%s @%d\r\n", indent(level), format_literal(vp,lp),
 	    format_ival(ivalue), level);
     ASSERT(level >= 0);
@@ -2544,100 +2563,102 @@ static void cleanup(varp_t* vp)
     cleanup_allocator(&vp->hlink_allocator);
 }
 
-static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
-			     const ERL_NIF_TERM argv[])
+
+static void default_varp_args(varp_args_t* arg)
 {
-    UNUSED(argc);
-    varp_t* vp;
-    unsigned int grow   = DEFAULT_MAP_GROW;
-    unsigned int vsize  = DEFAULT_MAP_SIZE;
-    unsigned int csize  = DEFAULT_MAP_SIZE;
-    size_t ssize;
-    ERL_NIF_TERM t;
-    ERL_NIF_TERM list = argv[0];
+    arg->qtype = lifo;
+    arg->atype = off;
+    arg->hash  = false;
+    arg->edge  = false;
+    arg->xref  = false;
+    arg->grow   = DEFAULT_MAP_GROW;
+    arg->vsize  = DEFAULT_MAP_SIZE;
+    arg->csize  = DEFAULT_MAP_SIZE;
+}
+
+static int parse_varp_args(ErlNifEnv* env, ERL_NIF_TERM list, varp_args_t* arg)
+{
     ERL_NIF_TERM head, tail;
-    qtype_t qtype = lifo;
-    atype_t atype = off;
-    bool_t clause_hash = false;
-    bool_t edge = false;
-    bool_t xref = false;
-    int i;
-    
-    DBG("new varc instance\r\n");
-    
+
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	const ERL_NIF_TERM* elem;
 	int arity;
 	if (!enif_get_tuple(env, head, &arity, &elem) || (arity != 2))
-	    return enif_make_badarg(env);
+	    return -1;
 	if (elem[0] == ATOM(grow)) {
 	    if (elem[1] == ATOM(default))
-		grow = DEFAULT_MAP_GROW;
-	    else if (!enif_get_uint(env, elem[1], &grow))
-		return enif_make_badarg(env);
-	    else if ((grow <= 0) || (grow >  MAX_MAP_EXPAND))
-		return enif_make_badarg(env);
+		arg->grow = DEFAULT_MAP_GROW;
+	    else if (!enif_get_uint(env, elem[1], &arg->grow))
+		return -1;
+	    else if ((arg->grow == 0) || (arg->grow >  MAX_MAP_EXPAND))
+		return -1;
 	}
 	else if (elem[0] == ATOM(size)) {
 	    if (elem[1] == ATOM(default))
-		vsize = DEFAULT_MAP_SIZE;
-	    else if (!enif_get_uint(env, elem[1], &vsize))
-		return enif_make_badarg(env);
-	    else if ((vsize < 2) || (vsize > MAX_MAP_SIZE))
-		return enif_make_badarg(env);
+		arg->vsize = DEFAULT_MAP_SIZE;
+	    else if (!enif_get_uint(env, elem[1], &arg->vsize))
+		return -1;
+	    else if ((arg->vsize < 2) || (arg->vsize > MAX_MAP_SIZE))
+		return -1;
 	}
 	else if ((elem[0] == ATOM(qtype)) && (elem[1] == ATOM(fifo))) {
-	    qtype = fifo;
+	    arg->qtype = fifo;
 	}
 	else if ((elem[0] == ATOM(qtype)) && (elem[1] == ATOM(lifo))) {
-	    qtype = lifo;
+	    arg->qtype = lifo;
 	}
 	else if ((elem[0] == ATOM(qtype)) && (elem[1] == ATOM(recursive))) {
-	    qtype = recursive;
+	    arg->qtype = recursive;
 	}	
 	else if (elem[0] == ATOM(activity) && (elem[1] == ATOM(mvsids))) {
-	    atype = mvsids;
+	    arg->atype = mvsids;
 	}
 	else if (elem[0] == ATOM(activity) && (elem[1] == ATOM(off))) {
-	    atype = off;
+	    arg->atype = off;
 	}	
 	else if (elem[0] == ATOM(xref) && (elem[1] == ATOM(true))) {
-	    xref = true;
+	    arg->xref = true;
 	}
 	else if (elem[0] == ATOM(xref) && (elem[1] == ATOM(false))) {
-	    xref = false;
+	    arg->xref = false;
 	}	
 	else if (elem[0] == ATOM(clause_hash) && (elem[1] == ATOM(true))) {
-	    clause_hash = true;
+	    arg->hash = true;
 	}
 	else if (elem[0] == ATOM(clause_hash) && (elem[1] == ATOM(false))) {
-	    clause_hash = false;
+	    arg->hash = false;
 	}
 	else if (elem[0] == ATOM(edge) && (elem[1] == ATOM(true))) {
-	    edge = true;
+	    arg->edge = true;
 	}
 	else if (elem[0] == ATOM(edge) && (elem[1] == ATOM(false))) {
-	    edge = false;
+	    arg->edge = false;
 	}
 	else
-	    return enif_make_badarg(env);
+	    return -1;
 	list = tail;
     }
     if (!enif_is_empty_list(env, list))
-	return enif_make_badarg(env);
+	return -1;
+    return 0;
+}
 
-    if (!(vp = enif_alloc_resource(varp_res, sizeof(varp_t))))
-	goto error;
-    memset(vp, 0, sizeof(varp_t));
-
-    vp->qtype = qtype;
-    vp->atype = atype;
-    vp->xref = xref;
-    vp->edge = edge;
-    vp->vnext = 1;
-    vp->vsize = vsize;
-    vp->vnum  = 0;
-    vp->grow = grow;
+// setup data-structure used by vp
+static int setup(varp_t* vp, varp_args_t* arg)
+{
+    size_t vsize = arg->vsize;
+    size_t csize = arg->csize;
+    size_t ssize;
+    int i;
+    
+    vp->qtype  = arg->qtype;
+    vp->atype  = arg->atype;
+    vp->xref   = arg->xref;
+    vp->edge   = arg->edge;
+    vp->vnext  = 1;
+    vp->vsize  = vsize;
+    vp->vnum   = 0;
+    vp->grow   = arg->grow;
     vp->marked = NULL;
     vp->first_unbound = 1;
     vp->next_unbound = 1;
@@ -2653,7 +2674,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     if (!(vp->var_value = VARP_ALLOC(PACKED_BYTES(vsize)*sizeof(uint8_t))))
 	goto error;
 #endif
-#endif    
+#endif
     ssize = 1;
     while(ssize < vsize) ssize *= 2;
     if (!(vp->sym_map = VARP_ALLOC(ssize*sizeof(symbol_t**))))
@@ -2664,7 +2685,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 
     vp->chsize = 0;
     vp->chnum = 0;
-    if (clause_hash) {
+    if (arg->hash) {
 	size_t chsize = 1;
 	while(chsize < csize) chsize *= 2;
 	if (!(vp->clause_hash = VARP_ALLOC(chsize*sizeof(hlink_t**))))
@@ -2685,7 +2706,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     }
     vp->csize[0] = csize;
     vp->cdead = 0;
-    vp->edead = 0;    
+    vp->edead = 0;
 
     vp->unwatch = NULL;
     
@@ -2732,16 +2753,86 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
     vp->subs = NULL;
     vp->msg_env = enif_alloc_env();
     vp->caller_env = NULL;
-    
-    t = enif_make_resource(env,vp);
-    enif_release_resource(vp);
-    return t;
-
+    return 0;
 error:
-    if (vp) {
+    if (vp)
 	cleanup(vp);
+    return -1;
+}
+
+
+static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
+			     const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    ERL_NIF_TERM varc;
+    varp_args_t arg;
+
+    DBG("new varc instance\r\n");    
+
+    default_varp_args(&arg);
+
+    if (parse_varp_args(env, argv[0], &arg) < 0)
+	return enif_make_badarg(env);
+
+    if (!(vp = enif_alloc_resource(varp_res, sizeof(varp_t))))
+	goto error;
+    memset(vp, 0, sizeof(varp_t));
+
+    if (setup(vp, &arg) < 0)
+	goto error;
+    varc = enif_make_resource(env,vp);
+    enif_release_resource(vp);
+    return varc;
+error:
+    if (vp)
 	enif_release_resource(vp);
-    }
+    return enif_make_badarg(env);
+}
+
+// copy (clone) the varp structure (clauses and variables)
+// but leave the xref etc for the cloneer to speficy
+static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
+			       const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp0;    
+    varp_t* vp;
+    ERL_NIF_TERM varc;
+    varp_args_t arg;
+
+    DBG("clone varc instance\r\n");
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp0))
+	return enif_make_badarg(env);
+
+    default_varp_args(&arg);
+
+    arg.qtype = vp0->qtype;
+    arg.atype = vp0->atype;
+    arg.grow  = vp0->grow;
+    arg.vsize = vp0->vsize;
+    arg.csize = vp0->csize[0];
+    arg.hash  = (vp0->chsize > 0);
+    
+    if (parse_varp_args(env, argv[1], &arg) < 0)
+	return enif_make_badarg(env);
+
+    if (!(vp = enif_alloc_resource(varp_res, sizeof(varp_t))))
+	goto error;
+    memset(vp, 0, sizeof(varp_t));
+
+    if (setup(vp, &arg) < 0)
+	goto error;
+
+    varc = enif_make_resource(env,vp);
+    enif_release_resource(vp);
+    return varc;    
+    
+error:
+    if (vp)
+	enif_release_resource(vp);
     return enif_make_badarg(env);
 }
 

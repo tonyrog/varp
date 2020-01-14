@@ -11,6 +11,8 @@
 
 -export([new/0]).
 -export([new/1]).
+-export([clone/1]).
+-export([clone/2]).
 -export([info/2]).
 -export([config/3]).
 -export([add_variable/1]).
@@ -135,13 +137,22 @@ new() ->
 
 %%
 %% options
-%%    {size, Size::unsigned()}   -- inital variable tavle size
-%%    {grow, Grow::unsigned()}   -- variable table growth step
-%%    {qtype,lifo|fifo}          -- use lifo/fifo strategy in eval
-%%    {activity,mvsids|off}      -- use activity in conflicts (off)
+%%    {size, Size::unsigned()}    -- inital variable tavle size
+%%    {grow, Grow::unsigned()}    -- variable table growth step
+%%    {qtype,lifo|fifo|recursive} -- use lifo/fifo strategy in bcp
+%%    {xref, boolean()}           -- use cross references
+%%    {clause_hash, boolean()}    -- install hash over clauses
+%%    {edge, boolean()}           -- use edge instead of 2-clauses
+%%    {activity,mvsids|off}       -- use activity in conflicts (off)
 %%
 
 new(Options) when is_list(Options) ->
+    ?nif_stub().
+
+clone(Vp) ->
+    clone(Vp, []).
+
+clone(_Vp, Options) when is_list(Options) ->
     ?nif_stub().
 
 info(_Vp, Key) when is_atom(Key) ->

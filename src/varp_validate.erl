@@ -76,7 +76,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    io:format("\nREAD ERROR\n"),
 	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
-	    io:format("add clause ~w\n", [Clause]),
+	    %% io:format("add clause ~w\n", [Clause]),
 	    varc:set_level(Bs#bs.vp,1),
 	    Res = eval_neg_literal_list(Bs, Clause),
 	    varc:undo_level(Bs#bs.vp,1),
@@ -103,7 +103,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    end;
 	{d,Clause} ->
 	    %% what tests must be done?
-	    io:format("delete clause ~w\n", [Clause]),
+	    %% io:format("delete clause ~w\n", [Clause]),
 	    ok = varp_formula:del_clause(Bs, Clause),
 	    validate_loop(Fd,Type,Bs,I1)	    
     end.
@@ -126,6 +126,7 @@ read_text_clause(Fd, Bs) ->
     case file:read_line(Fd) of
 	eof -> eof;
 	{ok,Line} ->
+	    io:format("~s", [Line]),
 	    case varp_scan:string(binary_to_list(Line)) of
 		{ok,[{identifier,_Ln,"d"}|Ts],Ln1} ->
 		    text_clause(Fd, Bs, Ts, Ln1, [], d);
@@ -151,7 +152,7 @@ text_clause(Fd, Bs, Ts, Ln, Acc, Type) ->
 	{ok,CL} ->
 	    case lists:last(CL) of
 		0 ->
-		    {ok,snf_literals(CL--[0], Bs)};
+		    {Type,snf_literals(CL--[0], Bs)};
 		_ ->
 		    read_text_clause(Fd, Bs, Acc+Ts, Type)
 	    end;

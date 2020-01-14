@@ -1039,9 +1039,12 @@ mfa_arg({M,F,A},_Func) when is_atom(M), is_atom(F), is_list(A) ->
 
 %% possibly emit a model
 output_partial_model(Bs, _R) ->
-%%    case varp_formula:getopt(Bs,partial) of
-%%	true ->
-	    output_model(Bs,true,0).
+    case varp_formula:getopt(Bs,partial) of
+	true ->
+	    output_model(Bs,true,0);
+	false ->
+	    ok
+    end.
 
 output_model(Bs,Partial,I) ->
     output_model_header(Bs,Partial,I),

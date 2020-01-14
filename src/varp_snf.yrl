@@ -35,7 +35,7 @@ literal -> true  : true.
 literal -> false : false.
 literal -> pexpr : '$1'.
 literal -> decnum : to_integer('$1').
-literal -> '-' decnum : -to_integer('$1').
+literal -> '-' decnum : -to_integer('$2').
 
 bor_op  -> '|' : '$1'.
 band_op -> '&' : '$1'.

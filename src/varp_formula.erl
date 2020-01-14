@@ -3177,13 +3177,13 @@ proof_literal(Bs,Li) ->
     if EmptyVs -> integer_to_list(Li);	    
        Li < 0 ->
 	    case maps:find(-Li, Bs#bs.vs) of
-		error -> [$!,$$|integer_to_list(-Li)];
+		error -> integer_to_list(Li);
 		{ok,[{p,x,[I]}]} -> integer_to_list(-I);
 		{ok,[P|_]} -> [$!|format_symbol(P)]
 	    end;
        Li > 0 ->
 	    case maps:find(Li, Bs#bs.vs) of
-		error -> [$$|integer_to_list(Li)];
+		error -> integer_to_list(Li);
 		{ok,[{p,x,[I]}]} -> integer_to_list(I);
 		{ok,[P|_]} -> format_symbol(P)
 	    end
