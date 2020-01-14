@@ -5863,6 +5863,19 @@ static void remove_clause(varp_t* vp, clause_t* cp)
     }
 }
 
+// check if we have a hole at the end, update cnext
+static void clauseset_plug_hole(varp_t* vp, int si, int ix)
+{
+    clause_t** cm = vp->clause_map[si];
+    
+    if (ix+1 == (int)vp->cnext[si]) {  // we removed the last clause?
+	while((ix>0) && (cm[ix-1] == NULL))
+	    ix--;
+	vp->cnext[si] = ix;
+    }
+}
+
+
 // Move clause from one clause set to another,
 // right now only BETA => GAMMA is possible!
 static ERL_NIF_TERM varp_move_clause(ErlNifEnv* env, int argc,
@@ -5892,13 +5905,11 @@ static ERL_NIF_TERM varp_move_clause(ErlNifEnv* env, int argc,
     
     set_clause(vp, cix0, NULL);  // kill original position
     // check if we have a hole at the end, update cnext
+
     ix = GET_IX(cix0);
-    cm = vp->clause_map[si0];
-    if (ix+1 == (int)vp->cnext[si0]) {  // we remove the last clause
-	while((ix>0) && (cm[ix-1] == NULL))
-	    ix--;
-	vp->cnext[si0] = ix;
-    }
+
+    clauseset_plug_hole(vp, si0, ix);
+
     // setup TWL etc
     switch (clause_install(vp, get_clause(vp,cix))) {
     case 0:
@@ -5922,7 +5933,6 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     clause_t* cp;
     unsigned si;
     int ix;
-    clause_t** cm;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -5969,13 +5979,8 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 
     ASSERT(get_clause(vp, cix) == NULL);
 
-    // check if we have a hole at the end, update cnext
-    cm = vp->clause_map[si];
-    if (ix+1 == (int)vp->cnext[si]) {  // we remove the last clause
-	while((ix>0) && (cm[ix-1] == NULL))
-	    ix--;
-	vp->cnext[si] = ix;
-    }
+    clauseset_plug_hole(vp, si, ix);
+
     return ATOM(ok);
 }
 
@@ -6137,6 +6142,8 @@ static ERL_NIF_TERM varp_sort_clauses(ErlNifEnv* env, int argc,
 	int ix;
 	int rmap[n];
 	int h = 0;
+
+	// use clauseset_plug_hole
 	// cleanup the holes
 	while(n && (vp->clause_map[si][n-1] == NULL)) {
 	    h++;
@@ -6167,7 +6174,9 @@ static ERL_NIF_TERM varp_sort_clauses(ErlNifEnv* env, int argc,
 		remap_edge(&vp->var_map[i]->lit[0], si, rmap, n);	    
 		remap_edge(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
-	}	
+	}
+
+	// FIXME: remap all hash links
     }
     return ATOM(ok);
 }
