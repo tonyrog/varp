@@ -48,7 +48,7 @@
 // #define DEBUG_ORDER
 // #define DEBUG_EDGE
 // #define DEBUG_ORDER
-#define DEBUG_MEM
+// #define DEBUG_MEM
 // #define COUNT(vp, cnt)
 #define COUNT(vp, cnt) vp->counter[(cnt)]++
 

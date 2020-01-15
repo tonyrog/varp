@@ -819,7 +819,9 @@ solve(Mode, S, Bound) ->
     Meta = maps:from_list(Bound),
     Partial = (Method =:= none) 
 	orelse 
-	  ((Method =:= backjump) andalso (Timeout > 0)),
+	  ((Method =:= backjump) 
+	   andalso is_number(Timeout) 
+	   andalso (Timeout > 0)),
     case parse(Formula, Meta) of
 	{ok,{Sections,Form}} ->
 	    Options = [{method,count},{print,true},{timeout,Timeout},
