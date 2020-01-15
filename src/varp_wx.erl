@@ -817,12 +817,15 @@ solve(Mode, S, Bound) ->
 
     Formula = wxStyledTextCtrl:getText(S#s.formula),
     Meta = maps:from_list(Bound),
+    Partial = (Method =:= none) 
+	orelse 
+	  ((Method =:= backjump) andalso (Timeout > 0)),
     case parse(Formula, Meta) of
 	{ok,{Sections,Form}} ->
 	    Options = [{method,count},{print,true},{timeout,Timeout},
 		       {assoc,Assoc},{qtype,QType},{xref,true},
 		       {activity,AType},
-		       {partial,Method =:= none}
+		       {partial,Partial}
 		      ],
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),

@@ -7,8 +7,15 @@
 
 -module(varp_conflict).
 -export([analyze/3, analyze/4]).
+-export([analyze_beta/3]).
 
 -include("varp.hrl").
+
+analyze_beta(Bs, Level, Bump) ->
+    N = varc:info(Bs#bs.vp, number_of_conflicting_clauses),
+    [ varc:conflict(Bs#bs.vp, Level, Bump, I) ||
+	I <- lists:seq(0, N-1) ].
+
 
 analyze(Bs, Level, Bump) ->
     Trail = [Lit|_] = get_bindings(Bs,Level),

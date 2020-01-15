@@ -10,17 +10,34 @@
 -export([run/2]).
 -export([options/0]).
 
--export([minimize/2]).
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 -compile(export_all).
--import(varp_formula, [format_lit/2, format_lit/3]).
--import(varp_formula, [format_var/2]).
--import(varp_formula, [format_clause/2, format_clause/3]).
--import(varp_formula, [format_literals/2]).
+
+-define(ORDER_OPT(Ord,Ord2),
+	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
+		{seed,-1}]}).
+
+-define(REORDER_0,
+	[
+	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_RANDOM)},
+	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
+	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
+	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	]).
+
+-define(REORDER_1,
+	[
+	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
+	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	]).
+
 
 options() ->
     [#{ long  => "timeout",
@@ -89,6 +106,12 @@ options() ->
 	default => 0,
 	description => "Factor to calculate number of learned clauses"},
 
+     #{ long => "max-learned-inc",
+	key => max_learned_inc,
+	spec =>  float,
+	default => 0,
+	description => "Factor to increase number of learned clauses"},
+
      #{ long => "keep-factor",
 	key => keep_factor,
 	spec =>  float01,
@@ -119,6 +142,12 @@ options() ->
 	default => 0.95,
 	description => "Decay factory"},
 
+     #{ long => "bump",
+	key => bump,
+	spec =>  float,
+	default => 1.0,
+	description => "Bump value."},
+
      #{ long => "display",
 	short => "d",
 	key => display,
@@ -131,7 +160,7 @@ options() ->
      #{ key => reorder,
 	spec => {list,
 		 {integer,{atom,{list,term}}}},
-	default => [],
+	default => ?REORDER_1,
 	description => "Internal reorder list"}
     ].
      
@@ -148,44 +177,23 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_formula:config(Bs, max_conflicting, MaxConflicting),
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
-    %% Calculate size of lru cache
-    KeepFactor = maps:get(keep_factor, Param),
-    MinKeep    = maps:get(min_keep_clauses, Param),
-    KeepSize   = if MaxLearned =:= 0 ->
-			 0;
-		    KeepFactor > 0, MinKeep > 0 ->
-			 max(MinKeep, trunc(KeepFactor*MaxLearned));
-		    KeepFactor > 0 ->
-			 trunc(KeepFactor*MaxLearned);
-		    MinKeep > 0 ->
-			 MinKeep;
-		    true ->
-			 0
-		 end,
-    Permanent = varc:clauseset_size(Bs#bs.vp, ?DELTA),
-    %% io:format("permanent = |Delta| = ~w\n", [Permanent]),
-    %% io:format("keep-size = ~w\n", [KeepSize]),
-    %% io:format("max-learned = ~w\n", [MaxLearned]),
-    varc:clauseset_offset(Bs#bs.vp, ?GAMMA, KeepSize),  %% sets gamma offset
-
-    case maps:get(display, Param) of
-	true ->
-	    io:format("Permanent=~w, KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
-		      [Permanent, KeepSize, MaxLearned, KeepFactor, MinKeep]);
-	false -> ok
-    end,
+    _KeepSize  = keep_size(Bs, Param, MaxLearned),
 
     case maps:get(restart_counter,Param) of
 	0 -> ok;
 	_ ->
-	    EvalCounter = varp_formula:info(Bs, bcp_counter),
-	    counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, EvalCounter)
+	    BcpCounter = varp_formula:info(Bs, bcp_counter),
+	    counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, BcpCounter)
     end,
+
     case maps:get(restart_interval,Param) of
 	infinity -> ok;
-	RestartInterval ->
-	    erlang:start_timer(trunc(1000*RestartInterval), self(), restart)
+	IVal when IVal == 0 -> ok;
+	IVal ->
+	    IVal1 = max(0.1, IVal),  %% >= 0.1
+	    erlang:start_timer(trunc(1000*IVal1), self(), restart)
     end,
+
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     M0  = #m { method = varp_formula:getopt(Bs1,method),
 	       max = maps:get(max, Param) },
@@ -230,11 +238,13 @@ return(What, MR, Bs) ->
     end.
 
 contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
-    ClauseList0 = varp_conflict:analyze(Bs,Level),
+    ClauseList0 = varp_conflict:analyze(Bs,Level,maps:get(bump,Param)),
+    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ClauseList1 = 
 	case maps:get(minimize,Param) of
 	    true ->
-		lists:usort([ minimize(Bs,Clause) || Clause <- ClauseList0]);
+		lists:usort([ varp_minimize:clause(Bs,Clause) || 
+				Clause <- ClauseList0]);
 	    false ->
 		ClauseList0
 	end,
@@ -313,10 +323,6 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
     undo_until(Bs, Level, JLevel),  %% undo until JLevel
     varc:set_level(Bs#bs.vp, JLevel),
     {INext,Stack1} = pop_until(Bs,Stack,JLevel),
-    ?dcall(fun() -> io:format("stack[~w]: ", [JLevel]),
-		    display_stack_ln(Bs, Stack1),
-		    io:format("\n", [])
-	   end),
 
     %% install unit clauses
     Bs0 = lists:foldl(
@@ -375,22 +381,21 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 
     if 
 	DoPurge, JLevel =:= ?TOP_LEVEL ->
-	    if Learned > MaxLearned ->
-		    varp_formula:del_unused_clauses(Bs2),
-		    reorder(Bs2,Param);
-	       true ->
-		    %% but we can re-order literals?
-		    ok
-	    end,
-	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
-	    NU = varp_formula:number_of_unbound(Bs2),
-	    io:format("UNIT-RESTART Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", 
-		      [Learned, MaxLearned,Learned1,NU]),
-	    %%
-	    init(Bs,Param,MaxLearned,MR);
+	    MaxLearned1 =
+		if Learned > MaxLearned ->
+			varp_formula:del_unused_clauses(Bs2),
+			reorder(Bs2,Param),
+			MaxLearnedFactorInc = 
+			    min(1.0,maps:get(max_learned_inc,Param)),
+			trunc(MaxLearned * MaxLearnedFactorInc);
+		   true ->
+			MaxLearned
+		end,
+	    %%Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
+	    %%NU = varp_formula:number_of_unbound(Bs2),
+	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
+	    init(Bs,Param,MaxLearned1,MR);
        DoPurge, Learned > MaxLearned ->
-	    %% restart and purge!
-
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
@@ -401,7 +406,10 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
 		      [Learned, MaxLearned,Learned1]),
 	    reorder(Bs2,Param),
-	    init(Bs2,Param,MaxLearned,MR);
+	    MaxLearnedFactorInc = min(1.0,maps:get(max_learned_inc,Param)),
+	    MaxLearned1 = trunc(MaxLearned * MaxLearnedFactorInc),
+	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
+	    init(Bs2,Param,MaxLearned1,MR);
        DoRestart ->
 	    io:format("RESTART Count=~w, Time=~w\n", 
 		      [DoRestartCount, DoRestartTime]),
@@ -419,15 +427,27 @@ reorder(Bs,Param) ->
     varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
-	{ok,{order,[Key1,Key2,Arg]}} ->
-	    varp_formula:order_sort(Bs, Key1, Key2, Arg);
-	{ok,{saturate,[Laps,Timeout]}} ->
-	    varp_saturate:saturate(Bs, 1, Timeout, {{Laps},{Laps}}, 0);
+	{ok,{order,Opts}} ->
+	    ?dbg("Reorder: ~p\n", [Opts]),
+	    Seed = proplists:get_value(seed, Opts, -1),
+	    case proplists:get_value(sort, Opts, []) of
+		[] -> ok;
+		[Key1] ->
+		    varp_formula:order_sort(Bs,Key1,?ORDER_UNDEFINED,Seed);
+		[Key1,Key2] ->
+		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
+	    end;
+	{ok,{saturate,Opts}} ->
+	    io:format("reorder: Saturate: ~p\n", [Opts]),
+	    Laps = proplists:get_value(laps,Opts,0),
+	    Timeout = proplists:get_value(timeout,Opts,infinity),
+	    varp_saturate:saturate(Bs,1,Timeout,{{Laps},{Laps}}, 0);
 	_ ->
-	    io:format("random\n"),
+	    io:format("reorder: Random\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
     end.
+
 
 undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
     ?dbg("undo: ~w\n", [Level]),
@@ -439,7 +459,7 @@ undo_until(Bs, Level, Level) ->
 pop_until(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
     pop_until(Bs,Stack,JLevel);
 pop_until(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
-    ?dbg("backjump[~w]: ~s\n", [JLevel, format_lit(_Bs,_Xk)]),
+    ?dbg("backjump[~w]: ~s\n", [JLevel, varp_formula:format_lit(_Bs,_Xk)]),
     {K,Stack};
 pop_until(_Bs,[],_JLevel) ->
     {1, []}.
@@ -480,7 +500,8 @@ next(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 	    NextLevel = Level+1,
 	    varc:set_level(Bs#bs.vp,NextLevel),
 	    true = varc:bind(Bs#bs.vp,Xj),
-	    ?dbg("decision@~w = ~s\n", [NextLevel,format_lit(Bs,Xj)]),
+	    ?dbg("decision@~w = ~s\n", [NextLevel,
+					varp_formula:format_lit(Bs,Xj)]),
 	    loop(Bs,Param,NextLevel,MaxLearned,MR,J,[{J,Xj,NextLevel}|Stack])
     end.
 
@@ -527,6 +548,29 @@ do_stat(Bs, D1, D2) ->
        true ->
 	    counters:add(Bs#bs.d2, D2+1, 1)
     end.
+
+keep_size(Bs, Param, MaxLearned) ->
+    MinKeep = maps:get(min_keep_clauses, Param),
+    KeepFactor = maps:get(keep_factor, Param),
+    KeepSize = if MaxLearned =:= 0 ->
+		       0;
+		  KeepFactor > 0, MinKeep > 0 ->
+		       max(MinKeep, trunc(KeepFactor*MaxLearned));
+		  KeepFactor > 0 ->
+		       trunc(KeepFactor*MaxLearned);
+		  MinKeep > 0 ->
+		       MinKeep;
+		  true ->
+		       0
+	       end,
+    varc:clauseset_offset(Bs#bs.vp, ?GAMMA, KeepSize),  %% sets gamma offset
+    case maps:get(display, Param) of
+	true ->
+	    io:format("keep: KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
+		      [KeepSize, MaxLearned, KeepFactor, MinKeep]);
+	false -> ok
+    end,
+    KeepSize.
 
 max_learned(Bs,Param) ->
     Permanent = varc:clauseset_size(Bs#bs.vp, ?DELTA),
@@ -598,12 +642,12 @@ display_stat(Bs,Param) ->
 add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,Clause=[L]) ->
-    ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
+    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
     true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     Bs;
 add_conflict_clause(Bs,Clause) ->
-    ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
+    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
     ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),
@@ -639,77 +683,3 @@ compress(Bs,Param,Clause) ->
 
 compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
 compress_([_Ln]) -> [].
-
-minimize(_Bs,[]) -> [];
-minimize(_Bs,Clause=[_]) -> Clause;
-minimize(Bs,Clause0) ->
-    Clause = sort_abs_clause(Clause0),
-    %% io:format("minimize: ~p\n", [Clause]),
-    case minimize_(Bs, Clause, Clause, [], 0, 0) of
-	{0,_,_} -> 
-	    %% io:format("  no change\n", []),
-	    Clause;
-	{NumRemoved,_InputClauseLength,Clause1} ->
-	    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT,
-			 NumRemoved),
-	    %% io:format("minimize: saved ~.2f%\n", [(NumRemoved / _InputClauseLength)*100]),
-	    Clause1
-    end.
-
-minimize_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
-    case varc:implication_clause(Bs#bs.vp, -Li) of
-	-1 ->
-	    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
-	I ->
-	    A = varc:get_clause(Bs#bs.vp,I),
-	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
-	    %%    [-Li, A, Clause]),
-	    %% if A-{Li} is a subset of Clause then remove Li from clause
-	    case is_subclause_abs(A, -Li, Clause) of
-		true ->
-		    minimize_(Bs, Ls, Clause, NewClause, Removed+1, Length+1);
-		false ->
-		    minimize_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1)
-	    end
-    end;
-minimize_(_Bs, [], _Clause, NewClause, Removed, Length) ->
-    {Removed,Length,lists:reverse(NewClause)}.
-
-%% check if As is a subset of Bs
-is_subclause(As, Li, Bs) ->
-    case (As--[Li]) -- Bs of
-	[] -> true;
-	_ -> false
-    end.
-
-sort_abs_clause(Clause) ->
-    lists:sort(
-      fun(A,A) -> false;
-	 (A,B) -> 
-	      case abs(A) - abs(B) of
-		  0 -> A < 0;
-		  R -> R > 0
-	      end
-      end, Clause).
-
-%% assume clauses are abs sorted in reversed order
-is_subclause_abs([Li|As],Li,Bs) ->
-    is_subclause_abs(As,Li,Bs);
-is_subclause_abs([X|As],Li,[X|Bs]) ->
-    is_subclause_abs(As,Li,Bs);
-is_subclause_abs(As=[A|_As0],Li,[B|Bs]) ->
-    if abs(A) < abs(B) ->
-	    is_subclause_abs(As,Li,Bs);
-       true ->
-	    false
-    end;
-is_subclause_abs([],_Li,_Bs) ->
-    true;
-is_subclause_abs(_As,_Li,[]) ->
-    false.
-
-display_stack_ln(Bs,[{K,Xk,Level}|Stack]) ->
-    io:format("~s@~w/~w ", [format_lit(Bs,Xk), Level, K]),
-    display_stack_ln(Bs, Stack);
-display_stack_ln(_Bs,[]) ->
-    ok.

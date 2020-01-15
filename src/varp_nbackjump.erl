@@ -17,8 +17,6 @@
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 -compile(export_all).
--import(varp_formula, [format_lit/2, format_lit/3]).
--import(varp_formula, [format_var/2]).
 -import(varp_formula, [format_clause/2, format_clause/3]).
 -import(varp_formula, [format_literals/2]).
 
@@ -424,7 +422,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 			varp_formula:del_unused_clauses(Bs2),
 			reorder(Bs2, Param),
 			MaxLearnedFactorInc = 
-			    maps:get(max_learned_inc,Param,1.0),
+			    min(1.0,maps:get(max_learned_inc,Param)),
 			trunc(MaxLearned * MaxLearnedFactorInc);
 		   true ->
 			MaxLearned
@@ -435,8 +433,6 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs,Param,MaxLearned1,MR);
        DoPurge, Learned > MaxLearned ->
-	    %% restart and purge!
-
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
@@ -446,7 +442,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 		 [Learned, MaxLearned,
 		  varp_formula:info(Bs2, number_of_learned_clauses)]),
 	    reorder(Bs2, Param),
-	    MaxLearnedFactorInc = maps:get(max_learned_inc,Param,1.0),
+	    MaxLearnedFactorInc = min(1.0,maps:get(max_learned_inc,Param)),
 	    MaxLearned1 = trunc(MaxLearned * MaxLearnedFactorInc),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs2,Param,MaxLearned1,MR);

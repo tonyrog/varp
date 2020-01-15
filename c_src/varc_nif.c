@@ -48,7 +48,7 @@
 // #define DEBUG_ORDER
 // #define DEBUG_EDGE
 // #define DEBUG_ORDER
-// #define DEBUG_MEM
+#define DEBUG_MEM
 // #define COUNT(vp, cnt)
 #define COUNT(vp, cnt) vp->counter[(cnt)]++
 
@@ -380,7 +380,7 @@ typedef struct _variable_t     // :object_t
     float nkey[2];             // sort keys for negative literals
     float activity;            // activity 
     int map_index;             // order_map index
-    cix_t implication_clause;  // implication clause index (0=none)
+    cix_t implication_clause;  // implication clause index
     pos_t literal_pos;         // position in implication clause
     int  level;                // implication clause level
     char* strname;             // string formated name or NULL
@@ -393,8 +393,7 @@ typedef struct _symbol_t // :object_t
     struct _symbol_t* next;   // next symbol in hash slot or free list
     struct _symbol_t* anext;  // alias link
     uint32_t hash;            // symbol hash
-    int is_term;              // either name is a term or name is binary string
-    ERL_NIF_TERM term;        // binary or term(as binary)
+    bool_t is_term;           // either name is a term or name is binary string
     uint8_t* data;            // raw data
     size_t   size;            // raw len
     variable_t*  var;
@@ -493,15 +492,14 @@ typedef struct _varp_opt_t {
     bool_t   xref;      // xref used or not
     bool_t   hash;      // clause has or not
     bool_t   edge;      // keep edge list for 2-clauses
-    unsigned int grow;
-    unsigned int vsize;
-    unsigned int csize;    
+    size_t   grow;
+    size_t   vsize;
+    size_t   csize;
 } varp_opt_t;
 
 typedef struct _varp_t {
     varp_opt_t opt;           // varp options 
-    size_t vnext;             // next free variable number
-    size_t vnum;              // number of variables
+    size_t vnum;              // number of variables (including constant)
     uint32_t cnext[NUM_CSET]; // next clause number
     uint32_t csize[NUM_CSET]; // allocated size of clause map
     uint32_t cnum[NUM_CSET];  // number of clauses
@@ -528,10 +526,10 @@ typedef struct _varp_t {
     variable_t*  marked;      // mlist marked variables
     size_t ssize;             // size of symbol hash table
     size_t snum;              // number of symbols in symbol hash table
-    symbol_t**   sym_map;     // symbol hash table
-    size_t       chsize;      // size of clause hash table
-    size_t       chnum;       // number of clauses in clause hash table (cnext)?
-    hlink_t**    hash_tab;    // clause hash table    
+    symbol_t**   symtab;      // symbol hash table
+    size_t       hsize;       // size of clause hash table
+    size_t       hnum;        // number of clauses in clause hashtab
+    hlink_t**    hashtab;     // clause hash table    
     int*         order_map;   // literal order table
     int          sort_key[2]; // sort order -1,-2,1,2 (0=not used)
     clause_t**   clause_map[NUM_CSET]; // array of clauses, entries may be null
@@ -825,9 +823,9 @@ static inline void set_clause(varp_t* vp, cix_t index, clause_t* cp)
 static size_t get_number_of_clauses(varp_t* vp)
 {
     size_t cnum = 0;
-    int i;
-    for (i = 0; i < NUM_CSET; i++)
-	cnum += vp->cnum[i];
+    int si;
+    for (si = 0; si < NUM_CSET; si++)
+	cnum += vp->cnum[si];
     return cnum;
 }
 
@@ -1647,7 +1645,7 @@ static inline void unwatch_l(varp_t* vp, clause_t* cp, lit_t l)
 }
 
 // remove the 2-WL watch points
-static void unwatch_clause(varp_t* vp, clause_t* cp)
+static void clause_unwatch(varp_t* vp, clause_t* cp)
 {
     long p;
     if ((p = cp->wl[0].p) >= 0) unwatch_l(vp, cp, cp->lit[p]);
@@ -1770,7 +1768,7 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
     };
 	
     if (flags & SUB_FLAG_NUM_VARS)
-	values[0] = enif_make_int(env, vp->vnum);
+	values[0] = enif_make_int(env, vp->vnum-1);
     if (flags & SUB_FLAG_NUM_BOUND)
 	values[1] = enif_make_int(env, vp->num_bound);
     if (flags & SUB_FLAG_NUM_CLAUSES)
@@ -1845,7 +1843,7 @@ static inline void log_permanent(varp_t* vp, literal_t* x,
 
 static int order_next(varp_t* vp, int i, int skip)
 {
-    while(i < (int)vp->vnext) {
+    while(i < (int)vp->vnum) {
 	if (!vis_bound(vp, vp->order_map[i])) {
 	    if (!skip) {
 		return i;
@@ -1953,7 +1951,7 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
     if ((i = order_next(vp, vp->next_unbound, 0)) > 0)
 	vp->next_unbound = i;
     else
-	vp->next_unbound = vp->vnext;
+	vp->next_unbound = vp->vnum;
     DBG_BCP("%sNextvar=%d\r\n", indent(level), vp->next_unbound);
     log_permanent(vp, lp, NULL, level);
 }
@@ -2078,18 +2076,17 @@ static void keep_level(varp_t* vp, int level)
 
 static void activity_decay(varp_t* vp, float decay)
 {
-  int i;
+    int i;
 
-  switch (vp->opt.atype) {
-  case mvsids:
-    for (i = 1; i < (int)vp->vnext; i++) {
-      vp->var_map[i]->activity *= decay;
+    switch (vp->opt.atype) {
+    case mvsids:
+	for (i = 1; i < (int)vp->vnum; i++)
+	    vp->var_map[i]->activity *= decay;
+	break;
+    case off:
+    default:
+	break;
     }
-    break;
-  case off:
-  default:
-    break;
-  }
 }
 
 static void init_literal(literal_t* lp, variable_t* var, uint32_t sign)
@@ -2125,6 +2122,97 @@ static void init_variable(varp_t* vp, variable_t* var, int vix)
     init_literal(&var->lit[LIT_NEG], var, LIT_NEG);
 }
 
+// return 1 if a is equal to b, return 0 otherwise
+static int clause_is_equal(lit_t* a, lit_t* b, int size)
+{
+    int i = 0;
+    while((i<size) && (a[i] == b[i]))
+	i++;
+    return (i == size);
+}
+
+// resize clause hash table
+static int resize_hashtab(varp_t* vp, size_t size)
+{
+    hlink_t** htab;
+    int i;
+
+    if ((htab = VARP_ALLOC(size*sizeof(hlink_t**))) == NULL)
+	return -1;
+    memset(htab, 0, size*sizeof(hlink_t**));
+    for (i = 0; i < (int)vp->hsize; i++) {
+	hlink_t* hp = vp->hashtab[i];
+	while(hp != NULL) {
+	    hlink_t* hp1 = hp->next;
+	    int hjx = hp->hvalue & (size - 1);
+	    hp->next = htab[hjx];
+	    htab[hjx] = hp;
+	    hp = hp1;
+	}
+    }
+    VARP_FREE(vp->hashtab);
+    vp->hashtab = htab;
+    vp->hsize  = size;
+    return 0;
+}
+
+static int insert_hash_link(varp_t* vp, hlink_t* hp)
+{
+    int hix;
+    
+    if (vp->hnum+1 >= vp->hsize) {
+	size_t hsize1 = vp->hsize*2;
+	if (resize_hashtab(vp, hsize1) < 0)
+	    return -1;
+    }
+    vp->hnum++;
+    hix = hp->hvalue & (vp->hsize - 1);
+    hp->next = vp->hashtab[hix];
+    vp->hashtab[hix] = hp;
+    return 0;
+}
+
+static int hash_unlink(varp_t* vp, clause_t* cp)
+{
+    hlink_t** hpp = &vp->hashtab[cp->hvalue & (vp->hsize-1)];
+    while(*hpp) {
+	hlink_t* hp = *hpp;
+	if (hp->cix == cp->cix) {
+	    *hpp = hp->next;
+	    varp_free(&vp->hlink_allocator, hp);
+	    return 0;
+	}
+	hpp = &(hp->next);
+    }
+    DBG("clause %d not found in hash table\r\n", cp->cix);
+    return -1;
+}
+
+static hlink_t* clause_lookup(varp_t* vp,lit_t* lit,size_t size,
+			      uint32_t hvalue)
+{
+    hlink_t* hp = vp->hashtab[hvalue & (vp->hsize-1)];
+    while(hp) {
+	if (hp->hvalue == hvalue) {
+	    clause_t* cp = get_clause(vp, hp->cix);
+	    ASSERT(cp != NULL);
+	    if ((cp->size == size) && clause_is_equal(lit,cp->lit,size))
+		return hp;
+	}
+	hp = hp->next;
+    }
+    return NULL;
+}
+
+static int alloc_hashtab(varp_t* vp, size_t size)
+{
+    if (!(vp->hashtab = VARP_ALLOC(size*sizeof(hlink_t**))))
+	return -1;
+    memset(vp->hashtab, 0, size*sizeof(hlink_t**));
+    vp->hsize = size;
+    return 0;
+}
+
 
 // FIXME clauses should really be heap allocated?
 // except we need to garbage collect in that case when
@@ -2154,24 +2242,8 @@ static clause_t* clause_alloc(varp_t* vp, int size)
     clear_wlink(&cp->wl[1]);
     cp->size  = size;
     cp->flags = 0;
+    cp->select = (size > 3) ? 3 : size-1;
     return cp;
-}
-
-static void clause_hash_unlink(varp_t* vp, clause_t* cp)
-{
-    if (vp->opt.hash) {
-	hlink_t** hpp = &vp->hash_tab[cp->hvalue & (vp->chsize-1)];
-	while(*hpp) {
-	    hlink_t* hp = *hpp;
-	    if (hp->cix == cp->cix) {
-		*hpp = hp->next;
-		varp_free(&vp->hlink_allocator, hp);
-		return;
-	    }
-	    hpp = &(hp->next);
-	}
-	DBG("clause %d not found in hash table\r\n", cp->cix);
-    }
 }
 
 static void clause_free(varp_t* vp, clause_t* cp)
@@ -2180,8 +2252,8 @@ static void clause_free(varp_t* vp, clause_t* cp)
 	cix_t cix;
 	if ((cix = cp->cix) != CLAUSE_NONE) {
 	    int si = GET_SI(cix);
-	    if (si != BETA)
-		clause_hash_unlink(vp, cp);
+	    if ((si != BETA) && vp->opt.hash)
+		hash_unlink(vp, cp);
 	    set_clause(vp, cix, NULL);
 	    vp->cnum[si]--;
 	}
@@ -2193,19 +2265,21 @@ static void clause_free(varp_t* vp, clause_t* cp)
     }
 }
 
-// return 1 if a is equal to b, return 0 otherwise
-static int clause_is_equal(lit_t* a, lit_t* b, int size)
+static clause_t* clause_copy(varp_t* vp, clause_t* cp)
 {
-    int i = 0;
-    while((i<size) && (a[i] == b[i]))
-	i++;
-    return (i == size);
+    clause_t* copy;
+
+    if ((copy = clause_alloc(vp, cp->size)) == NULL)
+	return NULL;
+    memcpy(copy->lit, cp->lit, cp->size*sizeof(lit_t));
+    return copy;
 }
 
+#if 0
 // return 1 if a is subclause of b, return 0 otherwise
 // assume both clauses are sorted in falling order
 // (C D E)   (A B C D E F)
-int clause_is_subclause(lit_t* a, lit_t* b, int size_a, int size_b)
+static int clause_is_subclause(lit_t* a, lit_t* b, int size_a, int size_b)
 {
     if (size_a == size_b)
 	return clause_is_equal(a, b, size_a);
@@ -2226,6 +2300,7 @@ int clause_is_subclause(lit_t* a, lit_t* b, int size_a, int size_b)
     else
 	return 0;
 }
+#endif
 
 // if clause is already installed return index to installed clause if success
 // return CLAUSE_NONE otherwise
@@ -2234,29 +2309,13 @@ cix_t clause_find(varp_t* vp, lit_t* lit, size_t size)
     uint32_t hvalue = (uint32_t) literal_array_hash(vp, lit, size);
     
     if (vp->opt.hash) {
-	hlink_t* hp = vp->hash_tab[hvalue & (vp->chsize-1)];
-
-	// enif_fprintf(stdout, "find hvalue=%u ", hvalue);
-	// print_lit_array("", lit, size);
-	
-	while(hp) {
-	    if (hp->hvalue == hvalue) {
-		clause_t* cp = get_clause(vp, hp->cix);
-		ASSERT(cp != NULL);
-		if ((cp->size == size) && clause_is_equal(lit, cp->lit, size)) {
-		    // enif_fprintf(stdout, "found %d\r\n", cp->cix);
-		    return cp->cix;
-		}
-	    }
-	    hp = hp->next;
-	}
-	// enif_fprintf(stdout, "not found\r\n");	    
+	hlink_t* hp;
+	if ((hp = clause_lookup(vp,lit,size,hvalue)) != NULL)
+	    return hp->cix;
     }
     else {
 	int si;
 	DBG("warning slow clause_find in use\r\n");
-	// enif_fprintf(stdout, "find hvalue=%u ", hvalue);
-	// print_lit_array("", lit, size);
 	for (si = 0; si < NUM_CSET; si++) {
 	    int ix;
 	    for (ix = 0; ix < (int)vp->cnext[si]; ix++) {
@@ -2265,54 +2324,27 @@ cix_t clause_find(varp_t* vp, lit_t* lit, size_t size)
 		    (cp->size == size) &&
 		    (cp->hvalue == hvalue) &&
 		    clause_is_equal(lit, cp->lit, size)) {
-		    // enif_fprintf(stdout, "found %d\r\n", cp->cix);
 		    return cp->cix;
 		}
 	    }
 	}
-	// enif_fprintf(stdout, "not found\r\n");
     }
     return CLAUSE_NONE;
 }
+
+
 
 // assume cp->hvalue has been set!
 static int clause_hash_link(varp_t* vp, clause_t* cp)
 {
     if (vp->opt.hash) {  // insert in clause hash table
-	size_t chsize = vp->chsize;	
 	hlink_t* hp;
-	int hix;
+	
 	if ((hp = varp_alloc(&vp->hlink_allocator)) == NULL)
 	    return -1;
 	hp->hvalue = cp->hvalue;
 	hp->cix  = cp->cix;
-	vp->chnum++;
-
-	if (vp->chnum >= chsize) {  // rehash, fixme set ratio! like 75% ..
-	    size_t chsize1 = chsize*2;
-	    int i;
-	    hlink_t** htab1 = VARP_ALLOC(chsize1*sizeof(hlink_t**));
-
-	    memset(htab1, 0, chsize1*sizeof(hlink_t**));
-	    for (i = 0; i < (int)chsize; i++) {
-		hlink_t* hp1 = vp->hash_tab[i];
-		while(hp1 != NULL) {
-		    hlink_t* hpn = hp1->next;		
-		    int hjx = hp1->hvalue & (chsize1 - 1);
-		    hp1->next = htab1[hjx];
-		    htab1[hjx] = hp1;
-		    hp1 = hpn;
-		}
-		vp->hash_tab[i] = NULL;
-	    }
-	    VARP_FREE(vp->hash_tab);
-	    vp->hash_tab = htab1;
-	    vp->chsize = chsize1;
-	}
-	// link hash bucket list
-	hix = cp->hvalue & (vp->chsize -1 );
-	hp->next = vp->hash_tab[hix];
-	vp->hash_tab[hix] = hp;
+	return insert_hash_link(vp, hp);
     }
     return 0;
 }
@@ -2373,6 +2405,16 @@ static int vif_get_number(ErlNifEnv* env,ERL_NIF_TERM arg,double* dp)
     return 1;
 }
 
+static int vif_get_size_t(ErlNifEnv* env,ERL_NIF_TERM arg, size_t* sp)
+{
+    ErlNifUInt64 value;
+
+    if (!enif_get_uint64(env, arg, &value))
+	return 0;
+    *sp = value;
+    return 1;
+}
+
 // get primitive literal value
 static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
 		      literal_t** lpp)
@@ -2381,7 +2423,7 @@ static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
     if (enif_get_int(env, arg, &x)) {
 	if (x == 0)
 	    return 0;
-	else if (ABS(x) < (int)vp->vnext)
+	else if (ABS(x) < (int)vp->vnum)
 	    *lpp = vindex_ll(vp, x);
 	else {
 	    DBG("literal %d out of range\r\n", x);
@@ -2403,7 +2445,7 @@ static int vif_get_l(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg, lit_t* l)
     if (enif_get_int(env, arg, &x)) {
 	if (x == 0)
 	    return 0;
-	else if (ABS(x) < (int)vp->vnext)
+	else if (ABS(x) < (int)vp->vnum)
 	    *l = vindex_l(vp, x);
 	else {
 	    DBG("literal %d out of range\r\n", x);
@@ -2481,17 +2523,17 @@ static void cleanup(varp_t* vp)
 {
     int si;
     
-    if (vp->sym_map) {
+    if (vp->symtab) {
 	int i;
 	for (i = 0; i < (int)vp->ssize; i++) {
-	    symbol_t* sp = vp->sym_map[i];
+	    symbol_t* sp = vp->symtab[i];
 	    while(sp) {
 		VARP_FREE(sp->data);
 		sp = sp->next;
 	    }
 	}
-	VARP_FREE(vp->sym_map);
-	vp->sym_map = NULL;		    
+	VARP_FREE(vp->symtab);
+	vp->symtab = NULL;		    
     }
 
     if (vp->var_map) {
@@ -2521,8 +2563,8 @@ static void cleanup(varp_t* vp)
     // turn off, avoid free all hash links clause_free, they are
     // all deallocated when the allocator is destroyed
     if (vp->opt.hash) {
-	VARP_FREE(vp->hash_tab);
-	vp->hash_tab = NULL;
+	VARP_FREE(vp->hashtab);
+	vp->hashtab = NULL;
 	vp->opt.hash = false;  
     }
 
@@ -2585,7 +2627,7 @@ static int parse_varp_opts(ErlNifEnv* env, ERL_NIF_TERM list, varp_opt_t* opt)
 	if (elem[0] == ATOM(grow)) {
 	    if (elem[1] == ATOM(default))
 		opt->grow = DEFAULT_MAP_GROW;
-	    else if (!enif_get_uint(env, elem[1], &opt->grow))
+	    else if (!vif_get_size_t(env, elem[1], &opt->grow))
 		return -1;
 	    else if ((opt->grow == 0) || (opt->grow >  MAX_MAP_EXPAND))
 		return -1;
@@ -2593,7 +2635,7 @@ static int parse_varp_opts(ErlNifEnv* env, ERL_NIF_TERM list, varp_opt_t* opt)
 	else if (elem[0] == ATOM(size)) {
 	    if (elem[1] == ATOM(default))
 		opt->vsize = DEFAULT_MAP_SIZE;
-	    else if (!enif_get_uint(env, elem[1], &opt->vsize))
+	    else if (!vif_get_size_t(env, elem[1], &opt->vsize))
 		return -1;
 	    else if ((opt->vsize < 2) || (opt->vsize > MAX_MAP_SIZE))
 		return -1;
@@ -2640,6 +2682,135 @@ static int parse_varp_opts(ErlNifEnv* env, ERL_NIF_TERM list, varp_opt_t* opt)
     return 0;
 }
 
+static int alloc_symtab(varp_t* vp, size_t size)
+{
+    void* ptr = VARP_ALLOC(size*sizeof(symbol_t**));
+    if (ptr == NULL)
+	return -1;
+    memset(ptr, 0, size*sizeof(symbol_t**));
+    vp->symtab = ptr;
+    vp->ssize = size;
+    return 0;
+}
+
+static int resize_symtab(varp_t* vp, size_t size)
+{
+    symbol_t** symtab = VARP_ALLOC(size*sizeof(symbol_t**));
+    int i;
+    if (symtab == NULL)
+	return -1;
+    memset(symtab, 0, size*sizeof(symbol_t**));
+    for (i = 0; i < (int)vp->ssize; i++) {
+	symbol_t* sp = vp->symtab[i];
+	while(sp != NULL) {
+	    symbol_t* sp1 = sp->next;
+	    int hjx = sp->hash & (size - 1);
+	    sp->next = symtab[hjx];
+	    symtab[hjx] = sp;
+	    sp = sp1;
+	}
+    }
+    VARP_FREE(vp->symtab);
+    vp->symtab = symtab;
+    vp->ssize = size;
+    return 0;
+}
+
+static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
+			       uint32_t hash, bool_t is_term)
+{
+    int hix  = hash & (vp->ssize - 1);
+    symbol_t* sp = vp->symtab[hix];
+    while(sp != NULL) {
+	if ((sp->hash == hash) &&
+	    (sp->size == bp->size) &&
+	    (sp->is_term == is_term) &&
+	    (memcmp(sp->data, bp->data, bp->size) == 0))
+	    return sp;
+	sp = sp->next;
+    }
+    return NULL;
+}
+
+// create a new symbol
+static symbol_t* symbol_create(varp_t* vp, variable_t* var, ErlNifBinary* bp,
+			       uint32_t hash, bool_t is_term)
+{
+    symbol_t* sp;
+    
+    if ((sp = varp_alloc(&vp->sym_allocator)) == NULL)
+	return NULL;
+    sp->is_term = is_term;
+    sp->hash = hash;
+    sp->var  = var;    
+    // copy term or binary
+    if (is_term) {
+	sp->data = VARP_ALLOC(bp->size);
+	memcpy(sp->data, bp->data, bp->size);
+	sp->size = bp->size;
+    }
+    else {
+	sp->data = VARP_ALLOC(bp->size+1);
+	memcpy(sp->data, bp->data, bp->size);
+	sp->data[bp->size] = '\0';
+	sp->size = bp->size;
+	if (var->strname == NULL)
+	    var->strname = (char*) sp->data;
+    }
+    return sp;
+}
+
+static int symbol_insert(varp_t* vp,variable_t* var,
+			 symbol_t* sp, uint32_t hash)
+{
+    int hix;
+
+    if (vp->snum+1 >= vp->ssize) { // rehash
+	unsigned int ssize1 = vp->ssize*2;
+	if (resize_symtab(vp, ssize1) < 0)
+	    return -1;
+    }
+    
+    hix = hash & (vp->ssize-1);
+
+    sp->anext = var->names;  // link alias list
+    var->names = sp;
+    
+    // link hash bucket list
+    sp->next = vp->symtab[hix];
+    vp->symtab[hix] = sp;
+    
+    vp->snum++;
+    
+    return 0;
+}
+
+static symbol_t* symbol_copy(varp_t* vp, variable_t* var, symbol_t* sp0)
+{
+    symbol_t* sp;
+    
+    if ((sp = varp_alloc(&vp->sym_allocator)) == NULL)
+	return NULL;
+    sp->is_term = sp0->is_term;
+    sp->hash = sp0->hash;
+    sp->var  = var;
+    // copy term or binary
+    if (sp0->is_term) {
+	sp->data = VARP_ALLOC(sp0->size);
+	memcpy(sp->data, sp0->data, sp0->size);
+	sp->size = sp0->size;
+    }
+    else {
+	sp->data = VARP_ALLOC(sp0->size+1);
+	memcpy(sp->data, sp0->data, sp0->size);
+	sp->data[sp0->size] = '\0';
+	sp->size = sp0->size;
+	if (var->strname == NULL)
+	    var->strname = (char*) sp->data;	
+    }
+    return sp;
+}
+
 // setup data-structure used by vp
 static int setup(varp_t* vp, varp_opt_t* opt)
 {
@@ -2649,10 +2820,9 @@ static int setup(varp_t* vp, varp_opt_t* opt)
     vp->opt = *opt;
 
     vsize = vp->opt.vsize;
-    csize = vp->opt.vsize;
+    csize = vp->opt.csize;
 
-    vp->vnext  = 1;
-    vp->vnum   = 0;
+    vp->vnum   = 1;  // include constant
     vp->marked = NULL;
     vp->first_unbound = 1;
     vp->next_unbound  = 1;
@@ -2671,21 +2841,16 @@ static int setup(varp_t* vp, varp_opt_t* opt)
 #endif
     ssize = 1;
     while(ssize < vsize) ssize *= 2;
-    if (!(vp->sym_map = VARP_ALLOC(ssize*sizeof(symbol_t**))))
+    if (alloc_symtab(vp, ssize) < 0)
 	goto error;
-    memset(vp->sym_map, 0, ssize*sizeof(symbol_t**));
-    vp->ssize = ssize;
     vp->snum = 0;
-
-    vp->chsize = 0;
-    vp->chnum = 0;
+    vp->hsize = 0;
+    vp->hnum = 0;
     if (vp->opt.hash) {
-	size_t chsize = 1;
-	while(chsize < csize) chsize *= 2;
-	if (!(vp->hash_tab = VARP_ALLOC(chsize*sizeof(hlink_t**))))
+	size_t hsize = 1;
+	while(hsize < csize) hsize *= 2;
+	if (alloc_hashtab(vp, hsize) < 0) 
 	    goto error;
-	memset(vp->hash_tab, 0, chsize*sizeof(hlink_t**));
-	vp->chsize = chsize;
     }
     
     if (!(vp->order_map = VARP_ALLOC(vsize*sizeof(int))))
@@ -2755,7 +2920,6 @@ error:
     return -1;
 }
 
-
 static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
 {
@@ -2786,44 +2950,60 @@ error:
     return enif_make_badarg(env);
 }
 
-// copy (clone) the varp structure (clauses and variables)
-// but leave the xref etc for the cloneer to speficy
-static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
-			       const ERL_NIF_TERM argv[])
+// realloc var_map/values/order to vsize
+static int realloc_variables(varp_t* vp, size_t vsize)
 {
-    UNUSED(argc);
-    varp_t* vp0;    
-    varp_t* vp;
-    ERL_NIF_TERM varc;
-    varp_opt_t opt;
+    void* ptr;
 
-    DBG("clone varc instance\r\n");
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp0))
-	return enif_make_badarg(env);
-
-    opt = vp0->opt;
-
-    if (parse_varp_opts(env, argv[1], &opt) < 0)
-	return enif_make_badarg(env);
-
-    if (!(vp = enif_alloc_resource(varp_res, sizeof(varp_t))))
-	goto error;
-    memset(vp, 0, sizeof(varp_t));
-
-    if (setup(vp, &opt) < 0)
-	goto error;
-
-    varc = enif_make_resource(env,vp);
-    enif_release_resource(vp);
-    return varc;
-    
-error:
-    if (vp)
-	enif_release_resource(vp);
-    return enif_make_badarg(env);
+    if (!(ptr = VARP_REALLOC(vp->var_map, vsize*sizeof(variable_t*))))
+	return -1;
+    vp->var_map = ptr;
+	
+    if (!(ptr = VARP_REALLOC(vp->order_map, vsize*sizeof(int))))
+	return -1;
+    vp->order_map = ptr;
+#ifdef PACKED_VALUE
+#ifdef LIT_VALUE
+    if (!(ptr = VARP_REALLOC(vp->lit_value,
+			     2*PACKED_BYTES(vsize)*sizeof(uint8_t))))
+	return -1;
+    vp->lit_value = ptr;
+    vp->lit_overlay = (uint16_t*) ptr;
+#else
+    if (!(ptr = VARP_REALLOC(vp->var_value,
+			     PACKED_BYTES(vsize)*sizeof(uint8_t))))
+	return -1;
+    vp->var_value = ptr;
+#endif
+#endif	
+    return 0;
 }
 
+// add n variables return index to the first added
+static int add_variables(varp_t* vp, size_t n)
+{
+    int first;
+    
+    if (vp->vnum + n - 1 >= vp->opt.vsize) {
+	size_t new_vsize = vp->opt.vsize + n + vp->opt.grow;
+	if (realloc_variables(vp, new_vsize) < 0)
+	    return -1;
+	vp->opt.vsize = new_vsize;
+    }
+    first = vp->vnum;
+    while(n--) {
+	variable_t* var;
+	int i;
+	if ((var = varp_alloc(&vp->var_allocator)) == NULL)
+	    return -1;
+	i = (int) vp->vnum++;
+	vp->order_map[i] = i;
+	init_variable(vp, var, i);
+	vp->var_map[i] = var;	
+    }
+    return first;
+}
+    
 // varc:add_variable(Vp:varc()) -> integer()
 static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
@@ -2831,7 +3011,6 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int vix;
-    variable_t* var;
     bool_t is_atom;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -2839,45 +3018,15 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     if (!vif_get_boolean(env, argv[1], &is_atom))
 	return enif_make_badarg(env);
 
-    if (vp->vnext >= VLIMIT)
+    if (vp->vnum >= VLIMIT)
 	enif_raise_exception(env, ATOM(system_limit));
-
-    if ((var = varp_alloc(&vp->var_allocator)) == NULL)
+    
+    if ((vix = add_variables(vp, 1)) < 0)
 	return enif_make_badarg(env);
+    
+    if (is_atom)
+	vp->var_map[vix]->flags |= VAR_FLAG_ATOM;
 
-    vix = (int) vp->vnext++;
-    if (vp->vnext == vp->opt.vsize) {
-	unsigned int new_vsize = vp->opt.vsize + vp->opt.grow;
-	void* ptr;
-
-	if (!(ptr = VARP_REALLOC(vp->var_map, new_vsize*sizeof(variable_t*))))
-	    return enif_make_badarg(env);
-	vp->var_map = ptr;
-	
-	if (!(ptr = VARP_REALLOC(vp->order_map, new_vsize*sizeof(int))))
-	    return enif_make_badarg(env);
-	vp->order_map = ptr;
-#ifdef PACKED_VALUE
-#ifdef LIT_VALUE
-	if (!(ptr = VARP_REALLOC(vp->lit_value,
-				 2*PACKED_BYTES(new_vsize)*sizeof(uint8_t))))
-	    return enif_make_badarg(env);
-	vp->lit_value = ptr;
-	vp->lit_overlay = (uint16_t*) ptr;
-#else
-	if (!(ptr = VARP_REALLOC(vp->var_value,
-				 PACKED_BYTES(new_vsize)*sizeof(uint8_t))))
-	    return enif_make_badarg(env);
-	vp->var_value = ptr;
-#endif
-#endif	
-	vp->opt.vsize = new_vsize;
-    }
-    vp->vnum++;
-    vp->order_map[vix] = vix;
-    init_variable(vp, var, vix);
-    vp->var_map[vix] = var;
-    if (is_atom) var->flags |= VAR_FLAG_ATOM;
     return enif_make_int(env, vix);
 }
 
@@ -2915,8 +3064,7 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     variable_t* var;
     ErlNifBinary bin;
     uint32_t hash;
-    int hix;
-    int is_term = 0;
+    bool_t is_term = false;
     symbol_t* sp;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -2927,72 +3075,21 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     if (!enif_inspect_iolist_as_binary(env, argv[2], &bin)) {
 	if (!enif_term_to_binary(env, argv[2], &bin))
 	    return enif_make_badarg(env);
-	is_term = 1;
+	is_term = true;
     }
 
     hash = djb_hash(bin.data, bin.size);
-    hix  = hash & (vp->ssize - 1);
-    sp = vp->sym_map[hix];
-    while(sp != NULL) {
-	if ((sp->hash == hash) &&
-	    (sp->size == bin.size) &&
-	    (sp->is_term == is_term) &&
-	    (memcmp(sp->data, bin.data, bin.size) == 0)) {
-	    // already defined
-	    if (is_term) enif_release_binary(&bin);
-	    return ATOM(error);
-	}
-	sp = sp->next;
-    }
-    // not found allocate new
-    if ((sp = varp_alloc(&vp->sym_allocator)) == NULL)
-	return enif_make_badarg(env);
-    sp->is_term = is_term;
-    sp->hash = hash;
-    sp->var  = var;    
-    // copy term or binary
-    if (is_term) {
-	sp->data = VARP_ALLOC(bin.size);
-	memcpy(sp->data, bin.data, bin.size);
-	sp->size = bin.size;
-    }
-    else {
-	sp->data = VARP_ALLOC(bin.size+1);
-	memcpy(sp->data, bin.data, bin.size);
-	sp->data[bin.size] = '\0';
-	sp->size = bin.size;
-	if (var->strname == NULL)
-	    var->strname = (char*) sp->data;
-    }
-    // link alias list
-    sp->anext = var->names;
-    var->names = sp;
-    vp->snum++;
-    
-    if (vp->snum >= vp->ssize) { // rehash	
-	unsigned int ssize1 = vp->ssize*2;
-	int i;
-	symbol_t** sym_map1 = VARP_ALLOC(ssize1*sizeof(symbol_t**));
 
-	memset(sym_map1, 0, ssize1*sizeof(symbol_t**));
-	for (i = 0; i < (int)vp->ssize; i++) {
-	    symbol_t* sp1 = vp->sym_map[i];
-	    while(sp1 != NULL) {
-		symbol_t* spn = sp1->next;		
-		int hjx = sp1->hash & (ssize1 - 1);
-		sp1->next = sym_map1[hjx];
-		sp1 = spn;
-	    }
-	    vp->sym_map[i] = NULL;
-	}
-	VARP_FREE(vp->sym_map);
-	vp->sym_map = sym_map1;
-	vp->ssize = ssize1;
-	hix  = hash & (ssize1-1);  // hash index for new element
+    if ((sp = symbol_lookup(vp, &bin, hash, is_term)) != NULL) {
+	if (is_term) enif_release_binary(&bin);
+	return ATOM(error);
     }
-    // link hash bucket list
-    sp->next = vp->sym_map[hix];
-    vp->sym_map[hix] = sp;
+
+    if ((sp = symbol_create(vp, var, &bin, hash, is_term)) == NULL)
+	return enif_make_badarg(env);
+
+    if (symbol_insert(vp, var, sp, hash) < 0)
+	return enif_make_badarg(env);
 
     return ATOM(ok);
 }
@@ -3004,10 +3101,9 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
     UNUSED(argc);    
     varp_t* vp;
     ErlNifBinary bin;
-    uint32_t hash;    
-    int hix;
-    int is_term = 0;
-    symbol_t* sp;    
+    uint32_t hash; 
+    bool_t is_term = false;
+    symbol_t* sp;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -3015,24 +3111,15 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
     if (!enif_inspect_iolist_as_binary(env, argv[1], &bin)) {
 	if (!enif_term_to_binary(env, argv[1], &bin))
 	    return enif_make_badarg(env);
-	is_term = 1;
+	is_term = true;
     }
+    
     hash = djb_hash(bin.data, bin.size);
-    hix  = hash & (vp->ssize - 1);
-    sp = vp->sym_map[hix];
 
-    while(sp != NULL) {
-	if ((sp->hash == hash) &&
-	    (sp->size == bin.size) &&
-	    (sp->is_term == is_term) &&
-	    (memcmp(sp->data, bin.data, bin.size) == 0)) {
-	    // found
-	    if (is_term) enif_release_binary(&bin);
-	    return enif_make_int(env, sp->var->vix);
-	}
-	sp = sp->next;
-    } 
+    sp = symbol_lookup(vp, &bin, hash, is_term);
     if (is_term) enif_release_binary(&bin);
+    if (sp != NULL)
+	return enif_make_int(env, sp->var->vix);
     return ATOM(false);
 }
 
@@ -3203,7 +3290,8 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
 	return enif_make_int(env, i);
     return ATOM(false);
 }
-    
+
+
 
 #define ORDER_UNDEFINED  0x00   // "zero" order
 #define ORDER_IDENTITY   0x01   // "input" order
@@ -3229,9 +3317,9 @@ static int order_reset(varp_t* vp)
     vp->order_map[0] = 0;
     vp->var_map[0]->map_index = 0;
     l = 0;
-    u = vp->vnext;
+    u = vp->vnum;
 
-    for (i=(int)vp->vnext-1; i >= 1; i--) {
+    for (i=(int)vp->vnum-1; i >= 1; i--) {
 	if (vis_bound(vp, i)) {
 	    l++;
 	    vp->order_map[l] = i;
@@ -3249,7 +3337,7 @@ static int order_reset(varp_t* vp)
 static void order_k_identity(varp_t* vp, int k)
 {
     int i;
-    for (i = 1; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = (float) i + 0.1;  // make the positive side "win"
 	var->nkey[k] = (float) i;
@@ -3260,7 +3348,7 @@ static void order_k_random(varp_t* vp, int k, int order)
 {
     UNUSED(order);
     int i;
-    for (i = 1; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	float v1 = arc4_random_uniform(&vp->as, 0x7fffff) / (float)0x7fffff;
 	float v2 = arc4_random_uniform(&vp->as, 0x7fffff) / (float)0x7fffff;
@@ -3273,7 +3361,7 @@ static void order_k_random(varp_t* vp, int k, int order)
 static void order_k_undefined(varp_t* vp, int k)
 {
     int i;
-    for (i = 1; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = 0.0f;
 	var->nkey[k] = 0.0f;
@@ -3284,7 +3372,7 @@ static void order_k_undefined(varp_t* vp, int k)
 static void order_k_degree(varp_t* vp, int k)
 {
     int i;
-    for (i = 1; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->lit[LIT_POS].degree;
 	var->nkey[k] = var->lit[LIT_NEG].degree;
@@ -3297,10 +3385,10 @@ static void order_k_degree(varp_t* vp, int k)
 static void order_k_rank(varp_t* vp, int k)
 {
     int i, si;
-    int vmax = (int) vp->vnext;
+    int vmax = (int) vp->vnum;
     int vmin = -vmax;
     
-    for (i = 1; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];	
 	var->pkey[k] = 0.0f;
 	var->nkey[k] = 0.0f;
@@ -3336,7 +3424,7 @@ static void order_k_activity(varp_t* vp, int k)
 
     switch(vp->opt.atype) {
     case mvsids:
-      for (i = 1; i < (int)vp->vnext; i++) {
+      for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->activity;
 	var->nkey[k] = var->activity;
@@ -3344,7 +3432,7 @@ static void order_k_activity(varp_t* vp, int k)
       break;
     case off:
     default:
-      for (i = 1; i < (int)vp->vnext; i++) {
+      for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = 0.0f;
 	var->nkey[k] = 0.0f;
@@ -3358,7 +3446,7 @@ static void order_k_activity(varp_t* vp, int k)
 static void order_k_user(varp_t* vp, int k)
 {
     int i;
-    for (i = 1; i < (int)vp->vnext; i++) {
+    for (i = 1; i < (int)vp->vnum; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->lit[LIT_POS].user;
 	var->nkey[k] = var->lit[LIT_NEG].user;
@@ -3515,18 +3603,18 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
     
     // sort unbound variables according to sort_keys
-    if (u < (int)vp->vnext) {
+    if (u < (int)vp->vnum) {
 	int i;
 	int k1, k2;
 
-	QSORT(vp->order_map+u, vp->vnext-u, sizeof(int), cmp_keys, vp);
+	QSORT(vp->order_map+u, vp->vnum-u, sizeof(int), cmp_keys, vp);
 
 	k1 = ABS(vp->sort_key[0]);
 	k2 = ABS(vp->sort_key[1]);
 	// update map_index of sorted variables also update the sign
 	// FIME: update INTERLEAVE SORT 1 2 3 4 5 6 7 => 1 7 2 6 3 5 4
 	// X1/Y1 X1/Y2 X1/Y2  X2/Y
-	for (i = u; i < (int)vp->vnext; i++) {
+	for (i = u; i < (int)vp->vnum; i++) {
 	    int v = vp->order_map[i];
 	    variable_t* var = vp->var_map[v];
 	    float r;
@@ -3542,12 +3630,12 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     
 #ifdef DEBUG_ORDER
     enif_fprintf(stdout, "u = %d\r\n", u);
+    enif_fprintf(stdout, "#num = %d\r\n", vp->vnum-1);
     enif_fprintf(stdout, "#bound = %d\r\n", vp->num_bound);
     enif_fprintf(stdout, "#subst = %d\r\n", vp->num_subst);
-    enif_fprintf(stdout, "#unbound = %d\r\n", vp->vnum - vp->num_bound);
-    enif_fprintf(stdout, "vnext = %d\r\n", (int)vp->vnext);
+    enif_fprintf(stdout, "#unbound = %d\r\n", (vp->vnum-1) - vp->num_bound);
 
-    for (i = u; i < (int)vp->vnext; i++) {
+    for (i = u; i < (int)vp->vnum; i++) {
 	int j = vp->order_map[i];
 	variable_t* var = vp->var_map[abs(j)];
 	enif_fprintf(stdout, "[%d]=([%f,%f],%d) ",
@@ -3600,7 +3688,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     mark_variable(vp, vp->var_map[0]);
     mi = 1;
     // copy all bound variables
-    while ((mi < vp->vnext) && vis_bound(vp, vp->order_map[mi])) {
+    while ((mi < vp->vnum) && vis_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
 	mark_variable(vp, vp->var_map[ABS(x)]);
 	map[mi++] = x;
@@ -3627,7 +3715,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
 	list = tail;
     }
     // move rest of the varaibles not already moved
-    while(ui < vp->vnext) {
+    while(ui < vp->vnum) {
 	int x = vp->order_map[ui];
 	int xi = ABS(x);
 	if (!is_marked(vp->var_map[xi])) { // not moved
@@ -3684,7 +3772,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     mark_variable(vp, vp->var_map[0]);
     mi = 1;
     // copy all bound variables
-    while ((mi < vp->vnext) && vis_bound(vp, vp->order_map[mi])) {
+    while ((mi < vp->vnum) && vis_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
 	mark_variable(vp, vp->var_map[ABS(x)]);
 	map[mi++] = x;
@@ -3694,7 +3782,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     vp->next_unbound = ui;   // also for the interator
     DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
     
-    mi = vp->vnext;  // last position(+1)
+    mi = vp->vnum;  // last position(+1)
     // copy/move variables in the list (not already copied)
     list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
@@ -3714,7 +3802,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
 
     mi = ui;
     // move rest of the varaibles not already moved
-    while(ui < vp->vnext) {
+    while(ui < vp->vnum) {
 	int x = vp->order_map[ui];
 	int xi = ABS(x);
 	if (!is_marked(vp->var_map[xi])) { // not moved
@@ -3767,7 +3855,7 @@ static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
-    if ((x == 0) || (ABS(x) >= (int)vp->vnext)) {
+    if ((x == 0) || (ABS(x) >= (int)vp->vnum)) {
 	DBG("literal %d out of range\r\n", x);
 	return enif_make_badarg(env);
     }    
@@ -3934,7 +4022,7 @@ static ERL_NIF_TERM varp_set_user_count(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
-    if ((x == 0) || (ABS(x) >= (int)vp->vnext)) {
+    if ((x == 0) || (ABS(x) >= (int)vp->vnum)) {
 	DBG("literal %d out of range\r\n", x);
 	return enif_make_badarg(env);
     }
@@ -4152,10 +4240,10 @@ static void update_clause_activity(varp_t* vp, clause_t* cp, float value)
     int i;
 
     if (vp->opt.atype == mvsids) {
-      for (i = 0; i < n; i++) {
-	variable_t* var = var_l(vp, cp->lit[i]);
-	var->activity += value;
-      }
+	for (i = 0; i < n; i++) {
+	    variable_t* var = var_l(vp, cp->lit[i]);
+	    var->activity += value;
+	}
     }
 }
 
@@ -4213,7 +4301,7 @@ static int is_unit_clause(varp_t* vp, clause_t* cp)
 // (lp0,level0)
 // setup TWL structure for a clause
 
-static int watch_clause(varp_t* vp, clause_t* cp)
+static int clause_watch(varp_t* vp, clause_t* cp)
 {
     int va[3], la[3];
     long pa[3];
@@ -4312,7 +4400,7 @@ static void add_xref(varp_t* vp, clause_t* cp, pos_t p)
     lp->xlast = &(xp->next);
 }
 
-static void xref_clause(varp_t* vp, clause_t* cp)
+static void clause_xref(varp_t* vp, clause_t* cp)
 {
     long n = (long)cp->size;
     long p;
@@ -4340,7 +4428,7 @@ static inline void del_xref(varp_t* vp, clause_t* cp, pos_t p)
     DBG("xref not found for clause %lu pos = %ld\r\n", cp->cix, p);
 }
 
-static void unxref_clause(varp_t* vp, clause_t* cp)
+static void clause_unxref(varp_t* vp, clause_t* cp)
 {
     long n = (long)cp->size;
     long p;
@@ -4350,10 +4438,10 @@ static void unxref_clause(varp_t* vp, clause_t* cp)
 	del_xref(vp, cp, p);
 }
 
-static int link_clause(varp_t* vp, clause_t* cp)
+static int clause_link(varp_t* vp, clause_t* cp)
 {
     if (vp->opt.xref)
-	xref_clause(vp, cp);
+	clause_xref(vp, cp);
     if (vp->opt.edge && (cp->size == 2)) {
 	lit_t* lit  = cp->lit;
 	edge_insert(vp, neg_l(lit[0]), lit[1], cp->cix);
@@ -4364,7 +4452,95 @@ static int link_clause(varp_t* vp, clause_t* cp)
 	DBG("  edge-list added (no watch)\r\n");
 	return 1;
     }
-    return watch_clause(vp, cp);
+    return clause_watch(vp, cp);
+}
+
+
+
+// copy (clone) the varp structure (clauses and variables)
+// but leave the xref etc for the cloneer to speficy
+static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
+			       const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp0;    
+    varp_t* vp;
+    ERL_NIF_TERM varc;
+    varp_opt_t opt;
+    int si, i;
+    
+    DBG("clone varc instance\r\n");
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp0))
+	return enif_make_badarg(env);
+
+    opt = vp0->opt;
+
+    if (parse_varp_opts(env, argv[1], &opt) < 0)
+	return enif_make_badarg(env);
+
+    if (!(vp = enif_alloc_resource(varp_res, sizeof(varp_t))))
+	goto error;
+    memset(vp, 0, sizeof(varp_t));
+
+    if (setup(vp, &opt) < 0)
+	goto error;
+
+    if (add_variables(vp, vp0->vnum) < 0)     // create N variables
+	goto error;
+
+    // copy current values (level=0)
+    for (i = 1; i < (int)vp0->vnum; i++) {
+	variable_t* var0 = vp0->var_map[i];
+	variable_t* var  = vp->var_map[i];
+	symbol_t* sp0;
+	ival_t v = get_vv(vp0, var0);
+	int j;
+	
+	switch(v) {
+	case I_FALSE:
+	case I_TRUE:
+	    if (var0->level == 0)
+		set_vv(vp, var, v);
+	    break;
+	case I_BOUND:
+	    bnd_vv(vp, var);
+	    j = export_ll(var0->bound);
+	    var->bound = vindex_ll(vp, j);
+	    break;
+	case I_UNDEF:
+	default:
+	    break;
+	}
+
+	// copy symbols
+	sp0 = var0->names;
+	while(sp0 != NULL) {
+	    symbol_t* sp = symbol_copy(vp, var, sp0);
+	    if (sp != NULL)
+		symbol_insert(vp, var, sp, sp->hash);
+	    sp0 = sp0->anext;
+	}
+    }
+
+    for (si = 0; si < NUM_CSET; si++) {
+	for (i = 0; i < (int) vp0->cnum[si]; i++) {
+	    clause_t* cp = clause_copy(vp, vp0->clause_map[si][i]);
+	    if (cp != NULL) {
+		clause_insert(vp, si, cp, cp->hvalue);
+		clause_link(vp, cp);
+	    }
+	}
+    }
+		
+    varc = enif_make_resource(env,vp);
+    enif_release_resource(vp);
+    return varc;
+    
+error:
+    if (vp)
+	enif_release_resource(vp);
+    return enif_make_badarg(env);
 }
 
 //  2-clause coding...
@@ -4483,7 +4659,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	ASSERT(yl == cp->lit[yptr->p]);
 
 	if ((yptr->p == cp->wl[0].p) || (yptr->p == cp->wl[1].p)) {
-	    unwatch_clause(vp, cp);
+	    clause_unwatch(vp, cp);
 	    rewatch = 1;
 	}
 	
@@ -4501,7 +4677,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    yp->degree--;
 
 	    if (rewatch) {
-		if (watch_clause(vp, cp) <= 0) {
+		if (clause_watch(vp, cp) <= 0) {
 		    ASSERT(0);
 		}
 	    }
@@ -4517,7 +4693,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    }
 	    yp->degree--;
 	    if (rewatch) {
-		if (watch_clause(vp, cp) <= 0) {
+		if (clause_watch(vp, cp) <= 0) {
 		    ASSERT(0);
 		}
 	    }
@@ -5115,7 +5291,7 @@ static void bcp_unwatch(varp_t* vp)
 		}
 	    }
 	}
-	unwatch_clause(vp, cp);
+	clause_unwatch(vp, cp);
 	cp->flags &= ~CLAUSE_FLAG_UNWATCH;
 	cp = cp->uwatch;
     }
@@ -5339,7 +5515,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->num_conflicting);
     } 
     if (argv[1] == ATOM(number_of_variables)) {
-	return enif_make_int(env, vp->vnum);
+	return enif_make_int(env, vp->vnum-1);
     }
     if (argv[1] == ATOM(number_of_clauses)) {
 	return enif_make_int(env, get_number_of_clauses(vp));
@@ -5363,7 +5539,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->num_subst);
     }    
     if (argv[1] == ATOM(number_of_unbound_variables)) {
-	return enif_make_int(env, vp->vnum - vp->num_bound);
+	return enif_make_int(env, (vp->vnum-1) - vp->num_bound);
     }
     if (argv[1] == ATOM(clause_n_counter)) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_N]);
@@ -5398,12 +5574,14 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	}
     }
     if (argv[1] == ATOM(max_level)) {
-	return enif_make_int(env, vp->max_level);
-	vp->max_level = 0;
+	int level = vp->max_level;
+	vp->max_level = 0;	
+	return enif_make_int(env, level);
     }
     if (argv[1] == ATOM(max_bound)) {
-	return enif_make_int(env, vp->max_bound);
+	int bound = vp->max_bound;
 	vp->max_bound = 0;
+	return enif_make_int(env, bound);
     }    
     if (argv[1] == ATOM(literal_size)) {
 	return enif_make_uint(env, 8*sizeof(lit_t));
@@ -5471,13 +5649,13 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->opt.xref = true;
 	    for (si = 0; si < NUM_CSET; si++) {
 		for (i = 0; i < (int)vp->cnext[si]; i++)
-		    xref_clause(vp, vp->clause_map[si][i]);
+		    clause_xref(vp, vp->clause_map[si][i]);
 	    }
 	}
 	else if (!enable && vp->opt.xref) { // teardown xref
 	    for (si = 0; si < NUM_CSET; si++) {	    
 		for (i = 0; i < (int)vp->cnext[si]; i++)
-		    unxref_clause(vp, vp->clause_map[si][i]);
+		    clause_unxref(vp, vp->clause_map[si][i]);
 	    }
 	    vp->opt.xref = false;
 	}
@@ -5641,12 +5819,6 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
     if ((cix = clause_insert(vp, si, cp, hvalue)) == CLAUSE_NONE)
 	return CLAUSE_NONE;
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
-    switch(size) {
-    case 1: cp->select = 0; break; // 0 = 1 clause (unit)
-    case 2: cp->select = 1; break; // 1 = 2 clause
-    case 3: cp->select = 2; break; // 2 = 3 clause
-    default: cp->select = 3; break; // 3 = n clause
-    }
     return cix;
 }
 
@@ -5654,7 +5826,7 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 // handle edges. Then update degree and activity stats
 static int clause_install(varp_t* vp, clause_t* cp)
 {
-    int r = link_clause(vp, cp);
+    int r = clause_link(vp, cp);
     if (r >= 0) {
 	int si = GET_SI(cp->cix);
 	update_clause_degree(vp, cp, 1);
@@ -5776,7 +5948,7 @@ static ERL_NIF_TERM varp_find_clause(ErlNifEnv* env, int argc,
 	    list = tail;
 	}
 	size = sort_clause_array(vp, literals, size, true);
-	if ((cix=clause_find(vp, literals, size)) == CLAUSE_NONE)
+	if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE)
 	    return ATOM(false);
 	return enif_make_int(env, (int)cix);
     }
@@ -5851,22 +6023,22 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
     return bin;
 }
 
-static void unlink_clause(varp_t* vp, clause_t* cp)
+static void clause_unlink(varp_t* vp, clause_t* cp)
 {
     if ((cp->size == 2) && vp->opt.edge) {
 	lit_t* lit  = cp->lit;
 	edge_remove(vp, neg_l(lit[0]), lit[1], cp->cix);
 	edge_remove(vp, neg_l(lit[1]), lit[0], cp->cix);
     }
-    unwatch_clause(vp, cp);      // remove watched literals
+    clause_unwatch(vp, cp);      // remove watched literals
     if (vp->opt.xref)
-	unxref_clause(vp, cp);
+	clause_unxref(vp, cp);
 }
 
 static void remove_clause(varp_t* vp, clause_t* cp)
 {
     if (cp != NULL) {
-	unlink_clause(vp, cp);
+	clause_unlink(vp, cp);
 	update_clause_degree(vp, cp, -1);
 	clause_free(vp, cp);
     }
@@ -5973,7 +6145,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 		list = tail;
 	    }
 	    size = sort_clause_array(vp, literals, size, true);
-	    if ((cix=clause_find(vp, literals, size)) == CLAUSE_NONE)
+	    if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE)
 		return enif_make_badarg(env);
 	}
     }
@@ -6021,7 +6193,7 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
 
     DBG("cleanup: clause %u, size=%lu\r\n", cix, size);
 
-    unlink_clause(vp, cp);
+    clause_unlink(vp, cp);
     if (cp->flags & CLAUSE_FLAG_DEAD) goto remove;
     size = sort_clause_array(vp, lit, size, false);
     if (lit[size-1] == L_TRUE(vp))
@@ -6030,7 +6202,7 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
 	goto error;
     cp->size = size;
 
-    link_clause(vp, cp);
+    clause_link(vp, cp);
     return ATOM(ok);
     
 remove:
@@ -6042,8 +6214,6 @@ remove:
 error:
     return enif_make_badarg(env);    
 }
-
-
 
 // may only clean literal on level 0!
 static ERL_NIF_TERM varp_clean_edges(ErlNifEnv* env, int argc,
@@ -6129,7 +6299,7 @@ static void remap_edge(literal_t* lp, unsigned int si, int* remap, int n)
 static void remap_hash_slot(varp_t* vp,int i,unsigned int si,int* remap,int n)
 {
     UNUSED(n);    
-    hlink_t* hp = vp->hash_tab[i];
+    hlink_t* hp = vp->hashtab[i];
     while (hp != NULL) {
 	if (GET_SI(hp->cix) == si) {
 	    int ix = GET_IX(hp->cix);
@@ -6184,21 +6354,21 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	// now map all xrefs and edges
 	if (vp->opt.xref) {
 	    int i;
-	    for (i = 1; i < (int)vp->vnext; i++) {
+	    for (i = 1; i < (int)vp->vnum; i++) {
 		remap_xref(&vp->var_map[i]->lit[0], si, rmap, n);
 		remap_xref(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.edge) {
 	    int i;
-	    for (i = 1; i < (int)vp->vnext; i++) {
+	    for (i = 1; i < (int)vp->vnum; i++) {
 		remap_edge(&vp->var_map[i]->lit[0], si, rmap, n);	    
 		remap_edge(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.hash && (si != BETA)) {
 	    int i;
-	    for (i = 0; i < (int)vp->chsize; i++)
+	    for (i = 0; i < (int)vp->hsize; i++)
 		remap_hash_slot(vp, i, si, rmap, n);
 	}
     }

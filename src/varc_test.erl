@@ -358,11 +358,6 @@ nbcp_loop(V) ->
 	    nbcp_loop(V)
     end.
     
-dump_variables(V, List) ->
-    lists:foreach(
-      fun(X) ->
-	      io:format("~w: ~p\n", [X, varc:variable_info(V, X)])
-      end, List).
 
 order() ->
     V = varc:new([{activity, mvsids}]),
@@ -855,6 +850,40 @@ edge_list3() ->
     ?F = varc:value(V, D),
     ok.
 
+clone1() ->
+    V = varc:new(),
+    X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
+    X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
+    X3 = add_variable(V), varc:add_symbol(V, X3, <<"P(2,1)">>),
+    X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,2)">>),
+    X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(3,1)">>),
+    X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(3,2)">>),
+
+    varc:add_clause(V, [X1,X2]),
+    varc:add_clause(V, [X3, X4]),
+    varc:add_clause(V, [X5, X6]),
+    varc:add_clause(V, [-X1, -X3]),
+    varc:add_clause(V, [-X1, -X5]),
+    varc:add_clause(V, [-X3, -X5]),
+    varc:add_clause(V, [-X2, -X4]),
+    varc:add_clause(V, [-X2, -X6]),
+    varc:add_clause(V, [-X4, -X6]),
+
+    varc:set_level(V, 1),
+    false = varc:nbcp(V),
+
+    print_clauses(V),
+    dump_variables(V, [X1,X2,X3,X4,X5,X6]),
+
+    W = varc:clone(V),
+
+    varc:set_level(W, 1),
+    false = varc:nbcp(W),
+
+    print_clauses(W),
+    dump_variables(W, [X1,X2,X3,X4,X5,X6]),
+    ok.
+
 %% Utils
 
 get_watched(V) ->
@@ -870,7 +899,7 @@ get_watched(_V, []) ->
 print_clauses(V) ->
     print_clauses(V,false).
 print_clauses(V,Raw) ->
-    print_clauses_(V, Raw, varc:clause_first(V)).
+    print_clauses_(V, Raw, varc:clauseset_first(V)).
 
 print_clauses_(_V, _Raw, false) ->
     ok;
@@ -879,7 +908,13 @@ print_clauses_(V, Raw, I) ->
     io:format("~w: ~s ~w\n",
 	      [I, format_clause_flags(Fs),
 	       varc:get_clause(V,I,undefined,Raw)]),
-    print_clauses_(V, Raw, varc:clause_next(V, I)).
+    print_clauses_(V, Raw, varc:clauseset_next(V, I)).
+
+dump_variables(V, List) ->
+    lists:foreach(
+      fun(X) ->
+	      io:format("~w: ~p\n", [X, varc:variable_info(V, X)])
+      end, List).
 
 add_variable(V) ->
     varc:add_variable(V).
