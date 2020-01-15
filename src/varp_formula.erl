@@ -264,7 +264,7 @@ del_clause(Bs, IndexOrClause) ->
 
 del_unused_clauses(Bs) ->
     V = Bs#bs.vp,
-    ?dbg0("del_unused_clause gamma offset=~w, size=~w\n", 
+    ?dbg1("del_unused_clause gamma offset=~w, size=~w\n", 
 	  [varc:clauseset_offset(V, ?GAMMA), 
 	   varc:clauseset_size(V, ?GAMMA)]),
     varc:clauseset_sort(V, ?GAMMA),  %% learned clauses
@@ -274,7 +274,7 @@ del_unused_clauses(Bs) ->
 	_ ->
 	    del_proof_clauses(Bs, V, varc:clauseset_first(V, ?GAMMA))
     end,
-    ?dbg0("del_unused_clause size=~w\n", 
+    ?dbg1("del_unused_clause size=~w\n", 
 	  [varc:clauseset_size(V, ?GAMMA)]),
     ok.
     
@@ -291,7 +291,7 @@ del_proof_clauses(_Bs, _V, false) ->
 del_proof_clauses(Bs, V, I) ->
     proof_output(Bs, $d, I),  
     varc:del_clause(V, I),
-    del_proof_clauses(Bs, V, varc:clause_next(V, I)).
+    del_proof_clauses(Bs, V, varc:clauseset_next(V, I)).
 
 clean_clauses(Bs) ->
     clean_clauses_(Bs, varc:clause_first(Bs#bs.vp)).
@@ -300,7 +300,7 @@ clean_clauses_(Bs, false) ->
     Bs;
 clean_clauses_(Bs, I) ->
     varc:clean_clause(Bs#bs.vp, I),
-    clean_clauses_(Bs, varc:clause_next(Bs#bs.vp, I)).
+    clean_clauses_(Bs, varc:clauseset_next(Bs#bs.vp, I)).
 
 clean_edges(Bs) ->
     each_unbound(Bs, 

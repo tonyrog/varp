@@ -114,8 +114,8 @@
 
 -define(DELTA, 0).
 -define(GAMMA, 1).
--define(ALPHA, 2).
--define(BETA,  3).
+-define(BETA,  2).
+-define(ALPHA, 3).
 
 -type varc() :: reference().
 -type literal() :: integer().

@@ -33,6 +33,8 @@ options() ->
     ].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
+    %% io:format("Decls = ~p\n", [Bs#bs.decls]),
+    %% io:format("Var = ~p\n", [Bs#bs.vs]),
     T = case maps:get(type, Param) of
 	    undefined -> varp_formula:getopt(Bs, proof_output);
 	    Type -> Type
@@ -46,9 +48,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 		end;
 	    File -> File
 	end,
-
     close_proof_output(Bs), %% reopen later?
-
     case file:open(F, [read,binary,raw,read_ahead]) of
 	{ok,Fd} ->
 	    Res = validate_loop(Fd, T, Bs, 0),
@@ -83,7 +83,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    case Res of
 		false -> %% ok valid
 		    varc:set_level(Bs#bs.vp,0),
-		    varp_formula:add_clause(Bs, Clause),
+		    {true,_CIX} = varc:add_clause(Bs#bs.vp, Clause, gamma),
 		    case varc:bcp(Bs#bs.vp) of
 			false ->
 			    case read_clause(Fd,Type,Bs) of
@@ -98,13 +98,17 @@ validate_loop(Fd,Type,Bs, I) ->
 			    validate_loop(Fd,Type,Bs,I1)
 		    end;
 		true ->
+		    io:format("INVALID ~w\n", [Clause]),
 		    io:format("\nINVALID\n"),
 		    {?ERROR,"invalid",Bs}
 	    end;
 	{d,Clause} ->
 	    %% what tests must be done?
-	    %% io:format("delete clause ~w\n", [Clause]),
-	    ok = varp_formula:del_clause(Bs, Clause),
+	    %% io:format("DELETE ~w\n", [Clause]),
+	    CIX = varc:find_clause(Bs#bs.vp, Clause),
+	    %% io:format("  INDEX: ~w:~w\n", [(_CIX bsr 30),
+	    %%            (CIX band 16#3fffffff)]),
+	    ok = varc:del_clause(Bs#bs.vp, CIX),
 	    validate_loop(Fd,Type,Bs,I1)	    
     end.
 
@@ -126,7 +130,7 @@ read_text_clause(Fd, Bs) ->
     case file:read_line(Fd) of
 	eof -> eof;
 	{ok,Line} ->
-	    io:format("~s", [Line]),
+	    %% io:format("~s", [Line]),
 	    case varp_scan:string(binary_to_list(Line)) of
 		{ok,[{identifier,_Ln,"d"}|Ts],Ln1} ->
 		    text_clause(Fd, Bs, Ts, Ln1, [], d);
@@ -167,16 +171,24 @@ snf_literals(CL, Bs) ->
 snf_literals([Li|CL], Bs, Acc) when is_integer(Li) ->
     snf_literals(CL, Bs, [Li|Acc]);
 snf_literals([{'not',X}|CL], Bs, Acc) ->
-    snf_literals(CL, Bs, [-variable(eval_sym(X), Bs)|Acc]);
+    snf_literals(CL, Bs, [-variable(eval_sym(X,Bs), Bs)|Acc]);
 snf_literals([X|CL], Bs, Acc) ->
-    snf_literals(CL, Bs, [variable(eval_sym(X), Bs)|Acc]);
+    snf_literals(CL, Bs, [variable(eval_sym(X,Bs), Bs)|Acc]);
 snf_literals([], _Bs, Acc) ->
     lists:reverse(Acc).
 
-eval_sym({p,S,Args}) ->
+eval_sym({p,S,Args},_Bs) ->
     {p,S,[eval_arg(A)||A<-Args]};
-eval_sym({bit_index,Sym,Index}) ->
-    {bit_index,eval_sym(Sym),eval_arg(Index)}.
+eval_sym({bit_index,Sym,Index},Bs) ->
+    {p,Name,_Arg} = ESym = eval_sym(Sym,Bs),
+    EIndex = eval_arg(Index),
+    case maps:get(Name, Bs#bs.decls, undefined) of
+	undefined ->
+	    {bit_index,ESym,EIndex};
+	{PType,_Arity,Size} ->
+	    {PType,ESym,Size,EIndex}
+    end.
+
 
 eval_arg(V) when is_integer(V) -> V;
 eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).

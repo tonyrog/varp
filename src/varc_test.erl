@@ -267,7 +267,8 @@ or_bcp_bindings() ->
     print_clauses(V),
     ok.
 
-nbcp_p3() ->
+%% pigeon=3
+p3() ->
     V = varc:new(),
     X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
     X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
@@ -275,7 +276,6 @@ nbcp_p3() ->
     X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,2)">>),
     X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(3,1)">>),
     X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(3,2)">>),
-    %% pigeon=3
     varc:add_clause(V, [X1,X2]),
     varc:add_clause(V, [X3, X4]),
     varc:add_clause(V, [X5, X6]),
@@ -285,24 +285,10 @@ nbcp_p3() ->
     varc:add_clause(V, [-X2, -X4]),
     varc:add_clause(V, [-X2, -X6]),
     varc:add_clause(V, [-X4, -X6]),
+    V.
 
-    varc:set_level(V, 1),
-
-    false = varc:nbcp(V),
-    Bn1 = varc:get_all_bindings(V),
-    io:format("bindings = ~w\n", [Bn1]),
-    varc:undo(V),
-
-    false = varc:nbcp(V),
-    Bn2 = varc:get_all_bindings(V),
-    io:format("bindings = ~w\n", [Bn2]),
-    varc:undo(V),
-
-    BnX = varc:get_all_bindings(V),
-    io:format("bindings = ~w\n", [BnX]),
-    ok.
-
-nbcp_p4() ->
+%% pigeon=4
+p4() ->
     V = varc:new(),
     X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
     X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
@@ -316,8 +302,6 @@ nbcp_p4() ->
     X10 = add_variable(V), varc:add_symbol(V, X10, <<"P(4,1)">>),
     X11 = add_variable(V), varc:add_symbol(V, X11, <<"P(4,2)">>),
     X12 = add_variable(V), varc:add_symbol(V, X12, <<"P(4,3)">>),
-
-    ok = varc:order_sort_first(V, [X2,X4,X6,X8,X10,X12,X1,X3,X5,X7,X9,X11]),
 
     varc:add_clause(V, [X1,X2,X3]),
     varc:add_clause(V, [X4,X5,X6]),
@@ -341,10 +325,43 @@ nbcp_p4() ->
     varc:add_clause(V, [-X6,-X9]),
     varc:add_clause(V, [-X6,-X12]),
     varc:add_clause(V, [-X9,-X12]),
+    V.
 
-    varc:set_level(V, 1),
+nbcp_p3() ->
+    P3 = p3(),
+    varc:set_level(P3, 1),
+    false = varc:nbcp(P3),
+    Bn1 = varc:get_all_bindings(P3),
+    io:format("bindings = ~w\n", [Bn1]),
+    varc:undo(P3),
+    false = varc:nbcp(P3),
+    Bn2 = varc:get_all_bindings(P3),
+    io:format("bindings = ~w\n", [Bn2]),
+    varc:undo(P3),
+    BnX = varc:get_all_bindings(P3),
+    io:format("bindings = ~w\n", [BnX]),
+    ok.
 
-    nbcp_loop(V).
+nbcp_p4() ->
+    P4 = p4(),
+    ok = symlist_sort_first(P4,
+			    [<<"P(1,2)">>,
+			     <<"P(2,1)">>,
+			     <<"P(2,3)">>,
+			     <<"P(3,2)">>,
+			     <<"P(4,1)">>,
+			     <<"P(4,3)">>,
+			     <<"P(1,1)">>,
+			     <<"P(1,3)">>,
+			     <<"P(2,2)">>,
+			     <<"P(3,1)">>,
+			     <<"P(3,3)">>,
+			     <<"P(4,2)">>]),
+    varc:set_level(P4, 1),
+    nbcp_loop(P4).
+
+symlist_sort_first(V, SymList) ->
+    varc:order_sort_first([varc:find_symbol(V, Sym) || Sym <- SymList]).
 
 nbcp_loop(V) ->
     false = varc:nbcp(V),
@@ -896,25 +913,72 @@ get_watched(V, [Xi|Xs]) ->
 get_watched(_V, []) ->
     [].
 
+dump(V) ->
+    io:format("STATE of ~p\n", [V]),
+    lists:foreach(
+      fun({Key, Value}) ->
+	      io:format("  ~s: ~p\n", [Key,Value])
+      end, varc:info(V)),
+    io:format("VARIABLES\n"),
+    dump_variables(V, lists:seq(1, varc:info(V,number_of_variables))),
+    io:format("CLAUSES DELTA\n"),
+    dump_clauses(V, true, varc:clauseset_first(V,delta)),
+    io:format("CLAUSES GAMMA\n"),
+    dump_clauses(V, true, varc:clauseset_first(V,gamma)),
+    io:format("CLAUSES BETA\n"),
+    dump_clauses(V, true, varc:clauseset_first(V,beta)),
+    io:format("CLAUSES ALPHA\n"),
+    dump_clauses(V, true, varc:clauseset_first(V,alpha)),
+    io:format("BINDINGS\n"),
+    lists:foreach(
+      fun(L) ->
+	      io:format("~w: ~p\n", [L, varc:get_bindings(V, L)])
+      end, lists:seq(0, varc:info(V,level))),
+    ok.
+
 print_clauses(V) ->
     print_clauses(V,false).
 print_clauses(V,Raw) ->
-    print_clauses_(V, Raw, varc:clauseset_first(V)).
+    dump_clauses(V, Raw, varc:clauseset_first(V,delta)).
 
-print_clauses_(_V, _Raw, false) ->
+dump_clauses(_V, _Raw, false) ->
     ok;
-print_clauses_(V, Raw, I) ->
-    Fs = varc:clause_info(V, I),
-    io:format("~w: ~s ~w\n",
-	      [I, format_clause_flags(Fs),
-	       varc:get_clause(V,I,undefined,Raw)]),
-    print_clauses_(V, Raw, varc:clauseset_next(V, I)).
+dump_clauses(V, Raw, I) ->
+    {_,SI,IX} = split_cix(I),
+    io:format("~w - ~s:~w\n", [I,SI,IX]),
+    io:format("  ~w\n", [varc:get_clause(V,I,undefined,Raw)]),
+    io:format("  ~p\n", [varc:clause_info(V, I)]),
+    dump_clauses(V, Raw, varc:clauseset_next(V, I)).
 
 dump_variables(V, List) ->
     lists:foreach(
       fun(X) ->
-	      io:format("~w: ~p\n", [X, varc:variable_info(V, X)])
+	      Keys = varc:variable_info_keys() -- [implication,symbol],
+	      Sym  = varc:variable_info(V,X,symbol),
+	      io:format("~w: ~p\n", [X, Sym]),
+	      lists:foreach(
+		fun(Key) ->
+			io:format("  ~s: ~p\n", 
+				  [Key,varc:variable_info(V,X,Key)])
+		end, Keys),
+	      io:format(" +xref: ~p\n", [get_cix_list(V,X,literal)]),
+	      io:format(" +watch: ~p\n", [get_cix_list(V,X,watch)]),
+	      io:format(" -xref: ~p\n", [get_cix_list(V,-X,literal)]),
+	      io:format(" -watch: ~p\n", [get_cix_list(V,-X,watch)])
       end, List).
+
+get_cix_list(V, X, How) ->
+    [split_cix(I) || I <- varc:get_clauses(V, X, How)].
+
+split_cix(I) ->
+    {I, case (I bsr 30) band 3 of 
+	    ?DELTA -> delta;
+	    ?GAMMA -> gamma;
+	    ?BETA -> beta;
+	    ?ALPHA -> alpha
+	end,
+     I band 16#3fffffff}.
+    
 
 add_variable(V) ->
     varc:add_variable(V).
