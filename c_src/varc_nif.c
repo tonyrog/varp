@@ -299,12 +299,33 @@ typedef struct _allocator_t
 
 typedef struct _dynarray_t // :object_t
 {
+    const char* name;  // debugging name of array
     size_t capacity; // max number of elements
     size_t nel;      // assigned size <= capacity
     size_t width;    // element size
     void*  base;     // array base address
 } dynarray_t;
 
+#define dynvar(type, name) \
+    dynarray_t name ## _dyn_;			\
+    type name
+
+#define dynvar_size(name) name ## _dyn_.nel
+#define dynvar_capacity(name) name ## _dyn_.capacity
+
+#define dynvar_init(name, size)			\
+    ((dynarray_init(&name ## _dyn_, #name, (size), sizeof(name[0])) < 0) ? -1 : \
+     (name = name ## _dyn_.base, 0))
+
+#define dynvar_resize(name, size)				\
+    ((dynarray_resize(&name ## _dyn_, (size)) < 0) ? -1 :	\
+     (name = name ## _dyn_.base, 0))
+
+#define dynvar_add(name)			\
+    (__typeof__(name[0])*) dynarray_add(&name ## _dyn_)
+
+#define dynvar_clear(name)			\
+    (dynarray_clear(&name ## _dyn_), name = NULL)
 
 #ifdef LIT_INTEGER
 #if LIT_INTEGER == 8
@@ -543,38 +564,32 @@ typedef struct _varp_t {
     int num_conflicting;      // number of conflicting clauses saved
     int max_conflicting;      // max number of conflicting <= MAX_CONFLICTING
     cix_t conflicting_clauses[MAX_CONFLICTING];
-    // DYNARRAY    
-    variable_t** var_map;     // variable map
+
+    dynvar(variable_t**, var_map);
 #if defined(LIT_VALUE)
 #if defined(PACKED_VALUE)
-    // DYNARRAY    
-    uint8_t*     lit_value;   // ivals for every lit_t value
+    dynvar(uint8_t*, lit_value);   // ivals for every lit_t value
     uint16_t*    lit_overlay; // write overlay access for single write access
 #endif
 #else
 #if defined(PACKED_VALUE)
-    // DYNARRAY    
-    uint8_t*     var_value;   // values are stored 8 bit/2 bit packed
+    dynvar(uint8_t*, var_value);   // values are stored 8 bit/2 bit packed
 #endif
 #endif
-    variable_t*  marked;      // mlist marked variables
-    size_t ssize;             // size of symbol hash table
-    size_t snum;              // number of symbols in symbol hash table
-    // DYNARRAY
-    symbol_t**   symtab;      // symbol hash table
-    size_t       hsize;       // size of clause hash table
-    size_t       hnum;        // number of clauses in clause hashtab
-    // DYNARRAY
-    hlink_t**    hashtab;     // clause hash table
-    // DYNARRAY    
-    int*         order_map;   // literal order table
-    int          sort_key[2]; // sort order -1,-2,1,2 (0=not used)
-    // DYNARRAY    
+    variable_t*  marked;        // mlist marked variables
+    size_t ssize;               // size of symbol hash table
+    size_t snum;                // number of symbols in symbol hash table
+    dynvar(symbol_t**,symtab);  // symbol hash table
+    size_t       hsize;         // size of clause hash table
+    size_t       hnum;          // number of clauses in clause hashtab
+    dynvar(hlink_t**,hashtab);  // clause hash table
+    dynvar(int*,order_map);     // literal order table
+    int          sort_key[2];   // sort order -1,-2,1,2 (0=not used)
+    // FIXME DYNARRAY    
     clause_t**   clause_map[NUM_CSET]; // array of clauses, entries may be null
     clause_t*    unwatch;     // clauses to unwatch (check after bcp)
     size_t       unum;        // number of levels allocated
-    // DYNARRAY    
-    undo_t*      undo;        // array of undo block, one for each level
+    dynvar(undo_t*,undo);     // array of undo block, one for each level
     size_t       num_bound;   // #bound variables
     size_t       num_subst;   // #substitions < #bound
     size_t       max_bound;   // statistics max bound variables since last check
@@ -597,9 +612,7 @@ typedef struct _varp_t {
     ErlNifEnv*      msg_env;       // message environment
     ErlNifEnv*      caller_env;    // message environment
 
-    // DYNARRAY (lit_t?)
-    size_t dmem_size;              // allocated size of dmem
-    void*  dmem;                   // temporary memory of dmem_size
+    dynvar(lit_t*, tlit);          // temporary clause
 
     allocator_t dyn_allocator;     // heap storage for dyn_t
     allocator_t var_allocator;     // heap storage for variable_t
@@ -884,15 +897,19 @@ static size_t dynarray_first_size(size_t nel)
     return dynarray_next_size(1, nel);
 }
 
-static int dynarray_init(varp_t* vp, dynarray_t* dp, size_t nel, size_t width)
+static int dynarray_init(dynarray_t* dp, const char* name, size_t nel,
+			 size_t width)
 {
-    UNUSED(vp);
     size_t capacity = dynarray_first_size(nel);
     void* base;
 
     // fixme: allocate small 2^i chunks as fixed allocator chunks
     if ((base = VARP_ALLOC(capacity*width)) == NULL)
 	return -1;
+
+    enif_fprintf(stdout, "dynarray_init: [%s] nel=%d, cap=%d, width=%d\r\n",
+		 name, nel, capacity, width);
+    dp->name = name;
     dp->capacity = capacity;
     dp->nel      = nel;
     dp->width    = width;
@@ -900,10 +917,17 @@ static int dynarray_init(varp_t* vp, dynarray_t* dp, size_t nel, size_t width)
     return 0;
 }
 
+static void dynarray_clear(dynarray_t* dp)
+{
+    VARP_FREE(dp->base);
+    dp->nel = 0;
+    dp->capacity = 0;
+}
+
 static void dynarray_destroy(varp_t* vp, dynarray_t* dp)
 {
     if (dp) {
-	VARP_FREE(dp->base);
+	dynarray_clear(dp);
 	varp_free(&vp->dyn_allocator, dp);
     }
 }
@@ -922,31 +946,38 @@ static inline size_t dynarray_size(dynarray_t* dp)
     return dp->nel;
 }
 
-static int dynarray_resize(varp_t* vp, dynarray_t* dp, size_t nel)
+static int dynarray_grow_(dynarray_t* dp, size_t min_capacity)
 {
-    UNUSED(vp);
-    if (nel > dp->capacity) {
-	size_t capacity = dynarray_next_size(dp->capacity, nel);
-	void* base;
-	if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
-	    return -1;
-	dp->base = base;
-	dp->capacity = capacity;
-    }
-    dp->nel = nel;
-    enif_fprintf(stdout, "dynarray_resize nel=%d cap=%d\r\n",
-		 dp->nel, dp->capacity);	 
+    size_t capacity = dynarray_next_size(dp->capacity, min_capacity);
+    void* base;
+    if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
+	return -1;
+    dp->base = base;
+    enif_fprintf(stdout, "dynarray_grow_: [%s] %d => %d\r\n",
+		 dp->name, dp->capacity, capacity); 
+    dp->capacity = capacity;
     return 0;
 }
 
-static dynarray_t* dynarray_create(varp_t* vp, size_t nel, size_t width)
+static inline int dynarray_resize(dynarray_t* dp, size_t nel)
+{
+    if (nel > dp->capacity) {
+	if (dynarray_grow_(dp, nel) < 0)
+	    return -1;
+    }
+    dp->nel = nel;
+    return 0;
+}
+
+static dynarray_t* dynarray_create(varp_t* vp, const char* name,
+				   size_t nel, size_t width)
 {
     dynarray_t* dp;
     
     if ((dp = varp_alloc(&vp->dyn_allocator)) == NULL)
 	return NULL;
     if (dp != NULL) {
-	if (dynarray_init(vp, dp, nel, width) < 0) {
+	if (dynarray_init(dp, name, nel, width) < 0) {
 	    varp_free(&vp->dyn_allocator, dp);
 	    return NULL;
 	}
@@ -954,9 +985,10 @@ static dynarray_t* dynarray_create(varp_t* vp, size_t nel, size_t width)
     return dp;
 }
 
-static inline dynarray_t* dynarray_empty(varp_t* vp, size_t width)
+static inline dynarray_t* dynarray_empty(varp_t* vp, const char* name,
+					 size_t width)
 {
-    return dynarray_create(vp, 0, width);
+    return dynarray_create(vp, name, 0, width);
 }
 
 static inline void* dynarray_element(dynarray_t* dp, int i)
@@ -969,26 +1001,25 @@ static inline void* dynarray_element(dynarray_t* dp, int i)
 
 
 // copy data into dynarray resize if needed
-static inline int dynarray_setelement(varp_t* vp,dynarray_t* dp,
-				      int i,void* data)
+static inline int dynarray_setelement(dynarray_t* dp,int i,void* data)
 {
     if (dp == NULL || (i < 0)) return -1;
     if (i >= (int)dp->nel) {
-	if (dynarray_resize(vp, dp, i+1) < 0)
+	if (dynarray_resize(dp, i+1) < 0)
 	    return -1;
     }
     memcpy(DYN_ADDR(dp, i), data, dp->width);
     return 0;
 }
 
-static inline void* dynarray_add(varp_t* vp, dynarray_t* dp)
+static inline void* dynarray_add(dynarray_t* dp)
 {
     size_t n;
     if (dp == NULL) return NULL;
     n = dp->nel;
-    if (dynarray_resize(vp, dp, n+1) < 0)
+    if (dynarray_resize(dp, n+1) < 0)
 	return NULL;
-    return dynarray_element(dp, n);
+    return DYN_ADDR(dp, n);
 }
 
 //
@@ -1686,24 +1717,6 @@ void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
     enif_fprintf(stdout, "\r\n");
 }
 
-static void* dmem_alloc(varp_t* vp, size_t size)
-{
-    if (vp->dmem == NULL) {  // alloc
-	size_t memsize = size < 256 ? 256 : 2*size;
-	if ((vp->dmem = VARP_ALLOC(memsize)) == NULL)
-	    return NULL;
-	vp->dmem_size = memsize;
-    }
-    else if (vp->dmem_size < size) {  // realloc
-	size_t memsize = 2*size;
-	if ((vp->dmem = VARP_REALLOC(vp->dmem, memsize)) == NULL)
-	    return NULL;
-	vp->dmem_size = memsize;
-    }
-    return vp->dmem;
-}
-
-
 static void arc4_init(arc4_stream_t *as)
 {
     int n;
@@ -2171,30 +2184,22 @@ static void init_level(varp_t* vp, int level)
 
 static int undo_alloc(varp_t* vp, size_t size)
 {
-    void* ptr;
     int i;
 
-    if ((ptr = VARP_ALLOC(size*sizeof(undo_t))) == NULL)
-	return -1;
-    vp->undo = ptr;
+    dynvar_init(vp->undo, size);
     vp->unum = size;
     for (i = 0; i < (int)size; i++)
 	init_level(vp, i);
-    vp->num_bound = 0;
-    vp->num_subst = 0;
-    vp->level = 0;
     return 0;    
 }
 
 static int undo_resize(varp_t* vp, size_t size)
 {
-    void* ptr;
     int i, n;
-    
-    if ((ptr = VARP_REALLOC(vp->undo, size*sizeof(undo_t))) == NULL)
+
+    if (dynvar_resize(vp->undo, size) < 0)
 	return -1;
     n = vp->unum;
-    vp->undo = ptr;
     vp->unum = size;
     for (i = n; i < (int)size; i++)
 	init_level(vp, i);
@@ -2340,18 +2345,16 @@ static int clause_is_equal(lit_t* a, lit_t* b, int size)
 
 static int hashtab_alloc(varp_t* vp, size_t size)
 {
-    void* ptr;    
     if (size == 0) {  // 2^size > csize
 	size = 1;
 	while(size < (size_t)vp->csize)
 	    size *= 2;
     }
-    if (!(ptr = VARP_ALLOC(size*sizeof(hlink_t**))))
+    if (dynvar_init(vp->hashtab, size) < 0)
 	return -1;
-    memset(ptr, 0, size*sizeof(hlink_t**));
-    vp->hashtab = ptr;
+    memset(vp->hashtab, 0, size*sizeof(hlink_t*));
+    vp->hsize = size;   // = vp->hashtab_dyn.nel    
     vp->hnum  = 0;
-    vp->hsize = size;
     return 0;
 }
 
@@ -2361,7 +2364,7 @@ static int hashtab_clear(varp_t* vp)
     VARP_FREE(vp->hashtab);
     vp->hashtab = NULL;
 
-    cleanup_allocator(&vp->hlink_allocator);    
+    cleanup_allocator(&vp->hlink_allocator);
     vp->hnum  = 0;
     vp->hsize = 0;
     return 0;
@@ -2370,25 +2373,27 @@ static int hashtab_clear(varp_t* vp)
 // allocate / resize clause hash table
 static int hashtab_resize(varp_t* vp, size_t size)
 {
-    hlink_t** htab;
+    hlink_t** htab = vp->hashtab;
+    size_t hsize   = vp->hsize;
     int i;
 
-    if ((htab = VARP_ALLOC(size*sizeof(hlink_t**))) == NULL)
+    // LOUSY TRICK, overwrite old hash table with a new table!
+    // FIXME a better rehash
+    if (dynvar_init(vp->hashtab, size) < 0)
 	return -1;
-    memset(htab, 0, size*sizeof(hlink_t**));
-    for (i = 0; i < (int)vp->hsize; i++) {
-	hlink_t* hp = vp->hashtab[i];
+    memset(vp->hashtab, 0, size*sizeof(hlink_t*));
+    for (i = 0; i < (int)hsize; i++) {
+	hlink_t* hp = htab[i];
 	while(hp != NULL) {
 	    hlink_t* hp1 = hp->next;
 	    int hjx = hp->hvalue & (size - 1);
-	    hp->next = htab[hjx];
-	    htab[hjx] = hp;
+	    hp->next = vp->hashtab[hjx];
+	    vp->hashtab[hjx] = hp;
 	    hp = hp1;
 	}
     }
-    VARP_FREE(vp->hashtab);
-    vp->hashtab = htab;
-    vp->hsize   = size;
+    VARP_FREE(htab);
+    vp->hsize = size;
     return 0;
 }
 
@@ -2786,8 +2791,7 @@ static void cleanup(varp_t* vp)
 		sp = sp->next;
 	    }
 	}
-	VARP_FREE(vp->symtab);
-	vp->symtab = NULL;
+	dynvar_clear(vp->symtab);
     }
 
     if (vp->opt.xref) {
@@ -2801,29 +2805,16 @@ static void cleanup(varp_t* vp)
 	}
     }    
 
-    if (vp->var_map) {
-	VARP_FREE(vp->var_map);
-	vp->var_map = NULL;
-    }
+    dynvar_clear(vp->var_map);
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
-    if (vp->lit_value) {    
-	VARP_FREE(vp->lit_value);
-	vp->lit_value = NULL;
-	vp->lit_overlay = NULL;
-    }
+    dynvar_clear(vp->lit_value);
+    vp->lit_overlay = NULL;
 #else
-    if (vp->var_value) {
-	VARP_FREE(vp->var_value);
-	vp->var_value = NULL;
-    }
+    dynvar_clear(vp->var_value);
 #endif
 #endif
-    
-    if (vp->order_map) {
-	VARP_FREE(vp->order_map);
-	vp->order_map = NULL;
-    }
+    dynvar_clear(vp->order_map);
 
     // turn off, avoid free all hash links clause_free
     if (vp->opt.hash) {
@@ -2845,17 +2836,9 @@ static void cleanup(varp_t* vp)
 	VARP_FREE(vp->clause_map[si]);
 	vp->clause_map[si] = NULL;
     }
-    
-    if (vp->undo) {
-	VARP_FREE(vp->undo);
-	vp->undo = NULL;
-    }
 
-    if (vp->dmem != NULL) {
-	VARP_FREE(vp->dmem);
-	vp->dmem = NULL;
-	vp->dmem_size = 0;
-    }
+    dynvar_clear(vp->undo);
+    dynvar_clear(vp->tlit);
 
     cleanup_allocator(&vp->dyn_allocator);    
     cleanup_allocator(&vp->var_allocator);
@@ -2955,40 +2938,41 @@ static int parse_new_opts(ErlNifEnv* env,ERL_NIF_TERM list,varp_new_opt_t* opt)
 
 static int symtab_alloc(varp_t* vp, size_t size)
 {
-    void* ptr;
     if (size == 0) {
 	size = 1;
 	while(size < (size_t)vp->opt.vsize)
 	    size *= 2;
     }
-    if ((ptr = VARP_ALLOC(size*sizeof(symbol_t**))) == NULL)
+    if (dynvar_init(vp->symtab, size) < 0)
 	return -1;
-    memset(ptr, 0, size*sizeof(symbol_t**));
-    vp->symtab = ptr;
-    vp->ssize = size;
+    memset(vp->symtab, 0, size*sizeof(symbol_t*));
+    vp->ssize = size; // = vp->symtab_dyn.nel
     vp->snum  = 0;
     return 0;
 }
 
 static int symtab_resize(varp_t* vp, size_t size)
 {
-    symbol_t** symtab = VARP_ALLOC(size*sizeof(symbol_t**));
+    symbol_t** stab = vp->symtab;
+    size_t ssize   = vp->ssize;
     int i;
-    if (symtab == NULL)
+    
+    // LOUSY TRICK, overwrite old hash table with a new table!
+    // FIXME a better rehash
+    if (dynvar_init(vp->symtab, size) < 0)
 	return -1;
-    memset(symtab, 0, size*sizeof(symbol_t**));
-    for (i = 0; i < (int)vp->ssize; i++) {
-	symbol_t* sp = vp->symtab[i];
+    memset(vp->symtab, 0, size*sizeof(symbol_t*));
+    for (i = 0; i < (int)ssize; i++) {
+	symbol_t* sp = stab[i];
 	while(sp != NULL) {
 	    symbol_t* sp1 = sp->next;
 	    int hjx = sp->hash & (size - 1);
-	    sp->next = symtab[hjx];
-	    symtab[hjx] = sp;
+	    sp->next = vp->symtab[hjx];
+	    vp->symtab[hjx] = sp;
 	    sp = sp1;
 	}
     }
-    VARP_FREE(vp->symtab);
-    vp->symtab = symtab;
+    VARP_FREE(stab);
     vp->ssize = size;
     return 0;
 }
@@ -3105,15 +3089,16 @@ static int setup(varp_t* vp, varp_config_t* config)
     vp->hsize = 0;  // allocated clause hash
     vp->hnum = 0;   // number of clauses (in hash)
 
-    if (!(vp->var_map = VARP_ALLOC(vsize*sizeof(variable_t**))))
+    if (dynvar_init(vp->var_map, vsize) < 0)
 	goto error;
+    
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
-    if (!(vp->lit_value = VARP_ALLOC(2*PACKED_BYTES(vsize)*sizeof(uint8_t))))
+    if (dynvar_init(vp->lit_value, 2*PACKED_BYTES(vsize)) < 0)
 	goto error;
     vp->lit_overlay = (uint16_t*) vp->lit_value;
 #else
-    if (!(vp->var_value = VARP_ALLOC(PACKED_BYTES(vsize)*sizeof(uint8_t))))
+    if (dynvar_init(vp->var_value, PACKED_BYTES(vsize)) < 0)
 	goto error;
 #endif
 #endif
@@ -3123,7 +3108,7 @@ static int setup(varp_t* vp, varp_config_t* config)
 	if (hashtab_alloc(vp, 0) < 0)
 	    goto error;
     }
-    if (!(vp->order_map = VARP_ALLOC(vsize*sizeof(int))))
+    if (dynvar_init(vp->order_map, vsize) < 0)
 	goto error;
     
     for (i = 0; i < NUM_CSET; i++) {
@@ -3133,6 +3118,9 @@ static int setup(varp_t* vp, varp_config_t* config)
 	vp->coffs[i] = 0;
 	vp->clause_map[i] = NULL;
     }
+
+    if (dynvar_init(vp->tlit, 8) < 0)
+	goto error;
 
     vp->cdead = 0;
     vp->edead = 0;
@@ -3158,6 +3146,11 @@ static int setup(varp_t* vp, varp_config_t* config)
 
     lqueue_init(&vp->q);
     undo_alloc(vp, DEFAULT_UNDO_SIZE);
+
+    vp->num_bound = 0;
+    vp->num_subst = 0;
+    vp->level = 0;
+    
 
     // transient statistics
     vp->max_level = 0;
@@ -3223,27 +3216,20 @@ error:
 // realloc var_map/values/order to vsize
 static int realloc_variables(varp_t* vp, size_t vsize)
 {
-    void* ptr;
-
-    if (!(ptr = VARP_REALLOC(vp->var_map, vsize*sizeof(variable_t*))))
+    // void* ptr;
+    
+    if (dynvar_resize(vp->var_map, vsize) < 0)
 	return -1;
-    vp->var_map = ptr;
-	
-    if (!(ptr = VARP_REALLOC(vp->order_map, vsize*sizeof(int))))
+    if (dynvar_resize(vp->order_map, vsize) < 0)
 	return -1;
-    vp->order_map = ptr;
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
-    if (!(ptr = VARP_REALLOC(vp->lit_value,
-			     2*PACKED_BYTES(vsize)*sizeof(uint8_t))))
+    if (dynvar_resize(vp->lit_value, 2*PACKED_BYTES(vsize)) < 0)
 	return -1;
-    vp->lit_value = ptr;
-    vp->lit_overlay = (uint16_t*) ptr;
+    vp->lit_overlay = (uint16_t*) vp->lit_value;
 #else
-    if (!(ptr = VARP_REALLOC(vp->var_value,
-			     PACKED_BYTES(vsize)*sizeof(uint8_t))))
+    if (dynvar_resize(vp->var_value, PACKED_BYTES(vsize)) < 0)
 	return -1;
-    vp->var_value = ptr;
 #endif
 #endif	
     return 0;
@@ -4313,10 +4299,8 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     int i;
     int level;
     double bump;
-    size_t csize, dsize;
     variable_t* trail;
     literal_t* lp;
-    lit_t* dlit;
     cix_t cix;
     int step;
     
@@ -4338,9 +4322,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     cix = vp->conflicting_clauses[i];
     step = 1;
 
-    dsize = 1024;
-    dlit = (lit_t*) dmem_alloc(vp, dsize*sizeof(lit_t));
-    csize = 0;
+    dynvar_resize(vp->tlit, 0);
     
     while(trail) {
 	int i;
@@ -4365,11 +4347,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 		    if ((qlevel = qp->var->level) == level)
 			step++;
 		    else if (qlevel > 0) {
-			if (csize >= dsize) {
-			    dsize = 2*dsize;
-			    dlit = (lit_t*) dmem_alloc(vp, dsize*sizeof(lit_t));
-			}
-			dlit[csize++] = q;
+			*dynvar_add(vp->tlit) = q;
 		    }
 		}
 	    }
@@ -4382,11 +4360,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    step--;
 	    if (step == 0) {
 		lp = literal_neg_vv(vp, trail);
-		if (csize >= dsize) {
-		    dsize = 2*dsize;
-		    dlit = (lit_t*) dmem_alloc(vp, dsize*sizeof(lit_t));
-		}
-		dlit[csize++] = ll2l(vp, lp);
+		*dynvar_add(vp->tlit) = ll2l(vp, lp);
 		goto make_clause;
 	    }
 	    cix = trail->implication_clause;
@@ -4398,7 +4372,8 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     goto done;
     
 make_clause:
-    if ((cix = add_clause_array(vp, ALPHA, dlit, csize, false)) == CLAUSE_NONE)
+    if ((cix = add_clause_array(vp, ALPHA, vp->tlit,
+				dynvar_size(vp->tlit), false)) == CLAUSE_NONE)
 	result = enif_make_badarg(env);
     else if (cix == CLAUSE_TRUE)
 	result = ATOM(true);
@@ -4444,7 +4419,6 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     varp_t* vp;
     cix_t  cix;
     clause_t* cp;
-    lit_t* dlit;
     size_t csize;
     int i,n;
     
@@ -4457,23 +4431,25 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     if (GET_SI(cix) != ALPHA)
 	return enif_make_badarg(env);
 
-    dlit = (lit_t*) dmem_alloc(vp, cp->size*sizeof(lit_t));
+    dynvar_resize(vp->tlit, 0);
     csize = 0;
+
     n = (int) cp->size;
     for (i = 0; i < n; i++) {
 	lit_t li = cp->lit[i];
 	variable_t* var = var_l(vp, li);
 	if ((cix = var->implication_clause) != CLAUSE_NONE) {
-	    if (!is_subclause(get_clause(vp, cix), neg_l(li), cp))
-		dlit[csize++] = li;
+	    if (!is_subclause(get_clause(vp, cix), neg_l(li), cp)) {
+		*dynvar_add(vp->tlit) = li;
+	    }
 	}
     }
     if (csize == 0)
 	enif_fprintf(stdout, "Minimize failed? contradiction\r\n");
-    if (csize < cp->size) {
-	memcpy(cp->lit, dlit, sizeof(lit_t)*csize);
-	cp->size = csize;
-	return enif_make_int(env, csize);
+    if (dynvar_size(vp->tlit) < cp->size) {
+	memcpy(cp->lit, vp->tlit, sizeof(lit_t)*dynvar_size(vp->tlit));
+	cp->size = dynvar_size(vp->tlit);
+	return enif_make_int(env, dynvar_size(vp->tlit));
     }
     return enif_make_int(env, 0);
 }
@@ -4658,8 +4634,8 @@ static void xref_add(varp_t* vp, clause_t* cp, pos_t p)
     xref_t* xp;
     
     if (lp->xref == NULL)
-	lp->xref = dynarray_empty(vp, sizeof(xref_t));
-    xp = dynarray_add(vp, lp->xref);
+	lp->xref = dynarray_empty(vp, "xref", sizeof(xref_t));
+    xp = dynarray_add(lp->xref);
     xp->cix  = cp->cix;
     xp->p    = p;
 }
@@ -5020,7 +4996,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     xref_t*    yptr = dynarray_element(yp->xref,0);
     size_t     ylen = dynarray_size(yp->xref);
 
-    dynarray_t* x1 = dynarray_create(vp, xlen+ylen, sizeof(xref_t));
+    dynarray_t* x1 = dynarray_create(vp, "x1", xlen+ylen, sizeof(xref_t));
     xref_t*    x1ptr = dynarray_element(x1,0);
     xref_t*    x1ptr0 = x1ptr;
 
@@ -5093,7 +5069,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     
     while(xlen--)
 	*x1ptr++ = *xptr++;
-    dynarray_resize(vp, x1, x1ptr - x1ptr0);
+    dynarray_resize(x1, x1ptr - x1ptr0);
 
     dynarray_destroy(vp, xp->xref);
     xp->xref = x1;
@@ -6266,11 +6242,10 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     else {
 	ERL_NIF_TERM ret;
-	lit_t* dlit;
 	lit_t* lpp;
 
-	dlit = (lit_t*) dmem_alloc(vp, size*sizeof(lit_t));	
-	lpp = dlit;
+	dynvar_resize(vp->tlit, size);
+	lpp = vp->tlit;
 	
 	list = argv[1];
 	while(enif_get_list_cell(env, list, &head, &tail)) {
@@ -6280,7 +6255,7 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 	    list = tail;
 	}
 	vp->caller_env = env;
-	if ((cix = add_clause_array(vp, si, dlit, size, true)) == CLAUSE_NONE)
+	if ((cix = add_clause_array(vp,si,vp->tlit,size,true)) == CLAUSE_NONE)
 	    ret = enif_make_badarg(env);
 	else if (cix == CLAUSE_TRUE)
 	    ret = ATOM(true);

@@ -950,9 +950,17 @@ dump_clauses(_V, _Raw, false) ->
     ok;
 dump_clauses(V, Raw, I) ->
     {_,SI,IX} = split_cix(I),
-    io:format("~w - ~s:~w\n", [I,SI,IX]),
+    WATCH = case varc:clause_info(V, I, watch) of
+		{-1,-1} -> "";
+		{P1,P2} -> " watch:"++integer_to_list(P1)++","++
+			       integer_to_list(P2)
+	    end,
+    STATUS = case varc:clause_info(V, I, status) of
+		 ok -> "";
+		 Status -> io_lib:format(" ~p", [Status])
+	     end,
+    io:format("~w - ~s:~w~s~s\n", [I,SI,IX,WATCH,STATUS]),
     io:format("  ~w\n", [varc:get_clause(V,I,undefined,Raw)]),
-    io:format("  ~p\n", [varc:clause_info(V, I)]),
     dump_clauses(V, Raw, varc:clauseset_next(V, I)).
 
 dump_variables(V, List) ->
