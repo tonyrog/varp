@@ -27,14 +27,14 @@ win32app:
 osxapp:
 	erl -wx -noshell -s varp_wx -s servator make_osxapp $(APP) -s erlang halt
 	mkdir -p tmpdist
+	rm -rf tmpdist/$(APPL).app
 	mv $(APPL).app tmpdist/
-	cd tmpdist/
-	../../servator/priv/make_icns ../priv/$(APP).png
-	rm -rf AppIcon.iconset
-	mv AppIcon.icns $(APPL).app/Contents/Resources/
-	cd ..
+	(cd tmpdist/; ../../servator/priv/make_icns ../priv/$(APP).png)
+	rm -rf tmpdist/AppIcon.iconset
+	mv tmpdist/AppIcon.icns tmpdist/$(APPL).app/Contents/Resources/
 	hdiutil create tmp.dmg -ov -volname "$(APPL)" -fs HFS+ -srcfolder "./tmpdist/"
-	hdiutil convert -format UDZO -o $(APPL).dmg tmp.dmg
+	hdiutil convert -format UDZO -o $(APPL)-$(VSN).dmg tmp.dmg
+	rm tmp.dmg
 
 appimage_nw:
 	erl -noshell -s $(APP) start0 -s servator make_appimage $(APP)

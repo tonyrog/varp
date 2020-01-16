@@ -606,7 +606,7 @@ subst1() ->
     [NX3,X1] = lists:sort(varc:get_clause(V, C1)),
     ok.
 
-%% simply substitute {X2,X3} [X2/X3] => {X2}
+%% simply substitute {X1,X2} [X1/X2] => {X1}
 subst2() ->
     V = varc:new([{xref,true}]), 
     X1 = varc:add_variable(V),
@@ -659,7 +659,10 @@ subst4() ->
 
     io:format(" [~w/~w]\n", [X6,X3]),
     varc:subst(V, X6, X3),
-    io:format("clause after\n"),    
+    io:format("clause after\n"),
+
+    %% FIXME: clause 2 has bad watch points should be {0,1} is {0,2}!
+
     print_clauses(V),
 
     true = varc:bcp(V),
@@ -687,6 +690,8 @@ subst5() ->
     %% varc:subst(V, X7, X3),
     io:format(" [~w/~w]\n", [X3,X7]),
     varc:subst(V, X3, X7),
+
+    %% FIXME: clause 1 has bad watch points should be {0,1} should be {-1,-1}
 
     io:format("clause after\n"),
     print_clauses(V,true),

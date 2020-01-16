@@ -84,7 +84,7 @@
 -export([add_clause/2]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
--export([clean_clauses/1]).
+-export([clean_clauses/1, clean_clauses/2]).
 -export([clean_edges/1]).
 -export([set_var/3, add_var/4]).
 -export([config/3]).
@@ -294,7 +294,10 @@ del_proof_clauses(Bs, V, I) ->
     del_proof_clauses(Bs, V, varc:clauseset_next(V, I)).
 
 clean_clauses(Bs) ->
-    clean_clauses_(Bs, varc:clause_first(Bs#bs.vp)).
+    clean_clauses(Bs, ?DELTA).
+
+clean_clauses(Bs, Set) ->
+    clean_clauses_(Bs, varc:clauseset_first(Bs#bs.vp, Set)).
 
 clean_clauses_(Bs, false) ->
     Bs;

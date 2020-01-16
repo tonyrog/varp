@@ -286,6 +286,26 @@ typedef struct _allocator_t
     object_t* free_list;     // list of free objects
 } allocator_t;
 
+// Grow factor
+#define DYN_GROW0 2.0000
+#define DYN_GROW1 1.6180
+#define DYN_GROW2 1.2500
+
+// switch limit
+#define DYN_GROW0_LIMIT 1024
+#define DYN_GROW1_LIMIT (1024*1024)
+
+#define DYN_ADDR(dp,i) ((void*)((intptr_t)((dp)->base) + ((i)*(dp)->width)))
+
+typedef struct _dynarray_t // :object_t
+{
+    size_t capacity; // max number of elements
+    size_t nel;      // assigned size <= capacity
+    size_t width;    // element size
+    void*  base;     // array base address
+} dynarray_t;
+
+
 #ifdef LIT_INTEGER
 #if LIT_INTEGER == 8
 typedef uint8_t ulit_t;
@@ -310,7 +330,6 @@ typedef struct _literal_t *lit_t;
 #define ULIT_TRUE   0
 #define ULIT_FALSE  1
 
-
 typedef struct _literal_t
 {
     uint32_t sign;             // 0=positive, 1=negative
@@ -320,13 +339,11 @@ typedef struct _literal_t
 #if defined(LIT_VALUE) && !defined(PACKED_VALUE)
     ival_t    ivalue;
 #endif
-    // uint16_t flags;
     struct _variable_t* var;   // "parent"
     struct _wlink_t* wlist;    // list of watch positions
     struct _literal_t* qlink;  // unit propagation queue/stack
     struct _edge_t* elist;     // list of 2-clause triggers
-    struct _xref_t* xfirst;    // cross ref clauses
-    struct _xref_t** xlast;
+    dynarray_t* xref;          // cross references when enabled
 } literal_t;
 
 typedef uint32_t cix_t;             // clause index type <<set:2,index:30>>
@@ -338,9 +355,8 @@ typedef int32_t  pos_t;             // literal position type (-1 = invalid)
 #define GET_SI(cix)      ((int)(((cix)>>30) & 3))
 #define GET_IX(cix)      ((cix)&0x3FFFFFFF)
 
-typedef struct _xref_t // :object_t
+typedef struct _xref_t
 {
-    struct _xref_t* next;
     cix_t cix;
     pos_t p;
 } xref_t;
@@ -506,9 +522,10 @@ typedef struct _varp_clone_opt_t {
     // one bit per clauseset to clone
     // default = (1 << DELTA)
     int clauseset;
-    // number of levels (bindings) to clone -1=all 0=none
-    // default = 0
+    // clone all bindings upto level (including)
     int level;
+    // clone queue
+    bool_t queue;
 } varp_clone_opt_t;
 
 typedef struct _varp_t {
@@ -526,29 +543,37 @@ typedef struct _varp_t {
     int num_conflicting;      // number of conflicting clauses saved
     int max_conflicting;      // max number of conflicting <= MAX_CONFLICTING
     cix_t conflicting_clauses[MAX_CONFLICTING];
+    // DYNARRAY    
     variable_t** var_map;     // variable map
 #if defined(LIT_VALUE)
 #if defined(PACKED_VALUE)
+    // DYNARRAY    
     uint8_t*     lit_value;   // ivals for every lit_t value
     uint16_t*    lit_overlay; // write overlay access for single write access
 #endif
 #else
 #if defined(PACKED_VALUE)
+    // DYNARRAY    
     uint8_t*     var_value;   // values are stored 8 bit/2 bit packed
 #endif
 #endif
     variable_t*  marked;      // mlist marked variables
     size_t ssize;             // size of symbol hash table
     size_t snum;              // number of symbols in symbol hash table
+    // DYNARRAY
     symbol_t**   symtab;      // symbol hash table
     size_t       hsize;       // size of clause hash table
     size_t       hnum;        // number of clauses in clause hashtab
-    hlink_t**    hashtab;     // clause hash table    
+    // DYNARRAY
+    hlink_t**    hashtab;     // clause hash table
+    // DYNARRAY    
     int*         order_map;   // literal order table
     int          sort_key[2]; // sort order -1,-2,1,2 (0=not used)
+    // DYNARRAY    
     clause_t**   clause_map[NUM_CSET]; // array of clauses, entries may be null
     clause_t*    unwatch;     // clauses to unwatch (check after bcp)
     size_t       unum;        // number of levels allocated
+    // DYNARRAY    
     undo_t*      undo;        // array of undo block, one for each level
     size_t       num_bound;   // #bound variables
     size_t       num_subst;   // #substitions < #bound
@@ -572,12 +597,13 @@ typedef struct _varp_t {
     ErlNifEnv*      msg_env;       // message environment
     ErlNifEnv*      caller_env;    // message environment
 
+    // DYNARRAY (lit_t?)
     size_t dmem_size;              // allocated size of dmem
     void*  dmem;                   // temporary memory of dmem_size
-    
+
+    allocator_t dyn_allocator;     // heap storage for dyn_t
     allocator_t var_allocator;     // heap storage for variable_t
     allocator_t sym_allocator;     // heap storage for symbols_t
-    allocator_t xref_allocator;    // heap storage for xref_t
     allocator_t sub_allocator;     // heap storage for subscription_t
     allocator_t edge_allocator;    // heap storage for edge_t
     allocator_t hlink_allocator;   // heap storage for hlink_t
@@ -691,6 +717,7 @@ DECL_ATOM(max_bound);
 DECL_ATOM(fifo);
 DECL_ATOM(xref);
 DECL_ATOM(hash);
+DECL_ATOM(queue);
 DECL_ATOM(implication);
 DECL_ATOM(implication_clause);
 DECL_ATOM(implication_pos);
@@ -765,8 +792,228 @@ void debug_free(void* ptr)
     }
 }
 
-#define EXT  0x80
-#define MASK  0x7f
+
+
+static heap_t* new_heap_block(heap_t* next)
+{
+    heap_t* hp;
+
+    if ((hp = VARP_ALLOC(HEAP_BLOCK_SIZE + HEAP_ALIGN - 1)) == NULL)
+	return NULL;
+    hp->next    = next;
+    hp->current = hp->base + PAD(hp->base,HEAP_ALIGN);
+    hp->end     = hp->current + MAX_HEAP_ALLOC_SIZE;
+    return hp;
+}
+
+static void* heap_alloc(heap_t** pool, size_t size)
+{
+    heap_t* hp;
+    heap_t* hq;
+    void* ptr;
+
+    if (size > MAX_HEAP_ALLOC_SIZE)
+	return NULL;
+    hp = *pool;
+    if ((hp == NULL) || (hp->current + size >= hp->end)) {
+	if ((hq = new_heap_block(hp)) == NULL)
+	    return NULL;
+	*pool = hq;
+	hp = hq;
+    }
+    ptr = hp->current;
+    hp->current += size;
+    return ptr;
+}
+
+static void cleanup_heap(heap_t* hp)
+{
+    while(hp != NULL) {
+	heap_t* hp_next = hp->next;
+	VARP_FREE(hp);
+	hp = hp_next;
+    }
+}
+
+static int init_allocator(allocator_t* ap, size_t size)
+{
+    ap->size = ALIGN(size, HEAP_ALIGN);
+    ap->heap_list = NULL;
+    ap->free_list = NULL;
+    return 0;
+}
+
+static void cleanup_allocator(allocator_t* ap)
+{
+    cleanup_heap(ap->heap_list);
+    ap->heap_list = NULL;
+    ap->free_list = NULL;
+}
+
+static void* varp_alloc(allocator_t* ap)
+{
+    object_t* ptr;
+    if ((ptr = ap->free_list) == NULL)
+	return heap_alloc(&ap->heap_list, ap->size);
+    ap->free_list = ptr->next;
+    return ptr;
+}
+
+// FIXME: add debug info so that pointer contains allocator pointer!
+// and check that objects are returned to correct allocator
+static void varp_free(allocator_t* ap, void* ptr)
+{
+    ((object_t*)ptr)->next = ap->free_list;
+    ap->free_list = (object_t*)ptr;
+}
+
+
+static size_t dynarray_next_size(size_t size, size_t nel)
+{
+    while((size < nel) && (size < DYN_GROW0_LIMIT))
+	size *= DYN_GROW0;
+    while((size < nel) && (size < DYN_GROW1_LIMIT))
+	size *= DYN_GROW1;
+    while((size < nel))
+	size *= DYN_GROW2;
+    return size;    
+}
+
+static size_t dynarray_first_size(size_t nel)
+{
+    return dynarray_next_size(1, nel);
+}
+
+static int dynarray_init(varp_t* vp, dynarray_t* dp, size_t nel, size_t width)
+{
+    UNUSED(vp);
+    size_t capacity = dynarray_first_size(nel);
+    void* base;
+
+    // fixme: allocate small 2^i chunks as fixed allocator chunks
+    if ((base = VARP_ALLOC(capacity*width)) == NULL)
+	return -1;
+    dp->capacity = capacity;
+    dp->nel      = nel;
+    dp->width    = width;
+    dp->base     = base;
+    return 0;
+}
+
+static void dynarray_destroy(varp_t* vp, dynarray_t* dp)
+{
+    if (dp) {
+	VARP_FREE(dp->base);
+	varp_free(&vp->dyn_allocator, dp);
+    }
+}
+
+static inline size_t dynarray_capacity(dynarray_t* dp)
+{
+    if (dp == NULL)
+	return 0;
+    return dp->capacity;
+}
+
+static inline size_t dynarray_size(dynarray_t* dp)
+{
+    if (dp == NULL)
+	return 0;
+    return dp->nel;
+}
+
+static int dynarray_resize(varp_t* vp, dynarray_t* dp, size_t nel)
+{
+    UNUSED(vp);
+    if (nel > dp->capacity) {
+	size_t capacity = dynarray_next_size(dp->capacity, nel);
+	void* base;
+	if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
+	    return -1;
+	dp->base = base;
+	dp->capacity = capacity;
+    }
+    dp->nel = nel;
+    enif_fprintf(stdout, "dynarray_resize nel=%d cap=%d\r\n",
+		 dp->nel, dp->capacity);	 
+    return 0;
+}
+
+static dynarray_t* dynarray_create(varp_t* vp, size_t nel, size_t width)
+{
+    dynarray_t* dp;
+    
+    if ((dp = varp_alloc(&vp->dyn_allocator)) == NULL)
+	return NULL;
+    if (dp != NULL) {
+	if (dynarray_init(vp, dp, nel, width) < 0) {
+	    varp_free(&vp->dyn_allocator, dp);
+	    return NULL;
+	}
+    }
+    return dp;
+}
+
+static inline dynarray_t* dynarray_empty(varp_t* vp, size_t width)
+{
+    return dynarray_create(vp, 0, width);
+}
+
+static inline void* dynarray_element(dynarray_t* dp, int i)
+{
+    if (dp == NULL) return NULL;
+    if (i == 0) return dp->base;
+    if ((i < 0) || (i >= (int)dp->nel)) return NULL;
+    return DYN_ADDR(dp, i);
+}
+
+
+// copy data into dynarray resize if needed
+static inline int dynarray_setelement(varp_t* vp,dynarray_t* dp,
+				      int i,void* data)
+{
+    if (dp == NULL || (i < 0)) return -1;
+    if (i >= (int)dp->nel) {
+	if (dynarray_resize(vp, dp, i+1) < 0)
+	    return -1;
+    }
+    memcpy(DYN_ADDR(dp, i), data, dp->width);
+    return 0;
+}
+
+static inline void* dynarray_add(varp_t* vp, dynarray_t* dp)
+{
+    size_t n;
+    if (dp == NULL) return NULL;
+    n = dp->nel;
+    if (dynarray_resize(vp, dp, n+1) < 0)
+	return NULL;
+    return dynarray_element(dp, n);
+}
+
+//
+// nel=8
+// i=3
+// |0|1|2|3|4|5|6|7|
+// move = 8-i-1 = 8-3-1=4 elements
+// i=7
+// move = 8-7-1 = 0 
+//
+static inline void* dynarray_delete(dynarray_t* dp, int i)
+{
+    void* src;    
+    void* dst;
+    size_t len;
+    
+    if ((i<0) || (dp == NULL) || (i >= (int)dp->nel))
+	return NULL;
+    dst = DYN_ADDR(dp, i);
+    src = dst + dp->width;
+    if ((len = (dp->nel - i -1)) > 0)
+	memmove(dst, src, len*dp->width);
+    dp->nel--;
+    return dst;
+}
 
 //
 // li is converted into a unsigned representation of
@@ -775,7 +1022,8 @@ void debug_free(void* ptr)
 //
 // then li is written as b0...bl
 // 
-
+#define EXT  0x80
+#define MASK  0x7f
 
 static int compress_int(int li, uint8_t* ptr)
 {
@@ -813,7 +1061,6 @@ static int decompress_int(uint8_t* ptr)
 }
 #endif
 
-
 // Clause point from wlink_t pointer
 static inline clause_t* clause_pointer(wlink_t* wl)
 {
@@ -826,7 +1073,6 @@ static inline int wlink_index(wlink_t* wl)
     intptr_t w = (intptr_t) wl;
     return (w & (CLAUSE_ALIGNMENT-1)) / sizeof(wlink_t);
 }
-
 
 static inline clause_t* get_clause(varp_t* vp, cix_t index)
 {
@@ -1440,80 +1686,6 @@ void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
     enif_fprintf(stdout, "\r\n");
 }
 
-
-static heap_t* new_heap_block(heap_t* next)
-{
-    heap_t* hp;
-
-    if ((hp = VARP_ALLOC(HEAP_BLOCK_SIZE + HEAP_ALIGN - 1)) == NULL)
-	return NULL;
-    hp->next    = next;
-    hp->current = hp->base + PAD(hp->base,HEAP_ALIGN);
-    hp->end     = hp->current + MAX_HEAP_ALLOC_SIZE;
-    return hp;
-}
-
-static void* heap_alloc(heap_t** pool, size_t size)
-{
-    heap_t* hp;
-    heap_t* hq;
-    void* ptr;
-
-    if (size > MAX_HEAP_ALLOC_SIZE)
-	return NULL;
-    hp = *pool;
-    if ((hp == NULL) || (hp->current + size >= hp->end)) {
-	if ((hq = new_heap_block(hp)) == NULL)
-	    return NULL;
-	*pool = hq;
-	hp = hq;
-    }
-    ptr = hp->current;
-    hp->current += size;
-    return ptr;
-}
-
-static void cleanup_heap(heap_t* hp)
-{
-    while(hp != NULL) {
-	heap_t* hp_next = hp->next;
-	VARP_FREE(hp);
-	hp = hp_next;
-    }
-}
-
-static int init_allocator(allocator_t* ap, size_t size)
-{
-    ap->size = ALIGN(size, HEAP_ALIGN);
-    ap->heap_list = NULL;
-    ap->free_list = NULL;
-    return 0;
-}
-
-static void cleanup_allocator(allocator_t* ap)
-{
-    cleanup_heap(ap->heap_list);
-    ap->heap_list = NULL;
-    ap->free_list = NULL;
-}
-
-static void* varp_alloc(allocator_t* ap)
-{
-    object_t* ptr;
-    if ((ptr = ap->free_list) == NULL)
-	return heap_alloc(&ap->heap_list, ap->size);
-    ap->free_list = ptr->next;
-    return ptr;
-}
-
-// FIXME: add debug info so that pointer contains allocator pointer!
-// and check that objects are returned to correct allocator
-static void varp_free(allocator_t* ap, void* ptr)
-{
-    ((object_t*)ptr)->next = ap->free_list;
-    ap->free_list = (object_t*)ptr;
-}
-
 static void* dmem_alloc(varp_t* vp, size_t size)
 {
     if (vp->dmem == NULL) {  // alloc
@@ -1622,26 +1794,26 @@ static uint32_t arc4_random_uniform(arc4_stream_t* as, uint32_t upper_bound)
     return r % upper_bound;
 }
 
-static inline void clear_wlink(wlink_t* wlp)
+static inline void wlink_clear(wlink_t* wlp)
 {
-    wlp->p = -1;    
+    wlp->p = -1;
     wlp->next = NULL;   // mark dead for debug
 }
 
-static inline void link_wlink(wlink_t* wlp, literal_t* lp)
+static inline void wlink_link(wlink_t* wlp, literal_t* lp)
 {
     wlp->next = lp->wlist;  // link literal
     lp->wlist = wlp;
 }
 
-static inline void set_wlink(wlink_t* wlp, long p, literal_t* lp)
+static inline void wlink_set(wlink_t* wlp, long p, literal_t* lp)
 {
     wlp->p = p;   // new watch point
-    link_wlink(wlp, lp);
+    wlink_link(wlp, lp);
 }
 
 // FIXME: make constant
-static void unwatch_ll(varp_t* vp, clause_t* cp, literal_t* lp)
+static void wlink_unlink(varp_t* vp, clause_t* cp, literal_t* lp)
 {
     UNUSED(vp);
     wlink_t** wlp = &lp->wlist;
@@ -1659,7 +1831,7 @@ static void unwatch_ll(varp_t* vp, clause_t* cp, literal_t* lp)
 
 static inline void unwatch_l(varp_t* vp, clause_t* cp, lit_t l)
 {
-    unwatch_ll(vp, cp, l2ll(vp, l));
+    wlink_unlink(vp, cp, l2ll(vp, l));
 }
 
 // remove the 2-WL watch points
@@ -1889,11 +2061,12 @@ static int next_unbound(varp_t* vp)
 
 static void kill_clauses(varp_t* vp, literal_t* xp)
 {
-    xref_t* xptr = xp->xfirst;
+    xref_t* xptr = dynarray_element(xp->xref, 0);
+    size_t  len  = dynarray_size(xp->xref);
 
     DBG_BCP("%sKill %s\r\n", indent(vp->level), format_literal(vp, xp));
 
-    while(xptr) {
+    while(len--) {
 	clause_t* cp = get_clause(vp, xptr->cix);
 	if (cp && !(cp->flags & CLAUSE_FLAG_DEAD)) { // not alread dead
 	    vp->cdead++;
@@ -1911,7 +2084,7 @@ static void kill_clauses(varp_t* vp, literal_t* xp)
 		schedule_unwatch_clause(vp, cp);
 	    }
 	}
-	xptr = xptr->next;
+	xptr++;
     }
 }
 
@@ -1990,33 +2163,51 @@ static inline void put_l(varp_t* vp,lit_t l,ival_t ivalue,
 
 static void init_level(varp_t* vp, int level)
 {
+    ASSERT(level < vp->unum);
     vp->undo[level].decision = L_FALSE(vp);
     vp->undo[level].t  = uUNDEF;
     vp->undo[level].bs = NULL;
 }
 
-static void undo_init(varp_t* vp)
+static int undo_alloc(varp_t* vp, size_t size)
 {
+    void* ptr;
     int i;
-    vp->unum = DEFAULT_UNDO_SIZE;
-    vp->undo = VARP_ALLOC(DEFAULT_UNDO_SIZE * sizeof(undo_t));
-    for (i = 0; i < DEFAULT_UNDO_SIZE; i++)
+
+    if ((ptr = VARP_ALLOC(size*sizeof(undo_t))) == NULL)
+	return -1;
+    vp->undo = ptr;
+    vp->unum = size;
+    for (i = 0; i < (int)size; i++)
 	init_level(vp, i);
     vp->num_bound = 0;
     vp->num_subst = 0;
     vp->level = 0;
+    return 0;    
+}
+
+static int undo_resize(varp_t* vp, size_t size)
+{
+    void* ptr;
+    int i, n;
+    
+    if ((ptr = VARP_REALLOC(vp->undo, size*sizeof(undo_t))) == NULL)
+	return -1;
+    n = vp->unum;
+    vp->undo = ptr;
+    vp->unum = size;
+    for (i = n; i < (int)size; i++)
+	init_level(vp, i);
+    return 0;
 }
 
 // set current bindings level
 static int set_level(varp_t* vp, int level)
 {
     if (level >= (int)vp->unum) {
-	int i;
-	unsigned int n = vp->unum;
-	vp->unum *= 2;
-	vp->undo = VARP_REALLOC(vp->undo, vp->unum*sizeof(undo_t));
-	for (i = n; i < (int)vp->unum; i++)
-	    init_level(vp, i);
+	size_t size = 2*vp->unum;
+	if (undo_resize(vp, size) < 0)
+	    return -1;
     }
     vp->level = level;
     if (level > vp->max_level)
@@ -2062,7 +2253,6 @@ static void undo_level(varp_t* vp, int level)
     DBG_ORDER("%sUndo_level @%d\r\n", indent(level), level);    
     unbind_level(vp, level);
     init_level(vp, level);
-    // lqueue_clear(&vp->q);
 }
 
 // move bindings from src level to dst level
@@ -2116,8 +2306,7 @@ static void init_literal(literal_t* lp, variable_t* var, uint32_t sign)
     lp->wlist    = NULL;
     lp->qlink    = NULL;
     lp->elist    = NULL;
-    lp->xfirst   = NULL;
-    lp->xlast    = &lp->xfirst;
+    lp->xref     = NULL;
 }
 
 static void init_variable(varp_t* vp, variable_t* var, int vix)
@@ -2274,8 +2463,8 @@ static clause_t* clause_alloc(varp_t* vp, int size)
 	return NULL;
     }
 #endif
-    clear_wlink(&cp->wl[0]);
-    clear_wlink(&cp->wl[1]);
+    wlink_clear(&cp->wl[0]);
+    wlink_clear(&cp->wl[1]);
     cp->size  = size;
     cp->flags = 0;
     cp->select = (size > 3) ? 3 : size-1;
@@ -2601,6 +2790,17 @@ static void cleanup(varp_t* vp)
 	vp->symtab = NULL;
     }
 
+    if (vp->opt.xref) {
+	int i;
+	// FIXME destroy clear both dynamic array and dyn object
+	// dynobjects are cleared when allocator is clear so it is
+	// not really needed. Add a setcap that changes capacity as well!?
+	for (i = 1; i < (int)vp->vnum; i++) {
+	    dynarray_destroy(vp, vp->var_map[i]->lit[0].xref);
+	    dynarray_destroy(vp, vp->var_map[i]->lit[1].xref);
+	}
+    }    
+
     if (vp->var_map) {
 	VARP_FREE(vp->var_map);
 	vp->var_map = NULL;
@@ -2656,10 +2856,10 @@ static void cleanup(varp_t* vp)
 	vp->dmem = NULL;
 	vp->dmem_size = 0;
     }
-    
+
+    cleanup_allocator(&vp->dyn_allocator);    
     cleanup_allocator(&vp->var_allocator);
     cleanup_allocator(&vp->sym_allocator);
-    cleanup_allocator(&vp->xref_allocator);
     cleanup_allocator(&vp->sub_allocator);
     cleanup_allocator(&vp->edge_allocator);
     cleanup_allocator(&vp->hlink_allocator);
@@ -2943,11 +3143,11 @@ static int setup(varp_t* vp, varp_config_t* config)
 	goto error;
     vp->csize[0] = csize;
 
+    if (init_allocator(&vp->dyn_allocator, sizeof(dynarray_t)) < 0)
+	goto error;
     if (init_allocator(&vp->var_allocator, sizeof(variable_t)) < 0)
 	goto error;
     if (init_allocator(&vp->sym_allocator, sizeof(symbol_t)) < 0)
-	goto error;
-    if (init_allocator(&vp->xref_allocator, sizeof(xref_t)) < 0)
 	goto error;
     if (init_allocator(&vp->sub_allocator, sizeof(subscription_t)) < 0)
 	goto error;
@@ -2957,7 +3157,7 @@ static int setup(varp_t* vp, varp_config_t* config)
 	goto error;        
 
     lqueue_init(&vp->q);
-    undo_init(vp);
+    undo_alloc(vp, DEFAULT_UNDO_SIZE);
 
     // transient statistics
     vp->max_level = 0;
@@ -4279,7 +4479,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 }
 
 // update degree for all literals in a clause
-static void update_clause_degree(varp_t* vp, clause_t* cp, int value)
+static void clause_update_degree(varp_t* vp, clause_t* cp, int value)
 {
     int n = (int)cp->size;
     int i;
@@ -4291,7 +4491,7 @@ static void update_clause_degree(varp_t* vp, clause_t* cp, int value)
 }
 
 // update activity for all literals in a clause
-static void update_clause_activity(varp_t* vp, clause_t* cp, float value)
+static void clause_update_activity(varp_t* vp, clause_t* cp, float value)
 {
     int n = (int)cp->size;
     int i;
@@ -4358,6 +4558,14 @@ static int is_unit_clause(varp_t* vp, clause_t* cp)
 // (lp0,level0)
 // setup TWL structure for a clause
 
+static inline void clause_watch_insert(varp_t* vp, clause_t* cp,
+				       long p1, long p2)
+{
+    wlink_set(&cp->wl[0], p1, l2ll(vp, cp->lit[p1]));
+    wlink_set(&cp->wl[1], p2, l2ll(vp, cp->lit[p2]));
+}
+
+
 static int clause_watch(varp_t* vp, clause_t* cp)
 {
     int va[3], la[3];
@@ -4405,9 +4613,8 @@ static int clause_watch(varp_t* vp, clause_t* cp)
     }
 
     // setup watch
-    set_wlink(&cp->wl[0], pa[0], l2ll(vp, cp->lit[pa[0]]));
-    set_wlink(&cp->wl[1], pa[1], l2ll(vp, cp->lit[pa[1]]));
-    
+    clause_watch_insert(vp, cp, pa[0], pa[1]);
+
     if ((la[0] == INT_MAX) && (la[1] != INT_MAX)) {
 	if (!dead) {
 	    DBG("Set UNIT\r\n");
@@ -4448,33 +4655,33 @@ static int clause_watch(varp_t* vp, clause_t* cp)
 static void xref_add(varp_t* vp, clause_t* cp, pos_t p)
 {
     literal_t* lp = l2ll(vp, cp->lit[p]);
-    xref_t* xp = varp_alloc(&vp->xref_allocator);
+    xref_t* xp;
+    
+    if (lp->xref == NULL)
+	lp->xref = dynarray_empty(vp, sizeof(xref_t));
+    xp = dynarray_add(vp, lp->xref);
     xp->cix  = cp->cix;
     xp->p    = p;
-    xp->next = NULL;
-    *lp->xlast = xp;
-    lp->xlast = &(xp->next);
 }
 
 // locate and remove xref link
 static inline void xref_del(varp_t* vp, clause_t* cp, pos_t p)
 {
     literal_t* lp = l2ll(vp, cp->lit[p]);
-    xref_t* xp;
-    xref_t** xpp = &lp->xfirst;
+    if (lp->xref != NULL) {
+	xref_t* xptr  = dynarray_element(lp->xref,0);
+	size_t  xsize = dynarray_size(lp->xref);
+	int i;
 
-    while((xp = *xpp)) {
-	xref_t** xpp1 = &(xp->next);
-	if ((xp->cix == cp->cix) && (xp->p == p)) {
-	    if (lp->xlast == xpp1)
-		lp->xlast = xpp;
-	    *xpp = xp->next;
-	    varp_free(&vp->xref_allocator, xp);
-	    return;
+	for (i = 0; i < (int)xsize; i++) {
+	    if ((xptr->cix == cp->cix) && (xptr->p == p)) {
+		dynarray_delete(lp->xref, i);
+		return;
+	    }
+	    xptr++;
 	}
-	xpp = &(xp->next);
+	DBG("xref not found for clause %lu pos = %ld\r\n", cp->cix, p);	
     }
-    DBG("xref not found for clause %lu pos = %ld\r\n", cp->cix, p);
 }
 
 static void xref_add_clause(varp_t* vp, clause_t* cp)
@@ -4486,7 +4693,6 @@ static void xref_add_clause(varp_t* vp, clause_t* cp)
 	    xref_add(vp, cp, p);
     }
 }
-
 
 static void xref_del_clause(varp_t* vp, clause_t* cp)
 {
@@ -4527,9 +4733,9 @@ static int clause_install(varp_t* vp, clause_t* cp)
 	r = 1;
     }
     else if ((r = clause_link(vp, cp)) >= 0) {
-	update_clause_degree(vp, cp, 1);
+	clause_update_degree(vp, cp, 1);
 	if ((vp->opt.atype != off) && (si == GAMMA))
-	    update_clause_activity(vp, cp, 1.0f);
+	    clause_update_activity(vp, cp, 1.0f);
 #ifdef DEBUG_NBCP
 	enif_fprintf(stdout, "%sadd: ", indent(vp->level));
 	print_sym_clause(vp, "", cp);
@@ -4545,6 +4751,7 @@ static int parse_clone_opts(ErlNifEnv* env, ERL_NIF_TERM list,
     ERL_NIF_TERM head, tail;
     int level = 0;
     int clauseset = 0;
+    bool_t queue;
     
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	const ERL_NIF_TERM* elem;
@@ -4564,6 +4771,10 @@ static int parse_clone_opts(ErlNifEnv* env, ERL_NIF_TERM list,
 		    return -1;
 		clauseset |= (1 << si);
 	    }
+	    else if (elem[0] == ATOM(queue)) {
+		if (!vif_get_boolean(env, elem[1], &queue))
+		    return -1;
+	    }
 	    else
 		return -1;
 	}
@@ -4575,6 +4786,7 @@ static int parse_clone_opts(ErlNifEnv* env, ERL_NIF_TERM list,
 	opt->level = level;
     if (clauseset != 0)
 	opt->clauseset = clauseset;
+    opt->queue = queue;
     return 0;
 }
 
@@ -4598,6 +4810,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     opt.config    = vp0->opt;
     opt.clauseset = (1 << DELTA);
     opt.level     = 0;
+    opt.queue     = false;
 
     if (parse_clone_opts(env, argv[1], &opt) < 0)
 	return enif_make_badarg(env);
@@ -4638,7 +4851,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	    break;
 	}
 
-	// copy symbols
+	// copy symbols (maybe use ref count?)
 	sp0 = var0->names;
 	while(sp0 != NULL) {
 	    symbol_t* sp = symbol_copy(vp, var, sp0);
@@ -4648,15 +4861,44 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	}
     }
 
-    // maybe avoid clone level0?
-    // must setup undo structure
-    // copy state, setup variable lists
-#if 0
-    for (i = 0; i < opt.level; i++) {
-    }
-#endif
+    if (opt.level >= (int) vp->unum)
+	undo_resize(vp, MAX(opt.level+1,(int)vp0->unum));
     
-    // clone queue?
+    for (i = 0; i <= opt.level; i++) {  // clone undo structure
+	variable_t** dstp = &vp->undo[i].bs;
+	variable_t* src;
+	int li = export_l(vp0->undo[i].decision);
+	vp->undo[i].decision = vindex_l(vp, li);
+	vp->undo[i].t = vp0->undo[i].t;
+	
+	src = vp0->undo[i].bs;
+	dstp = &vp->undo[i].bs;
+	while(src) {
+	    int vix = src->vix;
+	    variable_t* dst = vp->var_map[vix];
+	    dst->next = NULL;
+	    *dstp = dst;
+	    dstp  = &dst->next;
+	    src = src->next;
+	}
+    }
+
+    if (opt.queue) {  // clone queue
+	literal_t* src;
+	literal_t** dstp;
+
+	src = vp0->q.head;
+	dstp = &vp->q.head;
+	while(src) {
+	    int l = export_ll(src);
+	    literal_t* dst = vindex_ll(vp, l);
+	    dst->qlink = NULL;
+	    *dstp = dst;
+	    dstp = &dst->qlink;
+	    src = src->qlink;
+	}
+	vp->q.tail = dstp;
+    }
 
     for (si = 0; si < NUM_CSET; si++) {
 	if (opt.clauseset & (1 << si)) {
@@ -4664,6 +4906,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 		clause_t* cp = clause_copy(vp, vp0->clause_map[si][i]);
 		if (cp != NULL) {
 		    clause_insert(vp, si, cp, cp->hvalue);
+		    // FIXME clone watch points! if opt.queue!
 		    clause_install(vp, cp);
 		}
 	    }
@@ -4749,20 +4992,16 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
 //
 void check_xref_consistence(literal_t* xp)
 {
-    size_t len = 0;
-    xref_t* xptr;
-    
-    // check consistence of x and !x
-    xptr = xp->xfirst;
-    while(xptr) {
-	xref_t* xptr1 = xptr->next;
-	if (xptr1) {
-	    ASSERT(xptr->cix < xptr1->cix);
-	}
-	xptr = xptr1;
-	len++;
+    xref_t* xptr = dynarray_element(xp->xref, 0);
+    size_t  xsize = dynarray_size(xp->xref);
+
+    ASSERT(xp->degree == xsize);
+
+    while(xsize > 1) {
+	ASSERT(xptr[0].cix < xptr[1].cix);
+	xptr++;
+	xsize--;
     }
-    ASSERT(xp->degree == len);
 }
 
 // substitute one literal
@@ -4771,10 +5010,20 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     literal_t* yp   = l2ll(vp, yl);
     literal_t* xp   = l2ll(vp, xl);
     literal_t* nxp  = neg_ll(xp);
-    xref_t**   xpp  = &xp->xfirst;
-    xref_t**  nxpp  = &nxp->xfirst;
-    xref_t*    yptr = yp->xfirst;
     
+    xref_t*    xptr = dynarray_element(xp->xref,0);
+    size_t     xlen = dynarray_size(xp->xref);
+
+    xref_t*    nxptr = dynarray_element(nxp->xref,0);
+    size_t     nxlen = dynarray_size(nxp->xref);    
+    
+    xref_t*    yptr = dynarray_element(yp->xref,0);
+    size_t     ylen = dynarray_size(yp->xref);
+
+    dynarray_t* x1 = dynarray_create(vp, xlen+ylen, sizeof(xref_t));
+    xref_t*    x1ptr = dynarray_element(x1,0);
+    xref_t*    x1ptr0 = x1ptr;
+
     ASSERT (yp != xp);
 
 #ifdef ASSERTIONS
@@ -4782,15 +5031,10 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     check_xref_consistence(yp);
 #endif
 
-    // reset y xref
-    yp->xfirst = NULL;
-    yp->xlast  = &yp->xfirst;
-
     // scan and rewrite all y's into x's
-    while(yptr) {
-	xref_t* yptr1 = yptr->next;
-	cix_t   cix   = yptr->cix;
-	clause_t* cp  = get_clause(vp, cix);
+    while(ylen--) {
+	cix_t   cix = yptr->cix;
+	clause_t* cp = get_clause(vp, cix);
 	int rewatch = 0;
 
 	ASSERT(yl == cp->lit[yptr->p]);
@@ -4799,34 +5043,33 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    clause_unwatch(vp, cp);
 	    rewatch = 1;
 	}
-	
-	while((*xpp) && ((*xpp)->cix < cix))  // step x
-	    xpp = &((*xpp)->next);
 
-	while((*nxpp) && ((*nxpp)->cix < cix))  // step !x
-	    nxpp = &((*nxpp)->next);
+	while(xlen && (xptr->cix < cix)) {  // step x
+	    *x1ptr++ = *xptr++;  // copy reference
+	    xlen--;
+	}
 
-	if (((*xpp == NULL) || ((*xpp)->cix > cix)) &&
-	    ((*nxpp == NULL) || ((*nxpp)->cix > cix))) { // Y only
+	while(nxlen && (nxptr->cix < cix)) { // step !x
+	    nxptr++;
+	    nxlen--;
+	}
 
+	if ( ((xlen==0) || (xptr->cix > cix)) &&
+	     ((nxlen==0) || (nxptr->cix > cix)) )  { // Y only 
 	    cp->lit[yptr->p] = xl;
 	    xp->degree++;
 	    yp->degree--;
-
 	    if (rewatch) {
 		if (clause_watch(vp, cp) <= 0) {
 		    ASSERT(0);
 		}
 	    }
-	    // link in yptr before xp chain
-	    yptr->next = *xpp;
-	    *xpp = yptr;
-	    xpp = &(yptr->next);
+	    *x1ptr++ = *yptr;
 	}
-	else if ((*xpp != NULL) && ((*xpp)->cix == cix)) { // X, Y
+	else if ((xlen > 0) && (xptr->cix == cix)) { // X, Y
 	    cp->lit[yptr->p] = L_FALSE(vp);
 	    if (!rewatch && is_unit_clause(vp, cp)) {
-		put_ll(vp, xp, I_TRUE, (*xpp)->p, cp->cix, vp->level);
+		put_ll(vp, xp, I_TRUE, xptr->p, cp->cix, vp->level);
 	    }
 	    yp->degree--;
 	    if (rewatch) {
@@ -4834,38 +5077,29 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 		    ASSERT(0);
 		}
 	    }
-	    varp_free(&vp->xref_allocator, yptr);
+	    *x1ptr++ = *xptr++;
+	    xlen--;
 	}
-	else if (*nxpp && ((*nxpp)->cix == yptr->cix)) { // !X, Y
+	else if ((nxlen > 0) && (nxptr->cix == cix)) { // !X, Y
 	    cp->lit[yptr->p] = L_TRUE(vp);
 	    if (!(cp->flags & CLAUSE_FLAG_DEAD)) {
 		cp->flags |= CLAUSE_FLAG_DEAD;
 		vp->cdead++;
 	    }
 	    yp->degree--;
-	    varp_free(&vp->xref_allocator, yptr);
 	}
-	else {
-	    ASSERT(yptr == NULL);
-	}
-	yptr = yptr1;
+	yptr++;
     }
     
-    // all the way and update xlast just in case
-    while(*xpp != NULL) {
-	xref_t* xptr = *xpp;	
-	xpp = &(xptr->next);
-    }
-    // the new last x
-    xp->xlast = xpp;
+    while(xlen--)
+	*x1ptr++ = *xptr++;
+    dynarray_resize(vp, x1, x1ptr - x1ptr0);
+
+    dynarray_destroy(vp, xp->xref);
+    xp->xref = x1;
     
-#if 0 
-    while(*nxpp != NULL) {
-	xref_t* nxptr = *nxpp;
-	nxpp = &(nxptr->next);
-    }
-    nxp->xlast = nxpp;
-#endif
+    dynarray_destroy(vp, yp->xref);
+    yp->xref = NULL;
 
 #ifdef ASSERTIONS
     // enif_fprintf(stdout, "x-check: %s\r\n", format_literal(vp, xp));
@@ -5116,7 +5350,7 @@ static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
     }
     DBG_BCP("%sMovewp3: %s %d=>%ld\r\n", indent(vp->level), format_lit(vp, cp->lit[wl0->p]), wl0->p, p);
     *wlp = wl0->next;
-    set_wlink(wl0, p, l2ll(vp,l));
+    wlink_set(wl0, p, l2ll(vp,l));
     return EV_NONE;
 }
 
@@ -5179,7 +5413,7 @@ static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
 			indent(vp->level),
 			format_lit(vp, cp->lit[wl0->p]), wl0->p, p);
 		*wlp = wl0->next;
-		set_wlink(wl0, p, l2ll(vp, cp->lit[p]));
+		wlink_set(wl0, p, l2ll(vp, cp->lit[p]));
 		return EV_NONE;
 	    case I_BOUND:
 	    default:
@@ -6198,7 +6432,7 @@ static void clause_remove(varp_t* vp, clause_t* cp)
 {
     if (cp != NULL) {
 	clause_unlink(vp, cp);
-	update_clause_degree(vp, cp, -1);
+	clause_update_degree(vp, cp, -1);
 	clause_free(vp, cp);
     }
 }
@@ -6401,6 +6635,66 @@ static ERL_NIF_TERM varp_clean_edges(ErlNifEnv* env, int argc,
     return ATOM(ok);
 }
 
+static int cmp_xref QSORT_ARGS(const void* a, const void* b,void* arg)
+{
+    UNUSED(arg);
+    if (((xref_t*) a)->cix < ((xref_t*) b)->cix)
+	return -1;
+    else if (((xref_t*) a)->cix > ((xref_t*) b)->cix)
+	return 1;
+    return 0;
+}
+
+// use remap (reverse map) to update cix in cross reference after
+// sorting clauses.
+static void xref_remap(literal_t* lp, int si, int* remap, int n)
+{
+    UNUSED(n);
+    xref_t* xptr0 = dynarray_element(lp->xref, 0);
+    xref_t* xptr = xptr0;
+    size_t len0  = dynarray_size(lp->xref);
+    size_t len = len0;
+
+    while(len--) {
+	if (GET_SI(xptr->cix) == si) {
+	    int ix = GET_IX(xptr->cix);
+	    ASSERT(ix < n);
+	    xptr->cix = MAKE_CIX(si, remap[ix]);
+	}
+	xptr++;
+    }
+    QSORT(xptr0, len0, sizeof(xref_t), cmp_xref, NULL);
+}
+
+
+static void edge_remap(literal_t* lp, int si, int* remap, int n)
+{
+    UNUSED(n);    
+    edge_t* ep = lp->elist;
+    while(ep != NULL) {
+	if (GET_SI(ep->cix) == si) {
+	    int ix = GET_IX(ep->cix);
+	    ASSERT(ix < n);	    
+	    ep->cix = MAKE_CIX(si, remap[ix]);
+	}
+	ep = ep->next;
+    }
+}
+
+static void hashtab_remap(varp_t* vp,int i,int si,int* remap,int n)
+{
+    UNUSED(n);
+    hlink_t* hp = vp->hashtab[i];
+    while (hp != NULL) {
+	if (GET_SI(hp->cix) == si) {
+	    int ix = GET_IX(hp->cix);
+	    ASSERT(ix < n);
+	    hp->cix = MAKE_CIX(si, remap[ix]);
+	}
+	hp = hp->next;
+    }
+}
+
 // del unused clauses is used for garbage collection and may
 // only be called during a restart. i.e no bindings may be present
 // so level must be = 0
@@ -6422,51 +6716,6 @@ static int cmp_stamp QSORT_ARGS(const void* a, const void* b,void* arg)
     else  if (cb->stamp < ca->stamp) return -1;
     else if (cb->stamp > ca->stamp) return 1;
     return 0;
-}
-
-// use remap (reverse map) to update cix in cross reference after
-// sorting clauses.
-static void remap_xref(literal_t* lp, int si, int* remap, int n)
-{
-    UNUSED(n);
-    xref_t* xp = lp->xfirst;
-
-    while(xp != NULL) {
-	if (GET_SI(xp->cix) == si) {
-	    int ix = GET_IX(xp->cix);
-	    ASSERT(ix < n);
-	    xp->cix = MAKE_CIX(si, remap[ix]);
-	}
-	xp = xp->next;
-    }
-}
-
-static void remap_edge(literal_t* lp, int si, int* remap, int n)
-{
-    UNUSED(n);    
-    edge_t* ep = lp->elist;
-    while(ep != NULL) {
-	if (GET_SI(ep->cix) == si) {
-	    int ix = GET_IX(ep->cix);
-	    ASSERT(ix < n);	    
-	    ep->cix = MAKE_CIX(si, remap[ix]);
-	}
-	ep = ep->next;
-    }
-}
-
-static void remap_hash_slot(varp_t* vp,int i,int si,int* remap,int n)
-{
-    UNUSED(n);
-    hlink_t* hp = vp->hashtab[i];
-    while (hp != NULL) {
-	if (GET_SI(hp->cix) == si) {
-	    int ix = GET_IX(hp->cix);
-	    ASSERT(ix < n);
-	    hp->cix = MAKE_CIX(si, remap[ix]);
-	}
-	hp = hp->next;
-    }
 }
 
 //
@@ -6493,6 +6742,8 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 
     n = (int)vp->cnext[si];
     cm = vp->clause_map[si];
+
+    enif_fprintf(stdout, "SORT si=%d, %d clause\r\n", si, n);
     QSORT(cm, n, sizeof(clause_t*), cmp_stamp, vp);
 
     {
@@ -6502,33 +6753,34 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	int m;
 
 	h = clauseset_plug_hole(vp, si, n-1);
+	enif_fprintf(stdout, "SORT plugged %d holes\r\n", h);	
 	m = n - h;
 
 	for (ix = 0; ix < m; ix++) {
-	    int jx = GET_IX(cm[ix]->cix);
-	    rmap[jx] = ix;  // build reverse map
-	    cm[ix]->cix = MAKE_CIX(si,ix);
+	    int jx = GET_IX(cm[ix]->cix);  // the old clause index
+	    rmap[jx] = ix;                 // point to new index
+	    cm[ix]->cix = MAKE_CIX(si,ix); // set the new index
 	}
 
 	// now map all xrefs and edges
 	if (vp->opt.xref) {
 	    int i;
 	    for (i = 1; i < (int)vp->vnum; i++) {
-		remap_xref(&vp->var_map[i]->lit[0], si, rmap, n);
-		remap_xref(&vp->var_map[i]->lit[1], si, rmap, n);
+		xref_remap(&vp->var_map[i]->lit[0], si, rmap, n);
+		xref_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.edge) {
 	    int i;
 	    for (i = 1; i < (int)vp->vnum; i++) {
-		remap_edge(&vp->var_map[i]->lit[0], si, rmap, n);	    
-		remap_edge(&vp->var_map[i]->lit[1], si, rmap, n);
+		edge_remap(&vp->var_map[i]->lit[0], si, rmap, n);	    
+		edge_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.hash && (si != ALPHA)) {
 	    int i;
 	    for (i = 0; i < (int)vp->hsize; i++)
-		remap_hash_slot(vp, i, si, rmap, n);
+		hashtab_remap(vp, i, si, rmap, n);
 	}
     }
     return ATOM(ok);
@@ -6917,13 +7169,14 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	}
     }
     else if (argv[2] == ATOM(literal)) {
-	xref_t* xp = lp->xfirst;
-	while(xp) {
-	    if (get_clause(vp, xp->cix) != NULL) {
-		ERL_NIF_TERM elem = make_cix(env, xp->cix);
+	xref_t* xptr = dynarray_element(lp->xref, 0);
+	size_t  xlen = dynarray_size(lp->xref);
+	while(xlen--) {
+	    if (get_clause(vp, xptr->cix) != NULL) {
+		ERL_NIF_TERM elem = make_cix(env, xptr->cix);
 		list = enif_make_list_cell(env, elem, list);
 	    }
-	    xp = xp->next;
+	    xptr++;
 	}
     }
     else if (argv[2] == ATOM(variable)) {
@@ -6931,13 +7184,14 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	int i;
 
 	for (i = 0; i < 2; i++) {
-	    xref_t* xp = var->lit[i].xfirst;
-	    while(xp) {
-		if (get_clause(vp, xp->cix) != NULL) {
-		    ERL_NIF_TERM elem = make_cix(env, xp->cix);
+	    xref_t* xptr = dynarray_element(var->lit[i].xref, 0);
+	    size_t  xlen = dynarray_size(var->lit[i].xref);	    
+	    while(xlen--) {
+		if (get_clause(vp, xptr->cix) != NULL) {
+		    ERL_NIF_TERM elem = make_cix(env, xptr->cix);
 		    list = enif_make_list_cell(env, elem, list);
 		}
-		xp = xp->next;
+		xptr++;
 	    }
 	}
     }
@@ -7237,7 +7491,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(max_bound);
     LOAD_ATOM(symbol);    
     LOAD_ATOM(xref);
-    LOAD_ATOM(hash);    
+    LOAD_ATOM(hash);
+    LOAD_ATOM(queue);    
     LOAD_ATOM(implication);    
     LOAD_ATOM(implication_clause);
     LOAD_ATOM(implication_pos);
