@@ -134,18 +134,29 @@ new() ->
     new([]).
 
 %%
-%% options
+%% new options
 %%    {size, Size::unsigned()}    -- inital variable tavle size
 %%    {grow, Grow::unsigned()}    -- variable table growth step
 %%    {qtype,lifo|fifo|recursive} -- use lifo/fifo strategy in bcp
 %%    {xref, boolean()}           -- use cross references
-%%    {clause_hash, boolean()}    -- install hash over clauses
+%%    {hash, boolean()}           -- install hash over clauses
 %%    {edge, boolean()}           -- use edge instead of 2-clauses
 %%    {activity,mvsids|off}       -- use activity in conflicts (off)
 %%
 
 new(Options) when is_list(Options) ->
     ?nif_stub().
+
+%%
+%% clone options 
+%%    new options +
+%%    {level, Level}     -- clone bindings up until level 'Level'
+%%    {set, delta}       -- clone clauseset DELTA
+%%    {set, gamma}       -- clone clauseset GAMMA
+%%    {set, beta}        -- clone clauseset BETA
+%%    {set, alpha}       -- clone clauseset ALPHA
+%%    {queue, boolean()} -- clone eval queue
+%%
 
 clone(Vp) ->
     clone(Vp, []).

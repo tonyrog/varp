@@ -4751,7 +4751,7 @@ static int parse_clone_opts(ErlNifEnv* env, ERL_NIF_TERM list,
     ERL_NIF_TERM head, tail;
     int level = 0;
     int clauseset = 0;
-    bool_t queue;
+    bool_t queue = false;
     
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	const ERL_NIF_TERM* elem;
