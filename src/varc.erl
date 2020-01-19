@@ -136,7 +136,6 @@ new() ->
 %%
 %% new options
 %%    {size, Size::unsigned()}    -- inital variable tavle size
-%%    {grow, Grow::unsigned()}    -- variable table growth step
 %%    {qtype,lifo|fifo|recursive} -- use lifo/fifo strategy in bcp
 %%    {xref, boolean()}           -- use cross references
 %%    {hash, boolean()}           -- install hash over clauses
@@ -592,7 +591,6 @@ info_keys() ->
      clause_d_counter,
      edge_2_counter,
      edge_d_counter,
-     grow,
      size,
      level,
      literal_size,     %% 8,16,32,64 (sizeof literal)

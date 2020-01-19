@@ -151,6 +151,18 @@ typedef enum {
 #define DBG_ORDER(args...)
 #endif
 
+#if defined(DEBUG_BCP)
+#define PRINT_CLAUSE(vp,msg,cp) print_clause((vp),(msg),(cp))
+#else
+#define PRINT_CLAUSE(vp,msg,cp)
+#endif
+
+#if defined(DEBUG)
+#define PRINT_LIT_ARRAY(msg,lit,size) print_lit_array((msg),(lit),(size))
+#else
+#define PRINT_LIT_ARRAY(msg,lit,size)
+#endif
+
 #define UNUSED(x) (void)(x)
 
 static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info);
@@ -247,8 +259,6 @@ NIF_LIST
 #define MAX_CONFLICTING    1024
 
 #define DEFAULT_MAP_SIZE  1024
-#define DEFAULT_MAP_GROW  1024
-#define DEFAULT_UNDO_SIZE 1024
 
 #define MAX_MAP_SIZE       (1024*1024)   // max inital size
 #define MAX_MAP_EXPAND     (256*1024)    // max expand
@@ -286,6 +296,10 @@ typedef struct _allocator_t
     object_t* free_list;     // list of free objects
 } allocator_t;
 
+#define DYN_SYMTAB_INIT  8
+#define DYN_HASHTAB_INIT 8
+#define DYN_UNDO_INIT    1 // 1024 at least 1 level 0 exit from start!
+
 // Grow factor
 #define DYN_GROW0 2.0000
 #define DYN_GROW1 1.6180
@@ -297,36 +311,66 @@ typedef struct _allocator_t
 
 #define DYN_ADDR(dp,i) ((void*)((intptr_t)((dp)->base) + ((i)*(dp)->width)))
 
+typedef struct _dyntype_t // :object
+{
+    const char* name;
+    size_t width;
+} dyntype_t;
+
 typedef struct _dynarray_t // :object_t
 {
     const char* name;  // debugging name of array
-    size_t capacity; // max number of elements
-    size_t nel;      // assigned size <= capacity
-    size_t width;    // element size
-    void*  base;     // array base address
+    size_t capacity;   // max number of elements
+    size_t size;       // assigned size <= capacity
+    size_t width;      // element size
+    void*  base;       // array base address
 } dynarray_t;
 
-#define dynvar(type, name) \
+// Simple variable fiels
+
+#define dynvar(type, name)			\
     dynarray_t name ## _dyn_;			\
     type name
 
-#define dynvar_size(name) name ## _dyn_.nel
+#define dynvar_size(name) name ## _dyn_.size
 #define dynvar_capacity(name) name ## _dyn_.capacity
-
 #define dynvar_init(name, size)			\
     ((dynarray_init(&name ## _dyn_, #name, (size), sizeof(name[0])) < 0) ? -1 : \
      (name = name ## _dyn_.base, 0))
-
 #define dynvar_resize(name, size)				\
     ((dynarray_resize(&name ## _dyn_, (size)) < 0) ? -1 :	\
      (name = name ## _dyn_.base, 0))
-
+#define dynvar_set_capacity(name, size)				\
+    ((dynarray_set_capacity(&name ## _dyn_, (size)) < 0) ? -1 :	\
+     (name = name ## _dyn_.base, 0))
 #define dynvar_add(name)			\
     (__typeof__(name[0])*) dynarray_add(&name ## _dyn_)
-
 #define dynvar_clear(name)			\
     (dynarray_clear(&name ## _dyn_), name = NULL)
 
+// Array variable fiels
+    
+#define dynvec(type,name,n)			\
+    dynarray_t name ## _dyn_[n];		\
+    type name[n]
+
+#define dynvec_size(name,i) name ## _dyn_[(i)].size
+#define dynvec_capacity(name,i) name ## _dyn_[(i)].capacity
+#define dynvec_init(name,i,vtag,size)					\
+    ((dynarray_init(&name ## _dyn_[(i)], #name vtag,(size),sizeof(name[(i)][0])) < 0) ? -1 : \
+     (name[(i)] = name ## _dyn_[(i)].base, 0))
+#define dynvec_resize(name,i,size)				\
+    ((dynarray_resize(&name ## _dyn_[(i)], (size)) < 0) ? -1 :	\
+     (name[(i)] = name ## _dyn_[(i)].base, 0))
+#define dynvec_set_capacity(name,i,size)			\
+    ((dynarray_set_capacity(&name ## _dyn_[(i)], (size)) < 0) ? -1 :	\
+     (name[(i)] = name ## _dyn_[(i)].base, 0))
+#define dynvec_add(name,i)				\
+    (__typeof__(name[(i)][0])*) dynarray_add(&name ## _dyn_[(i)])
+#define dynvec_clear(name,i)				\
+    (dynarray_clear(&name ## _dyn_[(i)]), name[(i)] = NULL)
+
+    
 #ifdef LIT_INTEGER
 #if LIT_INTEGER == 8
 typedef uint8_t ulit_t;
@@ -428,7 +472,7 @@ typedef struct _symbol_t // :object_t
 {
     struct _symbol_t* next;   // next symbol in hash slot or free list
     struct _symbol_t* anext;  // alias link
-    uint32_t hash;            // symbol hash
+    uint32_t hvalue;          // symbol hash
     bool_t is_term;           // either name is a term or name is binary string
     uint8_t* data;            // raw data
     size_t   size;            // raw len
@@ -529,7 +573,6 @@ typedef struct _varp_setting_t
     bool_t   xref;      // xref used or not
     bool_t   hash;      // clause has or not
     bool_t   edge;      // keep edge list for 2-clauses
-    size_t   grow;
     size_t   vsize;
     size_t   csize;
 } varp_config_t;
@@ -551,10 +594,7 @@ typedef struct _varp_clone_opt_t {
 
 typedef struct _varp_t {
     varp_config_t opt;        // varp configs
-    size_t vnum;              // number of variables (including constant)
-    uint32_t cnext[NUM_CSET]; // next clause number
-    uint32_t csize[NUM_CSET]; // allocated size of clause map
-    uint32_t cnum[NUM_CSET];  // number of clauses
+    uint32_t cnum[NUM_CSET];  // number of clauses (not counting holes)
     uint32_t coffs[NUM_CSET]; // offset for clause iterator
 
     uint32_t cdead;           // number of dead clauses (level=0)
@@ -577,18 +617,14 @@ typedef struct _varp_t {
 #endif
 #endif
     variable_t*  marked;        // mlist marked variables
-    size_t ssize;               // size of symbol hash table
-    size_t snum;                // number of symbols in symbol hash table
+    size_t       snum;          // number of symbols in symbol hash table
     dynvar(symbol_t**,symtab);  // symbol hash table
-    size_t       hsize;         // size of clause hash table
     size_t       hnum;          // number of clauses in clause hashtab
     dynvar(hlink_t**,hashtab);  // clause hash table
     dynvar(int*,order_map);     // literal order table
     int          sort_key[2];   // sort order -1,-2,1,2 (0=not used)
-    // FIXME DYNARRAY    
-    clause_t**   clause_map[NUM_CSET]; // array of clauses, entries may be null
+    dynvec(clause_t**,clauseset,NUM_CSET); // array of clausesets, entries may be null
     clause_t*    unwatch;     // clauses to unwatch (check after bcp)
-    size_t       unum;        // number of levels allocated
     dynvar(undo_t*,undo);     // array of undo block, one for each level
     size_t       num_bound;   // #bound variables
     size_t       num_subst;   // #substitions < #bound
@@ -644,6 +680,10 @@ ErlNifResourceType* varp_res;
 static cix_t add_clause_array(varp_t* vp, int si,
 			      lit_t* lit, size_t size, bool_t put_unit);
 
+void print_clause(varp_t* vp, char* label, clause_t* cp);
+void print_lit_array(char* label, lit_t* lit, size_t size);
+
+
 #ifdef NIF_TRACE
 #define NIF(name,arity,func) NIF_FUNC(name, arity, trace##_##func##_##arity),
 #else
@@ -675,7 +715,6 @@ DECL_ATOM(ok);
 DECL_ATOM(true);
 DECL_ATOM(false);
 DECL_ATOM(default);
-DECL_ATOM(grow);
 DECL_ATOM(size);
 DECL_ATOM(error);
 DECL_ATOM(inqueue);
@@ -764,6 +803,7 @@ DECL_ATOM(system_limit);
 #define VARP_FREE(ptr)      enif_free((ptr))
 #endif
 
+// NOT good for SMP!!! only light tetsing (atomics?)
 size_t varp_allocated = 0;
 
 void* debug_alloc(size_t n)
@@ -804,8 +844,6 @@ void debug_free(void* ptr)
 	enif_free(pptr);
     }
 }
-
-
 
 static heap_t* new_heap_block(heap_t* next)
 {
@@ -880,38 +918,65 @@ static void varp_free(allocator_t* ap, void* ptr)
     ap->free_list = (object_t*)ptr;
 }
 
-
-static size_t dynarray_next_size(size_t size, size_t nel)
+// return 2^r when 2^r > size
+static size_t next_pow2(size_t size)
 {
-    while((size < nel) && (size < DYN_GROW0_LIMIT))
-	size *= DYN_GROW0;
-    while((size < nel) && (size < DYN_GROW1_LIMIT))
-	size *= DYN_GROW1;
-    while((size < nel))
-	size *= DYN_GROW2;
-    return size;    
+    bool_t is_pow2 = (size>0) && ((size & (size-1)) == 0);
+    size_t next_size;
+
+    next_size = is_pow2 ? size : 1;
+    while(next_size <= size)
+	next_size *= 2;
+    return next_size;
 }
 
-static size_t dynarray_first_size(size_t nel)
+static size_t dynarray_next_size(size_t cur, size_t capacity)
 {
-    return dynarray_next_size(1, nel);
+    while((cur < DYN_GROW0_LIMIT) && (cur < capacity))
+	cur *= DYN_GROW0;
+    while((cur < DYN_GROW1_LIMIT) && (cur < capacity))
+	cur *= DYN_GROW1;
+    while((cur < capacity))
+	cur *= DYN_GROW2;
+    return cur;
 }
 
-static int dynarray_init(dynarray_t* dp, const char* name, size_t nel,
+static size_t dynarray_first_size(size_t capacity)
+{
+    return dynarray_next_size(1, capacity);
+}
+
+#if 0
+static void dyntype_init(dyntype_t* dt, const char* name, size_t width)
+{
+    dt->name = name;
+    dt->width = width;
+}
+#endif
+      
+static int dynarray_init(dynarray_t* dp, const char* name,
+			 size_t initial_capacity,
 			 size_t width)
 {
-    size_t capacity = dynarray_first_size(nel);
     void* base;
-
-    // fixme: allocate small 2^i chunks as fixed allocator chunks
-    if ((base = VARP_ALLOC(capacity*width)) == NULL)
-	return -1;
-
-    enif_fprintf(stdout, "dynarray_init: [%s] nel=%d, cap=%d, width=%d\r\n",
-		 name, nel, capacity, width);
-    dp->name = name;
+    size_t capacity;
+    
+    if (initial_capacity == 0) {
+	capacity = 0;
+	base = NULL;
+    }
+    else {
+	capacity = dynarray_first_size(initial_capacity);
+	if ((base = VARP_ALLOC(capacity*width)) == NULL)
+	    return -1;
+    }
+#ifdef DEBUG_MEM    
+    enif_fprintf(stdout, "dynarray_init: [%s] capacity=%d,width=%d\r\n",
+		 name, capacity, width);
+#endif
+    dp->name     = name;
     dp->capacity = capacity;
-    dp->nel      = nel;
+    dp->size     = 0;
     dp->width    = width;
     dp->base     = base;
     return 0;
@@ -919,8 +984,14 @@ static int dynarray_init(dynarray_t* dp, const char* name, size_t nel,
 
 static void dynarray_clear(dynarray_t* dp)
 {
+#ifdef DEBUG_MEM        
+    enif_fprintf(stdout,
+		 "dynarray_clear: [%s] size=%d, capacity=%d, width=%d\r\n",
+		 dp->name, dp->size, dp->capacity, dp->width);
+#endif
     VARP_FREE(dp->base);
-    dp->nel = 0;
+    dp->base = NULL;
+    dp->size = 0;
     dp->capacity = 0;
 }
 
@@ -934,50 +1005,67 @@ static void dynarray_destroy(varp_t* vp, dynarray_t* dp)
 
 static inline size_t dynarray_capacity(dynarray_t* dp)
 {
-    if (dp == NULL)
-	return 0;
-    return dp->capacity;
+    return (dp == NULL) ? 0 : dp->capacity;
 }
 
 static inline size_t dynarray_size(dynarray_t* dp)
 {
-    if (dp == NULL)
-	return 0;
-    return dp->nel;
+    return (dp == NULL) ? 0 : dp->size;
 }
 
+static int dynarray_set_capacity(dynarray_t* dp, size_t capacity)
+{
+    void* base;
+    
+    if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
+	return -1;
+    dp->base = base;
+#ifdef DEBUG_MEM
+    enif_fprintf(stdout, "dynarray_set_capacity: [%s] %d => %d\r\n",
+		 dp->name, dp->capacity, capacity);
+#endif
+    dp->capacity = capacity;
+    dp->size = MIN(dp->size, capacity);
+    return 0;
+}
+
+#if 0
 static int dynarray_grow_(dynarray_t* dp, size_t min_capacity)
 {
-    size_t capacity = dynarray_next_size(dp->capacity, min_capacity);
+    size_t capacity = dynarray_next_size(MAX(1,dp->capacity), min_capacity);
     void* base;
     if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
 	return -1;
     dp->base = base;
+#ifdef DEBUG_MEM    
     enif_fprintf(stdout, "dynarray_grow_: [%s] %d => %d\r\n",
-		 dp->name, dp->capacity, capacity); 
+		 dp->name, dp->capacity, capacity);
+#endif
     dp->capacity = capacity;
     return 0;
 }
+#endif
 
-static inline int dynarray_resize(dynarray_t* dp, size_t nel)
+static inline int dynarray_resize(dynarray_t* dp, size_t size)
 {
-    if (nel > dp->capacity) {
-	if (dynarray_grow_(dp, nel) < 0)
+    if (size > dp->capacity) {
+	size_t capacity = dynarray_next_size(MAX(1,dp->capacity), size);
+	if (dynarray_set_capacity(dp, capacity) < 0)
 	    return -1;
     }
-    dp->nel = nel;
+    dp->size = size;
     return 0;
 }
 
 static dynarray_t* dynarray_create(varp_t* vp, const char* name,
-				   size_t nel, size_t width)
+				   size_t capacity, size_t width)
 {
     dynarray_t* dp;
     
     if ((dp = varp_alloc(&vp->dyn_allocator)) == NULL)
 	return NULL;
     if (dp != NULL) {
-	if (dynarray_init(dp, name, nel, width) < 0) {
+	if (dynarray_init(dp, name, capacity, width) < 0) {
 	    varp_free(&vp->dyn_allocator, dp);
 	    return NULL;
 	}
@@ -995,7 +1083,7 @@ static inline void* dynarray_element(dynarray_t* dp, int i)
 {
     if (dp == NULL) return NULL;
     if (i == 0) return dp->base;
-    if ((i < 0) || (i >= (int)dp->nel)) return NULL;
+    if ((i < 0) || (i >= (int)dp->size)) return NULL;
     return DYN_ADDR(dp, i);
 }
 
@@ -1004,7 +1092,7 @@ static inline void* dynarray_element(dynarray_t* dp, int i)
 static inline int dynarray_setelement(dynarray_t* dp,int i,void* data)
 {
     if (dp == NULL || (i < 0)) return -1;
-    if (i >= (int)dp->nel) {
+    if (i >= (int)dp->size) {
 	if (dynarray_resize(dp, i+1) < 0)
 	    return -1;
     }
@@ -1016,33 +1104,25 @@ static inline void* dynarray_add(dynarray_t* dp)
 {
     size_t n;
     if (dp == NULL) return NULL;
-    n = dp->nel;
+    n = dp->size;
     if (dynarray_resize(dp, n+1) < 0)
 	return NULL;
     return DYN_ADDR(dp, n);
 }
 
-//
-// nel=8
-// i=3
-// |0|1|2|3|4|5|6|7|
-// move = 8-i-1 = 8-3-1=4 elements
-// i=7
-// move = 8-7-1 = 0 
-//
 static inline void* dynarray_delete(dynarray_t* dp, int i)
 {
     void* src;    
     void* dst;
     size_t len;
     
-    if ((i<0) || (dp == NULL) || (i >= (int)dp->nel))
+    if ((i<0) || (dp == NULL) || (i >= (int)dp->size))
 	return NULL;
     dst = DYN_ADDR(dp, i);
     src = dst + dp->width;
-    if ((len = (dp->nel - i -1)) > 0)
+    if ((len = (dp->size - i -1)) > 0)
 	memmove(dst, src, len*dp->width);
-    dp->nel--;
+    dp->size--;
     return dst;
 }
 
@@ -1107,12 +1187,19 @@ static inline int wlink_index(wlink_t* wl)
 
 static inline clause_t* get_clause(varp_t* vp, cix_t index)
 {
-    return vp->clause_map[GET_SI(index)][GET_IX(index)];
+    return vp->clauseset[GET_SI(index)][GET_IX(index)];
 }
 
 static inline void set_clause(varp_t* vp, cix_t index, clause_t* cp)
 {
-    vp->clause_map[GET_SI(index)][GET_IX(index)] = cp;
+#ifdef DEBUG
+    if (cp == NULL)
+	enif_fprintf(stdout, "set_clause %d[%d] = NULL\r\n",
+		    GET_SI(index),GET_IX(index));
+    else
+	print_clause(vp, "set_clause", cp);
+#endif
+    vp->clauseset[GET_SI(index)][GET_IX(index)] = cp;
 }
 
 static size_t get_number_of_clauses(varp_t* vp)
@@ -1599,18 +1686,6 @@ char* indent(int level)
     return buffer;
 }
 
-#if defined(DEBUG_BCP)
-#define PRINT_CLAUSE(vp,msg,cp) print_clause((vp),(msg),(cp))
-#else
-#define PRINT_CLAUSE(vp,msg,cp)
-#endif
-
-#if defined(DEBUG)
-#define PRINT_LIT_ARRAY(msg,lit,size) print_lit_array((msg),(lit),(size))
-#else
-#define PRINT_LIT_ARRAY(msg,lit,size)
-#endif
-
 char* format_ival(ival_t v)
 {
     switch(v) {
@@ -1971,7 +2046,7 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
     };
 	
     if (flags & SUB_FLAG_NUM_VARS)
-	values[0] = enif_make_int(env, vp->vnum-1);
+	values[0] = enif_make_int(env, dynvar_size(vp->var_map)-1);
     if (flags & SUB_FLAG_NUM_BOUND)
 	values[1] = enif_make_int(env, vp->num_bound);
     if (flags & SUB_FLAG_NUM_CLAUSES)
@@ -2046,7 +2121,8 @@ static inline void log_permanent(varp_t* vp, literal_t* x,
 
 static int order_next(varp_t* vp, int i, int skip)
 {
-    while(i < (int)vp->vnum) {
+    size_t n = dynvar_size(vp->var_map);
+    while(i < (int)n) {
 	if (!vis_bound(vp, vp->order_map[i])) {
 	    if (!skip) {
 		return i;
@@ -2155,7 +2231,7 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
     if ((i = order_next(vp, vp->next_unbound, 0)) > 0)
 	vp->next_unbound = i;
     else
-	vp->next_unbound = vp->vnum;
+	vp->next_unbound = dynvar_size(vp->var_map);
     DBG_BCP("%sNextvar=%d\r\n", indent(level), vp->next_unbound);
     log_permanent(vp, lp, NULL, level);
 }
@@ -2176,32 +2252,20 @@ static inline void put_l(varp_t* vp,lit_t l,ival_t ivalue,
 
 static void init_level(varp_t* vp, int level)
 {
-    ASSERT(level < vp->unum);
+    ASSERT(level < (int)dynvar_size(vp->undo));
     vp->undo[level].decision = L_FALSE(vp);
     vp->undo[level].t  = uUNDEF;
     vp->undo[level].bs = NULL;
 }
 
-static int undo_alloc(varp_t* vp, size_t size)
+static int undo_set_size(varp_t* vp, size_t size)
 {
+    size_t n = dynvar_size(vp->undo);
     int i;
-
-    dynvar_init(vp->undo, size);
-    vp->unum = size;
-    for (i = 0; i < (int)size; i++)
-	init_level(vp, i);
-    return 0;    
-}
-
-static int undo_resize(varp_t* vp, size_t size)
-{
-    int i, n;
-
     if (dynvar_resize(vp->undo, size) < 0)
 	return -1;
-    n = vp->unum;
-    vp->unum = size;
-    for (i = n; i < (int)size; i++)
+    // clear added levels
+    for (i = (int)n; i < (int)size; i++)
 	init_level(vp, i);
     return 0;
 }
@@ -2209,11 +2273,8 @@ static int undo_resize(varp_t* vp, size_t size)
 // set current bindings level
 static int set_level(varp_t* vp, int level)
 {
-    if (level >= (int)vp->unum) {
-	size_t size = 2*vp->unum;
-	if (undo_resize(vp, size) < 0)
-	    return -1;
-    }
+    if (level >= (int)dynvar_size(vp->undo))
+	undo_set_size(vp, level+1);
     vp->level = level;
     if (level > vp->max_level)
 	vp->max_level = level;
@@ -2222,8 +2283,10 @@ static int set_level(varp_t* vp, int level)
 	format_lit(vp, vp->undo[level].decision)); 
 #ifdef ASSERTIONS
     {
+	// check that levels above level are clean
+	int n = (int)dynvar_size(vp->undo);
 	int i;
-	for (i = level+1; i < (int)vp->unum; i++) {
+	for (i = level+1; i < n; i++) {
 	    ASSERT(vp->undo[i].bs == NULL);
 	}
     }
@@ -2290,10 +2353,12 @@ static void keep_level(varp_t* vp, int level)
 static void activity_decay(varp_t* vp, float decay)
 {
     int i;
-
+    size_t n;
+    
     switch (vp->opt.atype) {
     case mvsids:
-	for (i = 1; i < (int)vp->vnum; i++)
+	n = dynvar_size(vp->var_map);
+	for (i = 1; i < (int)n; i++)
 	    vp->var_map[i]->activity *= decay;
 	break;
     case off:
@@ -2343,78 +2408,54 @@ static int clause_is_equal(lit_t* a, lit_t* b, int size)
     return (i == size);
 }
 
-static int hashtab_alloc(varp_t* vp, size_t size)
-{
-    if (size == 0) {  // 2^size > csize
-	size = 1;
-	while(size < (size_t)vp->csize)
-	    size *= 2;
-    }
-    if (dynvar_init(vp->hashtab, size) < 0)
-	return -1;
-    memset(vp->hashtab, 0, size*sizeof(hlink_t*));
-    vp->hsize = size;   // = vp->hashtab_dyn.nel    
-    vp->hnum  = 0;
-    return 0;
-}
-
-// deallocate hashtab remove all hash links
-static int hashtab_clear(varp_t* vp)
-{
-    VARP_FREE(vp->hashtab);
-    vp->hashtab = NULL;
-
-    cleanup_allocator(&vp->hlink_allocator);
-    vp->hnum  = 0;
-    vp->hsize = 0;
-    return 0;
-}
-
 // allocate / resize clause hash table
-static int hashtab_resize(varp_t* vp, size_t size)
+static int hashtab_grow(varp_t* vp)
 {
-    hlink_t** htab = vp->hashtab;
-    size_t hsize   = vp->hsize;
+    size_t size0 = dynvar_size(vp->hashtab);
+    size_t size  = next_pow2(size0);
     int i;
 
-    // LOUSY TRICK, overwrite old hash table with a new table!
-    // FIXME a better rehash
-    if (dynvar_init(vp->hashtab, size) < 0)
+    if (dynvar_resize(vp->hashtab, size) < 0)
 	return -1;
-    memset(vp->hashtab, 0, size*sizeof(hlink_t*));
-    for (i = 0; i < (int)hsize; i++) {
-	hlink_t* hp = htab[i];
-	while(hp != NULL) {
-	    hlink_t* hp1 = hp->next;
-	    int hjx = hp->hvalue & (size - 1);
-	    hp->next = vp->hashtab[hjx];
-	    vp->hashtab[hjx] = hp;
-	    hp = hp1;
+    // clear new links
+    memset(vp->hashtab+size0, 0, (size-size0)*sizeof(hlink_t*));
+    // move elements that rehash to the upper part
+    for (i = 0; i < (int)size0; i++) {
+	hlink_t** hpp = &vp->hashtab[i];
+	hlink_t* hp;
+	while((hp = *hpp) != NULL) {
+	    int j = hp->hvalue & (size-1);  // hash with new size
+	    if (i == j) { // element stay
+		hpp = &(hp->next);
+	    }
+	    else { // element move to new location j=(i+2^r) (top half)
+		*hpp = hp->next;
+		hp->next = vp->hashtab[j];
+		vp->hashtab[j] = hp;		
+	    }
 	}
     }
-    VARP_FREE(htab);
-    vp->hsize = size;
     return 0;
 }
 
-static int hashtab_insert(varp_t* vp, hlink_t* hp)
+static int hlink_insert(varp_t* vp, hlink_t* hp)
 {
-    int hix;
-    
-    if (vp->hnum+1 >= vp->hsize) {
-	if (hashtab_resize(vp, vp->hsize*2) < 0)
+    int i;
+    if (vp->hnum+1 >= dynvar_size(vp->hashtab)) {
+	if (hashtab_grow(vp) < 0)
 	    return -1;
     }
+    i = hp->hvalue & (dynvar_size(vp->hashtab)-1);
+    hp->next = vp->hashtab[i];
+    vp->hashtab[i] = hp;
     vp->hnum++;
-    hix = hp->hvalue & (vp->hsize - 1);
-    hp->next = vp->hashtab[hix];
-    vp->hashtab[hix] = hp;
     return 0;
 }
 
 static int hash_unlink(varp_t* vp, clause_t* cp)
 {
-    hlink_t** hpp = &vp->hashtab[cp->hvalue & (vp->hsize-1)];
+    int i = cp->hvalue & (dynvar_size(vp->hashtab)-1);
+    hlink_t** hpp = &vp->hashtab[i];
     while(*hpp) {
 	hlink_t* hp = *hpp;
 	if (hp->cix == cp->cix) {
@@ -2428,18 +2469,21 @@ static int hash_unlink(varp_t* vp, clause_t* cp)
     return -1;
 }
 
-static hlink_t* clause_lookup(varp_t* vp,lit_t* lit,size_t size,
-			      uint32_t hvalue)
+static hlink_t* hlink_lookup(varp_t* vp,lit_t* lit,size_t size,uint32_t hvalue)
 {
-    hlink_t* hp = vp->hashtab[hvalue & (vp->hsize-1)];
-    while(hp) {
-	if (hp->hvalue == hvalue) {
-	    clause_t* cp = get_clause(vp, hp->cix);
-	    ASSERT(cp != NULL);
-	    if ((cp->size == size) && clause_is_equal(lit,cp->lit,size))
-		return hp;
+    size_t hsize = dynvar_size(vp->hashtab);
+    if (hsize > 0) {
+	int i = hvalue & (hsize-1);
+	hlink_t* hp = vp->hashtab[i];
+	while(hp) {
+	    if (hp->hvalue == hvalue) {
+		clause_t* cp = get_clause(vp, hp->cix);
+		ASSERT(cp != NULL);
+		if ((cp->size == size) && clause_is_equal(lit,cp->lit,size))
+		    return hp;
+	    }
+	    hp = hp->next;
 	}
-	hp = hp->next;
     }
     return NULL;
 }
@@ -2480,7 +2524,7 @@ static void clause_free(varp_t* vp, clause_t* cp)
 {
     if (cp != NULL) {
 	cix_t cix;
-	if ((cix = cp->cix) != CLAUSE_NONE) {
+	if ((cix = cp->cix) != CLAUSE_NONE) { // when?
 	    int si = GET_SI(cix);
 	    if ((si != ALPHA) && vp->opt.hash)
 		hash_unlink(vp, cp);
@@ -2542,16 +2586,17 @@ cix_t clause_find(varp_t* vp, lit_t* lit, size_t size)
     
     if (vp->opt.hash) {
 	hlink_t* hp;
-	if ((hp = clause_lookup(vp,lit,size,hvalue)) != NULL)
+	if ((hp = hlink_lookup(vp,lit,size,hvalue)) != NULL)
 	    return hp->cix;
     }
     else {
 	int si;
 	DBG("warning slow clause_find in use\r\n");
 	for (si = 0; si < NUM_CSET; si++) {
-	    int ix;
-	    for (ix = 0; ix < (int)vp->cnext[si]; ix++) {
-		clause_t* cp = get_clause(vp, MAKE_CIX(si,ix));
+	    int i;
+	    size_t n = dynvec_size(vp->clauseset, si);
+	    for (i = 0; i < (int)n; i++) {
+		clause_t* cp = get_clause(vp, MAKE_CIX(si,i));
 		if ((cp != NULL) &&
 		    (cp->size == size) &&
 		    (cp->hvalue == hvalue) &&
@@ -2564,52 +2609,52 @@ cix_t clause_find(varp_t* vp, lit_t* lit, size_t size)
     return CLAUSE_NONE;
 }
 
-// assume cp->hvalue has been set!
-static int clause_hash_link(varp_t* vp, clause_t* cp)
+static int clause_hash_insert(varp_t* vp, clause_t* cp)
 {
-    if (vp->opt.hash) {  // insert in clause hash table
-	hlink_t* hp;
-	
-	if ((hp = varp_alloc(&vp->hlink_allocator)) == NULL)
-	    return -1;
-	hp->hvalue = cp->hvalue;
-	hp->cix  = cp->cix;
-	return hashtab_insert(vp, hp);
-    }
-    return 0;
+    hlink_t* hp;
+
+    if ((hp = varp_alloc(&vp->hlink_allocator)) == NULL)
+	return -1;
+    hp->hvalue = cp->hvalue;
+    hp->cix  = cp->cix;
+    return hlink_insert(vp, hp);
 }
 
-static int clauseset_resize(varp_t* vp, int si, size_t size)
+// insert all clauses in a clauseset
+static int clauseset_hash_insert(varp_t* vp, int si)
 {
-    clause_t** cpp;    
-
-    if (!(cpp = VARP_REALLOC(vp->clause_map[si],size*sizeof(clause_t*))))
-	return -1;
-    // NULL new clause pointers?
-    vp->clause_map[si] = cpp;
-    vp->csize[si] = size;
+    int i;
+    size_t n = dynvec_size(vp->clauseset, si);
+    
+    enif_fprintf(stdout, "clauseset_hash_insert: si=%dm n=%d\r\n",
+		 si, n);
+    
+    for (i = 0; i < (int)n; i++) {
+	clause_t* cp = get_clause(vp, MAKE_CIX(si,i));
+	if (cp != NULL) {
+	    if (clause_hash_insert(vp, cp) < 0)
+		return -1;
+	}
+    }
     return 0;
 }
 
 static cix_t clause_insert(varp_t* vp, int si, clause_t* cp, uint32_t hvalue)
 {
-    uint32_t ix = vp->cnext[si]++;
+    uint32_t ix = dynvec_size(vp->clauseset, si);
     cix_t cix = MAKE_CIX(si,ix);
     
-    cp->cix = cix;
-    cp->stamp = vp->bcp_counter;
+    cp->cix    = cix;
+    cp->stamp  = vp->bcp_counter;
     cp->hvalue = hvalue;
-    
-    if (ix >= vp->csize[si]) {
-	uint32_t new_csize = vp->csize[si] + vp->opt.grow;
-	if (clauseset_resize(vp, si, new_csize) < 0)
-	    return CLAUSE_NONE;
-    }
+
+    if (dynvec_resize(vp->clauseset,si, ix+1) < 0)
+	return CLAUSE_NONE;
+
     vp->cnum[si]++;
     set_clause(vp, cix, cp);
-
-    if (si != ALPHA) // alphas are not hashed
-	clause_hash_link(vp, cp);
+    if ((si != ALPHA) && vp->opt.hash) // alphas are not hashed
+	clause_hash_insert(vp, cp);
     return cix;
 }
 
@@ -2683,7 +2728,7 @@ static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
     if (enif_get_int(env, arg, &x)) {
 	if (x == 0)
 	    return 0;
-	else if (ABS(x) < (int)vp->vnum)
+	else if (ABS(x) < (int)dynvar_size(vp->var_map))
 	    *lpp = vindex_ll(vp, x);
 	else {
 	    DBG("literal %d out of range\r\n", x);
@@ -2705,7 +2750,7 @@ static int vif_get_l(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg, lit_t* l)
     if (enif_get_int(env, arg, &x)) {
 	if (x == 0)
 	    return 0;
-	else if (ABS(x) < (int)vp->vnum)
+	else if (ABS(x) < (int)dynvar_size(vp->var_map))
 	    *l = vindex_l(vp, x);
 	else {
 	    DBG("literal %d out of range\r\n", x);
@@ -2767,7 +2812,7 @@ static int vif_get_cix(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM term,cix_t* cixp)
     if (!enif_get_uint(env, term, &cix))
 	return 0;
     si = GET_SI(cix);
-    if ((ix = GET_IX(cix)) >= (int)vp->cnext[si])
+    if ((ix = GET_IX(cix)) >= (int)dynvec_size(vp->clauseset,si))
 	return 0;
     *cixp = cix;
     return 1;
@@ -2781,10 +2826,11 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
 static void cleanup(varp_t* vp)
 {
     int si;
+    int i;
     
     if (vp->symtab) {
-	int i;
-	for (i = 0; i < (int)vp->ssize; i++) {
+	size_t size = dynvar_size(vp->symtab);
+	for (i = 0; i < (int)size; i++) {
 	    symbol_t* sp = vp->symtab[i];
 	    while(sp) {
 		VARP_FREE(sp->data);
@@ -2794,16 +2840,10 @@ static void cleanup(varp_t* vp)
 	dynvar_clear(vp->symtab);
     }
 
-    if (vp->opt.xref) {
-	int i;
-	// FIXME destroy clear both dynamic array and dyn object
-	// dynobjects are cleared when allocator is clear so it is
-	// not really needed. Add a setcap that changes capacity as well!?
-	for (i = 1; i < (int)vp->vnum; i++) {
-	    dynarray_destroy(vp, vp->var_map[i]->lit[0].xref);
-	    dynarray_destroy(vp, vp->var_map[i]->lit[1].xref);
-	}
-    }    
+    for (i = 1; i < (int)dynvar_size(vp->var_map); i++) {
+	dynarray_destroy(vp, vp->var_map[i]->lit[0].xref);
+	dynarray_destroy(vp, vp->var_map[i]->lit[1].xref);
+    }
 
     dynvar_clear(vp->var_map);
 #ifdef PACKED_VALUE
@@ -2817,24 +2857,22 @@ static void cleanup(varp_t* vp)
     dynvar_clear(vp->order_map);
 
     // turn off, avoid free all hash links clause_free
-    if (vp->opt.hash) {
-	hashtab_clear(vp);
-	// make sure clause free does not try to unlink 
-	vp->opt.hash = false;
-    }
-
+    dynvar_clear(vp->hashtab);
+    vp->hnum = 0;
+    vp->opt.hash = false; // avoid unlink in clause_free
+    
     for (si = 0; si < NUM_CSET; si++) {
-	if (vp->clause_map[si] != NULL) {
-	    clause_t** cm = vp->clause_map[si];
-	    int n = (int) vp->cnext[si];
+	if (vp->clauseset[si] != NULL) {
+	    clause_t** cm = vp->clauseset[si];
+	    size_t n = dynvec_size(vp->clauseset,si);
 	    int i;
-	    for (i = 0; i < n; i++) {
+	    for (i = 0; i < (int)n; i++) {
 		clause_t* cp = cm[i];
 		clause_free(vp, cp);
 	    }
 	}
-	VARP_FREE(vp->clause_map[si]);
-	vp->clause_map[si] = NULL;
+	dynarray_clear(&vp->clauseset_dyn_[si]);
+	vp->clauseset[si] = NULL;
     }
 
     dynvar_clear(vp->undo);
@@ -2856,7 +2894,6 @@ static void default_config(varp_config_t* conf)
     conf->hash  = false;
     conf->edge  = false;
     conf->xref  = false;
-    conf->grow   = DEFAULT_MAP_GROW;
     conf->vsize  = DEFAULT_MAP_SIZE;
     conf->csize  = DEFAULT_MAP_SIZE;
 }
@@ -2864,15 +2901,7 @@ static void default_config(varp_config_t* conf)
 static int vif_config(ErlNifEnv* env, const ERL_NIF_TERM* elem,
 		      varp_config_t* opt)
 {
-    if (elem[0] == ATOM(grow)) {
-	if (elem[1] == ATOM(default))
-	    opt->grow = DEFAULT_MAP_GROW;
-	else if (!vif_get_size_t(env, elem[1], &opt->grow))
-	    return 0;
-	else if ((opt->grow == 0) || (opt->grow >  MAX_MAP_EXPAND))
-	    return 0;
-    }
-    else if (elem[0] == ATOM(size)) {
+    if (elem[0] == ATOM(size)) {
 	if (elem[1] == ATOM(default))
 	    opt->vsize = DEFAULT_MAP_SIZE;
 	else if (!vif_get_size_t(env, elem[1], &opt->vsize))
@@ -2936,73 +2965,65 @@ static int parse_new_opts(ErlNifEnv* env,ERL_NIF_TERM list,varp_new_opt_t* opt)
     return 0;
 }
 
-static int symtab_alloc(varp_t* vp, size_t size)
+static int symtab_grow(varp_t* vp)
 {
-    if (size == 0) {
-	size = 1;
-	while(size < (size_t)vp->opt.vsize)
-	    size *= 2;
-    }
-    if (dynvar_init(vp->symtab, size) < 0)
-	return -1;
-    memset(vp->symtab, 0, size*sizeof(symbol_t*));
-    vp->ssize = size; // = vp->symtab_dyn.nel
-    vp->snum  = 0;
-    return 0;
-}
-
-static int symtab_resize(varp_t* vp, size_t size)
-{
-    symbol_t** stab = vp->symtab;
-    size_t ssize   = vp->ssize;
+    size_t size0 = dynvar_size(vp->symtab);
+    size_t size  = next_pow2(size0);
     int i;
-    
-    // LOUSY TRICK, overwrite old hash table with a new table!
-    // FIXME a better rehash
-    if (dynvar_init(vp->symtab, size) < 0)
+
+    if (dynvar_resize(vp->symtab, size) < 0)
 	return -1;
-    memset(vp->symtab, 0, size*sizeof(symbol_t*));
-    for (i = 0; i < (int)ssize; i++) {
-	symbol_t* sp = stab[i];
-	while(sp != NULL) {
-	    symbol_t* sp1 = sp->next;
-	    int hjx = sp->hash & (size - 1);
-	    sp->next = vp->symtab[hjx];
-	    vp->symtab[hjx] = sp;
-	    sp = sp1;
+    // clear new links
+    memset(vp->symtab+size0, 0, (size-size0)*sizeof(symbol_t*));
+    // move elements that rehash the lower part and move elements
+    // that rehash to the upper part
+    for (i = 0; i < (int)size0; i++) {
+	symbol_t** spp = &vp->symtab[i];
+	symbol_t* sp;
+	while((sp = *spp) != NULL) {
+	    int j = sp->hvalue & (size-1);  // hash with new size
+	    if (i == j) { // element stay
+		spp = &(sp->next);
+	    }
+	    else { // element move to new location j=(i+2^r) (top half)
+		*spp = sp->next;
+		sp->next = vp->symtab[j];
+		vp->symtab[j] = sp;
+	    }
 	}
     }
-    VARP_FREE(stab);
-    vp->ssize = size;
     return 0;
 }
 
 static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
-			       uint32_t hash, bool_t is_term)
+			       uint32_t hvalue, bool_t is_term)
 {
-    int hix  = hash & (vp->ssize - 1);
-    symbol_t* sp = vp->symtab[hix];
-    while(sp != NULL) {
-	if ((sp->hash == hash) &&
-	    (sp->size == bp->size) &&
-	    (sp->is_term == is_term) &&
-	    (memcmp(sp->data, bp->data, bp->size) == 0))
-	    return sp;
-	sp = sp->next;
+    size_t hsize = dynvar_size(vp->symtab);
+    if (hsize > 0) {
+	int hix  = hvalue & (hsize - 1);
+	symbol_t* sp = vp->symtab[hix];
+	while(sp != NULL) {
+	    if ((sp->hvalue == hvalue) &&
+		(sp->size == bp->size) &&
+		(sp->is_term == is_term) &&
+		(memcmp(sp->data, bp->data, bp->size) == 0))
+		return sp;
+	    sp = sp->next;
+	}
     }
     return NULL;
 }
 
 // create a new symbol
 static symbol_t* symbol_create(varp_t* vp, variable_t* var, ErlNifBinary* bp,
-			       uint32_t hash, bool_t is_term)
+			       uint32_t hvalue, bool_t is_term)
 {
     symbol_t* sp;
     
     if ((sp = varp_alloc(&vp->sym_allocator)) == NULL)
 	return NULL;
     sp->is_term = is_term;
-    sp->hash = hash;
+    sp->hvalue = hvalue;
     sp->var  = var;    
     // copy term or binary
     if (is_term) {
@@ -3021,22 +3042,19 @@ static symbol_t* symbol_create(varp_t* vp, variable_t* var, ErlNifBinary* bp,
     return sp;
 }
 
-static int symbol_insert(varp_t* vp,variable_t* var,
-			 symbol_t* sp, uint32_t hash)
+static int symbol_insert(varp_t* vp,variable_t* var, symbol_t* sp)
 {
-    int hix;
+    int i;
 
-    if (vp->snum+1 >= vp->ssize) { // rehash
-	unsigned int ssize1 = vp->ssize*2;
-	if (symtab_resize(vp, ssize1) < 0)
-	    return -1;
-    }    
-    hix = hash & (vp->ssize-1);
+    if (vp->snum+1 >= dynvar_size(vp->symtab)) // rehash
+	symtab_grow(vp);
+
+    i = sp->hvalue & ( dynvar_size(vp->symtab)-1);
     sp->anext = var->names;  // link alias list
     var->names = sp;
     // link hash bucket list
-    sp->next = vp->symtab[hix];
-    vp->symtab[hix] = sp;
+    sp->next = vp->symtab[i];
+    vp->symtab[i] = sp;
     vp->snum++;
     return 0;
 }
@@ -3048,7 +3066,7 @@ static symbol_t* symbol_copy(varp_t* vp, variable_t* var, symbol_t* sp0)
     if ((sp = varp_alloc(&vp->sym_allocator)) == NULL)
 	return NULL;
     sp->is_term = sp0->is_term;
-    sp->hash = sp0->hash;
+    sp->hvalue = sp0->hvalue;
     sp->var  = var;
     // copy term or binary
     if (sp0->is_term) {
@@ -3075,23 +3093,20 @@ static int setup(varp_t* vp, varp_config_t* config)
 
     vp->opt = *config;
 
-    vsize = vp->opt.vsize;
+    vsize = MAX(1, vp->opt.vsize);
     csize = vp->opt.csize;
 
-    vp->vnum   = 1;  // include constant
     vp->marked = NULL;
     vp->first_unbound = 1;
     vp->next_unbound  = 1;
 
-    vp->ssize = 0;  // allocated symbol hash
-    vp->snum = 0;   // number of symbols
-
-    vp->hsize = 0;  // allocated clause hash
-    vp->hnum = 0;   // number of clauses (in hash)
-
     if (dynvar_init(vp->var_map, vsize) < 0)
 	goto error;
     
+    dynvar_resize(vp->var_map, 1); // set size = 1 (include first constant)
+    
+    if (dynvar_init(vp->order_map, vsize) < 0)
+	goto error;    
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
     if (dynvar_init(vp->lit_value, 2*PACKED_BYTES(vsize)) < 0)
@@ -3102,34 +3117,31 @@ static int setup(varp_t* vp, varp_config_t* config)
 	goto error;
 #endif
 #endif
-    if (symtab_alloc(vp, 0) < 0)
+    if (dynvar_init(vp->symtab, DYN_SYMTAB_INIT) < 0)
 	goto error;
-    if (vp->opt.hash) {
-	if (hashtab_alloc(vp, 0) < 0)
-	    goto error;
-    }
-    if (dynvar_init(vp->order_map, vsize) < 0)
+    vp->snum  = 0;
+
+    if (dynvar_init(vp->hashtab, DYN_HASHTAB_INIT) < 0)
 	goto error;
-    
+    vp->hnum  = 0;
+
+    dynvec_init(vp->clauseset,0,"[DELTA]", csize);
+    dynvec_init(vp->clauseset,1,"[GAMMA]",0);
+    dynvec_init(vp->clauseset,2,"[BETA]", 0);
+    dynvec_init(vp->clauseset,3,"[ALPHA]", 0);
+
     for (i = 0; i < NUM_CSET; i++) {
-	vp->cnext[i] = 0;
-	vp->csize[i] = 0;
-	vp->cnum[i] = 0;
+	vp->cnum[i]  = 0;
 	vp->coffs[i] = 0;
-	vp->clause_map[i] = NULL;
     }
 
-    if (dynvar_init(vp->tlit, 8) < 0)
+    if (dynvar_init(vp->tlit, 0) < 0)
 	goto error;
 
     vp->cdead = 0;
     vp->edead = 0;
 
     vp->unwatch = NULL;
-    
-    if (!(vp->clause_map[0] = VARP_ALLOC(csize*sizeof(clause_t*))))
-	goto error;
-    vp->csize[0] = csize;
 
     if (init_allocator(&vp->dyn_allocator, sizeof(dynarray_t)) < 0)
 	goto error;
@@ -3145,12 +3157,13 @@ static int setup(varp_t* vp, varp_config_t* config)
 	goto error;        
 
     lqueue_init(&vp->q);
-    undo_alloc(vp, DEFAULT_UNDO_SIZE);
+    
+    dynvar_init(vp->undo, 0);
+    undo_set_size(vp, DYN_UNDO_INIT);
 
     vp->num_bound = 0;
     vp->num_subst = 0;
     vp->level = 0;
-    
 
     // transient statistics
     vp->max_level = 0;
@@ -3213,51 +3226,41 @@ error:
     return enif_make_badarg(env);
 }
 
-// realloc var_map/values/order to vsize
-static int realloc_variables(varp_t* vp, size_t vsize)
-{
-    // void* ptr;
-    
-    if (dynvar_resize(vp->var_map, vsize) < 0)
-	return -1;
-    if (dynvar_resize(vp->order_map, vsize) < 0)
-	return -1;
-#ifdef PACKED_VALUE
-#ifdef LIT_VALUE
-    if (dynvar_resize(vp->lit_value, 2*PACKED_BYTES(vsize)) < 0)
-	return -1;
-    vp->lit_overlay = (uint16_t*) vp->lit_value;
-#else
-    if (dynvar_resize(vp->var_value, PACKED_BYTES(vsize)) < 0)
-	return -1;
-#endif
-#endif	
-    return 0;
-}
-
 // add n variables return index to the first added
 static int add_variables(varp_t* vp, size_t n)
 {
-    int first;
+    size_t k = dynvar_size(vp->var_map);
+    size_t m = k + n;
+    size_t cap = dynvar_capacity(vp->var_map);
+    int j;
     
-    if (vp->vnum + n - 1 >= vp->opt.vsize) {
-	size_t new_vsize = vp->opt.vsize + n + vp->opt.grow;
-	if (realloc_variables(vp, new_vsize) < 0)
+    if (dynvar_resize(vp->var_map, m) < 0)
+	return -1;
+    // only update rest of variable/values when capacity grows
+    if (dynvar_capacity(vp->var_map) > cap) {
+	cap = dynvar_capacity(vp->var_map);
+	if (dynvar_set_capacity(vp->order_map, cap) < 0)
 	    return -1;
-	vp->opt.vsize = new_vsize;
+#ifdef PACKED_VALUE
+#ifdef LIT_VALUE
+	if (dynvar_set_capacity(vp->lit_value, 2*PACKED_BYTES(cap)) < 0)
+	    return -1;
+	vp->lit_overlay = (uint16_t*) vp->lit_value;
+#else
+	if (dynvar_set_capacity(vp->var_value, PACKED_BYTES(cap)) < 0)
+	    return -1;
+#endif
+#endif		
     }
-    first = vp->vnum;
-    while(n--) {
+    for (j = (int)k; j < (int)m; j++) {
 	variable_t* var;
-	int i;
 	if ((var = varp_alloc(&vp->var_allocator)) == NULL)
 	    return -1;
-	i = (int) vp->vnum++;
-	vp->order_map[i] = i;
-	init_variable(vp, var, i);
-	vp->var_map[i] = var;	
+	vp->order_map[j] = j;
+	init_variable(vp, var, j);
+	vp->var_map[j] = var;
     }
-    return first;
+    return (int)k;
 }
     
 // varc:add_variable(Vp:varc()) -> integer()
@@ -3266,7 +3269,7 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int vix;
+    int i;
     bool_t is_atom;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -3274,16 +3277,16 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     if (!vif_get_boolean(env, argv[1], &is_atom))
 	return enif_make_badarg(env);
 
-    if (vp->vnum >= VLIMIT)
+    if (dynvar_size(vp->var_map) >= VLIMIT)
 	enif_raise_exception(env, ATOM(system_limit));
     
-    if ((vix = add_variables(vp, 1)) < 0)
+    if ((i = add_variables(vp, 1)) < 0)
 	return enif_make_badarg(env);
     
     if (is_atom)
-	vp->var_map[vix]->flags |= VAR_FLAG_ATOM;
+	vp->var_map[i]->flags |= VAR_FLAG_ATOM;
 
-    return enif_make_int(env, vix);
+    return enif_make_int(env, i);
 }
 
 
@@ -3303,11 +3306,6 @@ static ERL_NIF_TERM varp_del_variable(ErlNifEnv* env, int argc,
     // check that variable is not referenced
     if ((var->lit[0].degree != 0) || (var->lit[1].degree != 0))
 	return enif_make_badarg(env);
-    ASSERT(var->lit[0].xfirst == NULL);
-    ASSERT(var->lit[1].xfirst == NULL);
-    
-    // we should be able to delete the variable at this point
-    // FIXME
     return ATOM(ok);
 }
 
@@ -3319,7 +3317,7 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     varp_t* vp;
     variable_t* var;
     ErlNifBinary bin;
-    uint32_t hash;
+    uint32_t hvalue;
     bool_t is_term = false;
     symbol_t* sp;
     
@@ -3334,17 +3332,17 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 	is_term = true;
     }
 
-    hash = djb_hash(bin.data, bin.size);
+    hvalue = djb_hash(bin.data, bin.size);
 
-    if ((sp = symbol_lookup(vp, &bin, hash, is_term)) != NULL) {
+    if ((sp = symbol_lookup(vp, &bin, hvalue, is_term)) != NULL) {
 	if (is_term) enif_release_binary(&bin);
 	return ATOM(error);
     }
 
-    if ((sp = symbol_create(vp, var, &bin, hash, is_term)) == NULL)
+    if ((sp = symbol_create(vp, var, &bin, hvalue, is_term)) == NULL)
 	return enif_make_badarg(env);
 
-    if (symbol_insert(vp, var, sp, hash) < 0)
+    if (symbol_insert(vp, var, sp) < 0)
 	return enif_make_badarg(env);
 
     return ATOM(ok);
@@ -3527,7 +3525,7 @@ static ERL_NIF_TERM varp_order_map(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &i) || (i < 0))
+    if (!enif_get_int(env, argv[1], &i) || (i < 0) || (i >= (int)vp->opt.vsize))
 	return enif_make_badarg(env);
     return enif_make_int(env, vp->order_map[i]);
 }
@@ -3568,14 +3566,15 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
 //
 static int order_reset(varp_t* vp)
 {
+    size_t n = dynvar_size(vp->var_map);    
     int i, l, u;
-
+    
     vp->order_map[0] = 0;
     vp->var_map[0]->map_index = 0;
     l = 0;
-    u = vp->vnum;
+    u = (int)n;
 
-    for (i=(int)vp->vnum-1; i >= 1; i--) {
+    for (i=(int)n-1; i >= 1; i--) {
 	if (vis_bound(vp, i)) {
 	    l++;
 	    vp->order_map[l] = i;
@@ -3592,8 +3591,9 @@ static int order_reset(varp_t* vp)
 
 static void order_k_identity(varp_t* vp, int k)
 {
+    size_t n = dynvar_size(vp->var_map);    
     int i;
-    for (i = 1; i < (int)vp->vnum; i++) {
+    for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = (float) i + 0.1;  // make the positive side "win"
 	var->nkey[k] = (float) i;
@@ -3603,8 +3603,9 @@ static void order_k_identity(varp_t* vp, int k)
 static void order_k_random(varp_t* vp, int k, int order)
 {
     UNUSED(order);
+    size_t n = dynvar_size(vp->var_map);        
     int i;
-    for (i = 1; i < (int)vp->vnum; i++) {
+    for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	float v1 = arc4_random_uniform(&vp->as, 0x7fffff) / (float)0x7fffff;
 	float v2 = arc4_random_uniform(&vp->as, 0x7fffff) / (float)0x7fffff;
@@ -3616,8 +3617,9 @@ static void order_k_random(varp_t* vp, int k, int order)
 
 static void order_k_undefined(varp_t* vp, int k)
 {
+    size_t n = dynvar_size(vp->var_map);        
     int i;
-    for (i = 1; i < (int)vp->vnum; i++) {
+    for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = 0.0f;
 	var->nkey[k] = 0.0f;
@@ -3627,8 +3629,9 @@ static void order_k_undefined(varp_t* vp, int k)
 // scan through all variables and calculate the degree count
 static void order_k_degree(varp_t* vp, int k)
 {
+    size_t n = dynvar_size(vp->var_map);    
     int i;
-    for (i = 1; i < (int)vp->vnum; i++) {
+    for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->lit[LIT_POS].degree;
 	var->nkey[k] = var->lit[LIT_NEG].degree;
@@ -3640,19 +3643,20 @@ static void order_k_degree(varp_t* vp, int k)
 // size of the clause that the literal Lj is a member
 static void order_k_rank(varp_t* vp, int k)
 {
+    size_t n = dynvar_size(vp->var_map);    
     int i, si;
-    int vmax = (int) vp->vnum;
+    int vmax = (int) n;
     int vmin = -vmax;
     
-    for (i = 1; i < (int)vp->vnum; i++) {
+    for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];	
 	var->pkey[k] = 0.0f;
 	var->nkey[k] = 0.0f;
     }
 
     for (si = 0; si < NUM_CSET; si++) {
-	int n = (int)vp->cnext[si];
-	clause_t** cm = vp->clause_map[si];
+	int n = (int)dynvec_size(vp->clauseset,si);
+	clause_t** cm = vp->clauseset[si];
 	for (i = 0; i < n; i++) {
 	    clause_t* cp = cm[i];
 	    int j;
@@ -3676,11 +3680,12 @@ static void order_k_rank(varp_t* vp, int k)
 // Set sort key k to the activity level on the variable
 static void order_k_activity(varp_t* vp, int k)
 {
+    size_t n = dynvar_size(vp->var_map);    
     int i;
-
+    
     switch(vp->opt.atype) {
     case mvsids:
-      for (i = 1; i < (int)vp->vnum; i++) {
+      for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->activity;
 	var->nkey[k] = var->activity;
@@ -3688,7 +3693,7 @@ static void order_k_activity(varp_t* vp, int k)
       break;
     case off:
     default:
-      for (i = 1; i < (int)vp->vnum; i++) {
+      for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = 0.0f;
 	var->nkey[k] = 0.0f;
@@ -3701,8 +3706,9 @@ static void order_k_activity(varp_t* vp, int k)
 // FIXME: clear user field before set/use
 static void order_k_user(varp_t* vp, int k)
 {
+    size_t n = dynvar_size(vp->var_map);    
     int i;
-    for (i = 1; i < (int)vp->vnum; i++) {
+    for (i = 1; i < (int)n; i++) {
 	variable_t* var = vp->var_map[i];
 	var->pkey[k] = var->lit[LIT_POS].user;
 	var->nkey[k] = var->lit[LIT_NEG].user;
@@ -3798,6 +3804,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     int arg = 0;
     int i, u;
     int order[2];
+    size_t n;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -3853,24 +3860,25 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	vp->sort_key[i-1] = k;
     }
     // install identity order
+    n = dynvar_size(vp->var_map);    
     u = order_reset(vp);
     vp->first_unbound = u;  // index to first unbound variable!
     vp->next_unbound = u;   // index to first unbound variable!
     DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
     
     // sort unbound variables according to sort_keys
-    if (u < (int)vp->vnum) {
+    if (u < (int)n) {
 	int i;
 	int k1, k2;
 
-	QSORT(vp->order_map+u, vp->vnum-u, sizeof(int), cmp_keys, vp);
+	QSORT(vp->order_map+u, n-u, sizeof(int), cmp_keys, vp);
 
 	k1 = ABS(vp->sort_key[0]);
 	k2 = ABS(vp->sort_key[1]);
 	// update map_index of sorted variables also update the sign
 	// FIME: update INTERLEAVE SORT 1 2 3 4 5 6 7 => 1 7 2 6 3 5 4
 	// X1/Y1 X1/Y2 X1/Y2  X2/Y
-	for (i = u; i < (int)vp->vnum; i++) {
+	for (i = u; i < (int)n; i++) {
 	    int v = vp->order_map[i];
 	    variable_t* var = vp->var_map[v];
 	    float r;
@@ -3886,12 +3894,12 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     
 #ifdef DEBUG_ORDER
     enif_fprintf(stdout, "u = %d\r\n", u);
-    enif_fprintf(stdout, "#num = %d\r\n", vp->vnum-1);
+    enif_fprintf(stdout, "#num = %d\r\n", n-1);
     enif_fprintf(stdout, "#bound = %d\r\n", vp->num_bound);
     enif_fprintf(stdout, "#subst = %d\r\n", vp->num_subst);
-    enif_fprintf(stdout, "#unbound = %d\r\n", (vp->vnum-1) - vp->num_bound);
+    enif_fprintf(stdout, "#unbound = %d\r\n", (n-1) - vp->num_bound);
 
-    for (i = u; i < (int)vp->vnum; i++) {
+    for (i = u; i < (int)n; i++) {
 	int j = vp->order_map[i];
 	variable_t* var = vp->var_map[abs(j)];
 	enif_fprintf(stdout, "[%d]=([%f,%f],%d) ",
@@ -3918,6 +3926,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     ERL_NIF_TERM head, tail;
     int* map;
     unsigned int ui, mi;
+    size_t n;
     ERL_NIF_TERM result = ATOM(ok);
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -3936,7 +3945,8 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     if (!enif_is_empty_list(env, list))
 	return enif_make_badarg(env);
 
-    if (!(map = VARP_ALLOC(vp->opt.vsize*sizeof(int))))
+    n = dynvar_size(vp->var_map);
+    if (!(map = VARP_ALLOC(n*sizeof(int)))) // dynvar!?
 	return enif_make_badarg(env);
 
     ASSERT(vp->marked == NULL);
@@ -3944,7 +3954,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
     mark_variable(vp, vp->var_map[0]);
     mi = 1;
     // copy all bound variables
-    while ((mi < vp->vnum) && vis_bound(vp, vp->order_map[mi])) {
+    while ((mi < n) && vis_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
 	mark_variable(vp, vp->var_map[ABS(x)]);
 	map[mi++] = x;
@@ -3971,7 +3981,7 @@ static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
 	list = tail;
     }
     // move rest of the varaibles not already moved
-    while(ui < vp->vnum) {
+    while(ui < n) {
 	int x = vp->order_map[ui];
 	int xi = ABS(x);
 	if (!is_marked(vp->var_map[xi])) { // not moved
@@ -4002,6 +4012,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     ERL_NIF_TERM head, tail;
     int* map;
     unsigned int ui, mi;
+    size_t n;    
     ERL_NIF_TERM result = ATOM(ok);
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -4019,7 +4030,9 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     }
     if (!enif_is_empty_list(env, list))
 	return enif_make_badarg(env);
-    if (!(map = VARP_ALLOC(vp->opt.vsize*sizeof(int))))
+
+    n = dynvar_size(vp->var_map);
+    if (!(map = VARP_ALLOC(n*sizeof(int))))
 	return enif_make_badarg(env);
 
     ASSERT(vp->marked == NULL);    
@@ -4028,7 +4041,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     mark_variable(vp, vp->var_map[0]);
     mi = 1;
     // copy all bound variables
-    while ((mi < vp->vnum) && vis_bound(vp, vp->order_map[mi])) {
+    while ((mi < n) && vis_bound(vp, vp->order_map[mi])) {
 	int x = vp->order_map[mi];
 	mark_variable(vp, vp->var_map[ABS(x)]);
 	map[mi++] = x;
@@ -4038,7 +4051,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
     vp->next_unbound = ui;   // also for the interator
     DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
     
-    mi = vp->vnum;  // last position(+1)
+    mi = n;  // last position(+1)
     // copy/move variables in the list (not already copied)
     list = argv[1];
     while (enif_get_list_cell(env, list, &head, &tail)) {
@@ -4058,7 +4071,7 @@ static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
 
     mi = ui;
     // move rest of the varaibles not already moved
-    while(ui < vp->vnum) {
+    while(ui < n) {
 	int x = vp->order_map[ui];
 	int xi = ABS(x);
 	if (!is_marked(vp->var_map[xi])) { // not moved
@@ -4111,10 +4124,10 @@ static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
-    if ((x == 0) || (ABS(x) >= (int)vp->vnum)) {
+    if ((x == 0) || (ABS(x) >= (int)dynvar_size(vp->var_map))) {
 	DBG("literal %d out of range\r\n", x);
 	return enif_make_badarg(env);
-    }    
+    }
     if (!enif_get_int(env, argv[2], &k))
 	return enif_make_badarg(env);
     if ((k < 0) || (k > 1))
@@ -4245,7 +4258,7 @@ static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
     }
     if (argc == 3) {
 	if (!enif_get_int(env, argv[2], &level) || (level < 0) ||
-	    (level >= (int)vp->unum))
+	    (level >= (int)dynvar_size(vp->undo)))
 	    return enif_make_badarg(env);
     }
     if (level < 0) level = vp->level;
@@ -4278,7 +4291,7 @@ static ERL_NIF_TERM varp_set_user_count(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &x))
 	return enif_make_badarg(env);
-    if ((x == 0) || (ABS(x) >= (int)vp->vnum)) {
+    if ((x == 0) || (ABS(x) >= (int)dynvar_size(vp->var_map))) {
 	DBG("literal %d out of range\r\n", x);
 	return enif_make_badarg(env);
     }
@@ -4419,7 +4432,6 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     varp_t* vp;
     cix_t  cix;
     clause_t* cp;
-    size_t csize;
     int i,n;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
@@ -4432,7 +4444,6 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     dynvar_resize(vp->tlit, 0);
-    csize = 0;
 
     n = (int) cp->size;
     for (i = 0; i < n; i++) {
@@ -4444,7 +4455,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	    }
 	}
     }
-    if (csize == 0)
+    if (dynvar_size(vp->tlit) == 0)
 	enif_fprintf(stdout, "Minimize failed? contradiction\r\n");
     if (dynvar_size(vp->tlit) < cp->size) {
 	memcpy(cp->lit, vp->tlit, sizeof(lit_t)*dynvar_size(vp->tlit));
@@ -4776,6 +4787,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     varp_t* vp;
     ERL_NIF_TERM varc;
     varp_clone_opt_t opt;
+    size_t vsize;
     int si, i;
     
     DBG("clone varc instance\r\n");
@@ -4801,10 +4813,11 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     if (setup(vp, &opt.config) < 0)
 	goto error;
 
-    if (add_variables(vp, vp0->vnum) < 0)     // create N variables
+    vsize = dynvar_size(vp0->var_map);
+    if (add_variables(vp, vsize) < 0)
 	goto error;
 
-    for (i = 1; i < (int)vp0->vnum; i++) {
+    for (i = 1; i < (int)vsize; i++) {
 	variable_t* var0 = vp0->var_map[i];
 	variable_t* var  = vp->var_map[i];
 	symbol_t* sp0;
@@ -4832,13 +4845,13 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	while(sp0 != NULL) {
 	    symbol_t* sp = symbol_copy(vp, var, sp0);
 	    if (sp != NULL)
-		symbol_insert(vp, var, sp, sp->hash);
+		symbol_insert(vp, var, sp);
 	    sp0 = sp0->anext;
 	}
     }
 
-    if (opt.level >= (int) vp->unum)
-	undo_resize(vp, MAX(opt.level+1,(int)vp0->unum));
+    if (opt.level >= (int)dynvar_size(vp->undo))
+	undo_set_size(vp, dynvar_size(vp0->undo));
     
     for (i = 0; i <= opt.level; i++) {  // clone undo structure
 	variable_t** dstp = &vp->undo[i].bs;
@@ -4878,8 +4891,9 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 
     for (si = 0; si < NUM_CSET; si++) {
 	if (opt.clauseset & (1 << si)) {
-	    for (i = 0; i < (int) vp0->cnext[si]; i++) {
-		clause_t* cp = clause_copy(vp, vp0->clause_map[si][i]);
+	    size_t n = dynvec_size(vp0->clauseset,si);
+	    for (i = 0; i < (int)n; i++) {
+		clause_t* cp = clause_copy(vp, vp0->clauseset[si][i]);
 		if (cp != NULL) {
 		    clause_insert(vp, si, cp, cp->hvalue);
 		    // FIXME clone watch points! if opt.queue!
@@ -5182,7 +5196,7 @@ static ERL_NIF_TERM varp_undo_level(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &level) || (level < 0))
 	return enif_make_badarg(env);
-    if (level < (int)vp->unum)
+    if (level < (int)dynvar_size(vp->undo))
 	undo_level(vp, level);
     return ATOM(ok);
 }
@@ -5201,7 +5215,7 @@ static ERL_NIF_TERM varp_keep_level(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &level) || (level < 0))
 	return enif_make_badarg(env);
-    if (level < (int)vp->unum)
+    if (level < (int)dynvar_size(vp->undo))
 	keep_level(vp, level);
     return ATOM(ok);
 }
@@ -5219,10 +5233,10 @@ static ERL_NIF_TERM varp_move_level(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &src) ||
-	(src < 0) || (src >= (int)vp->unum))
+	(src < 0) || (src >= (int)dynvar_size(vp->undo)))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[2], &dst) ||
-	(dst < 0) || (src >= (int)vp->unum))
+	(dst < 0) || (src >= (int)dynvar_size(vp->undo)))
 	return enif_make_badarg(env);
 
     if (src != dst) {
@@ -5529,7 +5543,6 @@ static int bcp_clauses(varp_t* vp, literal_t* lp)
 	    case ev_NONE:
 		break;
 	    default:
-		// cp->stamp = vp->bcp_counter;
 		if (vp->level == 0) {
 		    vp->cdead++;
 		    cp->flags |= CLAUSE_FLAG_DEAD;
@@ -5680,14 +5693,6 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 	// clear all conflict flags
 	unmark_cix_clauses(vp,vp->conflicting_clauses, vp->num_conflicting,
 			   ~CLAUSE_FLAG_CONFLICT);
-	/*
-	for (i = 0; i < vp->num_conflicting; i++) {
-	    cix_t cix = vp->conflicting_clauses[i];
-	    clause_t* cp = get_clause(vp, cix);
-	    if (cp != NULL)
-		cp->flags &= ~CLAUSE_FLAG_CONFLICT;
-	}
-	*/
 	return ATOM(false);
     }
     return ATOM(true);
@@ -5822,14 +5827,6 @@ bcp:
     DBG("num conflicts = %d\n", vp->num_conflicting);
     unmark_cix_clauses(vp,vp->conflicting_clauses, vp->num_conflicting,
 		       ~CLAUSE_FLAG_CONFLICT);
-    /*
-    for (i = 0; i < vp->num_conflicting; i++) {
-	cix_t cix = vp->conflicting_clauses[i];
-	clause_t* cp = get_clause(vp, cix);
-	if (cp != NULL)
-	    cp->flags &= ~CLAUSE_FLAG_CONFLICT;
-    }
-    */
     return ATOM(false);
 }
 
@@ -5862,7 +5859,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->num_conflicting);
     } 
     if (argv[1] == ATOM(number_of_variables)) {
-	return enif_make_int(env, vp->vnum-1);
+	return enif_make_int(env, dynvar_size(vp->var_map)-1);
     }
     if (argv[1] == ATOM(number_of_clauses)) {
 	return enif_make_int(env, get_number_of_clauses(vp));
@@ -5886,7 +5883,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->num_subst);
     }    
     if (argv[1] == ATOM(number_of_unbound_variables)) {
-	return enif_make_int(env, (vp->vnum-1) - vp->num_bound);
+	return enif_make_int(env, (dynvar_size(vp->var_map)-1) - vp->num_bound);
     }
     if (argv[1] == ATOM(clause_n_counter)) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_N]);
@@ -5905,9 +5902,6 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     }
     if (argv[1] == ATOM(edge_d_counter)) {
 	return enif_make_uint64(env, vp->counter[EDGE_D]);
-    }
-    if (argv[1] == ATOM(grow)) {
-	return enif_make_uint(env, vp->opt.grow);
     }
     if (argv[1] == ATOM(size)) {
 	return enif_make_uint(env, vp->opt.vsize);
@@ -5994,15 +5988,17 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    int i, si;
 	    vp->opt.xref = true;
 	    for (si = 0; si < NUM_CSET; si++) {
-		for (i = 0; i < (int)vp->cnext[si]; i++)
-		    xref_add_clause(vp, vp->clause_map[si][i]);
+		size_t n = dynvec_size(vp->clauseset, si);
+		for (i = 0; i < (int)n; i++)
+		    xref_add_clause(vp, vp->clauseset[si][i]);
 	    }
 	}
 	else if (!enable && vp->opt.xref) { // teardown xref
 	    int i, si;
-	    for (si = 0; si < NUM_CSET; si++) {	    
-		for (i = 0; i < (int)vp->cnext[si]; i++)
-		    xref_del_clause(vp, vp->clause_map[si][i]);
+	    for (si = 0; si < NUM_CSET; si++) {
+		size_t n = dynvec_size(vp->clauseset, si);
+		for (i = 0; i < (int)n; i++)
+		    xref_del_clause(vp, vp->clauseset[si][i]);
 	    }
 	    vp->opt.xref = false;
 	}
@@ -6013,10 +6009,21 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	if (!vif_get_boolean(env, argv[2], &enable))
 	    return enif_make_badarg(env);
 	if (enable && !vp->opt.hash) {      // hash all clauses
+	    size_t n = vp->cnum[DELTA]+vp->cnum[GAMMA]+vp->cnum[BETA];
+	    size_t size = next_pow2(n);
+
+	    dynvar_resize(vp->hashtab, size);
+	    
+	    clauseset_hash_insert(vp, BETA);
+	    clauseset_hash_insert(vp, GAMMA);
+	    clauseset_hash_insert(vp, DELTA);
+	    
 	    vp->opt.hash = true;
 	}
 	else if (!enable && vp->opt.hash) { // remove hash
-	    hashtab_clear(vp);
+	    dynvar_clear(vp->hashtab);
+	    cleanup_allocator(&vp->hlink_allocator);	    
+	    vp->hnum = 0;		    
 	    vp->opt.hash = false;
 	}
 	return ATOM(ok);
@@ -6036,7 +6043,8 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	if (argv[2] == ATOM(mvsids)) {
 	    if (vp->opt.atype == off) {
 		int i;
-		for (i = 1; i < (int)vp->vnum; i++)
+		size_t n = dynvar_size(vp->var_map);
+		for (i = 1; i < (int)n; i++)
 		    vp->var_map[i]->activity = ACTIVITY_INIT;
 		vp->opt.atype = mvsids;		
 	    }
@@ -6202,12 +6210,11 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
     if ((cp = clause_alloc(vp, size)) == NULL)
 	return CLAUSE_NONE;
     hvalue = (uint32_t) literal_array_hash(vp, lit, size);
+    memcpy(cp->lit, lit, sizeof(lit_t)*size);
     if ((cix = clause_insert(vp, si, cp, hvalue)) == CLAUSE_NONE)
 	return CLAUSE_NONE;
-    memcpy(cp->lit, lit, sizeof(lit_t)*size);
     return cix;
 }
-
 
 //
 // add_clause(vp, [x1, ..., xn])
@@ -6412,19 +6419,21 @@ static void clause_remove(varp_t* vp, clause_t* cp)
     }
 }
 
-// check if we have a hole at the end, update cnext
+// check if we have a hole at the end
 static int clauseset_plug_hole(varp_t* vp, int si, int ix)
 {
-    clause_t** cm = vp->clause_map[si];
+    clause_t** cm = vp->clauseset[si];
     int h = 0;
+    size_t n = dynvec_size(vp->clauseset, si);    
 
     // must be the last index and be cleared
-    if (((int)vp->cnext[si] == ix+1) && (cm[ix] == NULL)) {
+    if ((ix+1 == (int)n) && (cm[ix] == NULL)) {
+	h++;
 	while(ix && (cm[ix-1] == NULL)) {
 	    h++;
 	    ix--;
 	}
-	vp->cnext[si] = ix;
+	dynvec_resize(vp->clauseset, si, ix);
     }
     return h;
 }
@@ -6456,7 +6465,6 @@ static ERL_NIF_TERM varp_move_clause(ErlNifEnv* env, int argc,
     cix = clause_insert(vp, si, cp, cp->hvalue);
     
     set_clause(vp, cix0, NULL);  // kill original position
-    // check if we have a hole at the end, update cnext
 
     ix = GET_IX(cix0);
 
@@ -6575,7 +6583,6 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
     
 remove:
     DBG("  %lu-removed\r\n", size);
-    set_clause(vp, cix, NULL);
     clause_free(vp, cp);
     return ATOM(ok);
 
@@ -6638,6 +6645,7 @@ static void xref_remap(literal_t* lp, int si, int* remap, int n)
 	}
 	xptr++;
     }
+    // must sort for subst to work!
     QSORT(xptr0, len0, sizeof(xref_t), cmp_xref, NULL);
 }
 
@@ -6693,9 +6701,24 @@ static int cmp_stamp QSORT_ARGS(const void* a, const void* b,void* arg)
     return 0;
 }
 
+static void print_clauseset(varp_t* vp, int si, size_t n)
+{
+    int i;
+
+    for (i = 0; i < (int)n; i++) {
+	clause_t* cp;
+	if ((cp = vp->clauseset[si][i]) == NULL) {
+	    enif_fprintf(stdout, " %d:%d = NULL\n", si, i);
+	}
+	else {
+	    print_clause(vp, "", cp);
+	}
+    }
+}
+
 //
 // Sort and "compact" clause put all "holes" (NULL clauses)
-// at the end and update cnext and cnum to match cleanup
+// at the end and update cnum to match cleanup
 //
 static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 					const ERL_NIF_TERM argv[])
@@ -6712,13 +6735,15 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_make_badarg(env);
-    if (vp->cnext[si] == 0)
+    
+    if ((n=(int)dynvec_size(vp->clauseset, si)) == 0)
 	return ATOM(ok);
 
-    n = (int)vp->cnext[si];
-    cm = vp->clause_map[si];
+    cm = vp->clauseset[si];
 
-    enif_fprintf(stdout, "SORT si=%d, %d clause\r\n", si, n);
+//    enif_fprintf(stdout, "SORT si=%d, %d clauses\r\n", si, n);
+//    print_clauseset(vp, si, n);
+    
     QSORT(cm, n, sizeof(clause_t*), cmp_stamp, vp);
 
     {
@@ -6728,7 +6753,7 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	int m;
 
 	h = clauseset_plug_hole(vp, si, n-1);
-	enif_fprintf(stdout, "SORT plugged %d holes\r\n", h);	
+	// enif_fprintf(stdout, "SORT plugged %d holes\r\n", h);	
 	m = n - h;
 
 	for (ix = 0; ix < m; ix++) {
@@ -6737,24 +6762,30 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	    cm[ix]->cix = MAKE_CIX(si,ix); // set the new index
 	}
 
+	// enif_fprintf(stdout, "SORTED + remapped %d\r\n", m);
+	// print_clauseset(vp, si, m);
+
 	// now map all xrefs and edges
 	if (vp->opt.xref) {
 	    int i;
-	    for (i = 1; i < (int)vp->vnum; i++) {
+	    size_t n = dynvar_size(vp->var_map);
+	    for (i = 1; i < (int)n; i++) {
 		xref_remap(&vp->var_map[i]->lit[0], si, rmap, n);
 		xref_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.edge) {
 	    int i;
-	    for (i = 1; i < (int)vp->vnum; i++) {
+	    size_t n = dynvar_size(vp->var_map);
+	    for (i = 1; i < (int)n; i++) {
 		edge_remap(&vp->var_map[i]->lit[0], si, rmap, n);	    
 		edge_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.hash && (si != ALPHA)) {
 	    int i;
-	    for (i = 0; i < (int)vp->hsize; i++)
+	    size_t hsize = dynvar_size(vp->hashtab);
+	    for (i = 0; i < (int)hsize; i++)
 		hashtab_remap(vp, i, si, rmap, n);
 	}
     }
@@ -6772,7 +6803,7 @@ static ERL_NIF_TERM varp_clauseset_size(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_si(env, argv[1], &si))
 	return enif_make_badarg(env);    
-    return enif_make_uint(env, vp->cnext[si]);
+    return enif_make_uint(env, dynvec_size(vp->clauseset,si));
 }
 
 static ERL_NIF_TERM varp_clauseset_offset(ErlNifEnv* env, int argc,
@@ -6800,18 +6831,20 @@ static ERL_NIF_TERM varp_clauseset_first(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int si, i;
-    clause_t** cm;
+    int si;
+    size_t n;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_si(env, argv[1], &si))
 	return enif_make_badarg(env);
-    i = vp->coffs[si];
-    cm = vp->clause_map[si];
-    while(i < (int)vp->cnext[si]) {
-	if (cm[i] != NULL) {
-	    return make_cix(env, MAKE_CIX(si,i));
+    if ((n = dynvec_size(vp->clauseset, si)) > 0) {
+	int i = vp->coffs[si];
+	clause_t** cm = vp->clauseset[si];
+    
+	while(i < (int)n) {
+	    if (cm[i] != NULL)
+		return make_cix(env, MAKE_CIX(si,i));
 	}
 	i++;
     }
@@ -6824,22 +6857,24 @@ static ERL_NIF_TERM varp_clauseset_next(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     unsigned int cix;
-    int ix, si, n;
-    clause_t** cm;
-    
+    int si;
+    size_t n;
+
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!enif_get_uint(env, argv[1], &cix))
 	return enif_make_badarg(env);
     si = GET_SI(cix);
-    ix = GET_IX(cix)+1;
-    n  = (int)vp->cnext[si];
-    cm = vp->clause_map[si];
-    while(ix < n) {
-	if (cm[ix] != NULL) {
-	    return make_cix(env, MAKE_CIX(si,ix));
+    if ((n = dynvec_size(vp->clauseset, si)) > 0) {
+	clause_t** cm = vp->clauseset[si];
+	int i = GET_IX(cix)+1;
+
+	while(i < (int)n) {
+	    if (cm[i] != NULL) {
+		return make_cix(env, MAKE_CIX(si,i));
+	    }
+	    i++;
 	}
-	ix++;
     }
     return ATOM(false);
 }
@@ -7358,7 +7393,7 @@ static ERL_NIF_TERM varp_get_number_of_bindings(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &level) || (level < 0) ||
-	(level >= (int)vp->unum))
+	(level >= (int)dynvar_size(vp->undo)))
 	return enif_make_badarg(env);
     bp = vp->undo[level].bs;
     while(bp != NULL) {
@@ -7414,7 +7449,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(false);
     LOAD_ATOM(undefined);
     LOAD_ATOM(default);
-    LOAD_ATOM(grow);
     LOAD_ATOM(size);
     LOAD_ATOM(error);
     LOAD_ATOM(inqueue);

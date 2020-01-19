@@ -11,20 +11,26 @@
 -include("varp.hrl").
 
 all() ->
-    test_constants(),
-    test_inc(),
-    test_add(),
-    test_sub(),
-    test_mul(),
-    test_div(),
-    test_cmp(),
-    test_shift(),
-    test_rotate(),
-    test_equation1(),
-    test_equation2(),
-    ok.
+    lists:foreach(
+      fun(Test) ->
+	      io:format("< ~w: ", [Test]),
+	      apply(?MODULE, Test, []),
+	      io:format("> ok\n")
+      end, [
+	    constants,
+	    inc,
+	    add,
+	    sub,
+	    mul,
+	    'div',
+	    cmp_1, cmp_2, cmp_3, cmp_4,
+	    shift,
+	    rotate,
+	    equation1,
+	    equation2
+	   ]).
 
-test_constants() ->
+constants() ->
     {{uint,1,[?F]},_} = varp_formula:build({uint,1,0}),
 
     {{uint,1,[?T]},_} = varp_formula:build({uint,1,1}),
@@ -42,14 +48,14 @@ test_constants() ->
     {{int,4,[?T,?T,?F,?T]},_} = varp_formula:build({int,4,-5}),
     ok.
 
-test_inc() ->
+inc() ->
     true = sat({'==', {'+',{int,4,3},{uint,1,1}}, {int,4,4}},
 	       [[]]),
     true = sat({'==', {'-',{int,4,3},{uint,1,1}}, {int,4,2}},
 	       [[]]),
     ok.
 
-test_add() ->
+add() ->
     X = {p,'X',[]},
     Y = {p,'Y',[]},
 
@@ -80,7 +86,7 @@ test_add() ->
 		   Xi <- [-2,-1,0,1], Yi <- [-2,-1,0,1], Xi+Yi< -1]),
     ok.
 
-test_sub() ->
+sub() ->
     X = {p,'X',[]},
 
     true = sat({'==', {'-',{int,4,3},{uint,4,2}}, {int,4,1}},
@@ -89,7 +95,7 @@ test_sub() ->
 	       [[{X,1}]]),
     ok.
 
-test_mul() ->
+mul() ->
     X = {p,'X',[]},
     Y = {p,'Y',[]},
 
@@ -116,7 +122,7 @@ test_mul() ->
 		     [{X,-7},{Y,-1}]]),
     ok.
 
-test_div() ->
+'div'() ->
     X = {p,'X',[]},
     Y = {p,'Y',[]},
 
@@ -134,34 +140,27 @@ test_div() ->
 		     [{X,5},{Y,1}]]),
     ok.
 
-test_cmp() ->
-    test_cmp_1(),
-    test_cmp_2(),
-    test_cmp_3(),
-    test_cmp_4(),
-    ok.
-
-test_cmp_1() ->
+cmp_1() ->
     X = {p,'X',[]},
     true = sat({'<', {uint,4,X},{uint,4,2}},
 	       [[{X,0}],[{X,1}]]).
 
-test_cmp_2() ->
+cmp_2() ->
     X = {p,'X',[]},
     true = sat({'<', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(-8,1)]).
 
-test_cmp_3() ->
+cmp_3() ->
     X = {p,'X',[]},
     true = sat({'>', {uint,4,X},{uint,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,15)]).
 
-test_cmp_4() ->
+cmp_4() ->
     X = {p,'X',[]},
     true = sat({'>', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,7)]).
 
-test_shift() ->
+shift() ->
     X = {p,'X',[]},
 
     true = sat({'==', {'<<',{uint,4,3}, {uint,1,1}}, {uint,4,6}},
@@ -178,7 +177,7 @@ test_shift() ->
 	       [[{X,-2}]]),
     ok.
 
-test_rotate() ->
+rotate() ->
     X = {p,'X',[]},
 
     true = sat({'==', {'<<<',{uint,4,X}, {uint,1,1}}, {uint,4,X}},
@@ -202,7 +201,7 @@ test_rotate() ->
 %%
 %%   Z = X+Y-12  
 %%
-test_equation1() ->
+equation1() ->
     N = 8,
     Xv = {p,'X',[]},
     Yv = {p,'Y',[]},
@@ -230,7 +229,7 @@ sat(
     
 
 %% solve 7x + 11y + 26z = 123
-test_equation2() ->
+equation2() ->
     N = 10,
     Xv = {p,'X',[]},
     Yv = {p,'Y',[]},

@@ -44,17 +44,17 @@ all() ->
 
 test1() ->
     V = varc:new(),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
     Ls0 = lists:usort([X1, X2, X3]),
-    C0 = add_clause(V, Ls0),
+    C0 = clause(V, Ls0),
     io:format("C0=~w\n", [C0]),
     Ls0 = get_clause(V, C0),
     io:format("Ls0=~w\n", [Ls0]),
     
     Ls1 = lists:usort([X1,-X2,X3]),
-    C1 = add_clause(V, Ls1),
+    C1 = clause(V, Ls1),
     io:format("C0=~w\n", [C1]),
     Ls1 = get_clause(V, C1),
     io:format("Ls0=~w\n", [Ls1]),
@@ -62,17 +62,17 @@ test1() ->
 
 test1_gamma() ->
     V = varc:new(),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
     Ls0 = lists:usort([X1, X2, X3]),
-    C0 = add_clause(V, Ls0, ?GAMMA),
+    C0 = clause(V, Ls0, gamma),
     io:format("C0=~w\n", [C0]),
     Ls0 = get_clause(V, C0),
     io:format("Ls0=~w\n", [Ls0]),
     
     Ls1 = lists:usort([X1,-X2,X3]),
-    C1 = add_clause(V, Ls1),
+    C1 = clause(V, Ls1),
     io:format("C0=~w\n", [C1]),
     Ls1 = get_clause(V, C1),
     io:format("Ls0=~w\n", [Ls1]),
@@ -80,13 +80,13 @@ test1_gamma() ->
     
 test2() ->
     V = varc:new(),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
-    X4 = add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
     
-    C0 = add_clause(V, [X1, X2, X3]),
-    C1 = add_clause(V, [X2, X3, X4]),
+    C0 = clause(V, [X1, X2, X3]),
+    C1 = clause(V, [X2, X3, X4]),
 
     [X1, X2, X3] = get_clause(V, C0),
     [X2, X3, X4] = get_clause(V, C1),
@@ -97,18 +97,18 @@ test2() ->
 %%    
 test3() ->
     V = varc:new([{xref,true}]),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
-    X4 = add_variable(V),
-    X5 = add_variable(V),
-    X6 = add_variable(V),
-    X7 = add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    X6 = var(V),
+    X7 = var(V),
 
-    C0 = add_clause(V, [X1, X2, X3]),
-    C1 = add_clause(V, [X2, X3, X4]),
-    C2 = add_clause(V, [X3, X4, X5, X6]),
-    C3 = add_clause(V, [X5, X6, X7]),
+    C0 = clause(V, [X1, X2, X3]),
+    C1 = clause(V, [X2, X3, X4]),
+    C2 = clause(V, [X3, X4, X5, X6]),
+    C3 = clause(V, [X5, X6, X7]),
 
     [X1,X2,X3] = get_clause(V, C0),
     [X2,X3,X4] = get_clause(V, C1),
@@ -137,21 +137,21 @@ test3() ->
 %% Test all clause simplifications
 clause_simplify() ->
     V = varc:new(),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
-    X4 = add_variable(V),
-    X5 = add_variable(V),
-    C0 = add_clause(V, [X2,X3,X4,X5]),
-    C1 = add_clause(V, [X5,X4,X3,X2]),
-    C20 = add_clause(V, [X1,X1,X1,X1,X1]),
-    C23 = add_clause(V, [X2,X3,X3,X3,X2]),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    C0 = clause(V, [X2,X3,X4,X5]),
+    C1 = clause(V, [X5,X4,X3,X2]),
+    C20 = clause(V, [X1,X1,X1,X1,X1]),
+    C23 = clause(V, [X2,X3,X3,X3,X2]),
     L3 = [X2,X3,X2,X3,X4,?F],
     io:format("L3 = ~w\n", [L3]),
-    C3 = add_clause(V, L3),
-    C4 = add_clause(V, [X2,X3,X2,X3,X4]),
-    C5 = add_clause(V, [X2,?T,X3,?F,X4,?T,X4,?T, X5,?F]),
-    C6 = add_clause(V, [X2,?T,X3,?F,-X3,?T,X3,?T,-X3,?F,X4]),
+    C3 = clause(V, L3),
+    C4 = clause(V, [X2,X3,X2,X3,X4]),
+    C5 = clause(V, [X2,?T,X3,?F,X4,?T,X4,?T, X5,?F]),
+    C6 = clause(V, [X2,?T,X3,?F,-X3,?T,X3,?T,-X3,?F,X4]),
 
     io:format("C3=~w, C4=~w\n", [C3,C4]),
 
@@ -169,10 +169,10 @@ clause_simplify() ->
 %% Test eval
 clause_bcp() ->
     V = varc:new(),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
-    X4 = add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
 
     undefined = varc:value(V, X1),
     undefined = varc:value(V, X2),
@@ -180,10 +180,10 @@ clause_bcp() ->
     undefined = varc:value(V, X4),
 
     varc:set_level(V, 1),
-    C0 = add_clause(V, [X1, ?F, ?F]),
-    C1 = add_clause(V, [X2, ?T, ?T, ?T]),
-    C2 = add_clause(V, [-X3, ?F, ?F, ?F]),
-    C3 = add_clause(V, [X4, ?F, ?T, ?F, ?T]),
+    C0 = clause(V, [X1, ?F, ?F]),
+    C1 = clause(V, [X2, ?T, ?T, ?T]),
+    C2 = clause(V, [-X3, ?F, ?F, ?F]),
+    C3 = clause(V, [X4, ?F, ?T, ?F, ?T]),
     io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     print_clauses(V),
 
@@ -216,16 +216,16 @@ clause_bcp() ->
 %%
 or_bcp_bindings() ->
     V = varc:new(),
-    X1 = add_variable(V),
-    X2 = add_variable(V),
-    X3 = add_variable(V),
-    X4 = add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
 
     varc:set_level(V, 1),
-    add_clause(V, [-X1, -X2, -X3]),
-    add_clause(V, [-X1, -X2,  X4]),
-    add_clause(V, [-X1,  X2, -X3]),
-    add_clause(V, [-X1,  X2,  X3]),
+    clause(V, [-X1, -X2, -X3]),
+    clause(V, [-X1, -X2,  X4]),
+    clause(V, [-X1,  X2, -X3]),
+    clause(V, [-X1,  X2,  X3]),
     io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
     io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
     io:format("watched = ~w\n", [get_watched(V)]),
@@ -239,7 +239,7 @@ or_bcp_bindings() ->
     print_clauses(V),
 
     varc:set_level(V, 2),
-    add_clause(V, [-X1,  X2,  X3, -X4]),
+    clause(V, [-X1,  X2,  X3, -X4]),
     io:format("watched = ~w\n", [get_watched(V)]),
     io:format("3/1\n", []),
     varc:bind(V, X2),
@@ -270,61 +270,61 @@ or_bcp_bindings() ->
 %% pigeon=3
 p3() ->
     V = varc:new(),
-    X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
-    X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
-    X3 = add_variable(V), varc:add_symbol(V, X3, <<"P(2,1)">>),
-    X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,2)">>),
-    X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(3,1)">>),
-    X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(3,2)">>),
-    varc:add_clause(V, [X1,X2]),
-    varc:add_clause(V, [X3, X4]),
-    varc:add_clause(V, [X5, X6]),
-    varc:add_clause(V, [-X1, -X3]),
-    varc:add_clause(V, [-X1, -X5]),
-    varc:add_clause(V, [-X3, -X5]),
-    varc:add_clause(V, [-X2, -X4]),
-    varc:add_clause(V, [-X2, -X6]),
-    varc:add_clause(V, [-X4, -X6]),
+    X1 = var(V, <<"P(1,1)">>),
+    X2 = var(V, <<"P(1,2)">>),
+    X3 = var(V, <<"P(2,1)">>),
+    X4 = var(V, <<"P(2,2)">>),
+    X5 = var(V, <<"P(3,1)">>),
+    X6 = var(V, <<"P(3,2)">>),
+    clause(V, [X1,X2]),
+    clause(V, [X3, X4]),
+    clause(V, [X5, X6]),
+    clause(V, [-X1, -X3]),
+    clause(V, [-X1, -X5]),
+    clause(V, [-X3, -X5]),
+    clause(V, [-X2, -X4]),
+    clause(V, [-X2, -X6]),
+    clause(V, [-X4, -X6]),
     V.
 
 %% pigeon=4
 p4() ->
     V = varc:new(),
-    X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
-    X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
-    X3 = add_variable(V), varc:add_symbol(V, X3, <<"P(1,3)">>),
-    X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,1)">>),
-    X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(2,2)">>),
-    X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(2,3)">>),
-    X7 = add_variable(V), varc:add_symbol(V, X7, <<"P(3,1)">>),
-    X8 = add_variable(V), varc:add_symbol(V, X8, <<"P(3,2)">>),
-    X9 = add_variable(V), varc:add_symbol(V, X9, <<"P(3,3)">>),
-    X10 = add_variable(V), varc:add_symbol(V, X10, <<"P(4,1)">>),
-    X11 = add_variable(V), varc:add_symbol(V, X11, <<"P(4,2)">>),
-    X12 = add_variable(V), varc:add_symbol(V, X12, <<"P(4,3)">>),
+    X1 = var(V, <<"P(1,1)">>),
+    X2 = var(V, <<"P(1,2)">>),
+    X3 = var(V, <<"P(1,3)">>),
+    X4 = var(V, <<"P(2,1)">>),
+    X5 = var(V, <<"P(2,2)">>),
+    X6 = var(V, <<"P(2,3)">>),
+    X7 = var(V, <<"P(3,1)">>),
+    X8 = var(V, <<"P(3,2)">>),
+    X9 = var(V, <<"P(3,3)">>),
+    X10 = var(V, <<"P(4,1)">>),
+    X11 = var(V, <<"P(4,2)">>),
+    X12 = var(V, <<"P(4,3)">>),
 
-    varc:add_clause(V, [X1,X2,X3]),
-    varc:add_clause(V, [X4,X5,X6]),
-    varc:add_clause(V, [X7,X8,X9]),
-    varc:add_clause(V, [X10,X11,X12]),
-    varc:add_clause(V, [-X1,-X4]),
-    varc:add_clause(V, [-X1,-X7]),
-    varc:add_clause(V, [-X1,-X10]),
-    varc:add_clause(V, [-X4,-X7]),
-    varc:add_clause(V, [-X4,-X10]),
-    varc:add_clause(V, [-X7,-X10]),
-    varc:add_clause(V, [-X2,-X5]),
-    varc:add_clause(V, [-X2,-X8]),
-    varc:add_clause(V, [-X2,-X11]),
-    varc:add_clause(V, [-X5,-X8]),
-    varc:add_clause(V, [-X5,-X11]),
-    varc:add_clause(V, [-X8,-X11]),
-    varc:add_clause(V, [-X3,-X6]),
-    varc:add_clause(V, [-X3,-X9]),
-    varc:add_clause(V, [-X3,-X12]),
-    varc:add_clause(V, [-X6,-X9]),
-    varc:add_clause(V, [-X6,-X12]),
-    varc:add_clause(V, [-X9,-X12]),
+    clause(V, [X1,X2,X3]),
+    clause(V, [X4,X5,X6]),
+    clause(V, [X7,X8,X9]),
+    clause(V, [X10,X11,X12]),
+    clause(V, [-X1,-X4]),
+    clause(V, [-X1,-X7]),
+    clause(V, [-X1,-X10]),
+    clause(V, [-X4,-X7]),
+    clause(V, [-X4,-X10]),
+    clause(V, [-X7,-X10]),
+    clause(V, [-X2,-X5]),
+    clause(V, [-X2,-X8]),
+    clause(V, [-X2,-X11]),
+    clause(V, [-X5,-X8]),
+    clause(V, [-X5,-X11]),
+    clause(V, [-X8,-X11]),
+    clause(V, [-X3,-X6]),
+    clause(V, [-X3,-X9]),
+    clause(V, [-X3,-X12]),
+    clause(V, [-X6,-X9]),
+    clause(V, [-X6,-X12]),
+    clause(V, [-X9,-X12]),
     V.
 
 nbcp_p3() ->
@@ -378,24 +378,24 @@ nbcp_loop(V) ->
 
 order() ->
     V = varc:new([{activity, mvsids}]),
-    X1 = varc:add_variable(V), varc:add_symbol(V, X1, <<"X1">>),
-    X2 = varc:add_variable(V), varc:add_symbol(V, X2, <<"X2">>),
-    X3 = varc:add_variable(V), varc:add_symbol(V, X3, <<"X3">>),
-    X4 = varc:add_variable(V), varc:add_symbol(V, X4, <<"X4">>),
-    X5 = varc:add_variable(V), varc:add_symbol(V, X5, <<"X5">>),
-    X6 = varc:add_variable(V), varc:add_symbol(V, X6, <<"X6">>),
-    Y1 = varc:add_variable(V),
-    Y2 = varc:add_variable(V),
-    Y3 = varc:add_variable(V),
+    X1 = var(V, <<"X1">>),
+    X2 = var(V, <<"X2">>),
+    X3 = var(V, <<"X3">>),
+    X4 = var(V, <<"X4">>),
+    X5 = var(V, <<"X5">>),
+    X6 = var(V, <<"X6">>),
+    Y1 = var(V),
+    Y2 = var(V),
+    Y3 = var(V),
 
-    _Z0 = add_clause(V, [Y2, Y3], ?GAMMA),
-    _Z1 = add_clause(V, [Y2, -Y3], ?GAMMA),
-    _C0 = add_clause(V, [X1, X2, X3, X4, X5, X6, Y1], ?GAMMA),
-    _C1 = add_clause(V, [    X2, X3, X4, X5, X6, Y1], ?GAMMA),
-    _C2 = add_clause(V, [        X3, X4, X5, X6, Y1], ?GAMMA),
-    _C3 = add_clause(V, [            X4, X5, X6, Y1], ?GAMMA),
-    _C4 = add_clause(V, [                X5, X6, Y1], ?GAMMA),
-    _C5 = add_clause(V, [                    X6, Y1], ?GAMMA),
+    _Z0 = clause(V, [Y2, Y3], ?GAMMA),
+    _Z1 = clause(V, [Y2, -Y3], ?GAMMA),
+    _C0 = clause(V, [X1, X2, X3, X4, X5, X6, Y1], ?GAMMA),
+    _C1 = clause(V, [    X2, X3, X4, X5, X6, Y1], ?GAMMA),
+    _C2 = clause(V, [        X3, X4, X5, X6, Y1], ?GAMMA),
+    _C3 = clause(V, [            X4, X5, X6, Y1], ?GAMMA),
+    _C4 = clause(V, [                X5, X6, Y1], ?GAMMA),
+    _C5 = clause(V, [                    X6, Y1], ?GAMMA),
     varc:bind(V, Y1),
 
     lists:foreach(
@@ -509,13 +509,13 @@ order() ->
 
 subst0a() ->
     V = varc:new([{xref,true}]),
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
-    X = varc:add_variable(V),
-    Y = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
+    C = var(V),
+    X = var(V),
+    Y = var(V),
 
-    _C0 = varc:add_clause(V, [A, B, Y, C]),
+    _C0 = clause(V, [A, B, Y, C]),
 
     print_clauses(V),
 
@@ -530,13 +530,13 @@ subst0a() ->
 
 subst0b() ->
     V = varc:new([{xref,true}]),
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
-    X = varc:add_variable(V),
-    Y = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
+    C = var(V),
+    X = var(V),
+    Y = var(V),
 
-    _C0 = varc:add_clause(V, [A, X, B, Y, C]),
+    _C0 = clause(V, [A, X, B, Y, C]),
 
     print_clauses(V),
 
@@ -551,13 +551,13 @@ subst0b() ->
 
 subst0c() ->
     V = varc:new([{xref,true}]),
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
-    X = varc:add_variable(V),
-    Y = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
+    C = var(V),
+    X = var(V),
+    Y = var(V),
 
-    _C0 = varc:add_clause(V, [A, X, B, -Y, C]),
+    _C0 = clause(V, [A, X, B, -Y, C]),
 
     print_clauses(V),
 
@@ -572,10 +572,10 @@ subst0c() ->
 
 subst0d() ->
     V = varc:new([{xref,true}]),
-    X = varc:add_variable(V),
-    Y = varc:add_variable(V),
+    X = var(V),
+    Y = var(V),
 
-    _C0 = varc:add_clause(V, [X, Y]),
+    _C0 = clause(V, [X, Y]),
 
     print_clauses(V),
 
@@ -591,12 +591,12 @@ subst0d() ->
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
     V = varc:new([{xref,true}]), 
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
     NX3 = -X3,
-    C0 = add_clause(V, [X1,X2]),
-    C1 = add_clause(V, [X1,-X2]),
+    C0 = clause(V, [X1,X2]),
+    C1 = clause(V, [X1,-X2]),
     io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, X3, X2),
@@ -609,9 +609,9 @@ subst1() ->
 %% simply substitute {X1,X2} [X1/X2] => {X1}
 subst2() ->
     V = varc:new([{xref,true}]), 
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    C0 = add_clause(V, [X1,X2]),
+    X1 = var(V),
+    X2 = var(V),
+    C0 = clause(V, [X1,X2]),
     io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, X1, X2),
@@ -624,9 +624,9 @@ subst2() ->
 
 subst3() ->
     V = varc:new([{xref,true}]), 
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    C0 = add_clause(V, [-X2,X3]),
+    X2 = var(V),
+    X3 = var(V),
+    C0 = clause(V, [-X2,X3]),
     io:format("\nbefore\n"),
     print_clauses(V),
     varc:subst(V, -X2, X3),
@@ -639,20 +639,20 @@ subst3() ->
     
 subst4() ->
     V = varc:new([{xref,true}]),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
-    X6 = varc:add_variable(V),
-    X7 = varc:add_variable(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    X6 = var(V),
+    X7 = var(V),
     
-    _C0 = add_clause(V, [-X4,-X3,-X2]),
-    _C1 = add_clause(V, [-X5,-X4,-X3]),
-    _C2 = add_clause(V, [X6, X3, X2]),
-    _C3 = add_clause(V, [X7, X6, X2]),
-    _C4 = add_clause(V, [-X6, X3]),
-    _C5 = add_clause(V, [X4, X2]),
-    _C6 = add_clause(V, [X7, X4, -X2]),
+    _C0 = clause(V, [-X4,-X3,-X2]),
+    _C1 = clause(V, [-X5,-X4,-X3]),
+    _C2 = clause(V, [X6, X3, X2]),
+    _C3 = clause(V, [X7, X6, X2]),
+    _C4 = clause(V, [-X6, X3]),
+    _C5 = clause(V, [X4, X2]),
+    _C6 = clause(V, [X7, X4, -X2]),
 
     io:format("\nbefore\n"),
     print_clauses(V),
@@ -672,18 +672,18 @@ subst4() ->
 
 subst5() ->
     V = varc:new([{xref,true}]),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
-    X6 = varc:add_variable(V),
-    X7 = varc:add_variable(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    X6 = var(V),
+    X7 = var(V),
 
-    _C0 = add_clause(V, [X4,-X3]),
-    _C1 = add_clause(V, [X7,X3]),
-    _C2 = add_clause(V, [X7,-X5]),
-    _C3 = add_clause(V, [X3,X2]),
-    _C4 = add_clause(V, [-X4,X6]),
+    _C0 = clause(V, [X4,-X3]),
+    _C1 = clause(V, [X7,X3]),
+    _C2 = clause(V, [X7,-X5]),
+    _C3 = clause(V, [X3,X2]),
+    _C4 = clause(V, [-X4,X6]),
 
     print_clauses(V),
     %% io:format(" [~w/~w]\n", [X7,X3]),
@@ -702,18 +702,18 @@ subst5() ->
 
 subst6() ->
     V = varc:new([{xref,true}]),
-    Y = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
-    X = varc:add_variable(V),
-    A = varc:add_variable(V),
+    Y = var(V),
+    B = var(V),
+    C = var(V),
+    X = var(V),
+    A = var(V),
 
-    _C0 = varc:add_clause(V, [A, X, B, Y, C]),
-    _C1 = varc:add_clause(V, [A, -X, B, Y, C]),
-    _C2 = varc:add_clause(V, [A, X, B, -C]),
-    _C3 = varc:add_clause(V, [-A, B, -Y, C]),
-    _C4 = varc:add_clause(V, [-A, B, -X, C]),
-    _C5 = varc:add_clause(V, [A, -Y, B, -X, C]),
+    _C0 = clause(V, [A, X, B, Y, C]),
+    _C1 = clause(V, [A, -X, B, Y, C]),
+    _C2 = clause(V, [A, X, B, -C]),
+    _C3 = clause(V, [-A, B, -Y, C]),
+    _C4 = clause(V, [-A, B, -X, C]),
+    _C5 = clause(V, [A, -Y, B, -X, C]),
 
     print_clauses(V),
 
@@ -727,13 +727,13 @@ subst6() ->
 
 watch1() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
-    X5 = varc:add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
 
-    C1 = add_clause(V, [X5,X4,X3,X2,X1]),
+    C1 = clause(V, [X5,X4,X3,X2,X1]),
        [X1,X2,X3,X4,X5] = varc:get_clause(V, C1),
     %%  0  A   0  0  0
     %% initial watch points are set in the end!
@@ -778,14 +778,14 @@ watch1() ->
 
     %% add clauses under the above bindings
     Y3 = -X5, Y2 = -X4, Y1 = -X2, 
-    C2 = add_clause(V, [Y3, Y2, Y1]),
+    C2 = clause(V, [Y3, Y2, Y1]),
     [Y1, Y2, Y3] = varc:get_clause(V, C2),
 
     0 = varc:clause_info(V, C2, watch0),
     2 = varc:clause_info(V, C2, watch1),
 
     Z3 = X4, Z2 = X3, Z1 = -X1,
-    C3 = add_clause(V, [Z3,Z2,Z1]),
+    C3 = clause(V, [Z3,Z2,Z1]),
     [Z1,Z2,Z3] = varc:get_clause(V, C3),
 
     0 = varc:clause_info(V, C3, watch0),
@@ -797,8 +797,8 @@ edge_list0() ->
     V = varc:new([{edge, true}]),
     true = varc:info(V, edge),
 
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
 
     {true,_C0} = varc:add_clause(V, [A, B]),
     
@@ -811,9 +811,9 @@ edge_list1() ->
     V = varc:new([{edge, true}]),
     true = varc:info(V, edge),
 
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
+    C = var(V),
 
     {true,_C0} = varc:add_clause(V, [A, B, C]),
     %% assume A,B are watched
@@ -829,9 +829,9 @@ edge_list2() ->
     V = varc:new([{edge, true}]),
     true = varc:info(V, edge),
 
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
+    C = var(V),
 
     varc:bind(V, -C),
 
@@ -846,10 +846,10 @@ edge_list3() ->
     V = varc:new([{edge, true}]),
     true = varc:info(V, edge),
 
-    A = varc:add_variable(V),
-    B = varc:add_variable(V),
-    C = varc:add_variable(V),
-    D = varc:add_variable(V),
+    A = var(V),
+    B = var(V),
+    C = var(V),
+    D = var(V),
 
     {true,_C0} = varc:add_clause(V, [A, B]),
     {true,_C1} = varc:add_clause(V, [A, C]),
@@ -874,22 +874,22 @@ edge_list3() ->
 
 clone1() ->
     V = varc:new(),
-    X1 = add_variable(V), varc:add_symbol(V, X1, <<"P(1,1)">>),
-    X2 = add_variable(V), varc:add_symbol(V, X2, <<"P(1,2)">>),
-    X3 = add_variable(V), varc:add_symbol(V, X3, <<"P(2,1)">>),
-    X4 = add_variable(V), varc:add_symbol(V, X4, <<"P(2,2)">>),
-    X5 = add_variable(V), varc:add_symbol(V, X5, <<"P(3,1)">>),
-    X6 = add_variable(V), varc:add_symbol(V, X6, <<"P(3,2)">>),
+    X1 = var(V, <<"P(1,1)">>),
+    X2 = var(V, <<"P(1,2)">>),
+    X3 = var(V, <<"P(2,1)">>),
+    X4 = var(V, <<"P(2,2)">>),
+    X5 = var(V, <<"P(3,1)">>),
+    X6 = var(V, <<"P(3,2)">>),
 
-    varc:add_clause(V, [X1,X2]),
-    varc:add_clause(V, [X3, X4]),
-    varc:add_clause(V, [X5, X6]),
-    varc:add_clause(V, [-X1, -X3]),
-    varc:add_clause(V, [-X1, -X5]),
-    varc:add_clause(V, [-X3, -X5]),
-    varc:add_clause(V, [-X2, -X4]),
-    varc:add_clause(V, [-X2, -X6]),
-    varc:add_clause(V, [-X4, -X6]),
+    clause(V, [X1,X2]),
+    clause(V, [X3, X4]),
+    clause(V, [X5, X6]),
+    clause(V, [-X1, -X3]),
+    clause(V, [-X1, -X5]),
+    clause(V, [-X3, -X5]),
+    clause(V, [-X2, -X4]),
+    clause(V, [-X2, -X6]),
+    clause(V, [-X4, -X6]),
 
     varc:set_level(V, 1),
     false = varc:nbcp(V),
@@ -905,6 +905,123 @@ clone1() ->
     print_clauses(W),
     dump_variables(W, [X1,X2,X3,X4,X5,X6]),
     ok.
+
+sort_delete() ->
+    %% install 20 clauses of size 3 with literals -10 .. 10
+    N = 20, M = 3, K = 10,
+    V = varc:new(),
+    _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
+    CNF = generate_cnf(N, M, K),
+    _ = install_cnf(V, CNF, delta),
+    %% varc:del_clause(V, 1),
+    varc:del_clause(V, 5),
+    %% varc:del_clause(V, 19),
+    varc:clauseset_sort(V, delta),
+    V.
+
+sort_offset_delete() ->
+    %% install 20 clauses of size 3 with literals -10 .. 10
+    N = 20, M = 3, K = 10,
+    V = varc:new(),
+    _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
+    CNF = generate_cnf(N, M, K),
+    _ = install_cnf(V, CNF, delta),
+    use_clauses(V, delta),
+    varc:clauseset_sort(V, delta),
+    varc:clauseset_offset(V, delta, 5),
+    delete_clauses(V, delta),
+    varc:clauseset_offset(V, delta, 0),
+    V.
+
+%% will have the effect that clause 1 have stamp T1 and clause N have stamp Tn
+use_clauses(V, Set) ->
+    use_clauses(V, Set, varc:clauseset_first(V, Set)).
+
+use_clauses(_V, _Set, false) ->
+    ok;
+use_clauses(V, Set, I) ->
+    varc:bcp(V),
+    use_clauses(V, Set, varc:clauseset_next(V, I)).
+
+delete_clauses(V, Set) ->
+    delete_clauses(V, Set, varc:clauseset_first(V, Set)).
+
+delete_clauses(_V, _Set, false) ->
+    ok;
+delete_clauses(V, Set, I) ->
+    io:format("delete clause ~w\n", [I]),
+    ok = varc:del_clause(V, I),
+    delete_clauses(V, Set, varc:clauseset_next(V, I)).
+
+
+random_cnf() ->
+    random_cnf(20, 6, 7).
+
+random_cnf(N, M, K) ->
+    random_cnf(N, M, K, delta).
+random_cnf(N, M, K, Set) ->
+    V = varc:new(),
+    _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
+    CNF = generate_cnf(N, M, K),
+    _ = install_cnf(V, CNF, Set),
+    V.
+
+install_cnf(V, CNF) ->
+    install_cnf(V, CNF, delta).
+
+install_cnf(V, CNF, Set) ->
+    lists:foreach(
+      fun(Clause) ->
+	      case clause(V, Clause, Set) of
+		  false ->
+		      %% the clause is contradictory 
+		      assert_eval(V, Clause, false);
+		  true ->
+		      %% the clause is true 
+		      %% either evaluate to true or has X -X in the clause
+		      assert_eval(V, Clause, true);
+		  Ci ->
+		      %% check the clause
+		      GetClause = varc:get_clause(V, Ci),
+		      assert_equal(GetClause, Clause)
+	      end
+      end, CNF).
+
+assert_eval(V, Clause, Value) ->
+    case eval(V, Clause) of
+	Value -> ok;
+	Other -> 
+	    io:format("assertion failed: eval(~w) ~w =/= ~w\n",
+		      [Clause,Other,Value]),
+	    throw(badmatch)
+    end.
+
+assert_equal(Value1, Value2) ->
+    if Value1 =:= Value2 -> ok;
+       true ->
+	    io:format("assertion failed: get ~w =/= norm ~w\n",
+		      [Value1,Value2]),
+	    throw(badmatch)
+    end.
+	    
+eval(_V, true) ->
+    true;
+eval(V, [Li]) ->
+    case varc:value(V, Li) of
+	?T -> true;
+	?F -> false;
+	undefined -> true
+    end;
+eval(V, Ls) ->
+    eval(V, Ls, false).
+
+eval(V, [Li|Ls], Sum) ->
+    case varc:value(V, Li) of
+	?T -> true;
+	?F -> eval(V, Ls, Sum);
+	undefined -> eval(V,Ls,undefined)
+    end;
+eval(_V, [], Sum) -> Sum.
 
 %% Utils
 
@@ -993,16 +1110,22 @@ split_cix(I) ->
      I band 16#3fffffff}.
     
 
-add_variable(V) ->
+var(V) ->
     varc:add_variable(V).
 
-add_clause(V, Literals) ->
-    add_clause(V, Literals, ?DELTA).
+var(V, Sym) ->
+    Vi = varc:add_variable(V),
+    varc:add_symbol(V, Vi, Sym),
+    Vi.
 
-add_clause(V, Literals, Set) ->
-    case varc:add_clause(V, Literals, Set) of
+clause(V, Ls) ->
+    clause(V, Ls, delta).
+
+clause(V, Ls, Set) ->
+    case varc:add_clause(V, Ls, Set) of
 	{true,Ci} -> Ci;
-	true -> true
+	true -> true;
+	false -> false
     end.
 
 get_clause(V, ClauseIndex) ->
@@ -1016,3 +1139,54 @@ format_clause_flag({watch,{P1,P2}}) -> io_lib:format("w:(~w,~w)",[P1,P2]);
 format_clause_flag({status,inqueue}) -> "s:inqueue";
 format_clause_flag({status,dead}) -> "s:dead";
 format_clause_flag({status,ok}) -> "s:ok".
+
+generate_cnf(N,M,K) ->
+    [generate_clause(M,K) || _ <- lists:seq(1,N)].
+
+%% generate a clause of length M of literals in range -K .. K
+%% The clause can only contain wither X or -X 
+%% do not include repeats
+%%
+generate_clause(M,K) ->
+    L = lists:sort([{rand:uniform(),rand_sign(),Li} || 
+		       Li <- lists:seq(1, K)]),
+    abs_sort([S*Li || {_,S,Li} <- lists:sublist(L, M)]).
+
+%% (1,2)  
+%% (1,2)*2   = (2,4)
+%% (2,4) - 3 = (-1,1)
+
+rand_sign() ->
+    rand:uniform(2)*2 -3.
+       
+%% generate one literal in range -K .. K but skip 0
+generate_literal(K) ->
+    A = rand:uniform(2*K-1)-(K+1),
+    if A < 0 -> A;
+       true -> A + 1
+    end.
+
+abs_sort(L) ->
+    lists:sort(fun(A,B) -> abs(B) >= abs(A) end, L).
+
+rev_abs_sort(L) ->
+    lists:sort(fun(A,B) -> abs(A) >= abs(B) end, L).
+
+%% remove repeats, kill clauses with both X and -X
+normalize_clause(Clause) ->
+    L = rev_abs_sort(Clause),
+    normalize_abs_clause(L).
+
+normalize_abs_clause([]) -> 
+    [];
+normalize_abs_clause([Li|L]) ->
+    normalize_abs_clause_(L, Li, []).
+
+normalize_abs_clause_([Li|L], Li, Acc) ->
+    normalize_abs_clause_(L, Li, Acc);
+normalize_abs_clause_([Lj|_L], Li, _Acc) when Li =:= -Lj ->
+    true;
+normalize_abs_clause_([Lj|L], Li, Acc) ->
+    normalize_abs_clause_(L, Lj,[Li|Acc]);
+normalize_abs_clause_([], Li, Acc) ->
+    [Li|Acc].
