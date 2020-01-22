@@ -17,15 +17,30 @@ all() ->
     lists:foreach(
       fun(Test) ->
 	      io:format("< ~w: ", [Test]),
-	      apply(?MODULE, Test, []),
-	      io:format("> ok\n")
+	      Result = sync_apply(?MODULE, Test, []),
+	      io:format("> ~s\n", [Result])
       end, [test1,
 	    test2,
 	    test3,
 	    clause_simplify,
+	    bcp2,
+	    bcp3,
+	    bcp4,
 	    clause_bcp,
+	    clause_learn1,
 	    watch1,
-	    order,
+	    
+	    %% order checks
+	    order_identity,
+	    order_user,
+	    order_degree,
+	    order_rank,
+	    order_activity,
+	    order_first, %% BUGGY
+	    order_last,  %% BUGGY
+	    order_first_and_last,
+	    order_random,
+
 	    edge_list0,
 	    edge_list1,
 	    edge_list2,
@@ -39,8 +54,26 @@ all() ->
 	    subst3,
 	    subst4,
 	    subst5,
-	    subst6
+	    subst6,
+	    cnf_install,
+	    cnf_delete_sort,
+	    cnf_sort_offset_delete
 	   ]).
+
+sync_apply(Mod, Fun, Args) ->
+    PARENT = self(),
+    Pid = spawn(fun() ->
+			try apply(Mod, Fun, Args) of
+			    _Res -> PARENT ! {self(),ok}
+			catch 
+			    error:_ ->
+				PARENT ! {self(),error}
+			end
+		end),
+    receive
+	{Pid, Result} ->
+	    Result
+    end.
 
 test1() ->
     V = varc:new(),
@@ -166,6 +199,76 @@ clause_simplify() ->
     C6 = true,
     ok.
 
+bcp2() ->
+    V = varc:new(),
+    X = var(V, <<"X">>),
+    Y = var(V, <<"Y">>),
+    clause(V, [X, Y]),
+
+    [Y] = eval_bindings(V, [-X]),
+    [X] = eval_bindings(V, [-Y]),
+    [] = eval_bindings(V, [X]),
+    [] = eval_bindings(V, [Y]),
+    ok.
+
+bcp3() ->
+    V = varc:new(),
+    X = var(V, <<"X">>),
+    Y = var(V, <<"Y">>),
+    Z = var(V, <<"Z">>),
+    Cix = clause(V, [X, Y, Z]),
+
+    [Z] = eval_bindings(V, [-X,-Y]),
+    [X] = eval_bindings(V, [-Y,-Z]),
+    [Y] = eval_bindings(V, [-Z,-X]),
+    ok.
+
+bcp4() ->
+    V = varc:new(),
+    X = var(V, <<"X">>),
+    Y = var(V, <<"Y">>),
+    Z = var(V, <<"Z">>),
+    T = var(V, <<"T">>),
+    Cix = clause(V, [X, Y, Z, T]),
+
+    [T] = eval_bindings(V, [-X,-Y,-Z]),
+    [X] = eval_bindings(V, [-Y,-Z,-T]),
+    [Y] = eval_bindings(V, [-X,-Z,-T]),
+    [Z] = eval_bindings(V, [-X,-Y,-T]),
+
+    ok.
+
+bcp_add() ->
+    V = varc:new(),
+    X = var(V, <<"X">>),
+    Y = var(V, <<"Y">>),
+    Z = var(V, <<"Z">>),
+    varc:set_level(V, 1),
+    varc:bind(V, -Y),
+    Cix1 = clause(V, [X, Y, Z]),
+    varc:undo_level(V, 1),
+    varc:set_level(V, 0),
+    0 = varc:clause_info(V, Cix1, watch0),
+    2 = varc:clause_info(V, Cix1, watch1),
+    varc:bind(V, -X),
+    true = varc:bcp(V),
+    Cix2 = clause(V, [X, -Z]),
+    true = varc:bcp(V),
+    Match = [-X,-Z,Y],
+    Match = varc:get_bindings(V, 0),
+    dump(V).
+
+
+eval_bindings(V, Xs) ->
+    varc:set_level(V, 1),
+    _ = [(true = varc:bind(V, X)) || X <- Xs ],
+    varc:set_level(V, 2),
+    true = varc:bcp(V),
+    R = varc:get_bindings(V, 2),
+    varc:undo_level(V, 2),
+    varc:undo_level(V, 1),
+    R.
+
 %% Test eval
 clause_bcp() ->
     V = varc:new(),
@@ -187,27 +290,19 @@ clause_bcp() ->
     io:format("clauses=~p\n", [[C0,C1,C2,C3]]),
     print_clauses(V),
 
-    io:format("queue=~p\n", [varc:get_queue(V)]),
     true = varc:bcp(V),
 
     V1 = varc:value(V, X1),
-    io:format("X1 = ~w\n", [V1]),
     true = V1 =:= ?T,
 
     V2 = varc:value(V, X2),
-    io:format("X2 = ~w\n", [V2]),
     true = V2 =:= undefined,
 
     V3 = varc:value(V, X3),
-    io:format("X3 = ~w\n", [V3]),
     true = V3 =:= ?F,
 
     V4 = varc:value(V, X4),
-    io:format("X4 = ~w\n", [V4]),
     true = V4 =:= undefined,
-
-    io:format("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
-    io:format("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
 
     true.
 
@@ -375,8 +470,7 @@ nbcp_loop(V) ->
 	    nbcp_loop(V)
     end.
     
-
-order() ->
+order_install() ->
     V = varc:new([{activity, mvsids}]),
     X1 = var(V, <<"X1">>),
     X2 = var(V, <<"X2">>),
@@ -397,42 +491,52 @@ order() ->
     _C4 = clause(V, [                X5, X6, Y1], ?GAMMA),
     _C5 = clause(V, [                    X6, Y1], ?GAMMA),
     varc:bind(V, Y1),
+    varc:bind(V, Y2),
+    varc:bind(V, Y3),
+    {V, [X1,X2,X3,X4,X5,X6]}.
 
-    lists:foreach(
-      fun({L,Xi}) ->
-	      varc:set_level(V,L), varc:bind(V, Xi),
-	      varc:set_level(V,L+1), varc:bind(V, -Y2), false = varc:bcp(V),
-	      varc:undo_level(V,L+1)
-      end, [{X1,1},{X2,2},{X3,3},{X4,4},{X5,5},{X6,6}]),
+%% bind() ->
+%%     {V, [X1,X2,X3,X4,X5,X6,Y2,Y3]} = order_install(),
+%%     lists:foreach(
+%%       fun({L,Xi}) ->
+%% 	      varc:set_level(V,L), 
+%% 	      varc:bind(V, Xi),
+%% 	      varc:set_level(V,L+1),
+%% 	      varc:bind(V, -Y2),
+%% 	      false = varc:bcp(V),
+%% 	      varc:undo_level(V,L+1)
+%%       end, [{X1,1},{X2,2},{X3,3},{X4,4},{X5,5},{X6,6}]),
+%%     lists:foreach(
+%%       fun(L) ->
+%% 	      varc:undo_level(V, L)
+%%       end, lists:seq(7,1,-1)),
+%%     order:set_level(V, 0),
+%%     ok.
 
-    lists:foreach(
-      fun(L) ->
-	      varc:undo_level(V, L)
-      end, lists:seq(7,1,-1)),
-
+order_identity() ->    
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
+    ok = varc:order_sort(V, ?ORDER_IDENTITY),
+    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok.
+    
+order_user() ->    
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     lists:foreach(
       fun({L,Cp,Cn}) ->
 	      varc:set_user_count(V,L,Cp),
 	      varc:set_user_count(V,-L,Cn)
       end, [{X1,12,10},{X2,11,13},{X3,16,14},{X4,15,17},{X5,20,18},{X6,19,21}]),
-	      
-    varc:bind(V, Y2),
-    varc:bind(V, Y3),
+    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
+    U1 = [X1,-X2,X3,-X4,X5,-X6],
+    U1 = varc:order_all(V),
 
-    dump_variables(V, [X1,X2,X3,X4,X5,X6]),
+    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
+    U2 = [-X6,X5,-X4,X3,-X2,X1],
+    U2 = varc:order_all(V),
+    ok.
 
-    Index = varc:first_unbound_index(V),
-    io:format("First unbound index = ~w\n", [Index]),
-    if Index =:= false ->
-	    ok;
-       true ->
-	    Index1 = varc:next_unbound_index(V, Index),
-	    io:format("Next unbound index = ~w\n", [Index1])
-    end,
-
-    ok = varc:order_sort(V, ?ORDER_IDENTITY),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
-
+order_degree() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% d(X1) = 1
     %% d(X2) = 2
     %% d(X3) = 3
@@ -445,7 +549,10 @@ order() ->
 
     ok = varc:order_sort(V, ?ORDER_DEGREE bor ?ORDER_ASCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok.
 
+order_rank() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% r(X1) = 1/7,
     %% r(X2) = 1/7+1/6
     %% r(X3) = 1/7+1/6+1/5
@@ -458,41 +565,44 @@ order() ->
 
     ok = varc:order_sort(V, ?ORDER_RANK bor ?ORDER_ASCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok.
 
+order_activity() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
     ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_DESCEND),
     [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
 
     ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_ASCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok.
 
-    ok = varc:decay(V, 0.1),
-
-    dump_variables(V, [X1,X2,X3,X4,X5,X6]),
-
-    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
-    U1 = [X1,-X2,X3,-X4,X5,-X6],
-    U1 = varc:order_all(V),
-
-    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
-    U2 = [-X6,X5,-X4,X3,-X2,X1],
-    U2 = varc:order_all(V),
-
+order_first() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first check
     ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
     ok = varc:order_sort_first(V, [X5, X6]),
     [X5, X6, X1, X2, X3, X4] = varc:order_all(V),
+    ok.
 
+order_last() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% last check
     ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
+    ok = varc:order_sort_last(V, [X1,X2]),
     [X3, X4, X5, X6, X1, X2] = varc:order_all(V),
+    ok.
 
+order_first_and_last() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first & last check
     ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
     ok = varc:order_sort_first(V, [X5, X6]),
-    ok = varc:order_sort_last(V, [X2, X1]),  %% reversed
+    ok = varc:order_sort_last(V, [X1,X2]),
     [X5, X6, X3, X4, X1, X2] = varc:order_all(V),
+    ok.
 
+order_random() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
     ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1001),
     Rand1001 = [X1,X6,-X3,X5,-X4,X2],
@@ -504,8 +614,8 @@ order() ->
     Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
     Rand1003 = varc:order_all(V),
     %% io:format("random,1003, Vs = ~p\n", [Sort2]),
-
     ok.
+
 
 subst0a() ->
     V = varc:new([{xref,true}]),
@@ -906,32 +1016,145 @@ clone1() ->
     dump_variables(W, [X1,X2,X3,X4,X5,X6]),
     ok.
 
-sort_delete() ->
+%% install and check integrity
+cnf_install() ->
     %% install 20 clauses of size 3 with literals -10 .. 10
-    N = 20, M = 3, K = 10,
-    V = varc:new(),
+    cnf_install(20, 3, 10).
+
+cnf_install(N,M,K) ->
+    V = varc:new([{xref,true},{hash,true}]),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
-    %% varc:del_clause(V, 1),
-    varc:del_clause(V, 5),
-    %% varc:del_clause(V, 19),
+    verify_xref(V, CNF),
+    verify_hash(V, CNF),
+    V.    
+
+%% install random 3-CNF
+%% remove clause 5
+%% sort 
+%% check integrity
+%%
+cnf_delete_sort() ->
+    %% install 20 clauses of size 3 with literals -10 .. 10
+    cnf_delete_sort(20, 3, 10).
+
+cnf_delete_sort(N, M, K) ->
+    V = varc:new([{xref,true},{hash,true}]),
+    _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
+    CNF = generate_cnf(N, M, K),
+    _ = install_cnf(V, CNF, delta),
+    C5 = lists:nth(5, CNF),
+    Ci = varc:find_clause(V, C5),
+    varc:del_clause(V, Ci),
+    CNF1 = CNF -- [C5],
     varc:clauseset_sort(V, delta),
+    verify_xref(V, CNF1),
+    verify_hash(V, CNF1),
     V.
 
-sort_offset_delete() ->
+%% install random 3-CNF
+%% use_clauses
+%% sort
+%% remove clauses 5..19
+%% check integrity
+%%
+cnf_sort_offset_delete() ->
     %% install 20 clauses of size 3 with literals -10 .. 10
-    N = 20, M = 3, K = 10,
-    V = varc:new(),
+    cnf_sort_offset_delete(20, 3, 10).
+
+cnf_sort_offset_delete(N, M, K) ->
+    V = varc:new([{xref,true},{hash,true}]),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
     use_clauses(V, delta),
     varc:clauseset_sort(V, delta),
     varc:clauseset_offset(V, delta, 5),
-    delete_clauses(V, delta),
+    CiList = clause_list(V, delta),
+    CNF1 = lists:foldr(
+	     fun(Ci,CNFi) ->
+		     Clause = varc:get_clause(V, Ci),
+		     CNFi -- [Clause]
+	     end, CNF, CiList),
+    ok = delete_clauses(V, delta),
     varc:clauseset_offset(V, delta, 0),
+    verify_xref(V, CNF1),
+    verify_hash(V, CNF1),    
     V.
+
+clause_learn1() ->
+    V = varc:new(),
+    ok = varc:config(V, max_conflicting, 1),
+    A = var(V, <<"A">>),  %% 1
+    B = var(V, <<"B">>),  %% 2
+    C = var(V, <<"C">>),  %% 3
+    X = var(V, <<"X">>),  %% 4
+    Y = var(V, <<"Y">>),  %% 5
+    Z = var(V, <<"Z">>),  %% 6
+    clause(V, [A,B]),
+    clause(V, [B,C]),
+    clause(V, [-A,-X,Y]),  %% Y=1
+    clause(V, [-A,X,Z]),
+    clause(V, [-A,-Y,Z]),  %% Z=1
+    clause(V, [-A,X,-Z]),
+    clause(V, [-A,-Y,-Z]), %% Z=0
+
+    %% io:format("DUMP1\n"),
+    dump(V, false),
+
+    %% bind A/1 B/1 C/1 X/1
+    true = bind_and_bcp(V, 1, A),
+    true = bind_and_bcp(V, 2, B),
+    true = bind_and_bcp(V, 3, C),
+    false = bind_and_bcp(V, 4, X),
+
+    _Dix = varc:conflicting_clause(V, 0),
+    %% io:format("conflicting_clause1: ~w: ~w\n",[Dix,varc:get_clause(V,_Dix)]),
+    Learnt1 = varp_conflict:analyze(V, 4, 1.0, 0),
+    io:format("learnt_clause: ~w\n", [Learnt1]),
+    true = ([-1,-5] == abs_sort(Learnt1)),
+    %% Li1 = varc:conflict(V, 3, 1.0, 0),
+    %% Learnt1 = varc:get_clause(V, Li),
+
+    undo_until(V, 4, 1),
+
+    %% io:format("DUMP2\n"),
+    %% dump(V, false),
+
+    %% add learnt clause to gamma
+    _Gix1 = clause(V, Learnt1, gamma),
+    %% io:format("DUMP3\n"),
+    %% dump(V, false),
+
+    false = varc:bcp(V),
+    Cix2 = varc:conflicting_clause(V, 0),
+    io:format("conflicting_clause2: ~w: ~w\n", [Cix2,varc:get_clause(V, Cix2)]),
+    %% io:format("DUMP4\n"),
+    %% dump(V, false),
+    Learnt2 = varp_conflict:analyze(V, 1, 1.0, 0),
+    io:format("learnt_clause: ~w\n", [Learnt2]),
+    true = ([-1] == abs_sort(Learnt2)),
+    varc:undo_level(V,1),
+    varc:set_level(V, 0),
+    true = clause(V, Learnt2, gamma),
+    
+    true = varc:bcp(V),
+    Match = [-A,B],
+    Match = varc:get_bindings(V, 0),
+    ok.
+
+
+bind_and_bcp(V, Level, X) ->
+    varc:set_level(V, Level),
+    varc:bind(V, X) andalso varc:bcp(V).
+
+undo_until(V, From, To) when From > To ->
+    varc:undo_level(V, From),
+    undo_until(V, From-1, To);
+undo_until(V, _From, To) ->
+    varc:set_level(V, To),
+    To.
 
 %% will have the effect that clause 1 have stamp T1 and clause N have stamp Tn
 use_clauses(V, Set) ->
@@ -943,6 +1166,20 @@ use_clauses(V, Set, I) ->
     varc:bcp(V),
     use_clauses(V, Set, varc:clauseset_next(V, I)).
 
+%% get list of all clauses
+clause_list(V) ->
+    clause_list(V, delta).
+
+clause_list(V, Set) ->
+    clause_list_(V, Set, varc:clauseset_first(V, Set)).
+
+clause_list_(_V, _Set, false) ->
+    [];
+clause_list_(V, Set, I) ->
+    [I|clause_list_(V, Set, varc:clauseset_next(V, I))].
+    
+
+%% delete all clauses (from offset to end)
 delete_clauses(V, Set) ->
     delete_clauses(V, Set, varc:clauseset_first(V, Set)).
 
@@ -952,7 +1189,6 @@ delete_clauses(V, Set, I) ->
     io:format("delete clause ~w\n", [I]),
     ok = varc:del_clause(V, I),
     delete_clauses(V, Set, varc:clauseset_next(V, I)).
-
 
 random_cnf() ->
     random_cnf(20, 6, 7).
@@ -970,22 +1206,25 @@ install_cnf(V, CNF) ->
     install_cnf(V, CNF, delta).
 
 install_cnf(V, CNF, Set) ->
-    lists:foreach(
-      fun(Clause) ->
+    lists:foldr(
+      fun(Clause,Acc) ->
 	      case clause(V, Clause, Set) of
 		  false ->
 		      %% the clause is contradictory 
-		      assert_eval(V, Clause, false);
+		      assert_eval(V, Clause, false),
+		      [false|Acc];
 		  true ->
 		      %% the clause is true 
 		      %% either evaluate to true or has X -X in the clause
-		      assert_eval(V, Clause, true);
+		      assert_eval(V, Clause, true),
+		      [true|Acc];
 		  Ci ->
 		      %% check the clause
 		      GetClause = varc:get_clause(V, Ci),
-		      assert_equal(GetClause, Clause)
+		      assert_equal(GetClause, Clause),
+		      [Ci|Acc]
 	      end
-      end, CNF).
+      end, [], CNF).
 
 assert_eval(V, Clause, Value) ->
     case eval(V, Clause) of
@@ -1023,6 +1262,37 @@ eval(V, [Li|Ls], Sum) ->
     end;
 eval(_V, [], Sum) -> Sum.
 
+%% Verify that we can reach all clauses via xref
+verify_xref(V, CNF) ->
+    true = varc:info(V, xref),  %% assert we have xref enabled
+    DegLs = deg_literal_list(CNF),
+    %% check that clauses reached by Ls are in CNF
+    lists:foreach(
+      fun({Li,Deg}) ->
+	      XRefs = varc:get_clauses(V, Li, literal),
+	      XRefLen = length(XRefs),
+	      if XRefLen =:= Deg -> ok;
+		 true ->
+		      io:format("Literal degree mismatch: ~w xref = ~w\n",
+				[Li,XRefs]),
+		      io:format("cnf = \n~w\n", [CNF]),
+		      error(bad_degree)
+	      end,
+	      lists:foreach(
+		fun(Ci) ->
+			Clause = varc:get_clause(V, Ci),
+			true = lists:member(Clause, CNF)
+		end, XRefs)
+      end, DegLs).
+
+verify_hash(V, CNF) ->
+    true = varc:info(V, xref),  %% assert we have hash enabled
+    lists:foreach(
+      fun(Clause) ->
+	      Ci = varc:find_clause(V, Clause),
+	      Clause = varc:get_clause(V, Ci)
+      end, CNF).
+
 %% Utils
 
 get_watched(V) ->
@@ -1036,21 +1306,26 @@ get_watched(_V, []) ->
     [].
 
 dump(V) ->
+    dump(V, true).
+dump(V, Verb) ->
     io:format("STATE of ~p\n", [V]),
-    lists:foreach(
-      fun({Key, Value}) ->
-	      io:format("  ~s: ~p\n", [Key,Value])
-      end, varc:info(V)),
+    if Verb ->
+	    lists:foreach(
+	      fun({Key, Value}) ->
+		      io:format("  ~s: ~p\n", [Key,Value])
+	      end, varc:info(V));
+       true -> ok
+    end,
     io:format("VARIABLES\n"),
-    dump_variables(V, lists:seq(1, varc:info(V,number_of_variables))),
+    dump_variables(V, lists:seq(1, varc:info(V,number_of_variables)), Verb),
     io:format("CLAUSES DELTA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,delta)),
+    dump_clauses(V, true, varc:clauseset_first(V,delta), Verb),
     io:format("CLAUSES GAMMA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,gamma)),
+    dump_clauses(V, true, varc:clauseset_first(V,gamma), Verb),
     io:format("CLAUSES BETA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,beta)),
+    dump_clauses(V, true, varc:clauseset_first(V,beta), Verb),
     io:format("CLAUSES ALPHA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,alpha)),
+    dump_clauses(V, true, varc:clauseset_first(V,alpha), Verb),
     io:format("BINDINGS\n"),
     lists:foreach(
       fun(L) ->
@@ -1058,14 +1333,15 @@ dump(V) ->
       end, lists:seq(0, varc:info(V,level))),
     ok.
 
-print_clauses(V) ->
-    print_clauses(V,false).
-print_clauses(V,Raw) ->
-    dump_clauses(V, Raw, varc:clauseset_first(V,delta)).
+print_clauses(V) ->  print_clauses(V, true).
+print_clauses(V, Verb) ->  print_clauses(V,false,Verb).
 
-dump_clauses(_V, _Raw, false) ->
+print_clauses(V,Raw,Verb) ->
+    dump_clauses(V, Raw, varc:clauseset_first(V,delta), Verb).
+
+dump_clauses(_V, _Raw, false, _Verb) ->
     ok;
-dump_clauses(V, Raw, I) ->
+dump_clauses(V, Raw, I, Verb) ->
     {_,SI,IX} = split_cix(I),
     WATCH = case varc:clause_info(V, I, watch) of
 		{-1,-1} -> "";
@@ -1078,23 +1354,32 @@ dump_clauses(V, Raw, I) ->
 	     end,
     io:format("~w - ~s:~w~s~s\n", [I,SI,IX,WATCH,STATUS]),
     io:format("  ~w\n", [varc:get_clause(V,I,undefined,Raw)]),
-    dump_clauses(V, Raw, varc:clauseset_next(V, I)).
+    dump_clauses(V, Raw, varc:clauseset_next(V, I), Verb).
 
 dump_variables(V, List) ->
+    dump_variables(V, List, true).
+
+dump_variables(V, List, Verb) ->
     lists:foreach(
       fun(X) ->
-	      Keys = varc:variable_info_keys() -- [implication,symbol],
+	      Keys = varc:variable_info_keys() -- [implication,symbol,level],
 	      Sym  = varc:variable_info(V,X,symbol),
-	      io:format("~w: ~p\n", [X, Sym]),
-	      lists:foreach(
-		fun(Key) ->
-			io:format("  ~s: ~p\n", 
-				  [Key,varc:variable_info(V,X,Key)])
-		end, Keys),
-	      io:format(" +xref: ~p\n", [get_cix_list(V,X,literal)]),
-	      io:format(" +watch: ~p\n", [get_cix_list(V,X,watch)]),
-	      io:format(" -xref: ~p\n", [get_cix_list(V,-X,literal)]),
-	      io:format(" -watch: ~p\n", [get_cix_list(V,-X,watch)])
+	      Level = varc:variable_info(V,X,level),
+	      Value = varc:value(V, X),
+	      io:format("~w: ~s = ~w @~w\n", [X, Sym, Value,Level]),
+	      if Verb ->
+		      lists:foreach(
+			fun(Key) ->
+				io:format("  ~s: ~p\n", 
+					  [Key,varc:variable_info(V,X,Key)])
+			end, Keys),
+		      io:format(" +xref: ~p\n", [get_cix_list(V,X,literal)]),
+		      io:format(" +watch: ~p\n", [get_cix_list(V,X,watch)]),
+		      io:format(" -xref: ~p\n", [get_cix_list(V,-X,literal)]),
+		      io:format(" -watch: ~p\n", [get_cix_list(V,-X,watch)]);
+		 true ->
+		      ok
+	      end
       end, List).
 
 get_cix_list(V, X, How) ->
@@ -1139,6 +1424,41 @@ format_clause_flag({watch,{P1,P2}}) -> io_lib:format("w:(~w,~w)",[P1,P2]);
 format_clause_flag({status,inqueue}) -> "s:inqueue";
 format_clause_flag({status,dead}) -> "s:dead";
 format_clause_flag({status,ok}) -> "s:ok".
+
+%% literal list from clauses (CNF or DNF)
+literal_list(Cs) ->
+    literal_list_(Cs,#{},false).
+
+deg_literal_list(Cs) ->
+    literal_list_(Cs,#{},true).
+
+literal_list_([C|Cs],Map,Deg) ->
+    Map1 = lists:foldl(
+	     fun(Li,Mi) ->
+		     maps:put(Li,maps:get(Li,Mi,0)+1,Mi)
+	     end, Map, C),
+    literal_list_(Cs, Map1, Deg);
+literal_list_([], Map, true) ->
+    maps:fold(fun(Li,Deg,Acc) -> [{Li,Deg}|Acc] end, [], Map);
+literal_list_([], Map, false) ->
+    maps:fold(fun(Li,_Deg,Acc) -> [Li|Acc] end, [], Map).
+
+%% make CNF from DNF
+
+dnf_to_cnf([]) ->
+    [];
+dnf_to_cnf([D]) ->
+    normalize_cnf([[Di] || Di <- D]);
+dnf_to_cnf([D1,D2|Ds]) ->
+    normalize_cnf(dnf_to_cnf_(Ds, [[Di,Dj] || Di <- D1, Dj <- D2])).
+
+dnf_to_cnf_([D|Ds], CNF) ->
+    dnf_to_cnf_(Ds,  lists:append([[[Di|Ci] || Di <- D] || Ci <- CNF]));
+dnf_to_cnf_([], CNF) ->
+    CNF.
+
+%% Generate a random CNF
+%% N clauses with clause length M with K variables (-K..K)
 
 generate_cnf(N,M,K) ->
     [generate_clause(M,K) || _ <- lists:seq(1,N)].
@@ -1190,3 +1510,51 @@ normalize_abs_clause_([Lj|L], Li, Acc) ->
     normalize_abs_clause_(L, Lj,[Li|Acc]);
 normalize_abs_clause_([], Li, Acc) ->
     [Li|Acc].
+
+%%
+%% "normalize" cnf
+%% 1 - remove tautology clauses X,..,!X
+%% 2 - remove repeats X...X
+%% 3 - propagate units
+%%
+normalize_cnf(Cs) ->
+    propagate_cnf(normalize_cnf_(Cs,[])).
+
+normalize_cnf_([Ci|Cs],Acc) ->
+    case normalize_clause(Ci) of
+	true ->
+	    normalize_cnf_(Cs,Acc);
+	[] ->
+	    [];
+	Cj ->
+	    normalize_cnf_(Cs,[Cj|Acc])
+    end;
+normalize_cnf_([],Acc) ->
+    Acc.
+
+%% propagate unit clauses
+propagate_cnf(Cs) ->
+    {Units, Clauses} = lists:partition(fun([_]) -> true; (_) -> false end, Cs),
+    propagate_units_(Units, Clauses, Units).
+
+propagate_units_([[Q]|Qs], Clauses, Units) ->
+    propagate_unit_(Q, Qs, Clauses, [], Units);
+propagate_units_([], Clauses, Units) ->
+    Units ++ Clauses.
+
+%% propagte U
+propagate_unit_(U, Qs, [Clause|Clauses], Acc, Units) ->
+    case lists:member(U, Clause) of
+	true ->
+	    propagate_unit_(U, Qs, Clauses, Acc, Units);
+	false ->
+	    case Clause -- [-U] of
+		[V] ->  %% new unit
+		    propagate_unit_(U, Qs++[V], Clauses, Acc, [V|Units]);
+		Clause1 ->
+		    propagate_unit_(U, Qs, Clauses, [Clause1|Acc], Units)
+	    end
+    end;
+propagate_unit_(_U, Qs, [], Acc, Units) ->
+    propagate_units_(Qs, Acc, Units).
+			       

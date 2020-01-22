@@ -392,7 +392,7 @@ make_variable(V, Bs) ->
 order_sort_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
     ?dbg("last=~w\n",[lists:reverse(RevLast)]),
-    ok = varc:order_sort_last(Bs#bs.vp, RevLast),
+    ok = varc:order_sort_last(Bs#bs.vp, lists:reverse(RevLast)),
     Bs1.
 
 order_sort_first(Bs, VarList) ->

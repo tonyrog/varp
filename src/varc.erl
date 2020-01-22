@@ -27,7 +27,6 @@
 -export([value/2]).
 -export([bind/2, bind/3]).
 -export([subst/3]).
--export([key/3]).
 -export([implication_clause/2]).
 -export([implication_level/2]).
 -export([implication_pos/2]).
@@ -253,10 +252,6 @@ bind(_Vp, X, Level) when is_integer(X),
 
 subst(_Vp, X, Y) when is_integer(X),
 		      is_integer(Y) ->
-    ?nif_stub().
-
--spec key(Vp::varc(), Lit::literal(), K::integer()) -> float().
-key(_Vp, Lit, _K) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec implication_clause(Vp::varc(), Lit::literal()) ->
@@ -495,9 +490,8 @@ order_sort(_Vp, _Key1, _Key2, _Arg) ->
 order_sort_first(_Vp, _VarList) ->
     ?nif_stub().
 
--spec order_sort_last(Vp::varc(), ReversedVarList::[literal()]) -> ok.
-%% The list of variables must be reversed!
-order_sort_last(_Vp, _VarList) ->
+-spec order_sort_last(Vp::varc(), List::[literal()]) -> ok.
+order_sort_last(_Vp, _List) ->
     ?nif_stub().
 
 clauseset_offset(_Vp, _Si) ->

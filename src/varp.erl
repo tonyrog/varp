@@ -1546,13 +1546,16 @@ decision_clause(Bs) ->
 decision_clause(_Bs, 0) ->
     [];
 decision_clause(Bs, Level) ->
-    case varc:get_decision(Bs#bs.vp, Level) of
-	f -> decision_clause(Bs,Level-1);
-	Xi -> decision_clause__(Bs,Level-1,[-Xi])
+    case varc:get_undo_state(Bs#bs.vp, Level) of
+	done -> decision_clause(Bs,Level-1);
+	undefined -> error(bad_level);
+	_ -> %% set or toggle
+	    Xi = varc:get_decision(Bs#bs.vp, Level),
+	    [-Xi|decision_clause__(Bs,Level-1)]
     end.
 
-decision_clause__(_Bs, 0, Clause) ->
-    Clause;
-decision_clause__(Bs, Level, Clause) ->
+decision_clause__(_Bs, 0) ->
+    [];
+decision_clause__(Bs, Level) ->
     Xi = varc:get_decision(Bs#bs.vp, Level),
-    decision_clause__(Bs, Level-1, [-Xi|Clause]).
+    [-Xi|decision_clause__(Bs, Level-1)].

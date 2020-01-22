@@ -81,7 +81,7 @@ collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
 		    collect(Bs, Count, N, Acc);
 		false ->
 		    if Count =:= 0 ->
-			    proof_end(Bs),
+			    %% proof_end(Bs),
 			    {?INCONSISTENT,[],Bs};
 		       true ->
 			    {?DONE,Acc,Bs}
@@ -124,7 +124,7 @@ count_(Bs, Count, N) when N =:= 0; Count < N ->
 		    count(Bs, Count, N);
 		false ->
 		    if Count =:= 0 ->
-			    proof_end(Bs),
+			    %% proof_end(Bs),
 			    {?INCONSISTENT,0,Bs};
 		       true ->
 			    {?DONE,Count,Bs}
@@ -154,10 +154,10 @@ proof_output(Bs) ->
 	    varp_formula:proof_output(Bs,$a,Clause)
     end.
 
-proof_end(Bs) ->
-    case ?GETOPT_BS(Bs, proof_output) of
-	none ->
-	    ok;
-	_ ->
-	    varp_formula:proof_output(Bs,$a,[])
-    end.    
+%% proof_end(Bs) ->
+%%    case ?GETOPT_BS(Bs, proof_output) of
+%%	none ->
+%%	    ok;
+%%	_ ->
+%%	    varp_formula:proof_output(Bs,$a,[])
+%%    end.    

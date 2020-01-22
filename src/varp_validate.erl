@@ -83,7 +83,10 @@ validate_loop(Fd,Type,Bs, I) ->
 	    case Res of
 		false -> %% ok valid
 		    varc:set_level(Bs#bs.vp,0),
-		    {true,_CIX} = varc:add_clause(Bs#bs.vp, Clause, gamma),
+		    case varc:add_clause(Bs#bs.vp, Clause, gamma) of
+			true -> ok;
+			{true,_} -> ok
+		    end,
 		    case varc:bcp(Bs#bs.vp) of
 			false ->
 			    case read_clause(Fd,Type,Bs) of

@@ -32,6 +32,7 @@
 // DEBUG_BCP          print clauses during bcp
 // DEBUG_NBCP         print level information during nbcp
 // DEBUG_ORDER        print order handling info
+// VALIDATE_ORDER     check data structures after re-order
 // LIT_INTEGER        literals are represented as integers, size=8,16,32
 // LIT_VALUE          store literal values instead of variable value
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
@@ -46,8 +47,8 @@
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
+// #define VALIDATE_ORDER
 // #define DEBUG_EDGE
-// #define DEBUG_ORDER
 // #define DEBUG_MEM
 // #define COUNT(vp, cnt)
 #define COUNT(vp, cnt) vp->counter[(cnt)]++
@@ -182,7 +183,6 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "bind",                2,  varp_bind ) \
     NIF( "bind",                3,  varp_bind ) \
     NIF( "subst",               3,  varp_subst ) \
-    NIF( "key",                 3,  varp_key ) \
     NIF( "implication_clause",  2,  varp_implication_clause ) \
     NIF( "implication_level",   2,  varp_implication_level ) \
     NIF( "implication_pos",     2,  varp_implication_pos ) \
@@ -414,8 +414,8 @@ typedef struct _literal_t
 typedef uint32_t cix_t;             // clause index type <<set:2,index:30>>
 typedef int32_t  pos_t;             // literal position type (-1 = invalid)
 #define CLAUSE_NONE  ((cix_t) -1)
-#define CLAUSE_TRUE  ((cix_t) -2)
-#define CLAUSE_FALSE ((cix_t) -3)
+#define CLAUSE_TRUE  ((cix_t) -2)   // never stored, just returned
+#define CLAUSE_FALSE ((cix_t) -3)   // never stored, just returned
 #define MAKE_CIX(si,ix)  (((si)<<30)|(ix))
 #define GET_SI(cix)      ((int)(((cix)>>30) & 3))
 #define GET_IX(cix)      ((cix)&0x3FFFFFFF)
@@ -456,8 +456,6 @@ typedef struct _variable_t     // :object_t
     ival_t    ivalue;
 #endif
     int vix;                   // variable index
-    float pkey[2];             // sort keys for positive literals
-    float nkey[2];             // sort keys for negative literals
     float activity;            // activity 
     int map_index;             // order_map index
     cix_t implication_clause;  // implication clause index
@@ -624,15 +622,15 @@ typedef struct _varp_t {
     dynvar(int*,order_map);     // literal order table
     int          sort_key[2];   // sort order -1,-2,1,2 (0=not used)
     dynvec(clause_t**,clauseset,NUM_CSET); // array of clausesets, entries may be null
-    clause_t*    unwatch;     // clauses to unwatch (check after bcp)
-    dynvar(undo_t*,undo);     // array of undo block, one for each level
-    size_t       num_bound;   // #bound variables
-    size_t       num_subst;   // #substitions < #bound
-    size_t       max_bound;   // statistics max bound variables since last check
-    int          first_unbound; // index in order_map of
-    int          next_unbound;// next
-    int level;                // current undo level (mark)
-    int max_level;            // statistics max level since last check
+    clause_t*    unwatch;      // clauses to unwatch (check after bcp)
+    dynvar(undo_t*,undo);       // array of undo block, one for each level
+    size_t       num_bound;     // #bound variables
+    size_t       num_subst;     // #substitions < #bound
+    size_t       max_bound;     // max bound variables since last check
+    int          first_unbound; // first unbound in order_map
+    int          next_unbound;  // next unbound in order_map
+    int level;                  // current undo level
+    int max_level;              // statistics max level since last check
 
     lqueue_t q;               // literal queue for propagation
 
@@ -649,6 +647,8 @@ typedef struct _varp_t {
     ErlNifEnv*      caller_env;    // message environment
 
     dynvar(lit_t*, tlit);          // temporary clause
+    dynvec(float*, pkey,2);        // temporary sort key
+    dynvec(float*, nkey,2);        // temporary sort key    
 
     allocator_t dyn_allocator;     // heap storage for dyn_t
     allocator_t var_allocator;     // heap storage for variable_t
@@ -803,8 +803,33 @@ DECL_ATOM(system_limit);
 #define VARP_FREE(ptr)      enif_free((ptr))
 #endif
 
+
+#ifdef DEBUG_MEM
 // NOT good for SMP!!! only light tetsing (atomics?)
-size_t varp_allocated = 0;
+ErlNifMutex* mem_lock;  // lock while updateing mem_allocated
+static size_t mem_allocated = 0;
+
+void debug_mem_init()
+{
+    mem_lock = enif_mutex_create("mem_lock");
+    mem_allocated = 0;
+    enif_fprintf(stdout, "allocated memory at load = %ld\r\n",
+		 mem_allocated);    
+}
+
+void debug_mem_inc(size_t change)
+{
+    enif_mutex_lock(mem_lock);
+    mem_allocated += change;
+    enif_mutex_unlock(mem_lock);
+}
+
+void debug_mem_dec(size_t change)
+{
+    enif_mutex_lock(mem_lock);
+    mem_allocated -= change;
+    enif_mutex_unlock(mem_lock);
+}
 
 void* debug_alloc(size_t n)
 {
@@ -812,7 +837,7 @@ void* debug_alloc(size_t n)
 
     if ((ptr = enif_alloc(sizeof(size_t) + n)) != NULL) {
 	*((size_t*)ptr) = n;
-	varp_allocated += n;
+	debug_mem_inc(n);
 	return ptr+sizeof(size_t);
     }
     return NULL;
@@ -825,12 +850,18 @@ void* debug_realloc(void* ptr, size_t n)
     else {
 	void* pptr = ptr - sizeof(size_t);
 	size_t m = *((size_t*)pptr);
-	varp_allocated -= m;
+	
 	if ((ptr = enif_realloc(pptr, sizeof(size_t) + n)) != NULL) {
 	    *((size_t*)ptr) = n;
-	    varp_allocated += n;
+	    if (n == m)
+		;
+	    else if (n > m)
+		debug_mem_inc(n - m);
+	    else
+		debug_mem_dec(m - n);
 	    return ptr+sizeof(size_t);
 	}
+	debug_mem_dec(m);
 	return NULL;
     }
 }
@@ -840,10 +871,11 @@ void debug_free(void* ptr)
     if (ptr != NULL) {
 	void* pptr = ptr - sizeof(size_t);
 	size_t m = *((size_t*)pptr);
-	varp_allocated -= m;
+	debug_mem_dec(m);	
 	enif_free(pptr);
     }
 }
+#endif
 
 static heap_t* new_heap_block(heap_t* next)
 {
@@ -1029,23 +1061,6 @@ static int dynarray_set_capacity(dynarray_t* dp, size_t capacity)
     return 0;
 }
 
-#if 0
-static int dynarray_grow_(dynarray_t* dp, size_t min_capacity)
-{
-    size_t capacity = dynarray_next_size(MAX(1,dp->capacity), min_capacity);
-    void* base;
-    if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
-	return -1;
-    dp->base = base;
-#ifdef DEBUG_MEM    
-    enif_fprintf(stdout, "dynarray_grow_: [%s] %d => %d\r\n",
-		 dp->name, dp->capacity, capacity);
-#endif
-    dp->capacity = capacity;
-    return 0;
-}
-#endif
-
 static inline int dynarray_resize(dynarray_t* dp, size_t size)
 {
     if (size > dp->capacity) {
@@ -1214,15 +1229,12 @@ static size_t get_number_of_clauses(varp_t* vp)
 // primitive negate a literal
 static inline literal_t* neg_ll(literal_t* lp)
 {
-    // return lp->sign ? &lp->var->lit[LIT_POS] : &lp->var->lit[LIT_NEG];
     return &lp->var->lit[!lp->sign];
 }
 
 static inline literal_t* vindex_ll(varp_t* vp, int i)
 {
     ASSERT(i != 0);
-    // return (i < 0) ? &vp->var_map[-i]->lit[LIT_NEG] :
-    // &vp->var_map[i]->lit[LIT_POS];
     return &vp->var_map[abs(i)]->lit[(i<0)];
 }
 
@@ -1521,12 +1533,21 @@ static inline literal_t* lookup_literal(literal_t* lp)
     return lp;
 }
 
+static inline bool_t variable_is_bound(varp_t* vp, variable_t* var)
+{
+    return get_vv(vp, var) != I_UNDEF;
+}
+
+static inline bool_t literal_is_bound(varp_t* vp, literal_t* lp)
+{
+    return get_vv(vp, lp->var) != I_UNDEF;
+}
+
 // return true if variable is constant or bound to other variable
 // vix is a variable index or the negation of the same
-static int vis_bound(varp_t* vp, int vix)
+static inline int vis_bound(varp_t* vp, int i)
 {
-    variable_t* var = vp->var_map[ABS(vix)];
-    return get_vv(vp, var) != I_UNDEF;
+    return variable_is_bound(vp, vp->var_map[ABS(i)]);
 }
 
 static inline int export_vv(varp_t* vp, variable_t* var)
@@ -1638,6 +1659,7 @@ static int32_t literal_array_hash(varp_t* vp, lit_t* lit, size_t size)
     return len + (s<<10) - s + (p^((x<<5)-x));
 }
 
+// FIXME make thread safe
 char* format_variable(variable_t* var)
 {
     static char vn1[32];
@@ -1653,6 +1675,7 @@ char* format_variable(variable_t* var)
     return varname;
 }
 
+// FIXME make thread safe
 char* format_literal(varp_t* vp, literal_t* lp)
 {
     static char ln1[32];
@@ -1677,6 +1700,7 @@ char* format_lit(varp_t* vp, lit_t l)
     else return format_literal(vp, l2ll(vp, l));
 }
 
+// FIXME make thread safe
 char* indent(int level)
 {
     static char buffer[257];
@@ -2119,16 +2143,12 @@ static inline void log_permanent(varp_t* vp, literal_t* x,
 
 // find next unbound variable scanning from (including) i
 
-static int order_next(varp_t* vp, int i, int skip)
+static int order_next(varp_t* vp, int i)
 {
     size_t n = dynvar_size(vp->var_map);
     while(i < (int)n) {
-	if (!vis_bound(vp, vp->order_map[i])) {
-	    if (!skip) {
-		return i;
-	    }
-	    skip--;
-	}
+	if (!vis_bound(vp, vp->order_map[i]))
+	    return i;
 	i++;
     }
     return 0;
@@ -2138,7 +2158,7 @@ static int order_next(varp_t* vp, int i, int skip)
 static int next_unbound(varp_t* vp)
 {
     int i;
-    if ((i = order_next(vp, vp->next_unbound, 0)) > 0)
+    if ((i = order_next(vp, vp->next_unbound)) > 0)
 	return vp->order_map[i];
     return 0;
 }
@@ -2228,7 +2248,7 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
     var->literal_pos = li;
     var->level = level;
     // move next_unbound if needed
-    if ((i = order_next(vp, vp->next_unbound, 0)) > 0)
+    if ((i = order_next(vp, vp->next_unbound)) > 0)
 	vp->next_unbound = i;
     else
 	vp->next_unbound = dynvar_size(vp->var_map);
@@ -2306,6 +2326,9 @@ static void unbind_level(varp_t* vp, int level)
 	DBG_BCP("%sUnbind %s\r\n",
 		indent(level), format_variable(bp));
 	clr_vv(vp, bp);
+	bp->implication_clause = CLAUSE_NONE;
+	bp->literal_pos = -1;
+	bp->level = -1;
 	if (bp->map_index < vp->next_unbound)
 	    vp->next_unbound = bp->map_index;
 	DBG_BCP("%sNextvar=%d\r\n", indent(level), vp->next_unbound);
@@ -2385,8 +2408,6 @@ static void init_variable(varp_t* vp, variable_t* var, int vix)
     var->next      = NULL;    
     var->flags     = 0;
     var->bound     = NULL;
-    var->pkey[0]   = var->pkey[1] = 0.0f;
-    var->nkey[0]   = var->nkey[1] = 0.0f;    
     var->activity  = ACTIVITY_INIT;
     var->map_index = vix;
     var->implication_clause = CLAUSE_NONE;
@@ -2626,8 +2647,7 @@ static int clauseset_hash_insert(varp_t* vp, int si)
     int i;
     size_t n = dynvec_size(vp->clauseset, si);
     
-    enif_fprintf(stdout, "clauseset_hash_insert: si=%dm n=%d\r\n",
-		 si, n);
+    DBG("clauseset_hash_insert: si=%dm n=%d\r\n", si, n);
     
     for (i = 0; i < (int)n; i++) {
 	clause_t* cp = get_clause(vp, MAKE_CIX(si,i));
@@ -2878,6 +2898,11 @@ static void cleanup(varp_t* vp)
     dynvar_clear(vp->undo);
     dynvar_clear(vp->tlit);
 
+    dynvec_clear(vp->pkey, 0);
+    dynvec_clear(vp->pkey, 1);
+    dynvec_clear(vp->nkey, 0);
+    dynvec_clear(vp->nkey, 1);    
+    
     cleanup_allocator(&vp->dyn_allocator);    
     cleanup_allocator(&vp->var_allocator);
     cleanup_allocator(&vp->sym_allocator);
@@ -3137,6 +3162,11 @@ static int setup(varp_t* vp, varp_config_t* config)
 
     if (dynvar_init(vp->tlit, 0) < 0)
 	goto error;
+
+    dynvec_init(vp->pkey,0,"[0]", 0);
+    dynvec_init(vp->pkey,1,"[1]", 0);
+    dynvec_init(vp->nkey,0,"[0]", 0);
+    dynvec_init(vp->nkey,1,"[1]", 0);
 
     vp->cdead = 0;
     vp->edead = 0;
@@ -3492,8 +3522,7 @@ static ERL_NIF_TERM varp_first_unbound_index(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    i = vp->first_unbound;
-    if ((i = order_next(vp, i, 0)) > 0)
+    if ((i = order_next(vp, vp->first_unbound)) > 0)
 	return enif_make_int(env, i);
     return ATOM(false);
 }
@@ -3510,7 +3539,7 @@ static ERL_NIF_TERM varp_next_unbound_index(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &i) || (i < 0))
 	return enif_make_badarg(env);
-    if ((i = order_next(vp, i+1, 0)) > 0)
+    if ((i = order_next(vp, i+1)) > 0)
 	return enif_make_int(env, i);
     return ATOM(false);
 }
@@ -3525,7 +3554,8 @@ static ERL_NIF_TERM varp_order_map(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &i) || (i < 0) || (i >= (int)vp->opt.vsize))
+    if (!enif_get_int(env, argv[1], &i) ||
+	(i < 0) || (i >= (int)dynvar_size(vp->var_map)))
 	return enif_make_badarg(env);
     return enif_make_int(env, vp->order_map[i]);
 }
@@ -3566,15 +3596,17 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
 //
 static int order_reset(varp_t* vp)
 {
-    size_t n = dynvar_size(vp->var_map);    
+    int vn = (int)dynvar_size(vp->var_map);    
     int i, l, u;
+
+    // FIXME: try to keep current order
     
     vp->order_map[0] = 0;
     vp->var_map[0]->map_index = 0;
     l = 0;
-    u = (int)n;
+    u = vn;
 
-    for (i=(int)n-1; i >= 1; i--) {
+    for (i=vn-1; i >= 1; i--) {
 	if (vis_bound(vp, i)) {
 	    l++;
 	    vp->order_map[l] = i;
@@ -3589,69 +3621,58 @@ static int order_reset(varp_t* vp)
     return u;
 }
 
-static void order_k_identity(varp_t* vp, int k)
+static void order_k_identity(varp_t* vp, int k, int vn)
 {
-    size_t n = dynvar_size(vp->var_map);    
     int i;
-    for (i = 1; i < (int)n; i++) {
-	variable_t* var = vp->var_map[i];
-	var->pkey[k] = (float) i + 0.1;  // make the positive side "win"
-	var->nkey[k] = (float) i;
+    for (i = 1; i < vn; i++) {
+	vp->pkey[k][i] = (float) i + 0.1;  // make the positive side "win"
+	vp->nkey[k][i] = (float) i;	
     }
 }
 
-static void order_k_random(varp_t* vp, int k, int order)
+static void order_k_random(varp_t* vp, int k, int vn)
 {
-    UNUSED(order);
-    size_t n = dynvar_size(vp->var_map);        
     int i;
-    for (i = 1; i < (int)n; i++) {
-	variable_t* var = vp->var_map[i];
+    for (i = 1; i < vn; i++) {
 	float v1 = arc4_random_uniform(&vp->as, 0x7fffff) / (float)0x7fffff;
 	float v2 = arc4_random_uniform(&vp->as, 0x7fffff) / (float)0x7fffff;
-
-	var->pkey[k] = v1;
-	var->nkey[k] = v2;	
+	vp->pkey[k][i] = v1;
+	vp->nkey[k][i] = v2;		
     }
 }
 
-static void order_k_undefined(varp_t* vp, int k)
+static void order_k_undefined(varp_t* vp, int k, int vn)
 {
-    size_t n = dynvar_size(vp->var_map);        
     int i;
-    for (i = 1; i < (int)n; i++) {
-	variable_t* var = vp->var_map[i];
-	var->pkey[k] = 0.0f;
-	var->nkey[k] = 0.0f;
+    for (i = 1; i < vn; i++) {
+	vp->pkey[k][i] = 0.0f;
+	vp->nkey[k][i] = 0.0f;
     }
 }
 
 // scan through all variables and calculate the degree count
-static void order_k_degree(varp_t* vp, int k)
+static void order_k_degree(varp_t* vp, int k, int vn)
 {
-    size_t n = dynvar_size(vp->var_map);    
     int i;
-    for (i = 1; i < (int)n; i++) {
+    for (i = 1; i < vn; i++) {
 	variable_t* var = vp->var_map[i];
-	var->pkey[k] = var->lit[LIT_POS].degree;
-	var->nkey[k] = var->lit[LIT_NEG].degree;
+	vp->pkey[k][i] = var->lit[LIT_POS].degree;
+	vp->nkey[k][i] = var->lit[LIT_NEG].degree;
     }
 }
 
 // scan through all variables and calculate the "rank"
 // foreach literal calculate Rj = Sum(1/Ni) where ni is the
 // size of the clause that the literal Lj is a member
-static void order_k_rank(varp_t* vp, int k)
+static void order_k_rank(varp_t* vp, int k, int vn)
 {
-    size_t n = dynvar_size(vp->var_map);    
     int i, si;
-    int vmax = (int) n;
+    int vmax = vn;
     int vmin = -vmax;
     
-    for (i = 1; i < (int)n; i++) {
-	variable_t* var = vp->var_map[i];	
-	var->pkey[k] = 0.0f;
-	var->nkey[k] = 0.0f;
+    for (i = 1; i < vn; i++) {
+	vp->pkey[k][i] = 0.0f;
+	vp->nkey[k][i] = 0.0f;	
     }
 
     for (si = 0; si < NUM_CSET; si++) {
@@ -3667,9 +3688,9 @@ static void order_k_rank(varp_t* vp, int k)
 		    for (j = 0; j < n; j++) {
 			int x = export_l(cp->lit[j]);
 			if ((x > 0) && (x < vmax))
-			    vp->var_map[x]->pkey[k] += r;
+			    vp->pkey[k][x] += r;
 			else if ((x < 0) && (x > vmin))
-			    vp->var_map[-x]->nkey[k] += r;
+			    vp->nkey[k][-x] += r;
 		    }
 		}
 	    }
@@ -3678,40 +3699,36 @@ static void order_k_rank(varp_t* vp, int k)
 }
 
 // Set sort key k to the activity level on the variable
-static void order_k_activity(varp_t* vp, int k)
+static void order_k_activity(varp_t* vp, int k, int vn)
 {
-    size_t n = dynvar_size(vp->var_map);    
     int i;
     
     switch(vp->opt.atype) {
     case mvsids:
-      for (i = 1; i < (int)n; i++) {
-	variable_t* var = vp->var_map[i];
-	var->pkey[k] = var->activity;
-	var->nkey[k] = var->activity;
-      }
-      break;
+	for (i = 1; i < vn; i++) {
+	    variable_t* var = vp->var_map[i];
+	    vp->pkey[k][i] = var->activity;
+	    vp->nkey[k][i] = var->activity;
+	}
+	break;
     case off:
     default:
-      for (i = 1; i < (int)n; i++) {
-	variable_t* var = vp->var_map[i];
-	var->pkey[k] = 0.0f;
-	var->nkey[k] = 0.0f;
-      }
-      break;
+	for (i = 1; i < vn; i++) {
+	    vp->pkey[k][i] = 0.0f;
+	    vp->nkey[k][i] = 0.0f;		
+	}
+	break;
     }
 }
 
 // Set sort key k to the user level on the literal
-// FIXME: clear user field before set/use
-static void order_k_user(varp_t* vp, int k)
+static void order_k_user(varp_t* vp, int k, int vn)
 {
-    size_t n = dynvar_size(vp->var_map);    
     int i;
-    for (i = 1; i < (int)n; i++) {
+    for (i = 1; i < vn; i++) {
 	variable_t* var = vp->var_map[i];
-	var->pkey[k] = var->lit[LIT_POS].user;
-	var->nkey[k] = var->lit[LIT_NEG].user;
+	vp->pkey[k][i] = var->lit[LIT_POS].user;
+	vp->nkey[k][i] = var->lit[LIT_NEG].user;		
     }
 }
 
@@ -3761,10 +3778,10 @@ void qsort_r(void *base, size_t nmemb, size_t size,
 
 //
 
-static int cmpk(variable_t* ap, variable_t* bp, int k)
+static int cmpk(varp_t* vp, int ai, int bi, int k)
 {
-    float a = MAX(ap->pkey[k],ap->nkey[k]);
-    float b = MAX(bp->pkey[k],bp->nkey[k]);
+    float a = MAX(vp->pkey[k][ai],vp->nkey[k][ai]);
+    float b = MAX(vp->pkey[k][bi],vp->nkey[k][bi]);
     if (a < b) return -1;
     else if (a > b) return 1;
     return 0;
@@ -3775,36 +3792,131 @@ static int cmp_keys QSORT_ARGS(const void* a, const void* b,void* arg)
     varp_t* vp = (varp_t*) arg;
     int k1 = vp->sort_key[0];
     int k2 = vp->sort_key[1];
-    variable_t* ap = vp->var_map[*((int*)a)];
-    variable_t* bp = vp->var_map[*((int*)b)];
+    int ai = *((int*)a);
+    int bi = *((int*)b);
     int r = 0;
 
     // k1=0 means key[k1] is undefined, k2=0 means key[k2] is undefined
     if (k1 > 0) {
-	if ((r = cmpk(ap, bp, k1-1)) != 0)
+	if ((r = cmpk(vp,ai,bi,k1-1)) != 0)
 	    return r;
     }
     else if (k1 < 0) {
-	if ((r = cmpk(bp, ap, -k1-1)) != 0)
+	if ((r = cmpk(vp,bi,ai,(-k1)-1)) != 0)
 	    return r;
     }
     if (k2 > 0)
-	r = cmpk(ap, bp, k2-1);
+	r = cmpk(vp,ai,bi,k2-1);
     else if (k2 < 0)
-	r = cmpk(bp, ap, -k2-1);
+	r = cmpk(vp,bi,ai,(-k2)-1);
     return r;
 }
+
+#if defined(DEBUG_ORDER) || defined(VALIDATE_ORDER)
+static void dump_order(varp_t* vp)
+{
+    int vn = (int)dynvar_size(vp->var_map);
+    int i;
+    
+    enif_fprintf(stdout, "u = %d\r\n", vp->first_unbound);
+    enif_fprintf(stdout, "#num = %d\r\n", vn-1);
+    enif_fprintf(stdout, "#bound = %d\r\n", vp->num_bound);
+    enif_fprintf(stdout, "#subst = %d\r\n", vp->num_subst);
+    enif_fprintf(stdout, "#unbound = %d\r\n", (vn-1) - vp->num_bound);
+
+    for (i = vp->first_unbound; i < vn; i++) {
+	int j = vp->order_map[i];
+	variable_t* var = vp->var_map[abs(j)];
+	enif_fprintf(stdout, "[%d]=([%f,%f],%d) ",
+		     (j < 0) ? -var->vix : var->vix,
+		     vp->pkey[0][i], vp->nkey[0][i],
+		     var->map_index);
+    }
+    enif_fprintf(stdout, "\r\n");
+}
+#endif
+
+#ifdef VALIDATE_ORDER
+
+// After sort all variables should be grouped in two groups
+// bound variables and then unbound variables
+// the first_unbound and next_unbound should be set correct
+//
+static int validate_order(varp_t* vp)
+{
+    int vn = (int)dynvar_size(vp->var_map);
+    int i;
+    int valid = 1;
+
+    i = 0;
+    while(i < vn) {
+	int j = abs(vp->order_map[i]);
+	variable_t* var = vp->var_map[j];
+	cix_t cix;
+	
+	if (!variable_is_bound(vp, var))
+	    break;
+	if ((cix=var->implication_clause) != CLAUSE_NONE) {
+	    clause_t* cp;
+	    if ((cp = get_clause(vp, cix)) == NULL) {
+		enif_fprintf(stdout, "implication clause for bound %s @%d %d:%d is deleted\r\n", format_variable(var), var->level, GET_SI(cix), GET_IX(cix));
+		valid = 0;
+	    }
+	}
+	if (var->level > 0) {
+	    enif_fprintf(stdout, "bound variable %s @%d bad level\r\n", format_variable(var), var->level);
+	    valid = 0;
+	}
+	i++;
+    }
+    if (i != vp->first_unbound) {
+	enif_fprintf(stdout, "first_unbound = %d != %d\r\n",
+		     vp->first_unbound, i);
+	valid = 0;
+    }
+    if (vp->first_unbound != vp->next_unbound) {
+	enif_fprintf(stdout, "first_unbound=%d != next_unbound=%d\r\n",
+		     vp->first_unbound, vp->next_unbound);
+	valid = 0;
+    }
+
+    // rest of variables must be unbound
+    while(i < vn) {
+	int j = abs(vp->order_map[i]);
+	variable_t* var = vp->var_map[j];
+	cix_t cix;
+	
+	if (variable_is_bound(vp, vp->var_map[j])) {
+	    enif_fprintf(stdout, "NOT unbound = %d\r\n", j);
+	    valid = 0;
+	}
+	if ((cix=var->implication_clause) != CLAUSE_NONE) {
+	    clause_t* cp;
+	    if ((cp = get_clause(vp, cix)) == NULL) {
+		enif_fprintf(stdout, "implication clause for unbound %s @%d %d:%d is deleted\r\n", format_variable(var), var->level, GET_SI(cix), GET_IX(cix));
+		valid = 0;
+	    }
+	}
+	if (var->level > 0) {
+	    enif_fprintf(stdout, "unbound variable %s @%d bad level\r\n", format_variable(var), var->level);
+	    valid = 0;
+	}	
+	i++;
+    }
+    return valid;
+}
+
+#endif
 
 
 static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
-    (void) argc;
+    UNUSED(argc);
     varp_t* vp;
     int arg = 0;
-    int i, u;
+    int i, u, vn;
     int order[2];
-    size_t n;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -3814,6 +3926,8 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     if (!enif_get_int(env, argv[2], &order[1]))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[3], &arg))
+	return enif_make_badarg(env);
+    if (vp->level != 0)
 	return enif_make_badarg(env);
 
     if (((order[0] & 0x0f) == ORDER_RANDOM) ||
@@ -3826,31 +3940,37 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	}
     }
 
+    vn = (int)dynvar_size(vp->var_map);
+    dynvec_resize(vp->pkey, 0, vn);
+    dynvec_resize(vp->nkey, 0, vn);
+    dynvec_resize(vp->pkey, 1, vn);
+    dynvec_resize(vp->nkey, 1, vn);
+
     // generate the sort keys 0 and 1
     for (i = 1; i < 3; i++) {
 	int k = i;
 	switch(order[i-1] & 0x0f) {
 	case ORDER_IDENTITY:
-	    order_k_identity(vp, k-1);
+	    order_k_identity(vp, k-1, vn);
 	    break;
 	case ORDER_UNDEFINED:
-	    order_k_undefined(vp, k-1);
+	    order_k_undefined(vp, k-1, vn);
 	    k = 0;
 	    break;
 	case ORDER_RANDOM:
-	    order_k_random(vp, k-1, order[i-1]);
+	    order_k_random(vp, k-1, vn);
 	    break;
 	case ORDER_DEGREE:
-	    order_k_degree(vp, k-1);
+	    order_k_degree(vp, k-1, vn);
 	    break;
 	case ORDER_RANK:
-	    order_k_rank(vp, k-1);
+	    order_k_rank(vp, k-1, vn);
 	    break;
 	case ORDER_ACTIVITY:
-	    order_k_activity(vp, k-1);
+	    order_k_activity(vp, k-1, vn);
 	    break;
 	case ORDER_USER:
-	    order_k_user(vp, k-1);
+	    order_k_user(vp, k-1, vn);
 	    break;
 	default:
 	    return enif_make_badarg(env);
@@ -3859,232 +3979,209 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    k = -k;
 	vp->sort_key[i-1] = k;
     }
-    // install identity order
-    n = dynvar_size(vp->var_map);    
+
     u = order_reset(vp);
     vp->first_unbound = u;  // index to first unbound variable!
     vp->next_unbound = u;   // index to first unbound variable!
     DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
     
     // sort unbound variables according to sort_keys
-    if (u < (int)n) {
+    if (u < vn) {
 	int i;
 	int k1, k2;
 
-	QSORT(vp->order_map+u, n-u, sizeof(int), cmp_keys, vp);
+	QSORT(vp->order_map+u, vn-u, sizeof(int), cmp_keys, vp);
 
 	k1 = ABS(vp->sort_key[0]);
 	k2 = ABS(vp->sort_key[1]);
-	// update map_index of sorted variables also update the sign
-	// FIME: update INTERLEAVE SORT 1 2 3 4 5 6 7 => 1 7 2 6 3 5 4
-	// X1/Y1 X1/Y2 X1/Y2  X2/Y
-	for (i = u; i < (int)n; i++) {
+	for (i = u; i < vn; i++) {
 	    int v = vp->order_map[i];
 	    variable_t* var = vp->var_map[v];
 	    float r;
 	    
 	    var->map_index = i;
-	    r = var->pkey[k1] - var->nkey[k1];
+	    r = vp->pkey[k1][i] - vp->nkey[k1][i];
 	    if (ABS(r) < EPSILON)
-		r = (var->pkey[k2] - var->nkey[k2]);
+		r = (vp->pkey[k2][i] - vp->nkey[k2][i]);
 	    if (r < 0.0)
 		vp->order_map[i] = -v;
 	}
     }
     
-#ifdef DEBUG_ORDER
-    enif_fprintf(stdout, "u = %d\r\n", u);
-    enif_fprintf(stdout, "#num = %d\r\n", n-1);
-    enif_fprintf(stdout, "#bound = %d\r\n", vp->num_bound);
-    enif_fprintf(stdout, "#subst = %d\r\n", vp->num_subst);
-    enif_fprintf(stdout, "#unbound = %d\r\n", (n-1) - vp->num_bound);
-
-    for (i = u; i < (int)n; i++) {
-	int j = vp->order_map[i];
-	variable_t* var = vp->var_map[abs(j)];
-	enif_fprintf(stdout, "[%d]=([%f,%f],%d) ",
-		     (j < 0) ? -var->vix : var->vix,
-		     var->pkey[0], var->nkey[0],
-		     var->map_index);
-    }
-    enif_fprintf(stdout, "\r\n");
+#ifdef VALIDATE_ORDER
+    validate_order(vp);
 #endif
     
     return ATOM(ok);
 }
 
-// move the list of variables first among the unbound variables
-// and keep the order of the other variables.
-// this is done through by copy the various part into a new
-// array.
+//
+// sort bound < listed(&unmarked) < unbound
+//
+static int cmp_order_first QSORT_ARGS(const void* a, const void* b,void* arg)
+{
+    varp_t* vp = (varp_t*) arg;
+    int ai = *((int*)a);
+    int bi = *((int*)b);
+    literal_t* ap = vindex_ll(vp, ai);
+    literal_t* bp = vindex_ll(vp, bi);
+
+    if (literal_is_bound(vp, ap)) {  // a bound
+	if (!literal_is_bound(vp, bp)) return -1;
+	return 0;  // both bound keep sort
+    }
+    else {  // a unbound
+	if (literal_is_bound(vp, bp)) return 1;
+	else if ((ap->user == 0) && (bp->user == 0)) return 0;
+	else if (ap->user == 0) return 1;
+	else if (bp->user == 0) return -1;
+	return (int)ap->user - (int)bp->user;
+    }
+}
+
 static ERL_NIF_TERM varp_order_sort_first(ErlNifEnv* env, int argc,
 					  const ERL_NIF_TERM argv[])
 {
-    (void) argc;
+    UNUSED(argc);
     varp_t* vp;
     ERL_NIF_TERM list;
     ERL_NIF_TERM head, tail;
-    int* map;
-    unsigned int ui, mi;
+    int i, u;
     size_t n;
     ERL_NIF_TERM result = ATOM(ok);
+    uint32_t pos;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-
-    // validate list
-    list = argv[1];
-    while (enif_get_list_cell(env, list, &head, &tail)) {
-	lit_t xp;
-	if (!vif_get_lit(env, vp, head, &xp))
-	    return enif_make_badarg(env);
-	if (is_constant_l(vp, xp))
-	    return enif_make_badarg(env);
-	list = tail;
-    }
-    if (!enif_is_empty_list(env, list))
-	return enif_make_badarg(env);
-
-    n = dynvar_size(vp->var_map);
-    if (!(map = VARP_ALLOC(n*sizeof(int)))) // dynvar!?
+    if (vp->level != 0)
 	return enif_make_badarg(env);
 
     ASSERT(vp->marked == NULL);
-    map[0] = 0;
-    mark_variable(vp, vp->var_map[0]);
-    mi = 1;
-    // copy all bound variables
-    while ((mi < n) && vis_bound(vp, vp->order_map[mi])) {
-	int x = vp->order_map[mi];
-	mark_variable(vp, vp->var_map[ABS(x)]);
-	map[mi++] = x;
+
+    // clear all user counts
+    n = dynvar_size(vp->var_map);
+    for (i = 1; i < (int)n; i++) {
+	vp->var_map[i]->lit[0].user = 0;
+	vp->var_map[i]->lit[1].user = 0;
     }
-    ui = mi;  // save the position for the first unbound variabel
-    vp->first_unbound = ui;  // remember the position
-    vp->next_unbound = ui;   // also for the interator
-    DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
-    
-    // copy/move variables in the list (not already copied)
+
+    // mark literals (variables) in list
     list = argv[1];
+    pos = 1;
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	literal_t* lp;
 	if (!vif_get_literal(env, vp, head, &lp)) {
-	    VARP_FREE(map);
 	    result = enif_make_badarg(env);
 	    goto done;
 	}
-	if (!is_marked(lp->var)) { // not moved
+	if (!literal_is_bound(vp,lp) && !is_marked(lp->var)) {
 	    mark_variable(vp, lp->var);
-	    lp->var->map_index = mi;
-	    map[mi++] = export_ll(lp);
+	    lp->user = pos++;
 	}
 	list = tail;
     }
-    // move rest of the varaibles not already moved
-    while(ui < n) {
-	int x = vp->order_map[ui];
-	int xi = ABS(x);
-	if (!is_marked(vp->var_map[xi])) { // not moved
-	    mark_variable(vp, vp->var_map[xi]);     // mark as moved
-	    vp->var_map[xi]->map_index = mi;
-	    map[mi++] = x;
-	}
-	ui++;
+    if (!enif_is_empty_list(env, list)) {
+	result = enif_make_badarg(env);
+	goto done;
     }
-    VARP_FREE(vp->order_map);
-    vp->order_map = map;
-done:    
+
+    QSORT(vp->order_map+1, n-1, sizeof(int), cmp_order_first, vp);
+    
+    u = order_next(vp, 1);  // FIXME: better
+    vp->first_unbound = u;  // remember the position
+    vp->next_unbound = u;   // also for the interator
+
+#ifdef VALIDATE_ORDER
+    validate_order(vp);
+#endif    
+    
+done:
     unmark_all_variables(vp);  // MUST clear all marks !!!
     return result;
 }
 
-// move the list of variables last (REVERSED) among the unbound variables
-// and keep the order of the other variables.
-// this is done through by copy the various part into a new
-// array.
+
+//
+// sort bound < unbound < listed(&unmarked)
+//
+static int cmp_order_last QSORT_ARGS(const void* a, const void* b,void* arg)
+{
+    varp_t* vp = (varp_t*) arg;
+    int ai = *((int*)a);
+    int bi = *((int*)b);
+    literal_t* ap = vindex_ll(vp, ai);
+    literal_t* bp = vindex_ll(vp, bi);
+
+    if (literal_is_bound(vp, ap)) {  // a bound
+	if (!literal_is_bound(vp, bp)) return -1;
+	return 0;  // both bound keep sort
+    }
+    else {  // a unbound
+	if (literal_is_bound(vp, bp)) return 1;
+	else if ((ap->user == 0) && (bp->user == 0)) return 0;
+	else if (ap->user == 0) return -1;
+	else if (bp->user == 0) return 1;
+	return (int)ap->user - (int)bp->user;
+    }
+}
 
 static ERL_NIF_TERM varp_order_sort_last(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[])
 {
-    (void) argc;
+    UNUSED(argc);
     varp_t* vp;
     ERL_NIF_TERM list;
     ERL_NIF_TERM head, tail;
-    int* map;
-    unsigned int ui, mi;
-    size_t n;    
+    int i, u;
+    size_t n;
     ERL_NIF_TERM result = ATOM(ok);
+    uint32_t pos;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
+    if (vp->level != 0)
+	return enif_make_badarg(env);    
 
-    // validate list
-    list = argv[1];
-    while (enif_get_list_cell(env, list, &head, &tail)) {
-	lit_t xp;
-	if (!vif_get_lit(env, vp, head, &xp))
-	    return enif_make_badarg(env);
-	if (is_constant_l(vp, xp))
-	    return enif_make_badarg(env);
-	list = tail;
-    }
-    if (!enif_is_empty_list(env, list))
-	return enif_make_badarg(env);
+    ASSERT(vp->marked == NULL);
 
+    // clear all user counts
     n = dynvar_size(vp->var_map);
-    if (!(map = VARP_ALLOC(n*sizeof(int))))
-	return enif_make_badarg(env);
-
-    ASSERT(vp->marked == NULL);    
-
-    map[0] = 0;
-    mark_variable(vp, vp->var_map[0]);
-    mi = 1;
-    // copy all bound variables
-    while ((mi < n) && vis_bound(vp, vp->order_map[mi])) {
-	int x = vp->order_map[mi];
-	mark_variable(vp, vp->var_map[ABS(x)]);
-	map[mi++] = x;
+    for (i = 1; i < (int)n; i++) {
+	vp->var_map[i]->lit[0].user = 0;
+	vp->var_map[i]->lit[1].user = 0;
     }
-    ui = mi;  // save the position for the first unbound variabel
-    vp->first_unbound = ui;  // remember the position
-    vp->next_unbound = ui;   // also for the interator
-    DBG_BCP("%sNextvar=%d\r\n", indent(vp->level), vp->next_unbound);
-    
-    mi = n;  // last position(+1)
-    // copy/move variables in the list (not already copied)
+
+    // mark literals (variables) in list
     list = argv[1];
+    pos = 1;
     while (enif_get_list_cell(env, list, &head, &tail)) {
 	literal_t* lp;
 	if (!vif_get_literal(env, vp, head, &lp)) {
-	    VARP_FREE(map);
 	    result = enif_make_badarg(env);
 	    goto done;
 	}
-	if (!is_marked(lp->var)) {  // not moved
-	    mark_variable(vp, lp->var);  // mark as moved
-	    lp->var->map_index = --mi;
-	    map[mi] = export_ll(lp);
+	if (!literal_is_bound(vp,lp) && !is_marked(lp->var)) {
+	    mark_variable(vp, lp->var);
+	    lp->user = pos++;
 	}
 	list = tail;
     }
-
-    mi = ui;
-    // move rest of the varaibles not already moved
-    while(ui < n) {
-	int x = vp->order_map[ui];
-	int xi = ABS(x);
-	if (!is_marked(vp->var_map[xi])) { // not moved
-	    mark_variable(vp, vp->var_map[xi]);     // mark as moved
-	    vp->var_map[xi]->map_index = mi;
-	    map[mi++] = x;
-	}
-	ui++;
+    if (!enif_is_empty_list(env, list)) {
+	result = enif_make_badarg(env);
+	goto done;
     }
-    VARP_FREE(vp->order_map);
-    vp->order_map = map;
-done:
-    unmark_all_variables(vp);  // MUST clear all marks !!!    
+
+    QSORT(vp->order_map+1, n-1, sizeof(int), cmp_order_last, vp);
+    u = order_next(vp, 1);  // FIXME better
+    vp->first_unbound = u;  // remember the position
+    vp->next_unbound = u;   // also for the interator
+
+#ifdef VALIDATE_ORDER
+    validate_order(vp);
+#endif    
+    
+done:    
+    unmark_all_variables(vp);  // MUST clear all marks !!!
     return result;
 }
 
@@ -4109,34 +4206,6 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     case I_BOUND: return ATOM(undefined);
     default: return enif_make_int(env, 0);
     }
-}
-
-static ERL_NIF_TERM varp_key(ErlNifEnv* env, int argc,
-			     const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;    
-    literal_t* xp;
-    int x;    
-    int k;
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &x))
-	return enif_make_badarg(env);
-    if ((x == 0) || (ABS(x) >= (int)dynvar_size(vp->var_map))) {
-	DBG("literal %d out of range\r\n", x);
-	return enif_make_badarg(env);
-    }
-    if (!enif_get_int(env, argv[2], &k))
-	return enif_make_badarg(env);
-    if ((k < 0) || (k > 1))
-	return enif_make_badarg(env);
-    xp = vindex_ll(vp, x);
-    if (x < 0)
-	return enif_make_double(env, xp->var->nkey[k]);
-    else
-	return enif_make_double(env, xp->var->pkey[k]);
 }
 
 // retrieve implication clause
@@ -4223,7 +4292,7 @@ static ERL_NIF_TERM varp_is_bound(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
-    return make_boolean(env, get_vv(vp, var) != I_UNDEF);
+    return make_boolean(env, variable_is_bound(vp, var));
 }
 
 static ERL_NIF_TERM varp_is_equal(ErlNifEnv* env, int argc,
@@ -4272,7 +4341,7 @@ static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
 	vp->caller_env = env;
 	vp->undo[level].decision = xp;
 	vp->undo[level].t = uSET;
-	put_l(vp, xp, I_TRUE, -1, -1, level);
+	put_l(vp, xp, I_TRUE, -1, CLAUSE_NONE, level);
 	vp->caller_env = NULL; 
 	return ATOM(true);
     }
@@ -4337,7 +4406,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 
     dynvar_resize(vp->tlit, 0);
     
-    while(trail) {
+    do {
 	int i;
 	lit_t u = ll2l(vp, lp);
 	clause_t* cp;
@@ -4346,7 +4415,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    result = enif_make_badarg(env);
 	    goto done;
 	}
-	cp->stamp = vp->bcp_counter;
+	cp->stamp = vp->bcp_counter;  // mark clause as used in conflict
 
 	// conflict reason
 	for (i = 0; i < (int)cp->size; i++) {
@@ -4380,7 +4449,8 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    if ((trail = trail->next) != NULL)
 		lp = literal_vv(vp, trail);
 	}
-    }
+    } while(trail);
+    
     result = enif_make_badarg(env);
     goto done;
     
@@ -4593,11 +4663,12 @@ static int clause_watch(varp_t* vp, clause_t* cp)
 	la[0], la[1], la[2],
 	va[0], va[1], va[2],
 	pa[0], pa[1], pa[2]);
-*/
+
     if ((pa[0] < 0) || (pa[1] < 0)) {
 	printf("Could not set TWL\r\n");
 	return -1;
     }
+*/
 
     // setup watch
     clause_watch_insert(vp, cp, pa[0], pa[1]);
@@ -4657,10 +4728,10 @@ static inline void xref_del(varp_t* vp, clause_t* cp, pos_t p)
     literal_t* lp = l2ll(vp, cp->lit[p]);
     if (lp->xref != NULL) {
 	xref_t* xptr  = dynarray_element(lp->xref,0);
-	size_t  xsize = dynarray_size(lp->xref);
+	int xn = (int)dynarray_size(lp->xref);
 	int i;
 
-	for (i = 0; i < (int)xsize; i++) {
+	for (i = 0; i < xn; i++) {
 	    if ((xptr->cix == cp->cix) && (xptr->p == p)) {
 		dynarray_delete(lp->xref, i);
 		return;
@@ -5776,7 +5847,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     case uTOGGLE:
 	// note xp is already toggled by undo!
 	xp = vp->undo[level].decision;
-	put_l(vp, xp,  PHASE_INIT, -1, -1, level);
+	put_l(vp, xp,  PHASE_INIT, -1, CLAUSE_NONE, level);
 	vp->undo[level].t = uDONE;
 	DBG_ORDER("%sNbcp: t=uTOGGLE decision=%s\r\n",
 		  indent(level), format_lit(vp, xp));
@@ -5797,7 +5868,7 @@ next:
     xp = vindex_l(vp, x);
     vp->undo[level].decision = xp;
     vp->undo[level].t = uSET;
-    put_l(vp, xp, PHASE_INIT, -1, -1, level);
+    put_l(vp, xp, PHASE_INIT, -1, CLAUSE_NONE, level);
     DBG_ORDER("%sNbcp: next decision=%s\r\n",
 	      indent(level), format_lit(vp, xp));
 bcp:
@@ -6202,7 +6273,7 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 	if (lit[0] == L_FALSE(vp))
 	    return CLAUSE_FALSE;
 	if (put_unit) { // else make a real clause of the unit
-	    put_l(vp, lit[0], I_TRUE, -1, -1, 0);
+	    put_l(vp, lit[0], I_TRUE, -1, CLAUSE_NONE, 0);
 	    return CLAUSE_TRUE;
 	}
     }
@@ -6627,22 +6698,31 @@ static int cmp_xref QSORT_ARGS(const void* a, const void* b,void* arg)
     return 0;
 }
 
+static inline void remap_cix(cix_t* cip, const char* tag,
+			     int si, int* remap, int n)
+{
+    UNUSED(n);
+    UNUSED(tag);
+    cix_t cix = *cip;
+    if ((cix != CLAUSE_NONE) && (GET_SI(cix) == si)) {
+	int i = GET_IX(cix);
+	ASSERT(i < n);
+	DBG("remap %s si=%d, %d => %d\r\n", tag, si, i, remap[i]);
+	*cip = MAKE_CIX(si, remap[i]);
+    }
+}    
+
 // use remap (reverse map) to update cix in cross reference after
 // sorting clauses.
 static void xref_remap(literal_t* lp, int si, int* remap, int n)
 {
-    UNUSED(n);
     xref_t* xptr0 = dynarray_element(lp->xref, 0);
     xref_t* xptr = xptr0;
     size_t len0  = dynarray_size(lp->xref);
     size_t len = len0;
 
     while(len--) {
-	if (GET_SI(xptr->cix) == si) {
-	    int ix = GET_IX(xptr->cix);
-	    ASSERT(ix < n);
-	    xptr->cix = MAKE_CIX(si, remap[ix]);
-	}
+	remap_cix(&xptr->cix, "xref", si, remap, n);
 	xptr++;
     }
     // must sort for subst to work!
@@ -6652,28 +6732,18 @@ static void xref_remap(literal_t* lp, int si, int* remap, int n)
 
 static void edge_remap(literal_t* lp, int si, int* remap, int n)
 {
-    UNUSED(n);    
     edge_t* ep = lp->elist;
     while(ep != NULL) {
-	if (GET_SI(ep->cix) == si) {
-	    int ix = GET_IX(ep->cix);
-	    ASSERT(ix < n);	    
-	    ep->cix = MAKE_CIX(si, remap[ix]);
-	}
+	remap_cix(&ep->cix, "edge", si, remap, n);
 	ep = ep->next;
     }
 }
 
 static void hashtab_remap(varp_t* vp,int i,int si,int* remap,int n)
 {
-    UNUSED(n);
     hlink_t* hp = vp->hashtab[i];
     while (hp != NULL) {
-	if (GET_SI(hp->cix) == si) {
-	    int ix = GET_IX(hp->cix);
-	    ASSERT(ix < n);
-	    hp->cix = MAKE_CIX(si, remap[ix]);
-	}
+	remap_cix(&hp->cix, "hash", si, remap, n);
 	hp = hp->next;
     }
 }
@@ -6701,6 +6771,7 @@ static int cmp_stamp QSORT_ARGS(const void* a, const void* b,void* arg)
     return 0;
 }
 
+#if defined(DEBUG)
 static void print_clauseset(varp_t* vp, int si, size_t n)
 {
     int i;
@@ -6715,6 +6786,7 @@ static void print_clauseset(varp_t* vp, int si, size_t n)
 	}
     }
 }
+#endif
 
 //
 // Sort and "compact" clause put all "holes" (NULL clauses)
@@ -6741,8 +6813,8 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 
     cm = vp->clauseset[si];
 
-//    enif_fprintf(stdout, "SORT si=%d, %d clauses\r\n", si, n);
-//    print_clauseset(vp, si, n);
+    // enif_fprintf(stdout, "SORT si=%d, %d clauses\r\n", si, n);
+    // print_clauseset(vp, si, n);
     
     QSORT(cm, n, sizeof(clause_t*), cmp_stamp, vp);
 
@@ -6753,7 +6825,7 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	int m;
 
 	h = clauseset_plug_hole(vp, si, n-1);
-	// enif_fprintf(stdout, "SORT plugged %d holes\r\n", h);	
+	// enif_fprintf(stdout, "SORT plugged %d holes\r\n", h);
 	m = n - h;
 
 	for (ix = 0; ix < m; ix++) {
@@ -6765,27 +6837,37 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	// enif_fprintf(stdout, "SORTED + remapped %d\r\n", m);
 	// print_clauseset(vp, si, m);
 
+	// remap implication_clauses
+	{
+	    int i;
+	    size_t vn = dynvar_size(vp->var_map);
+	    for (i = 1; i < (int)vn; i++) {
+		remap_cix(&(vp->var_map[i]->implication_clause), "imp",
+			  si, rmap, n);
+	    }
+	}
+
 	// now map all xrefs and edges
 	if (vp->opt.xref) {
 	    int i;
-	    size_t n = dynvar_size(vp->var_map);
-	    for (i = 1; i < (int)n; i++) {
+	    size_t vn = dynvar_size(vp->var_map);
+	    for (i = 1; i < (int)vn; i++) {
 		xref_remap(&vp->var_map[i]->lit[0], si, rmap, n);
 		xref_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.edge) {
 	    int i;
-	    size_t n = dynvar_size(vp->var_map);
-	    for (i = 1; i < (int)n; i++) {
+	    size_t vn = dynvar_size(vp->var_map);
+	    for (i = 1; i < (int)vn; i++) {
 		edge_remap(&vp->var_map[i]->lit[0], si, rmap, n);	    
 		edge_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.hash && (si != ALPHA)) {
 	    int i;
-	    size_t hsize = dynvar_size(vp->hashtab);
-	    for (i = 0; i < (int)hsize; i++)
+	    size_t hn = dynvar_size(vp->hashtab);
+	    for (i = 0; i < (int)hn; i++)
 		hashtab_remap(vp, i, si, rmap, n);
 	}
     }
@@ -7559,12 +7641,12 @@ static void varp_dtor(ErlNifEnv* env, void* obj)
     varp_t* vp = (varp_t*) obj;
 #ifdef DEBUG_MEM
     enif_fprintf(stdout, "allocated memory before dtor = %ld\r\n",
-	   varp_allocated);
+		 mem_allocated);
 #endif    
     cleanup(vp);
 #ifdef DEBUG_MEM
     enif_fprintf(stdout, "allocated memory after dtor = %ld\r\n",
-		 varp_allocated);
+		 mem_allocated);
 #endif
 }
 
@@ -7586,6 +7668,10 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     UNUSED(env);
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
+
+#ifdef DEBUG_MEM
+    debug_mem_init();
+#endif
 
     rinit.dtor = varp_dtor;
     rinit.stop = varp_stop;

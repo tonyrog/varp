@@ -80,32 +80,30 @@ bt(Bs,Func,Acc) ->
 
 %% initalise backtrack stack
 init(Bs) ->
-    case varc:first_unbound_index(Bs#bs.vp) of
+    case varc:next_unbound(Bs#bs.vp) of
 	false ->
 	    {model,[]};
-	I ->
-	    Xi = varc:order_map(Bs#bs.vp, I),
-	    {true,[{I,0,[Xi,-Xi],?LEVEL}]}
+	Xi ->
+	    {true,[{0,[Xi,-Xi],?LEVEL}]}
     end.
 
-next([{_,_,[],_}|Stack1],Bs) ->
+next([{_,[],_}|Stack1],Bs) ->
     undo(Bs,Stack1),
     next(Stack1,Bs);
-next([{I,_,[Xi|Xs],Level}|Stack],Bs) ->
+next([{_,[Xi|Xs],Level}|Stack],Bs) ->
     varc:set_level(Bs#bs.vp,Level),
     case eq_eval(Bs,Xi,Level) of
 	false ->
-	    Stack1 = [{I,Xi,Xs,Level}|Stack],
+	    Stack1 = [{Xi,Xs,Level}|Stack],
 	    proof_output(Bs, Stack1),
 	    undo_level(Bs,Level),
 	    next(Stack1,Bs);
 	true ->
-	    case varc:next_unbound_index(Bs#bs.vp, I) of
+	    case varc:next_unbound(Bs#bs.vp) of
 		false ->
-		    {model,[{I,Xi,Xs,Level}|Stack]};
-		J ->
-		    Xj = varc:order_map(Bs#bs.vp, J),
-		    {true,[{J,0,[Xj,-Xj],Level+1},{I,Xi,Xs,Level}|Stack]}
+		    {model,[{Xi,Xs,Level}|Stack]};
+		Xj ->
+		    {true,[{0,[Xj,-Xj],Level+1},{Xi,Xs,Level}|Stack]}
 	    end
     end;
 next([],_Bs) ->
@@ -142,12 +140,12 @@ loop_(Stack,Func,I,Count,Acc,Bs) ->
 	    end
     end.
 	
-undo(Bs,[{_,_,_,Level}|_]) ->
+undo(Bs,[{_,_,Level}|_]) ->
     undo_level(Bs,Level);
 undo(_Bs,[]) ->
     ok.
 
-undo_all(Bs,[{_,_,_,Level}|Stack]) ->
+undo_all(Bs,[{_,_,Level}|Stack]) ->
     undo_level(Bs,Level),
     undo_all(Bs, Stack);
 undo_all(_Bs, []) ->
@@ -157,15 +155,15 @@ undo_level(Bs, Level) ->
     ?dbg("~sundo@~w\n", [indent(Level),Level]),
     varc:undo_level(Bs#bs.vp,Level).
     
-%% Xi is the current decision, that failed, 
+%% Xi is the current decision, that failed,
 %% Stack contains the negated previous decisions
 proof_output(Bs, Stack) ->
     case ?GETOPT_BS(Bs, proof_output) of
 	none ->
 	    ok;
 	_ ->
-	    Stack1 = lists:dropwhile(fun({_,_,Xs,_}) -> Xs =:= [] end, Stack),
-	    Clause = [-Xj || {_,Xj,_,_} <- Stack1], %% decision clause
+	    Stack1 = lists:dropwhile(fun({_,Xs,_}) -> Xs =:= [] end, Stack),
+	    Clause = [-Xj || {Xj,_,_} <- Stack1], %% decision clause
 	    varp_formula:proof_output(Bs,$a,Clause)
     end.
 

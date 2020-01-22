@@ -38,6 +38,11 @@
 	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
 	]).
 
+-define(REORDER_2,
+	[
+	 %% {0,?ORDER_OPT(?ORDER_IDENTITY,?ORDER_UNDEFINED)}
+	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_UNDEFINED)}
+	]).
 
 options() ->
     [#{ long  => "timeout",
@@ -160,7 +165,7 @@ options() ->
      #{ key => reorder,
 	spec => {list,
 		 {integer,{atom,{list,term}}}},
-	default => ?REORDER_1,
+	default => ?REORDER_2,
 	description => "Internal reorder list"}
     ].
      
@@ -200,19 +205,19 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     init(Bs1, Param, MaxLearned, M0).
 
 init(Bs, Param, MaxLearned, MR) ->
-    loop(Bs,Param,?TOP_LEVEL,MaxLearned,MR,1,[]).
+    loop(Bs,Param,?TOP_LEVEL,MaxLearned,MR,[]).
 
-loop(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
+loop(Bs,Param,Level,MaxLearned,MR,Stack) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
-	    loop_(Bs,Param,Level,MaxLearned,MR,I,Stack);
+	    loop_(Bs,Param,Level,MaxLearned,MR,Stack);
 	{true, What} ->
 	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    return(What, MR, Bs)
     end.
 
-loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
+loop_(Bs,Param,Level,MaxLearned,MR,Stack) ->
     ?dbg("loop_: BCP\n",[]),
     case varc:bcp(Bs#bs.vp) of
 	false ->
@@ -223,10 +228,10 @@ loop_(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 	       Level =:= 0 ->
 		    return(?CONTINUE,MR,Bs);
 	       true ->
-		    contradiction(Bs,Param,Level,MaxLearned,MR,I,Stack)
+		    contradiction(Bs,Param,Level,MaxLearned,MR,Stack)
 	    end;
 	true ->
-	    next(Bs,Param,Level,MaxLearned,MR,I,Stack)
+	    next(Bs,Param,Level,MaxLearned,MR,Stack)
     end.
 
 return(What, MR, Bs) ->
@@ -237,7 +242,7 @@ return(What, MR, Bs) ->
 	    {What,MR#m.n,Bs}
     end.
 
-contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
+contradiction(Bs,Param,Level,MaxLearned,MR,Stack) ->
     ClauseList0 = varp_conflict:analyze(Bs,Level,maps:get(bump,Param)),
     varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ClauseList1 = 
@@ -322,7 +327,7 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 
     undo_until(Bs, Level, JLevel),  %% undo until JLevel
     varc:set_level(Bs#bs.vp, JLevel),
-    {INext,Stack1} = pop_until(Bs,Stack,JLevel),
+    Stack1 = pop_until(Bs,Stack,JLevel),
 
     %% install unit clauses
     Bs0 = lists:foldl(
@@ -391,34 +396,30 @@ contradiction(Bs,Param,Level,MaxLearned,MR,_I,Stack) ->
 		   true ->
 			MaxLearned
 		end,
-	    %%Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
-	    %%NU = varp_formula:number_of_unbound(Bs2),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs,Param,MaxLearned1,MR);
        DoPurge, Learned > MaxLearned ->
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
-	    %% {INext1,[]} = backjump(Bs2,Stack1,?TOP_LEVEL),
-	    ?dbg("del_unused_clauses\n", []),
 	    varp_formula:del_unused_clauses(Bs),
-	    Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
-	    io:format("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
-		      [Learned, MaxLearned,Learned1]),
+	    ?dbg("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
+		 [Learned, MaxLearned,
+		  varp_formula:info(Bs2, number_of_learned_clauses)]),
 	    reorder(Bs2,Param),
 	    MaxLearnedFactorInc = min(1.0,maps:get(max_learned_inc,Param)),
 	    MaxLearned1 = trunc(MaxLearned * MaxLearnedFactorInc),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs2,Param,MaxLearned1,MR);
        DoRestart ->
-	    io:format("RESTART Count=~w, Time=~w\n", 
-		      [DoRestartCount, DoRestartTime]),
+	    ?dbg("RESTART Count=~w, Time=~w\n", 
+		 [DoRestartCount, DoRestartTime]),
 	    undo_until(Bs2, Level, ?TOP_LEVEL),
 	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
 	    reorder(Bs2,Param),
 	    init(Bs2,Param,MaxLearned,MR);
        true ->
-	    loop(Bs2,Param,JLevel,MaxLearned,MR,INext,Stack1)
+	    loop(Bs2,Param,JLevel,MaxLearned,MR,Stack1)
     end.
 
 reorder(Bs,Param) ->
@@ -428,7 +429,7 @@ reorder(Bs,Param) ->
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
-	    ?dbg("Reorder: ~p\n", [Opts]),
+	    ?dbg1("Reorder: ~p\n", [Opts]),
 	    Seed = proplists:get_value(seed, Opts, -1),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
@@ -456,20 +457,19 @@ undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
 undo_until(Bs, Level, Level) ->
     Bs.
 
-pop_until(Bs,[{_,_Xk,Level}|Stack],JLevel) when Level > JLevel ->
+pop_until(Bs,[{_Xk,Level}|Stack],JLevel) when Level > JLevel ->
     pop_until(Bs,Stack,JLevel);
-pop_until(_Bs,Stack=[{K,_Xk,Level}|_],JLevel) when Level =:= JLevel ->
+pop_until(_Bs,Stack=[{_Xk,Level}|_],JLevel) when Level =:= JLevel ->
     ?dbg("backjump[~w]: ~s\n", [JLevel, varp_formula:format_lit(_Bs,_Xk)]),
-    {K,Stack};
+    Stack;
 pop_until(_Bs,[],_JLevel) ->
-    {1, []}.
+    [].
 
-next(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
-    ?dbg("next: next_unbound ~w\n", [I]),
-    case varc:next_unbound_index(Bs#bs.vp, I) of
+next(Bs,Param,Level,MaxLearned,MR,Stack) ->
+    case varc:next_unbound(Bs#bs.vp) of
 	false ->
 	    N = MR#m.n + 1,
-	    Model = varp:output_model(Bs, N),
+	    Model = varp:output_model(Bs,false,N),
 	    if N >= MR#m.max, MR#m.max > 0; Stack =:= [] ->
 		    display_stat(Bs,Param),
 		    case MR#m.method of
@@ -494,18 +494,16 @@ next(Bs,Param,Level,MaxLearned,MR,I,Stack) ->
 			    init(Bs,Param,MaxLearned,MR1)
 		    end
 	    end;
-		    
-	J ->
-	    Xj = varc:order_map(Bs#bs.vp, J),
+	Xj ->
 	    NextLevel = Level+1,
 	    varc:set_level(Bs#bs.vp,NextLevel),
 	    true = varc:bind(Bs#bs.vp,Xj),
 	    ?dbg("decision@~w = ~s\n", [NextLevel,
 					varp_formula:format_lit(Bs,Xj)]),
-	    loop(Bs,Param,NextLevel,MaxLearned,MR,J,[{J,Xj,NextLevel}|Stack])
+	    loop(Bs,Param,NextLevel,MaxLearned,MR,[{Xj,NextLevel}|Stack])
     end.
 
-block_model([{_K,Xk,_Level}|Stack]) ->
+block_model([{Xk,_Level}|Stack]) ->
     [-Xk | block_model(Stack)];
 block_model([]) ->
     [].
@@ -642,44 +640,18 @@ display_stat(Bs,Param) ->
 add_conflict_clause(Bs,[]) ->
     Bs;
 add_conflict_clause(Bs,Clause=[L]) ->
-    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
+    ?dbg1("conflict UNIT clause: ~s @~w\n", 
+	 [varp_formula:format_clause(Bs, Clause),
+	  varc:info(Bs#bs.vp, level)]),
     true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     Bs;
 add_conflict_clause(Bs,Clause) ->
-    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
+    ?dbg("conflict clause: ~s @~w\n", 
+	 [varp_formula:format_clause(Bs, Clause),
+	  varc:info(Bs#bs.vp, level)]),
     ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),
     varp_formula:proof_output(Bs,$a,ClauseIndex),
     Bs.
-
-abs_sort(Clause) ->
-    lists:sort(fun(A,B) -> abs(A) < abs(B) end, Clause).
-
-compress(Bs,Param,Clause) ->
-    case maps:get(compress,Param) of
-	true ->
-	    Len = length(Clause),
-	    if Len > 2 ->
-		    NBits = length(Clause)*32,  %% initial number of bits
-		    DeltaCode = compress_(Clause),  %% abs deltas
-		    NCompressed = 32 + 
-			lists:sum([bit:size(Code)+1||Code<-DeltaCode]),
-		    N = NBits - NCompressed,
-		    io:format("compress, Clause=~w,delta=~w,NBits=~w,NCompressed=~w,N=~w\n", [Clause, DeltaCode, NBits, NCompressed, N]),
-		    if N =< 0 ->
-			    ok;
-		       true ->
-			    counters:add(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES,N)
-		    end,
-		    Clause;
-	       true ->
-		    Clause
-	    end;
-	false ->
-	    Clause
-    end.
-
-compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
-compress_([_Ln]) -> [].

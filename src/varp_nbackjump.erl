@@ -638,33 +638,3 @@ add_conflict_clause(Bs,Clause) ->
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),
     varp_formula:proof_output(Bs,$a,ClauseIndex),
     Bs.
-
-abs_sort(Clause) ->
-    lists:sort(fun(A,B) -> abs(A) < abs(B) end, Clause).
-
-compress(Bs,Param,Clause) ->
-    case maps:get(compress,Param) of
-	true ->
-	    Len = length(Clause),
-	    if Len > 2 ->
-		    NBits = length(Clause)*32,  %% initial number of bits
-		    DeltaCode = compress_(Clause),  %% abs deltas
-		    NCompressed = 32 + 
-			lists:sum([bit:size(Code)+1||Code<-DeltaCode]),
-		    N = NBits - NCompressed,
-		    io:format("compress, Clause=~w,delta=~w,NBits=~w,NCompressed=~w,N=~w\n", [Clause, DeltaCode, NBits, NCompressed, N]),
-		    if N =< 0 ->
-			    ok;
-		       true ->
-			    counters:add(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES,N)
-		    end,
-		    Clause;
-	       true ->
-		    Clause
-	    end;
-	false ->
-	    Clause
-    end.
-
-compress_([{L1,_}|Ls=[{L2,_}|_]]) -> [abs(L1)-abs(L2) | compress_(Ls)];
-compress_([_Ln]) -> [].
