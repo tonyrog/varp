@@ -101,7 +101,7 @@ validate_loop(Fd,Type,Bs, I) ->
 			    validate_loop(Fd,Type,Bs,I1)
 		    end;
 		true ->
-		    io:format("INVALID ~w\n", [Clause]),
+		    io:format("\nINVALID step=~w ~w\n", [I1,Clause]),
 		    io:format("\nINVALID\n"),
 		    {?ERROR,"invalid",Bs}
 	    end;
@@ -112,7 +112,9 @@ validate_loop(Fd,Type,Bs, I) ->
 	    %% io:format("  INDEX: ~w:~w\n", [(_CIX bsr 30),
 	    %%            (CIX band 16#3fffffff)]),
 	    ok = varc:del_clause(Bs#bs.vp, CIX),
-	    validate_loop(Fd,Type,Bs,I1)	    
+	    validate_loop(Fd,Type,Bs,I1);
+	{c,_Comment} ->
+	    validate_loop(Fd,Type,Bs,I1)
     end.
 
 eval_neg_literal_list(Bs, [Li|Ls]) ->
@@ -132,6 +134,8 @@ read_clause(Fd, _, Bs) ->  %% text/user
 read_text_clause(Fd, Bs) ->
     case file:read_line(Fd) of
 	eof -> eof;
+	{ok,<<"c ",Text/binary>>} ->
+	    {c, Text};
 	{ok,Line} ->
 	    %% io:format("~s", [Line]),
 	    case varp_scan:string(binary_to_list(Line)) of
