@@ -11,6 +11,7 @@
 
 -export([analyze/4]).
 
+%% -define(DEBUG, true).
 -include("varp.hrl").
 
 analyze_alpha(Bs, Level, Bump) ->
@@ -19,54 +20,63 @@ analyze_alpha(Bs, Level, Bump) ->
 	I <- lists:seq(0, N-1) ].
 
 analyze(Bs, Level, Bump) ->
-    Trail = get_bindings(Bs#bs.vp, Level),
-    ?dbg("trail: ~s\n", [varp_formula:format_literals(Bs,Trail)]),
+    Trail = get_trail(Bs#bs.vp, Level),
     N = varc:info(Bs#bs.vp, number_of_conflicting_clauses),
-    analyze_(Bs#bs.vp, Trail, Level, Bump, 0, N).
-
-analyze_(_V,_Trail,_Level,_Bump,N,N) ->
-    [];
-analyze_(V,Trail,Level,Bump,I,N) ->
-    Cix = varc:conflicting_clause(V,I),
-    [ analyze_clause_(V,Trail,Cix,Level,Bump) |
-      analyze_(V,Trail,Level,Bump,I+1,N) ].
+    [ begin
+	  analyze(Bs#bs.vp, Trail, I, Level, Bump)
+      end || I <- lists:seq(0, N-1)].
 
 analyze(V, Level, Bump, I) ->
-    Trail = get_bindings(V,Level),
-    Cix = varc:conflicting_clause(V, I),
-    analyze_clause_(V,Trail,Cix,Level,Bump).
+    analyze(V, get_trail(V, Level), Level, Bump, I).
 
-analyze_clause_(V,Trail,Cix,Level,Bump) ->
+analyze(V,Trail,I,Level,Bump) ->
+    analyze_conflict(V,Trail,varc:conflicting_clause(V,I),Level,Bump).
+
+analyze_conflict(V,Trail,Cix,Level,Bump) ->
     Conflicting = get_clause(V,Cix,undefined),
-    conflict_reason(V,Conflicting,Trail,Level,Bump,#{},0,[]).
+    ?dbg("trail: decision=~w,clause=~w,trail=~w\n", 
+	  [varc:get_decision(V, Level),Conflicting,Trail]),
+    analyze_reason(V,Conflicting,Trail,Level,Bump,#{},0,[]).
 
-conflict_reason(V,[Q|Qs],Trail,Level,Bump,Seen,C,CL) ->
+analyze_reason(V,[Q|Qs],Trail,Level,Bump,Seen,C,CL) ->
     case is_seen(Q, Seen) of
 	true ->
-	    conflict_reason(V,Qs,Trail,Level,Bump,Seen,C,CL);
+	    ?dbg("~w: seen\n", [Q]),
+	    analyze_reason(V,Qs,Trail,Level,Bump,Seen,C,CL);
 	false ->
 	    QLevel = varc:implication_level(V,Q),
+	    ?dbg("~w: level ~w\n", [Q, QLevel]),
 	    if QLevel > ?TOP_LEVEL ->
 		    varc:bump(V, Q, Bump),
 		    Seen1 = set_seen(Q, Seen),
 		    if QLevel >= Level ->
-			    conflict_reason(V,Qs,Trail,Level,Bump,Seen1,C+1,CL);
+			    analyze_reason(V,Qs,Trail,Level,Bump,Seen1,C+1,CL);
 		       true ->
-			    conflict_reason(V,Qs,Trail,Level,Bump,Seen1,C,[Q|CL])
+			    analyze_reason(V,Qs,Trail,Level,Bump,Seen1,C,[Q|CL])
 		    end;
 	       true ->
-		    conflict_reason(V,Qs,Trail,Level,Bump,Seen,C,CL)
+		    analyze_reason(V,Qs,Trail,Level,Bump,Seen,C,CL)
 	    end
     end;
-conflict_reason(V,[],Trail,Level,Bump,Seen,C,CL) ->
-    Trail1= [P|_] = lists:dropwhile(fun(Pi) -> not is_seen(Pi,Seen) end, Trail),
+analyze_reason(V,[],Trail,Level,Bump,Seen,C,CL) ->
+    [P|Trail1] = drop_not_seen(Trail, Seen),
     if C =< 1 ->
+	    ?dbg("conflict clause ~w\n", [[-P|CL]]),
 	    [-P|CL];
        true ->
-	    true = is_seen(P, Seen),
 	    Seen1 = clr_seen(P, Seen),
-	    Reason = reason(V,P),
-	    conflict_reason(V,Reason,Trail1,Level,Bump,Seen1,C-1,CL)
+	    analyze_reason(V,reason(V,P),Trail1,Level,Bump,Seen1,C-1,CL)
+    end.
+
+%% dropwhile but with debug output
+drop_not_seen(Trail=[P|Trail1], Seen) ->
+    case is_seen(P, Seen) of
+	true -> 
+	    ?dbg("~w: seen\n", [P]),
+	    Trail;
+	false -> 
+	    ?dbg("~w: dropped\n", [P]),
+	    drop_not_seen(Trail1, Seen)
     end.
 		    
 get_clause(V, ClauseIndex, SkipLiteral) ->
@@ -76,14 +86,15 @@ reason(V,L) ->
     case varc:implication_clause(V,L) of
 	-1 -> [];
 	Cix ->
+	    Reason = get_clause(V,Cix,L),
+	    ?dbg("~w: implication ~w = ~w\n", 
+		  [L,varp_formula:cix(Cix),Reason]),
 	    varc:use_clause(V, Cix),
-	    get_clause(V,Cix,L)
+	    Reason
     end.
 
-get_bindings(V,Level) ->
-    %% fixme: get_bindings(Vp, Level, Reversed=true)
-    Bindings = varc:get_bindings(V, Level),
-    lists:reverse(Bindings).
+get_trail(V, Level) ->
+    varc:get_bindings(V, Level, false, true).
 
 %% maps implementing set
 set_seen(Q, VarSet) ->

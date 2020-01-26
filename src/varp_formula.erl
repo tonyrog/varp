@@ -91,9 +91,9 @@
 -export([const_vector/2, const_vector/3]).
 -export([const_vector/4]).
 
-
 -export([vconst/1]).
 -export([normalize/3]).
+-export([cix/1]).
 
 -import(lists, [map/2, reverse/1, foldl/3]).
 
@@ -258,6 +258,16 @@ want_proof_output(Bs) ->
 	Type -> Type
     end.
 
+cix(I) ->
+    {case (I bsr 30) band 3 of 
+	 ?DELTA -> delta;
+	 ?GAMMA -> gamma;
+	 ?BETA -> beta;
+	 ?ALPHA -> alpha
+     end,
+     I band 16#3fffffff}.
+
+
 %% delete clause by index or list of literals
 del_clause(Bs, IndexOrClause) ->
     varc:del_clause(Bs#bs.vp, IndexOrClause).
@@ -267,7 +277,7 @@ del_unused_clauses(Bs) ->
     ?dbg1("del_unused_clause gamma offset=~w, size=~w\n", 
 	  [varc:clauseset_offset(V, ?GAMMA), 
 	   varc:clauseset_size(V, ?GAMMA)]),
-    varc:clauseset_sort(V, ?GAMMA),  %% learned clauses
+    varc:clauseset_sort(V, ?GAMMA),  %% learnt clauses
     case want_proof_output(Bs) of
 	false ->
 	    del_clauses(V, varc:clauseset_first(V, ?GAMMA));
@@ -282,8 +292,8 @@ del_unused_clauses(Bs) ->
 del_clauses(_V, false) ->
     ok;
 del_clauses(V, I) ->
-    ?dbg0("  del ~w:~w\n", [(I bsr 30),(I band 16#3FFFFFFF)]),
     varc:del_clause(V, I),
+    ?dbg0("del_clause: ~w\n", [cix(I)]),
     del_clauses(V, varc:clauseset_next(V, I)).
 
 del_proof_clauses(_Bs, _V, false) ->
@@ -291,6 +301,7 @@ del_proof_clauses(_Bs, _V, false) ->
 del_proof_clauses(Bs, V, I) ->
     proof_output(Bs, $d, I),  
     varc:del_clause(V, I),
+    ?dbg0("proof del_clause: ~w\n", [cix(I)]),
     del_proof_clauses(Bs, V, varc:clauseset_next(V, I)).
 
 clean_clauses(Bs) ->
@@ -436,13 +447,7 @@ order_sort(Bs,[Key1]) -> order_sort(Bs,Key1,?ORDER_UNDEFINED,-1).
 
 order_sort(Bs,Key1,Key2,Arg) 
   when is_integer(Key1), is_integer(Key2), is_integer(Arg) ->
-    Arg1 = if Key1 band 16#0f =:= ?ORDER_RANDOM, Arg =:= -1;
-	      Key2 band 16#0f =:= ?ORDER_RANDOM, Arg =:= -1 ->
-		   rand:uniform(1 bsl 24)-1;
-	      true ->
-		   Arg
-	   end,
-    varc:order_sort(Bs#bs.vp,Key1,Key2,Arg1).
+    varc:order_sort(Bs#bs.vp,Key1,Key2,Arg).
 
 value(Bs,V) ->
     varc:value(Bs#bs.vp, V).
@@ -3150,6 +3155,15 @@ format_bit(Tuple) when is_tuple(Tuple) ->
 log_clause(Bs, Clause) ->
     io:format("~s\n", [format_clause(Bs,Clause)]).
 
+proof_output(Bs, $c, Text) ->  %% non-standard
+    case want_proof_output(Bs) of
+	false -> ok;
+	binary -> ignore;
+	user ->
+	    io:put_chars(user, ["c ",Text,"\n"]);
+	_ ->
+	    file:write(Bs#bs.proof_fd,  ["c ",Text,"\n"])
+    end;
 proof_output(Bs, Prefix, Clause) ->
     case want_proof_output(Bs) of
 	false -> ok;

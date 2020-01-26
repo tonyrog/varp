@@ -75,12 +75,12 @@ run(Bs, Param0) when is_record(Bs, bs), is_map(Param0) ->
     end.
 
 order_literals(Bs, Param) ->
-    ?dbg("order params=~p\n", [Param]),
-    Seed = case maps:get(seed,Param,undefined) of
-	       undefined -> 
-		   varp_formula:getopt(Bs,seed);
+    ?dbg1("order params=~p\n", [Param]),
+    Seed = case maps:get(seed,Param) of
+	       -1 -> varp_formula:getopt(Bs,seed);
 	       S0 -> S0
 	   end,
+    ?dbg("Seed = ~w\n", [Seed]),
     case maps:get(sort,Param) of
 	[Key1,Key2] ->
 	    varp_formula:order_sort(Bs,Key1,Key2,Seed);

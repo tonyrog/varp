@@ -18,7 +18,7 @@
 -define(BETA,  2).
 -define(ALPHA, 3).
 
--define(NUM_COUNTERS, 12).
+-define(NUM_COUNTERS, 13).
 -define(COUNTER_CONFLICT_CLAUSES,   1).
 -define(COUNTER_MINIMIZE_COUNT,     2).
 -define(COUNTER_COMPRESS_CLAUSES,   3).
@@ -31,6 +31,7 @@
 -define(COUNTER_ST_BCP_COUNTER,     10). %% cancel/timeout check counter
 -define(COUNTER_BT_BCP_COUNTER,     11). %% cancel/timeout check counter
 -define(COUNTER_BJT_BCP_COUNTER,    12). %% cancel/timeout check counter
+-define(COUNTER_BJR_BOUND0,         13). %% store prvious #bound level=0
 
 %% plugin results
 -define(INCONSISTENT, inconsistent).

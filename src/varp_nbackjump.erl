@@ -180,21 +180,8 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     _KeepSize  = keep_size(Bs, Param, MaxLearned),
-    case maps:get(restart_counter,Param) of
-	0 -> ok;
-	_ ->
-	    BcpCounter = varp_formula:info(Bs, bcp_counter),
-	    counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, BcpCounter)
-    end,
-
-    case maps:get(restart_interval,Param) of
-	infinity -> ok;
-	IVal when IVal == 0 -> ok;
-	IVal ->
-	    IVal1 = max(0.1, IVal),  %% >= 0.1
-	    erlang:start_timer(trunc(1000*IVal1), self(), restart)
-    end,
-
+    set_bcp_counter(Bs, varp_formula:info(Bs, bcp_counter)),
+    start_restart_timer(Param),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     M0  = #m { method = varp_formula:getopt(Bs1,method),
 	       max = maps:get(max, Param) },
@@ -202,20 +189,19 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 
 init(Bs, Param, MaxLearned, MR) ->
     varc:set_level(Bs#bs.vp, ?TOP_LEVEL),
-    loop(Bs, Param, MaxLearned, MR).
+    timeout_or_cancel(Bs, Param, MaxLearned, MR).
 
-loop(Bs, Param, MaxLearned, MR) ->
+timeout_or_cancel(Bs, Param, MaxLearned, MR) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
-	    loop_(Bs, Param, MaxLearned, MR);
+	    main(Bs,Param,MaxLearned,MR);
 	{true, What} ->
 	    undo_until(Bs, ?TOP_LEVEL),
 	    return(What, MR, Bs)
     end.
 
-loop_(Bs,Param,MaxLearned,MR) ->
-    ?dbg("loop_: nbcp Q=~w\n",[ [{L, varc:value(Bs#bs.vp,L)} || L <- varc:get_queue(Bs#bs.vp)]]),
+main(Bs,Param,MaxLearned,MR) ->
     case varc:nbcp(Bs#bs.vp) of
 	false ->  %% contradiction
 	    Level = varc:info(Bs#bs.vp, level),
@@ -227,12 +213,12 @@ loop_(Bs,Param,MaxLearned,MR) ->
 		0 ->
 		    return(?DONE,MR,Bs);
 		_ ->
-		    contradiction(Bs,Param,Level,MaxLearned,MR)
+		    conflict(Bs,Param,Level,MaxLearned,MR)
 	    end;
 	true ->  %% model
+	    Level = varc:info(Bs#bs.vp, level),
 	    N = MR#m.n + 1,
 	    Model = varp:output_model(Bs,false,N),
-	    Level = varc:info(Bs#bs.vp, level),
 	    if N >= MR#m.max, MR#m.max > 0; Level =:= 0 -> %%?
 		    display_stat(Bs,Param),
 		    R = if Level =:= 0 -> ?DONE; true -> ?CONTINUE end,
@@ -261,15 +247,8 @@ loop_(Bs,Param,MaxLearned,MR) ->
 	    end
     end.
 
-return(What, MR, Bs) ->
-    case MR#m.method of
-	collect ->
-	    {What,MR#m.ms,Bs};
-	count ->
-	    {What,MR#m.n,Bs}
-    end.
 
-contradiction(Bs,Param,Level,MaxLearned,MR) ->
+conflict(Bs,Param,Level,MaxLearned,MR) ->
     %% Conflict0 = varc:conflict(Bs#bs.vp, Level, maps:get(bump,Param), 0),
     %% ClauseList0 = [Conflict0],
     ClauseList0 = varp_conflict:analyze(Bs,Level,maps:get(bump,Param)),
@@ -331,16 +310,6 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
     LClauseList5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
 			      LClauseList4),
 
-    IOrder = maps:get(iorder,Param),
-
-    LClauseList6 = 
-	if IOrder =:= 0 ->
-		LClauseList5;
-	   true ->
-		lists:takewhile(fun({La,_}) -> La =< IOrder end, 
-				LClauseList5)
-	end,
-
     L = maps:get(stumble,Param),
     K = maps:get(olle,Param),
     M = maps:get(stumble_olle,Param),
@@ -348,14 +317,12 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
     JLevel =
 	case JClause of
 	    undefined -> ?TOP_LEVEL;
-	    {Len0,_,_,_,_,_} when IOrder > 0, Len0 > IOrder -> ?TOP_LEVEL;
 	    {_Len0,D1,D2,J2,J3,_} ->
 		do_stat(Bs,D1,D2),
 		do_jump(Bs,L,K,M,D1,D2,J2,J3)
 	end,
 
     undo_until(Bs, Level, JLevel),  %% undo until JLevel
-    varc:set_level(Bs#bs.vp, JLevel),
 
     %% install unit clauses
     Bs0 = lists:foldl(
@@ -369,92 +336,63 @@ contradiction(Bs,Param,Level,MaxLearned,MR) ->
 	    fun({Len,Clause},Bsi) ->
 		    do_clause_stat(Bsi, Len),
 		    add_conflict_clause(Bsi,Clause)
-	    end, Bs0, LClauseList6),
+	    end, Bs0, LClauseList5),
 
     %% install "the" conflict clause
     Bs2 = case JClause of
 	      undefined ->
 		  Bs1;
-	      {Len1,_,_,_,_,_} when IOrder > 0, Len1 > IOrder ->
-		  Bs1;
-	      {Len1,_,_,_,_,Clause} ->
+	      {Len1,_D1,_D2,_J2,_J3,Clause} ->
 		  do_clause_stat(Bs1, Len1),
 		  add_conflict_clause(Bs1,Clause)
 	  end,
+    main_bcp(Bs2,Param,JLevel,MaxLearned,MR).
 
-    Learned = varc:clauseset_size(Bs2#bs.vp, ?GAMMA),
-    DoPurge = varc:clauseset_offset(Bs2#bs.vp, ?GAMMA) > 0,
+%% after conflict clause generation we need to run bcp and
+%% check result.
+main_bcp(Bs,Param,Level,MaxLearned,MR) ->
+    case varc:bcp(Bs#bs.vp) of
+	false ->
+	    case Level of
+		0 when MR#m.n =:= 0 ->
+		    varp_formula:proof_output(Bs,$a,[]),
+		    display_stat(Bs,Param),
+		    return(?INCONSISTENT,MR,Bs);
+		0 ->
+		    return(?DONE,MR,Bs);
+		_ ->
+		    conflict(Bs,Param,Level,MaxLearned,MR)
+	    end;
+	true ->
+	    restart(Bs,Param,Level,MaxLearned,MR)
+    end.
 
-    DoRestartCount =
-	case maps:get(restart_counter,Param) of
-	    0 -> false;
-	    RestartCounter ->
-		EvalCounter = varp_formula:info(Bs2, bcp_counter),
-		PrevCounter = counters:get(Bs2#bs.counters,
-					   ?COUNTER_BJR_BCP_COUNTER),
-		if (EvalCounter - PrevCounter) >= RestartCounter ->
-			counters:put(Bs2#bs.counters,?COUNTER_BJR_BCP_COUNTER,
-				     EvalCounter),
-			true;
-		   true ->
-			false
-		end
-	end,
-    %% FIXME: flush restart timer somewhere to avoid initial re-restart...
-    %% FIXME: only run restart if no units has been found during the
-    %%        restart_interval time, otherwise keep the order!
-    DoRestartTime = 
-	receive 
-	    {timeout,_Timer,restart} ->
-		RestartInterval = maps:get(restart_interval,Param),
-		erlang:start_timer(trunc(1000*RestartInterval),self(),restart),
-		true
-	after 0 ->
-		false
-	end,
-
-    DoRestart = DoRestartCount orelse DoRestartTime,
-
-    if 
-	DoPurge, JLevel =:= ?TOP_LEVEL ->
-	    MaxLearned1 = 
-		if Learned > MaxLearned ->
-			varp_formula:del_unused_clauses(Bs2),
-			reorder(Bs2, Param),
-			MaxLearnedFactorInc = 
-			    min(1.0,maps:get(max_learned_inc,Param)),
-			trunc(MaxLearned * MaxLearnedFactorInc);
-		   true ->
-			MaxLearned
-		end,
-	    %% Learned1 = varp_formula:info(Bs2, number_of_learned_clauses),
-	    %% NU = varp_formula:number_of_unbound(Bs2),
-	    %% io:format("UNIT-RESTART Units=~w, Learned=~w,MaxLearned=~w,NewLearned=~w,Unbound=~w!\n", [UnitClauses,Learned,MaxLearned,Learned1,NU]),
-	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
-	    init(Bs,Param,MaxLearned1,MR);
-       DoPurge, Learned > MaxLearned ->
-	    undo_until(Bs2, Level, ?TOP_LEVEL),
-	    ?dbg("Set LEVEL ~w\n", [?TOP_LEVEL]),
-	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
-	    ?dbg("del_unused_clauses\n", []),
+restart(Bs,Param,Level,MaxLearned,MR) ->
+    RestartByTimeout = restart_by_timeout(Bs, Param), %% also restart!!
+    RestartByCount = restart_by_counter(Bs, Param),
+    case need_purge(Bs, Param, MaxLearned) of
+	true ->
+	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    varp_formula:proof_output(Bs,$c,"purge"),
 	    varp_formula:del_unused_clauses(Bs),
-	    ?dbg("RESTART Learned=~w,MaxLearned=~w,NewLearned=~w\n", 
-		 [Learned, MaxLearned,
-		  varp_formula:info(Bs2, number_of_learned_clauses)]),
-	    reorder(Bs2, Param),
-	    MaxLearnedFactorInc = min(1.0,maps:get(max_learned_inc,Param)),
-	    MaxLearned1 = trunc(MaxLearned * MaxLearnedFactorInc),
+	    reorder(Bs, Param),
+	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
-	    init(Bs2,Param,MaxLearned1,MR);
-       DoRestart; JLevel =:= ?TOP_LEVEL ->
-	    ?dbg("RESTART Count=~w, Time=~w\n", 
-		 [DoRestartCount, DoRestartTime]),
-	    undo_until(Bs2, Level, ?TOP_LEVEL),
-	    varc:set_level(Bs2#bs.vp, ?TOP_LEVEL),
-	    reorder(Bs2, Param),
-	    init(Bs2,Param,MaxLearned,MR);
-       true ->
-	    loop(Bs2,Param,MaxLearned,MR)
+	    init(Bs, Param, MaxLearned1, MR);
+	false ->
+	    if RestartByCount ->
+		    varp_formula:proof_output(Bs,$c,"counter limit"),
+		    undo_until(Bs, Level, ?TOP_LEVEL),
+		    reorder(Bs, Param),
+		    init(Bs, Param, MaxLearned, MR);
+	       RestartByTimeout ->
+		    varp_formula:proof_output(Bs,$c,"timeout"),
+		    undo_until(Bs, Level, ?TOP_LEVEL),
+		    reorder(Bs, Param),
+		    init(Bs, Param, MaxLearned, MR);
+	       true ->
+		    timeout_or_cancel(Bs,Param,MaxLearned,MR)
+	    end
     end.
 
 reorder(Bs, Param) ->
@@ -473,18 +411,106 @@ reorder(Bs, Param) ->
 		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
 	    end;
 	{ok,{saturate,Opts}} ->
-	    io:format("reorder: Saturate: ~p\n", [Opts]),
 	    Laps = proplists:get_value(laps,Opts,0),
 	    Timeout = proplists:get_value(timeout,Opts,infinity),
 	    varp_saturate:saturate(Bs,1,Timeout,{{Laps},{Laps}}, 0);
 	_ ->
-	    io:format("reorder: Random\n"),
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
     end.
 
+
+return(What, MR, Bs) ->
+    case MR#m.method of
+	collect ->
+	    {What,MR#m.ms,Bs};
+	count ->
+	    {What,MR#m.n,Bs}
+    end.
+
+need_purge(Bs, _Param, MaxLearned) ->
+    case varc:clauseset_offset(Bs#bs.vp, ?GAMMA) > 0 of
+	true ->
+	    Learned = varc:clauseset_size(Bs#bs.vp, ?GAMMA),
+	    Learned > MaxLearned;
+	false ->
+	    false
+    end.
+
+max_learned_inc(_Bs, Param, MaxLearned) ->
+    Inc = maps:get(max_learned_inc,Param),
+    MaxLearnedFactorInc = max(1.0,Inc),
+    trunc(MaxLearned * MaxLearnedFactorInc).
+    
+restart_by_timeout(Bs, Param) ->
+    receive 
+	{timeout,_Timer,restart} ->
+	    start_restart_timer(Param),
+	    Bound0 = varc:get_number_of_bindings(Bs#bs.vp, 0),
+	    PrevBound0 = get_bound0(Bs),
+	    set_bound0(Bs, Bound0),
+	    PrevBound0 =:= Bound0   %% no units since last restart
+    after 0 ->
+	    false
+    end.
+
+start_restart_timer(Param) ->
+    case maps:get(restart_interval,Param) of
+	infinity -> undefined;
+	IVal when IVal == 0 -> undefined;
+	IVal ->
+	    IVal1 = max(0.1, IVal),
+	    erlang:start_timer(trunc(1000*IVal1), self(), restart)
+    end.
+
+get_bound0(Bs) ->
+    counters:get(Bs#bs.counters, ?COUNTER_BJR_BOUND0).
+
+set_bound0(Bs, Value) ->
+    counters:put(Bs#bs.counters,?COUNTER_BJR_BOUND0, Value).
+
+%% Restart using bcp counter
+restart_by_counter(Bs, Param) ->	
+    case maps:get(restart_counter,Param) of
+	0 -> false;
+	RestartCounter ->
+	    BcpCounter = varp_formula:info(Bs, bcp_counter),
+	    PrevCounter = get_bcp_counter(Bs),
+	    if (BcpCounter - PrevCounter) >= RestartCounter ->
+		    set_bcp_counter(Bs, BcpCounter),
+		    true;
+	       true ->
+		    false
+	    end
+    end. 
+
+get_bcp_counter(Bs) ->
+    counters:get(Bs#bs.counters, ?COUNTER_BJR_BCP_COUNTER).
+
+set_bcp_counter(Bs, Value) ->
+    counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, Value).
+
+%% simulated bcp - test
+nbcp(V) ->
+    nbcp_(V, varc:info(V, level)).
+
+nbcp_(V, Level) ->
+    case varc:bcp(V) of
+	true ->
+	    case varc:next_unbound(V) of
+		false -> true;  %% model
+		Xj ->
+		    NextLevel = Level+1,
+		    varc:set_level(V, NextLevel),
+		    varc:bind(V, Xj),
+		    nbcp_(V, NextLevel)
+	    end;
+	false ->
+	    false
+    end.
+
+
 undo_until(Bs, NewLevel) ->
-    ?dbg("undo_until: ~w\n", [NewLevel]),
     Level = varc:info(Bs#bs.vp, level),
     undo_until(Bs, Level, NewLevel).
 
@@ -492,6 +518,7 @@ undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
     varc:undo_level(Bs#bs.vp, Level),
     undo_until(Bs, Level-1, NewLevel);
 undo_until(Bs, Level, Level) ->
+    varc:set_level(Bs#bs.vp, Level),
     Bs.
 
 %% J2 is backjump level, J3 is backstumble level
@@ -555,7 +582,6 @@ keep_size(Bs, Param, MaxLearned) ->
 	false -> ok
     end,
     KeepSize.
-
 
 max_learned(Bs,Param) ->
     Permanent = varc:clauseset_size(Bs#bs.vp, ?DELTA),
@@ -624,14 +650,12 @@ display_stat(Bs,Param) ->
 	    ok
     end.
 
-add_conflict_clause(Bs,[]) ->
-    Bs;
 add_conflict_clause(Bs,Clause=[L]) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
     true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     Bs;
-add_conflict_clause(Bs,Clause) ->
+add_conflict_clause(Bs,Clause=[_,_|_]) ->
     ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
     ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),

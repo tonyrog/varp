@@ -62,10 +62,8 @@
 -export([get_latest_binding/1]).
 -export([get_decision/2]).
 -export([get_undo_state/2]).
--export([get_nbindings/2]).
--export([get_nbindings/3]).
--export([get_bindings/2]).
--export([get_bindings/3]).
+-export([get_nbindings/2, get_nbindings/3, get_nbindings/4]).
+-export([get_bindings/2, get_bindings/3, get_bindings/4]).
 -export([get_all_bindings/1]).
 -export([get_number_of_bindings/2]).
 -export([get_queue/1]).
@@ -450,7 +448,10 @@ get_latest_binding(Vp) ->
 get_nbindings(Vp,N) when is_integer(N), N>= 0 ->
     get_nbindings(Vp,N,false).
 
-get_nbindings(_Vp,N,_ClauseInfo) when is_integer(N), N>= 0 ->
+get_nbindings(Vp,N,ClauseInfo) when is_integer(N), N>= 0 ->
+    get_nbindings(Vp,N,ClauseInfo,false).
+
+get_nbindings(_Vp,N,_ClauseInfo,_Trail) when is_integer(N), N>= 0 ->
     ?nif_stub().
 
 get_all_bindings(V) ->
@@ -463,8 +464,10 @@ get_bindings(Vp, Level) ->
     get_bindings(Vp, Level, false).
 
 %% get bindings and possible clause info on Level
-get_bindings(_Vp, Level, _ClauseInfo)
-  when is_integer(Level), Level > 0 ->
+get_bindings(Vp, Level, ClauseInfo) ->
+    get_bindings(Vp, Level, ClauseInfo, false).
+
+get_bindings(_Vp, _Level, _ClauseInfo, _Trail) ->
     ?nif_stub().
 
 get_number_of_bindings(_Vp, _Level) ->

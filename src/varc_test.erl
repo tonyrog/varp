@@ -75,6 +75,39 @@ sync_apply(Mod, Fun, Args) ->
 	    Result
     end.
 
+bindings1() ->
+    V = varc:new(),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    X6 = var(V),
+
+    clause(V, [-X1, X3]),
+    clause(V, [-X1,-X2]),
+    varc:set_level(V, 1),
+    varc:bind(V, X1),
+    true = varc:bcp(V),
+
+    clause(V, [X4, -X6]),
+    clause(V, [X4, X5]),
+    varc:set_level(V, 2),
+    varc:bind(V, -X4),
+    true = varc:bcp(V),
+
+    %% FIXME tests are deependent on clause order!!
+    Match1a = [X1,-X2,X3],
+    Match1a = varc:get_bindings(V, 1),
+    Match1b = [X3,-X2,X1],
+    Match1b = varc:get_bindings(V, 1, false, true),
+
+    Match2a = [-X4,X5,-X6],
+    Match2a = varc:get_bindings(V, 2),
+    Match2b = [-X6,X5,-X4],
+    Match2b = varc:get_bindings(V, 2, false, true),
+    ok.
+
 test1() ->
     V = varc:new(),
     X1 = var(V),
@@ -216,7 +249,7 @@ bcp3() ->
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Z = var(V, <<"Z">>),
-    Cix = clause(V, [X, Y, Z]),
+    _Cix = clause(V, [X, Y, Z]),
 
     [Z] = eval_bindings(V, [-X,-Y]),
     [X] = eval_bindings(V, [-Y,-Z]),
@@ -229,7 +262,7 @@ bcp4() ->
     Y = var(V, <<"Y">>),
     Z = var(V, <<"Z">>),
     T = var(V, <<"T">>),
-    Cix = clause(V, [X, Y, Z, T]),
+    _Cix = clause(V, [X, Y, Z, T]),
 
     [T] = eval_bindings(V, [-X,-Y,-Z]),
     [X] = eval_bindings(V, [-Y,-Z,-T]),
@@ -252,7 +285,7 @@ bcp_add() ->
     2 = varc:clause_info(V, Cix1, watch1),
     varc:bind(V, -X),
     true = varc:bcp(V),
-    Cix2 = clause(V, [X, -Z]),
+    _Cix2 = clause(V, [X, -Z]),
     true = varc:bcp(V),
     Match = [-X,-Z,Y],
     Match = varc:get_bindings(V, 0),
@@ -495,23 +528,6 @@ order_install() ->
     varc:bind(V, Y3),
     {V, [X1,X2,X3,X4,X5,X6]}.
 
-%% bind() ->
-%%     {V, [X1,X2,X3,X4,X5,X6,Y2,Y3]} = order_install(),
-%%     lists:foreach(
-%%       fun({L,Xi}) ->
-%% 	      varc:set_level(V,L), 
-%% 	      varc:bind(V, Xi),
-%% 	      varc:set_level(V,L+1),
-%% 	      varc:bind(V, -Y2),
-%% 	      false = varc:bcp(V),
-%% 	      varc:undo_level(V,L+1)
-%%       end, [{X1,1},{X2,2},{X3,3},{X4,4},{X5,5},{X6,6}]),
-%%     lists:foreach(
-%%       fun(L) ->
-%% 	      varc:undo_level(V, L)
-%%       end, lists:seq(7,1,-1)),
-%%     order:set_level(V, 0),
-%%     ok.
 
 order_identity() ->    
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
