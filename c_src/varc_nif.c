@@ -4001,7 +4001,6 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 
     if (((order[0] & 0x0f) == ORDER_RANDOM) ||
 	((order[1] & 0x0f) == ORDER_RANDOM)) {
-	enif_fprintf(stdout, "random seed=%d\r\n", arg);
 	if (!arg)
 	    arc4_stir(&vp->as);
 	else {
@@ -4489,15 +4488,14 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    lit_t q;
 	    if ((q = cp->lit[i]) != u) { // skip the unit literal!
 		literal_t* qp = l2ll(vp, q);
-		if (!is_marked(qp->var)) {
-		    int qlevel;
+		int qlevel = qp->var->level;
+		if (!is_marked(qp->var) && (qlevel > 0)) {
 		    qp->var->activity += bump;
 		    mark_variable(vp, qp->var);
-		    if ((qlevel = qp->var->level) == level)
+		    if (qlevel >= level)
 			step++;
-		    else if (qlevel > 0) {
+		    else
 			*dynvar_add(vp->tlit) = q;
-		    }
 		}
 	    }
 	}

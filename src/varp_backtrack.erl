@@ -92,6 +92,7 @@ next([{_,[],_}|Stack1],Bs) ->
     next(Stack1,Bs);
 next([{_,[Xi|Xs],Level}|Stack],Bs) ->
     varc:set_level(Bs#bs.vp,Level),
+    ?dbg0("~s~s\n", [indent(Level),varp_formula:format_lit(Bs,Xi)]),
     case eq_eval(Bs,Xi,Level) of
 	false ->
 	    Stack1 = [{Xi,Xs,Level}|Stack],
@@ -177,4 +178,4 @@ eq_eval(Bs,L,_D) ->
 eqv(Bs,L) ->
     varc:bind(Bs#bs.vp,L) andalso varc:bcp(Bs#bs.vp).
 
-indent(D) -> lists:duplicate(D, $\s).
+indent(D) -> lists:duplicate(D, $>).

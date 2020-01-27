@@ -370,7 +370,6 @@ reorder(Bs,Param) ->
     end.
 
 next(Bs,Param,Level,MaxLearned,MR,Stack) ->
-    ?dbg1("next\n", []),
     case varc:next_unbound(Bs#bs.vp) of
 	false ->
 	    N = MR#m.n + 1,
@@ -401,14 +400,15 @@ next(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    end;
 	Xj ->
 	    NextLevel = Level+1,
-	    ?dbg1("bind ~w @~w\n", [Xj, NextLevel]),
+	    ?dbg0("~s~s\n", [indent(NextLevel),varp_formula:format_lit(Bs,Xj)]),
 	    varc:set_level(Bs#bs.vp,NextLevel),
 	    true = varc:bind(Bs#bs.vp,Xj),
 	    timeout_or_cancel(Bs,Param,NextLevel,MaxLearned,MR,
 			      [{Xj,NextLevel}|Stack])
     end.
 
-
+indent(L) -> lists:duplicate(L, $>).
+    
 return(What, MR, Bs) ->
     case MR#m.method of
 	collect ->
