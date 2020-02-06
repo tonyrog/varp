@@ -10,6 +10,7 @@
 -compile(export_all).
 
 -export([all/0]).
+-export([bench/0, bench/1]).
 
 -include("varp.hrl").
 
@@ -27,7 +28,8 @@ all() ->
 	    bcp3,
 	    bcp4,
 	    clause_bcp,
-	    clause_learn1,
+	    clause_learn_d1,
+	    clause_learn_a1,
 	    watch1,
 	    
 	    %% order checks
@@ -1099,7 +1101,7 @@ cnf_sort_offset_delete(N, M, K) ->
     verify_hash(V, CNF1),    
     V.
 
-clause_learn1() ->
+clause_learn_d1() ->
     V = varc:new(),
     ok = varc:config(V, max_conflicting, 1),
     A = var(V, <<"A">>),  %% 1
@@ -1127,11 +1129,9 @@ clause_learn1() ->
 
     _Dix = varc:conflicting_clause(V, 0),
     %% io:format("conflicting_clause1: ~w: ~w\n",[Dix,varc:get_clause(V,_Dix)]),
-    Learnt1 = varp_conflict:analyze(V, 4, 1.0, 0),
+    Learnt1 = varp_conflict:analyze_clause(V, 4, 1.0, 0),
     io:format("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
-    %% Li1 = varc:conflict(V, 3, 1.0, 0),
-    %% Learnt1 = varc:get_clause(V, Li),
 
     undo_until(V, 4, 1),
 
@@ -1148,7 +1148,7 @@ clause_learn1() ->
     io:format("conflicting_clause2: ~w: ~w\n", [Cix2,varc:get_clause(V, Cix2)]),
     %% io:format("DUMP4\n"),
     %% dump(V, false),
-    Learnt2 = varp_conflict:analyze(V, 1, 1.0, 0),
+    Learnt2 = varp_conflict:analyze_clause(V, 1, 1.0, 0),
     io:format("learnt_clause: ~w\n", [Learnt2]),
     true = ([-1] == abs_sort(Learnt2)),
     varc:undo_level(V,1),
@@ -1159,6 +1159,143 @@ clause_learn1() ->
     Match = [-A,B],
     Match = varc:get_bindings(V, 0),
     ok.
+
+clause_learn_a1() ->
+    V = varc:new(),
+    ok = varc:config(V, max_conflicting, 1),
+    A = var(V, <<"A">>),  %% 1
+    B = var(V, <<"B">>),  %% 2
+    C = var(V, <<"C">>),  %% 3
+    X = var(V, <<"X">>),  %% 4
+    Y = var(V, <<"Y">>),  %% 5
+    Z = var(V, <<"Z">>),  %% 6
+    clause(V, [A,B]),
+    clause(V, [B,C]),
+    clause(V, [-A,-X,Y]),  %% Y=1
+    clause(V, [-A,X,Z]),
+    clause(V, [-A,-Y,Z]),  %% Z=1
+    clause(V, [-A,X,-Z]),
+    clause(V, [-A,-Y,-Z]), %% Z=0
+
+    %% io:format("DUMP1\n"),
+    dump(V, false),
+
+    %% bind A/1 B/1 C/1 X/1
+    true = bind_and_bcp(V, 1, A),
+    true = bind_and_bcp(V, 2, B),
+    true = bind_and_bcp(V, 3, C),
+    false = bind_and_bcp(V, 4, X),
+
+    Aix1 = varc:conflict(V, 4, 1.0, 0),
+    Learnt1 = varc:get_clause(V,Aix1),
+    io:format("conflicting_clause1: ~w: ~w\n",
+	      [split_cix(Aix1),Learnt1]),
+    io:format("learnt_clause: ~w\n", [Learnt1]),
+    true = ([-1,-5] == abs_sort(Learnt1)),
+
+    undo_until(V, 4, 1),
+
+    io:format("DUMP2\n"),
+    dump(V, false),
+
+    %% add learnt clause to gamma
+    {true,_Gix1} = varc:move_clause(V, Aix1, gamma),
+
+    io:format("DUMP3\n"),
+    dump(V, false),
+
+    false = varc:bcp(V),
+    Aix2 = varc:conflict(V, 1, 1.0, 0),
+    Learnt2 = varc:get_clause(V,Aix2),
+    io:format("conflicting_clause2: ~w: ~w\n",
+	      [split_cix(Aix2),Learnt2]),
+    io:format("learnt_clause: ~w\n", [Learnt2]),
+    true = ([-1] == abs_sort(Learnt2)),
+
+    io:format("DUMP4\n"),
+    dump(V, false),
+
+    undo_until(V, 1, 0),
+    true = varc:move_clause(V, Aix2, gamma),
+    
+    true = varc:bcp(V),
+    Match = [-A,B],
+    Match = varc:get_bindings(V, 0),
+
+    io:format("DUMP5\n"),
+    dump(V, false),
+    ok.
+%% 
+%% bcp 999 clauses
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412
+%% {literal_integer,false},{literal_size,64},{value_packing,1} => 34047
+%% {literal_integer,false},{literal_size,64},{value_packing,no} => 35276
+%% 
+bench() ->
+    bench(20000).
+
+bench(N) ->
+    {X0,V} = bench_cnf(),
+    T0 = erlang:monotonic_time(),
+    Bcp = bench_(V,X0,N),
+    T1 = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
+    Ts = Time/1000000,
+    io:format("BCP/s=~w,"
+	      "NUM_CLAUSES=~w,"
+	      "LIT_INTEGER=~w,"
+	      "LITERAL_SIZE=~w,"
+	      "VALUE_PACKING=~w\n",
+	      [Bcp/Ts, 
+	       varc:info(V, number_of_clauses),
+	       varc:info(V, literal_integer),
+	       varc:info(V, literal_size),
+	       varc:info(V, value_packing)]),
+    Bcp / Ts.
+
+bench_(V, _X0, 0) ->
+    varc:info(V, bcp_counter);
+bench_(V, X0, I) ->
+    varc:set_level(V, 1),
+    true = varc:bind(V, X0),
+    true = varc:bcp(V),
+    varc:undo_level(V, 1),
+    bench_(V, X0, I-1).
+    
+bench_cnf() ->
+    bench_cnf(111).
+bench_cnf(N) ->
+    V = varc:new([{qtype,recursive}]),
+    Xs0 = [var(V)],
+    CNF =
+	lists:foldl(
+	  fun(_, CNF0) ->
+		  Xs1 = [var(V)|| _ <- lists:seq(1,2)],
+		  CNF1 = bench_clauses(Xs0, Xs1, CNF0),
+		  Xs2 = [var(V)|| _ <- lists:seq(1,3)],
+		  CNF2 = bench_clauses(Xs1, Xs2, CNF1),
+		  Xs3 = [var(V)|| _ <- lists:seq(1,4)],
+		  CNF3 = bench_clauses(Xs2, Xs3, CNF2),
+		  CNF3
+	  end, [], lists:seq(1, N)),
+    install_cnf(V, CNF),
+    {hd(Xs0),V}.
+
+
+%% first variable 
+bench_clauses([X1],[Y1,Y2],T) ->
+    [[Y1,-X1], [Y2,-X1] | T];
+
+bench_clauses([X1,X2],[Y1,Y2,Y3],T) ->
+    [[Y1,-X1,-X2],[Y2,-X1,-X2],[Y3,-X1,-X2] | T];
+
+bench_clauses([X1,X2,X3],[Y1,Y2,Y3,Y4], T) ->
+    [[Y1,-X1,-X2,-X3],[Y2,-X1,-X2,-X3],
+     [Y3,-X1,-X2,-X3],[Y4,-X1,-X2,-X3] | T];
+
+bench_clauses(Xs, Ys, T) ->
+    NXs = [-Xi || Xi <- Xs],
+    [ [ [Yi | NXs] || Yi <- Ys] | T].
 
 
 bind_and_bcp(V, Level, X) ->
@@ -1237,7 +1374,7 @@ install_cnf(V, CNF, Set) ->
 		  Ci ->
 		      %% check the clause
 		      GetClause = varc:get_clause(V, Ci),
-		      assert_equal(GetClause, Clause),
+		      assert_equal(GetClause, abs_sort(Clause)),
 		      [Ci|Acc]
 	      end
       end, [], CNF).
@@ -1302,7 +1439,7 @@ verify_xref(V, CNF) ->
       end, DegLs).
 
 verify_hash(V, CNF) ->
-    true = varc:info(V, xref),  %% assert we have hash enabled
+    true = varc:info(V, hash),  %% assert we have hash enabled
     lists:foreach(
       fun(Clause) ->
 	      Ci = varc:find_clause(V, Clause),

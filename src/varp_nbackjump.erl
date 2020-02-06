@@ -37,8 +37,7 @@
 	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
 	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
 	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)}
 	]).
 
 options() ->
@@ -247,106 +246,88 @@ main(Bs,Param,MaxLearned,MR) ->
 	    end
     end.
 
-
 conflict(Bs,Param,Level,MaxLearned,MR) ->
-    %% Conflict0 = varc:conflict(Bs#bs.vp, Level, maps:get(bump,Param), 0),
-    %% ClauseList0 = [Conflict0],
-    ClauseList0 = varp_conflict:analyze(Bs,Level,maps:get(bump,Param)),
+    %% LClauseList = [{ClauseLength, ClauseIndex}] 
+    %% ClauseLength may be 1 !
+    LClauses1 = varp_conflict:analyze_alpha(Bs,Level,
+					    maps:get(bump,Param),
+					    maps:get(minimize,Param)),
+    %% io:format("LClases1 = ~w\n", [LClauses1]),
     varc:decay(Bs#bs.vp, maps:get(decay,Param)),
-    ClauseList1 = 
-	case maps:get(minimize,Param) of
-	    true ->
-		lists:usort([ varp_minimize:clause(Bs,Clause) || 
-				Clause <- ClauseList0]);
-	    false ->
-		ClauseList0
-	end,
-    LClauseList1 = [{length(Clause),Clause} || Clause <- ClauseList1],
 
-    LClauseList2 = lists:keysort(1, LClauseList1),
-    
-    %% 
-    {LUnitClauseList, LClauseList3} =
-	lists:splitwith(fun({L,_}) -> L =:= 1 end, LClauseList2),
+    case lists:keysort(1, LClauses1) of
+	LClauses2 = [{1,_}|_] -> %% has unit! jump to top-level and install
+	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    move_to_gamma(Bs, LClauses2),
+	    main_bcp(Bs,Param,?TOP_LEVEL,MaxLearned,MR);
 
-    %% UnitClauses
-    UnitClauses = lists:usort([Clause || {_,Clause} <- LUnitClauseList]),
+	[{_Len,Aix}] -> %% one clause only
+	    {ALen,D1,D2,J2,J3,_Clause} = jump_info(Bs#bs.vp, Aix),
+	    do_stat(Bs,D1,D2),
+	    L = maps:get(stumble,Param),
+	    K = maps:get(olle,Param),
+	    M = maps:get(stumble_olle,Param),
+	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
+	    undo_until(Bs, Level, JLevel),
+	    move_to_gamma(Bs,ALen,Aix),
+	    main_bcp(Bs,Param,JLevel,MaxLearned,MR);
 
-    JClauseList1 =
-	lists:map(
-	  fun({L,Clause}) ->
-		  case lists:sort(fun(A,B) -> A > B end,
-				  [varc:implication_level(Bs#bs.vp,Q) ||
-				      Q <- Clause]) of
-		      [J1,J2,J3|_] ->
-			  D1 = J1 - J2,
-			  D2 = J2 - J3,
-			  {L,D1,D2,J2,J3,Clause};
-		      [J1,J2] ->
-			  J3 = ?TOP_LEVEL,
-			  D1 = J1 - J2,
-			  D2 = J2 - J3,
-			  {L,D1,D2,J2,J3,Clause}
-		  end
-	  end, LClauseList3),
+	LClauses2 -> %% no units determine level
+	    %% io:format("conflict clauses = ~p\n", [LClauses2]),
+	    JClauses1 = [jump_info(Bs#bs.vp, Aix) || {_Len,Aix} <- LClauses2],
+	    %% io:format("JClauses1 = ~w\n", [JClauses1]),
+	    %% jump_info = {L,D1,D2,J2,J3,Aix}
+	    JClauses2 =
+		lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Clausea},
+			       {Lb,D1b,_D2b,_J2b,_J3b,_Clauseb}) ->
+				   if D1a =:= D1b -> La < Lb;
+				      true -> D1a > D1b
+				   end
+			   end, JClauses1),
+	    [JClause|JClauses3] = JClauses2,
+	    LClauses4 = [{L,Clause} ||
+			    {L,_D1,_D2,_J2,_J3,Clause} <- JClauses3],
+	    LClauses5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
+				   LClauses4),
+	    L = maps:get(stumble,Param),
+	    K = maps:get(olle,Param),
+	    M = maps:get(stumble_olle,Param),
 
-    JClauseList2 =
-	lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Clausea},
-		       {Lb,D1b,_D2b,_J2b,_J3b,_Clauseb}) ->
-			   if D1a =:= D1b -> La < Lb;
-			      true -> D1a > D1b
-			   end
-		   end, JClauseList1),
+	    {ALen,D1,D2,J2,J3,Aix} = JClause,
+	    do_stat(Bs,D1,D2),
+	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
+	    %% FIXME if JLevel = J3 then we SHOULD select
+	    %% corresponding literal for -L2/-L3 as next unbound
+	    undo_until(Bs, Level, JLevel),
+	    move_to_gamma(Bs, LClauses5),
+	    %% install the conflict clause
+	    move_to_gamma(Bs,ALen,Aix),
+	    main_bcp(Bs,Param,JLevel,MaxLearned,MR)
+    end.
 
-    {JClause,LClauseList4} =
-	if UnitClauses =:= [] ->
-		[JC | JCList3] = JClauseList2,
-		{JC,[{L,Clause} || {L,_D1,_D2,_J2,_J3,Clause} <- JCList3]};
-	   true ->
-		{undefined,
-		 [{L,Clause} || {L,_D1,_D2,_J2,_J3,Clause} <- JClauseList2]}
-	end,
 
-    LClauseList5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
-			      LClauseList4),
+jump_info(V, Cix) ->
+    varc:clause_info(V, Cix, jump).
 
-    L = maps:get(stumble,Param),
-    K = maps:get(olle,Param),
-    M = maps:get(stumble_olle,Param),
+%% Move a list of clauses from alpha to gamma (install them)
+move_to_gamma(Bs, [{Len,Aix}|LCs]) ->
+    move_to_gamma(Bs, Len, Aix),
+    move_to_gamma(Bs, LCs);
+move_to_gamma(_Bs, []) ->
+    ok.
 
-    JLevel =
-	case JClause of
-	    undefined -> ?TOP_LEVEL;
-	    {_Len0,D1,D2,J2,J3,_} ->
-		do_stat(Bs,D1,D2),
-		do_jump(Bs,L,K,M,D1,D2,J2,J3)
-	end,
-
-    undo_until(Bs, Level, JLevel),  %% undo until JLevel
-
-    %% install unit clauses
-    Bs0 = lists:foldl(
-	    fun(Clause,Bsi) ->
-		    do_clause_stat(Bsi, 1),
-		    add_conflict_clause(Bsi,Clause)
-	    end, Bs, UnitClauses),
-
-    %% install length clauses
-    Bs1 = lists:foldl(
-	    fun({Len,Clause},Bsi) ->
-		    do_clause_stat(Bsi, Len),
-		    add_conflict_clause(Bsi,Clause)
-	    end, Bs0, LClauseList5),
-
-    %% install "the" conflict clause
-    Bs2 = case JClause of
-	      undefined ->
-		  Bs1;
-	      {Len1,_D1,_D2,_J2,_J3,Clause} ->
-		  do_clause_stat(Bs1, Len1),
-		  add_conflict_clause(Bs1,Clause)
-	  end,
-    main_bcp(Bs2,Param,JLevel,MaxLearned,MR).
+move_to_gamma(Bs, 1, Aix) ->
+    %% io:format("Move UNIT ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
+    true = varc:move_clause(Bs#bs.vp, Aix, gamma),
+    counters:add(Bs#bs.clen, 1, 1);
+move_to_gamma(Bs, Len, Aix) ->
+    %% io:format("Move CLAUSE ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
+    {true,_Gix} = varc:move_clause(Bs#bs.vp, Aix, gamma),
+    if Len >= 1023 ->
+	    counters:add(Bs#bs.clen, 1024, 1);
+       true ->
+	    counters:add(Bs#bs.clen, Len, 1)
+    end.
 
 %% after conflict clause generation we need to run bcp and
 %% check result.
@@ -374,8 +355,8 @@ restart(Bs,Param,Level,MaxLearned,MR) ->
 	true ->
 	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
+	    ?dbg0("purge\n",[]),
 	    varp_formula:del_unused_clauses(Bs),
-	    reorder(Bs, Param),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs, Param, MaxLearned1, MR);

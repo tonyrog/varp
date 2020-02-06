@@ -64,7 +64,7 @@ succ(Fd, Type, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [M, N])
     end,
-    I = varc:clause_first(Bs#bs.vp),
+    I = varc:clauseset_first(Bs#bs.vp),
     succ_(Fd, Type, I, Bs).
 
 succ_(_Fd,_Type,false,Bs) ->
@@ -72,9 +72,9 @@ succ_(_Fd,_Type,false,Bs) ->
 succ_(Fd,Type,I,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, false) of
 	true ->
-	    succ_(Fd,Type,varc:clause_next(Bs#bs.vp,I),Bs);
+	    succ_(Fd,Type,varc:clauseset_next(Bs#bs.vp,I),Bs);
 	[] ->
-	    succ_(Fd,Type,varc:clause_next(Bs#bs.vp,I),Bs);
+	    succ_(Fd,Type,varc:clauseset_next(Bs#bs.vp,I),Bs);
 	CL ->
 	    Bn = clause_bn(Bs,CL),
 	    Gn = group_bn(Bn),
@@ -98,7 +98,7 @@ succ_(Fd,Type,I,Bs) ->
 %%		      snf -> format_succ_snf_clause(Bs,Bn)
 %%		  end,
 %%	    io:put_chars(Fd,[Fmt,"\n"]),
-	    succ_(Fd,Type,varc:clause_next(Bs#bs.vp,I),Bs)
+	    succ_(Fd,Type,varc:clauseset_next(Bs#bs.vp,I),Bs)
     end.
 
 %% generate succesor covering from grouped "binary" number
@@ -201,16 +201,16 @@ format_succ_snf_clause(Bs,CL) ->
 
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varc:clause_first(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varc:clause_setfirst(Bs#bs.vp), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;
 count_number_of_clauses_(Bs, I, N) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, false) of
 	true -> 
-	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N);
+	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
 	[] ->
-	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N);
+	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
 	_CL ->    
-	    count_number_of_clauses_(Bs, varc:clause_next(Bs#bs.vp,I),N+1)
+	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N+1)
     end.

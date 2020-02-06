@@ -10,6 +10,9 @@
 
 -include("varp.hrl").
 
+clause(Bs, Cix) when is_integer(Cix) ->
+    varc:minimize(Bs#bs.vp, Cix),
+    Cix;
 clause(_Bs,[]) -> [];
 clause(_Bs,Clause=[_]) -> Clause;
 clause(Bs,Clause0) ->

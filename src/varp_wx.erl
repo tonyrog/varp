@@ -1340,10 +1340,11 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
+    NBS = [integer_to_list(NB),"[/",integer_to_list(NS),"]"],
     Status = io_lib:format(
-	       "#Var: ~-8w #Bound: ~-8w/~8w #Clauses: ~-8w"
+	       "#Var: ~-8w #Bound: ~-16s #Clauses: ~-8w"
 	       "#Dead: ~-8w #Bcp: ~-10w #Time: ~s",
-	       [NV, NB, NS, NC, ND, NE, format_time(Time)]),
+	       [NV, NBS, NC, ND, NE, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 

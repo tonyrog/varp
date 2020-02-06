@@ -6,33 +6,63 @@
 %%% Created :  3 Dec 2019 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_conflict).
--export([analyze/3]).
--export([analyze_alpha/3]).
-
 -export([analyze/4]).
+-export([analyze_alpha/4]).
+
+-export([analyze_clause/4]).
 
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
-analyze_alpha(Bs, Level, Bump) ->
+analyze_alpha(Bs, Level, Bump, Minimize) ->
     N = varc:info(Bs#bs.vp, number_of_conflicting_clauses),
-    [ varc:conflict(Bs#bs.vp, Level, Bump, I) ||
-	I <- lists:seq(0, N-1) ].
+    analyze_alpha_(Bs, Level, Bump, Minimize, 0, N).
 
-analyze(Bs, Level, Bump) ->
+analyze_alpha_(_Bs, _Level, _Bump, _Minimize, N, N) ->
+    [];
+analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
+    case varc:conflict(Bs#bs.vp, Level, Bump, I) of
+	undefined ->  %% duplicate
+	    %% io:format("clause duplicate\n"),
+	    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
+	Cix ->
+	    case Minimize of
+		true ->
+		    case varc:minimize(Bs#bs.vp, Cix) of
+			undefined ->
+			    %%io:format("clause duplicate after minimize\n"),
+			    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
+			Len ->
+			    [{Len, Cix}|
+			     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
+		    end;
+		false ->
+		    Len = varc:clause_info(Bs#bs.vp, Cix, length),
+		    [{Len, Cix}|
+		     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
+	    end
+    end.
+
+analyze(Bs, Level, Bump, Minimize) ->
     Trail = get_trail(Bs#bs.vp, Level),
     N = varc:info(Bs#bs.vp, number_of_conflicting_clauses),
     [ begin
-	  analyze(Bs#bs.vp, Trail, I, Level, Bump)
+	  Clause = analyze_clause_(Bs#bs.vp, Trail, I, Level, Bump),
+	  if Minimize -> 
+		  Clause1 = varp_minimize:clause(Bs, Clause),
+		  {length(Clause1), Clause1};
+	     true ->
+		  {length(Clause),Clause}
+	  end
       end || I <- lists:seq(0, N-1)].
 
-analyze(V, Level, Bump, I) ->
-    analyze(V, get_trail(V, Level), Level, Bump, I).
+analyze_clause(V, Level, Bump, I) ->
+    analyze_clause_(V, get_trail(V, Level), I, Level, Bump).
 
-analyze(V,Trail,I,Level,Bump) ->
-    analyze_conflict(V,Trail,varc:conflicting_clause(V,I),Level,Bump).
+analyze_clause_(V,Trail, I, Level, Bump) ->
+    analyze_conflict_(V,Trail,varc:conflicting_clause(V,I),Level,Bump).
 
-analyze_conflict(V,Trail,Cix,Level,Bump) ->
+analyze_conflict_(V,Trail,Cix,Level,Bump) ->
     Conflicting = get_clause(V,Cix,undefined),
     ?dbg("trail: decision=~w,clause=~w,trail=~w\n", 
 	  [varc:get_decision(V, Level),Conflicting,Trail]),

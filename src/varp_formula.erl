@@ -274,9 +274,9 @@ del_clause(Bs, IndexOrClause) ->
 
 del_unused_clauses(Bs) ->
     V = Bs#bs.vp,
-    ?dbg1("del_unused_clause gamma offset=~w, size=~w\n", 
-	  [varc:clauseset_offset(V, ?GAMMA), 
-	   varc:clauseset_size(V, ?GAMMA)]),
+    ?dbg("del_unused_clause gamma offset=~w, size=~w\n", 
+	 [varc:clauseset_offset(V, ?GAMMA), 
+	  varc:clauseset_size(V, ?GAMMA)]),
     varc:clauseset_sort(V, ?GAMMA),  %% learnt clauses
     case want_proof_output(Bs) of
 	false ->
@@ -284,8 +284,8 @@ del_unused_clauses(Bs) ->
 	_ ->
 	    del_proof_clauses(Bs, V, varc:clauseset_first(V, ?GAMMA))
     end,
-    ?dbg1("del_unused_clause size=~w\n", 
-	  [varc:clauseset_size(V, ?GAMMA)]),
+    ?dbg("del_unused_clause size=~w\n", 
+	 [varc:clauseset_size(V, ?GAMMA)]),
     ok.
     
 
