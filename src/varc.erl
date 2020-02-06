@@ -96,8 +96,8 @@
 -export([get_number_of_conflicting_clauses/1]).
 -export([get_number_of_bound_variables/1]).
 -export([get_number_of_unbound_variables/1]).
--export([get_clause_eval_counter/1]).
--export([get_clause_eval_counter/2]).
+-export([get_clause_bcp_counter/1]).
+-export([get_clause_bcp_counter/2]).
 -export([get_bcp_counter/1]).
 -export([get_conflict_counter/1]).
 
@@ -151,7 +151,7 @@ new(Options) when is_list(Options) ->
 %%    {set, gamma}       -- clone clauseset GAMMA
 %%    {set, beta}        -- clone clauseset BETA
 %%    {set, alpha}       -- clone clauseset ALPHA
-%%    {queue, boolean()} -- clone eval queue
+%%    {queue, boolean()} -- clone bcp queue
 %%
 
 clone(Vp) ->
@@ -558,13 +558,13 @@ order_map(_Vp, _Index) ->
 
 %% utility to get a list of unbound literals
 order_all(Vp) ->
-    order_all_(Vp,[],first_unbound_index(Vp)).
+    order_all_(Vp,first_unbound_index(Vp),[]).
 
-order_all_(_Vp,Acc,false) ->
+order_all_(_Vp,false,Acc) ->
     lists:reverse(Acc);
-order_all_(Vp,Acc,Index) ->
-    L = order_map(Vp, Index),
-    order_all_(Vp, [L|Acc], next_unbound_index(Vp, Index)).
+order_all_(Vp,I,Acc) ->
+    Xi = order_map(Vp, I),
+    order_all_(Vp, next_unbound_index(Vp, I), [Xi|Acc]).
 
 info(Vp) ->
     [ {Key,info(Vp, Key)} || Key <- info_keys()].
@@ -625,20 +625,20 @@ get_number_of_conflicting_clauses(Vp) ->
 get_max_clause_length(Vp) ->
     info(Vp, max_clause_length).
 
-get_clause_eval_counter(Vp) ->
-    info(Vp, clause_eval_counter).
+get_clause_bcp_counter(Vp) ->
+    info(Vp, clause_bcp_counter).
 
-get_clause_eval_counter(Vp,n) ->
+get_clause_bcp_counter(Vp,n) ->
     info(Vp, clause_n_counter);
-get_clause_eval_counter(Vp,2) ->
+get_clause_bcp_counter(Vp,2) ->
     info(Vp, clause_2_counter);
-get_clause_eval_counter(Vp,3) ->
+get_clause_bcp_counter(Vp,3) ->
     info(Vp, clause_3_counter);
-get_clause_eval_counter(Vp,dead) ->
+get_clause_bcp_counter(Vp,dead) ->
     info(Vp, clause_d_counter);
-get_clause_eval_counter(Vp,edge_eval) ->
+get_clause_bcp_counter(Vp,edge_bcp) ->
     info(Vp, edge_2_counter);
-get_clause_eval_counter(Vp,edge_dead) ->
+get_clause_bcp_counter(Vp,edge_dead) ->
     info(Vp, edge_d_counter).
 
 get_bcp_counter(Vp) ->

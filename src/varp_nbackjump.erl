@@ -16,9 +16,7 @@
 -define(ROOT_LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
--compile(export_all).
--import(varp_formula, [format_clause/2, format_clause/3]).
--import(varp_formula, [format_literals/2]).
+%% -compile(export_all).
 
 -define(ORDER_OPT(Ord,Ord2),
 	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
@@ -632,12 +630,12 @@ display_stat(Bs,Param) ->
     end.
 
 add_conflict_clause(Bs,Clause=[L]) ->
-    ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
+    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
     true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     Bs;
 add_conflict_clause(Bs,Clause=[_,_|_]) ->
-    ?dbg("conflict clause: ~s\n", [format_clause(Bs, Clause)]),
+    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
     ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),

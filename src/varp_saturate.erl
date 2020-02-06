@@ -11,10 +11,9 @@
 -export([options/0]).
 -export([saturate/5]).
 
--compile(export_all).
--import(varp_formula, [format_lit/2, format_var/2]).
-
 %% -define(DEBUG, true).
+%% -compile(export_all).
+
 -include("varp.hrl").
 
 -define(CHECK_INTERVAL, 1000).

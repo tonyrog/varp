@@ -491,7 +491,7 @@ nbcp_p4() ->
     nbcp_loop(P4).
 
 symlist_sort_first(V, SymList) ->
-    varc:order_sort_first([varc:find_symbol(V, Sym) || Sym <- SymList]).
+    varc:order_sort_first(V, [varc:find_symbol(V, Sym) || Sym <- SymList]).
 
 nbcp_loop(V) ->
     false = varc:nbcp(V),
@@ -1235,9 +1235,9 @@ bench() ->
     bench(20000).
 
 bench(N) ->
-    {X0,V} = bench_cnf(),
+    V = bench_cnf_build(),
     T0 = erlang:monotonic_time(),
-    Bcp = bench_(V,X0,N),
+    Bcp = bench_(V,1,N),
     T1 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T1-T0,native,microsecond),
     Ts = Time/1000000,
@@ -1261,26 +1261,45 @@ bench_(V, X0, I) ->
     true = varc:bcp(V),
     varc:undo_level(V, 1),
     bench_(V, X0, I-1).
+
+bench_cnf_build() ->
+    bench_install_cnf(bench_cnf()).
+
+bench_cnf_build(N) ->
+    bench_install_cnf(bench_cnf(N)).
     
+bench_install_cnf(CNF) ->
+    V = varc:new(),
+    Vs = lists:usort(lists:append([[abs(L) || L <- Ci] || Ci <- CNF])),
+    K  = lists:max(Vs),
+    _ = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
+    install_cnf(V, CNF),
+    V.
+
 bench_cnf() ->
     bench_cnf(111).
 bench_cnf(N) ->
-    V = varc:new([{qtype,recursive}]),
-    Xs0 = [var(V)],
-    CNF =
-	lists:foldl(
-	  fun(_, CNF0) ->
-		  Xs1 = [var(V)|| _ <- lists:seq(1,2)],
-		  CNF1 = bench_clauses(Xs0, Xs1, CNF0),
-		  Xs2 = [var(V)|| _ <- lists:seq(1,3)],
-		  CNF2 = bench_clauses(Xs1, Xs2, CNF1),
-		  Xs3 = [var(V)|| _ <- lists:seq(1,4)],
-		  CNF3 = bench_clauses(Xs2, Xs3, CNF2),
-		  CNF3
-	  end, [], lists:seq(1, N)),
-    install_cnf(V, CNF),
-    {hd(Xs0),V}.
+    bench_var_init(),
+    Xs0 = [bench_var()],
+    lists:reverse(
+      lists:foldl(
+	fun(_, CNF0) ->
+		Xs1 = [bench_var()|| _ <- lists:seq(1,2)],
+		CNF1 = bench_clauses(Xs0, Xs1, CNF0),
+		Xs2 = [bench_var()|| _ <- lists:seq(1,3)],
+		CNF2 = bench_clauses(Xs1, Xs2, CNF1),
+		Xs3 = [bench_var()|| _ <- lists:seq(1,4)],
+		CNF3 = bench_clauses(Xs2, Xs3, CNF2),
+		CNF3
+	end, [], lists:seq(1, N))).
 
+bench_var_init() ->
+    put(bench_var_next, 1).
+
+bench_var() ->
+    I = get(bench_var_next),
+    put(bench_var_next, I+1),
+    I.
 
 %% first variable 
 bench_clauses([X1],[Y1,Y2],T) ->
@@ -1354,6 +1373,20 @@ random_cnf(N, M, K, Set) ->
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, Set),
     V.
+
+write_cnf(CNF) ->
+    io:put_chars(
+      [format_preamable(CNF),"\n",
+       [[format_clause(C),"\n"] || C <- CNF]]).
+
+format_clause(C) ->
+    [[[integer_to_list(L)," "] || L <- C],"0"].
+
+format_preamable(CNF) ->
+    M = length(CNF),
+    Vs = lists:usort(lists:append([[abs(L) || L <- Ci] || Ci <- CNF])),
+    N = length(Vs),
+    ["p cnf ", integer_to_list(N), " ", integer_to_list(M)].
 
 install_cnf(V, CNF) ->
     install_cnf(V, CNF, delta).

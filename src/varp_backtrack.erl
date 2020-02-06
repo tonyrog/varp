@@ -10,7 +10,7 @@
 -export([options/0]).
 -export([run/2]).
 
--compile(export_all).
+%% -compile(export_all).
 
 %% -define(DEBUG, true).
 -include("varp.hrl").
@@ -44,14 +44,14 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     case varp_formula:getopt(Bs1,method) of
 	collect ->
 	    bt(Bs1, fun(Count,Acc,Bs2) ->
-			    Model = varp:output_model(Bs2,Count),
+			    Model = varp:output_model(Bs2,false,Count),
 			    Continue = (N =:= 0) orelse (Count < N),
 			    {Continue,[Model|Acc]}
 		    end, []);
 	count ->
 	    bt(Bs1, fun(Count,_Acc,Bs2) ->
 			    if Print =:= false -> ok;
-			       true -> varp:output_model(Bs2,Count)
+			       true -> varp:output_model(Bs2,false,Count)
 			    end,
 			    if Count rem 1000 =:= 0 ->
 				    io:format("~w\n", [Count]); %% option?

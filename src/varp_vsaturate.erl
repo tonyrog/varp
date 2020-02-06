@@ -6,7 +6,7 @@
 
 -export([run/2]).
 
--compile(export_all).
+%% -compile(export_all).
 
 -import(varp_formula, [format_lit/2]).
 
@@ -100,7 +100,7 @@ saturate_vec(Bs,Vec) ->
 	 [varp_formula:fmt_bind_list(Bs,
 				     varp_formula:get_bindings(Bs,1))]),
     %% remove mark but keep bindings
-    varp_formula:keep_level(Bs, 1),
+    varc:keep_level(Bs#bs.vp, 1),
     Res.
 
 -spec saturate_vec_(Bs::bs(),Vec::[{index(),var()}],Level::integer()) ->
@@ -119,11 +119,11 @@ saturate_vec_(_Bs,[],_Level) ->
     true.
 
 saturate_vec__(Bs,X,V,Level) ->
-    case mark_eq_eval(Bs,X,?F,Level) of
+    case mark_eq_eval(Bs,-X,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    varc:undo_level(Bs#bs.vp,Level),
-	    case eq_eval(Bs,X,?T,Level) of
+	    case eq_eval(Bs,X,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
@@ -135,7 +135,7 @@ saturate_vec__(Bs,X,V,Level) ->
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 		    varc:undo_level(Bs#bs.vp,Level),
-		    eq_eval(Bs,X,?T,Level);
+		    eq_eval(Bs,X,Level);
 		true ->
 		    Xs = varp_formula:get_bindings(Bs,Level+1), %% + X=false!
 		    ?dbg("~s~s/false: => {~s}\n", 
@@ -144,69 +144,46 @@ saturate_vec__(Bs,X,V,Level) ->
 			  varp_formula:fmt_bind_list(Bs,Xs)]),
 		    varc:undo_level(Bs#bs.vp,Level), %% (X=false)
 		    
-		    case mark_eq_eval(Bs,X,?T,Level) of
+		    case mark_eq_eval(Bs,X,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level),Level]),
 			    varc:undo_level(Bs#bs.vp,Level),  %% (X=true)
-			    eq_eval(Bs,X,?F,Level);
+			    eq_eval(Bs,-X,Level);
 			true ->
 			    ?dbg("~s~s/true: => {~s}\n",
 				 [indent(Level),varp_formula:fmt_var(Bs,X),
 				  varp_formula:fmt_bind_list(
 				    Bs,
 				    varp_formula:get_bindings(Bs,Level+1))]),
-			    Ys = varp_formula:intersect(Bs, X, Xs),
+			    Ys = varp_formula:intersect_bindings(Bs, X, Xs),
 			    ?if1(Ys =/= [],
 				 begin io:format("intersect=~w\n", [Ys]) end),
 			    ?dbg("~sintersect = {~s}\n", 
 				 [indent(Level),
 				  varp_formula:fmt_bind_list(Bs,Ys)]),
 			    varc:undo_level(Bs#bs.vp,Level),  %% undo (X=true)
-			    install_bindings(Bs, Ys),
-			    varc:eval(Bs#bs.vp)
+			    varp_formula:install_bindings(Bs,Level,Ys),
+			    varc:bcp(Bs#bs.vp)
 		    end
 	    end
     end.
 
-install_bindings(Bs, Bnds) ->
-    Bcp = varp_option:getopt(bcp,Bs#bs.option),
-    install_bindings(Bs, Bcp, Bnds).
-
-install_bindings(Bs,Bcp,[{Y,W}|Xs]) when abs(W) =:= ?T ->
-    varp_formula:equal(Bs,Y,W),
-    install_bindings(Bs,Bcp,Xs);
-install_bindings(Bs,Bcp=false,[{Y,W}|Xs]) ->
-    varp_formula:equal(Bs,Y,W),
-    install_bindings(Bs,Bcp,Xs);
-install_bindings(Bs,Bcp=true,[{Y,W}|Xs]) ->
-    io:format("install clause (~s, ~s)\n", 
-	      [format_lit(Bs,Y), format_lit(Bs, W)]),
-    install_bindings(Bs,Bcp,Xs);
-install_bindings(Bs,_Bcp,[]) ->
-    Bs.
-
 %% place mark before and after the decision variable
-mark_eq_eval(Bs,V,Value,Level) ->
-    ?dbg("~seq_eval: ~s/~s\n", 
-	 [indent(Level),
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:fmt_var(Bs,Value)]),
+mark_eq_eval(Bs,X,Level) ->
+    ?dbg("~seq_eval: ~s\n", [indent(Level),varp_formula:fmt_lit(Bs,X)]),
     varc:set_level(Bs#bs.vp,Level),
-    case varp_formula:equal(Bs,V,Value) of
+    case varc:bind(Bs#bs.vp,X) of
 	true ->
 	    varc:set_level(Bs#bs.vp,Level+1),
-	    varc:eval(Bs#bs.vp);
+	    varc:bcp(Bs#bs.vp);
 	false ->
 	    false
     end.
 
-eq_eval(Bs,V,Value,_D) ->
-    ?dbg("~seq_eval: ~s/~s\n", 
-	 [indent(_D),
-	  varp_formula:fmt_var(Bs,V),
-	  varp_formula:fmt_var(Bs,Value)]),
-    varp_formula:equal(Bs,V,Value) andalso varc:bcp(Bs#bs.vp).
+eq_eval(Bs,X,_D) ->
+    ?dbg("~seq_eval: ~s\n", [indent(_D),varp_formula:fmt_lit(Bs,X)]),
+    varc:bind(Bs#bs.vp,X) andalso varc:bcp(Bs#bs.vp).
 
 indent(D) -> lists:duplicate(D, $\s).
 
@@ -216,17 +193,21 @@ indent(D) -> lists:duplicate(D, $\s).
 init_vector(_Bs,0) ->
     [];
 init_vector(Bs,K) ->
-    case varp_formula:first_unbound(Bs) of
+    case varc:first_unbound_index(Bs#bs.vp) of
 	false -> [];
-	{I1,X1} -> init_vector_(Bs,K-1,I1,[{I1,X1}])
+	I1 -> 
+	    X1 = varc:order_map(Bs#bs.vp,I1),
+	    init_vector_(Bs,K-1,I1,[{I1,X1}])
     end.
 
 init_vector_(_Bs,0,_I,Vec) -> 
     Vec;
 init_vector_(Bs,K,I0,Vec) ->
-    case varp_formula:next_unbound(Bs,I0) of
+    case varc:next_unbound_index(Bs#bs.vp,I0) of
 	false -> Vec;
-	{I1,X1} -> init_vector_(Bs,K-1,I1,[{I1,X1}|Vec])
+	I1 -> 
+	    X1 = varc:order_map(Bs#bs.vp,I1),
+	    init_vector_(Bs,K-1,I1,[{I1,X1}|Vec])
     end.
 
 %%
@@ -236,32 +217,37 @@ next_vector(Bs,Vec) ->
     next_vector_(Bs,Vec,0).
 
 next_vector_(Bs,[{I,_Xi}|Vec],Max) ->
-    case varp_formula:next_unbound(Bs,I) of
+    case varc:next_unbound_index(Bs#bs.vp,I) of
 	false ->
 	    Vec1 = next_vector_(Bs,Vec,I),
 	    select_next(Bs,Vec1,Max);
-	{J,_Xj} when Max>0, J >= Max ->
+	J when Max>0, J >= Max ->
 	    Vec1 = next_vector_(Bs,Vec,I),
 	    select_next(Bs,Vec1,Max);
-	Uj ->
-	    [Uj|Vec]
+	J ->
+	    Xj = varc:order_map(Bs#bs.vp,J),
+	    [{J,Xj}|Vec]
     end;
 next_vector_(_Bs,[],_MI) ->
     [].
 
 select_next(_Bs,[],_Max) -> [];
 select_next(Bs,Vec=[{K,_Xk}|_],Max) ->
-    case varp_formula:next_unbound(Bs,K) of
+    case varc:next_unbound_index(Bs#bs.vp,K) of
 	false -> [];
-	{J,_Xj} when Max>0, J >= Max -> [];
-	Uj -> [Uj|Vec]
+	J when Max>0, J >= Max -> [];
+	J ->
+	    Xj = varc:order_map(Bs#bs.vp,J),
+	    [{J,Xj}|Vec]
     end.
 
 %% add one extra element to "vector"
 expand_vector([], _Bs) -> [];
 expand_vector(Vec, Bs) ->
     J = lists:max([I || {I,_} <- Vec]),
-    case varp_formula:next_unbound(Bs,J) of
+    case varc:next_unbound_index(Bs#bs.vp,J) of
 	false -> Vec;
-	{K,Xk} -> Vec++[{K,Xk}]
+	{K,Xk} ->
+	    Xk = varc:order_map(Bs#bs.vp,K),
+	    Vec++[{K,Xk}]
     end.

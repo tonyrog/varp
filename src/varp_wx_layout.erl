@@ -12,7 +12,7 @@
 
 -export([create/2, create/3]).
 -export([handle_sync_event/2]).
--compile(export_all).
+%% -compile(export_all).
 
 %% Create widgets and return toplevel widget and a name map
 create(Parent, Root) ->

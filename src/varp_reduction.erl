@@ -11,9 +11,9 @@
 -export([run/2]).
 -export([options/0]).
 
--compile(export_all).
-
 %% -define(DEBUG, true).
+%% -compile(export_all).
+
 -include("varp.hrl").
 
 options() ->
@@ -49,18 +49,19 @@ run(Bs, Param) ->
     end.
 
 red(Bs,N,CMax,Type) ->
-    case varp_formula:first_unbound(Bs) of
+    case varc:first_unbound_index(Bs#bs.vp) of
 	false -> {?CONTINUE,[],Bs};
-	{I,X} -> red(Bs,I,X,N,CMax,Type)
+	I -> red(Bs,I,N,CMax,Type)
     end.
 
-red(Bs,_I,_X,0,_CMax,_Type) -> 
+red(Bs,_I, 0,_CMax,_Type) -> 
     {?CONTINUE,[],Bs};
-red(Bs, I, X,N,CMax,Type) ->
+red(Bs,I,N,CMax,Type) ->
+    X = varc:order_map(Bs#bs.vp, I),
     Bs1 = add_var(Bs,X,CMax,Type),
-    case varp_formula:next_unbound(Bs1,I) of
+    case varp_formula:next_unbound_index(Bs1,I) of
 	false -> {?CONTINUE,[],Bs1};
-	{I1,X1} -> red(Bs1,I1,X1,N-1,CMax,Type)
+	I1 -> red(Bs1,I1,N-1,CMax,Type)
     end.
 
 add_var(Bs,V,CMax,Type) ->

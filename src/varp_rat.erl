@@ -10,7 +10,7 @@
 -export([run/2]).
 -export([options/0]).
 
--compile(export_all).
+%% -compile(export_all).
 
 %% -define(DEBUG, true).
 -include("varp.hrl").
@@ -45,18 +45,19 @@ run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
     end.
 
 rat(Bs,N,Type) ->
-    case varp_formula:first_unbound(Bs) of
+    case varc:first_unbound_index(Bs#bs.vp) of
 	false -> {?CONTINUE,[],Bs};
-	{I,X} -> rat(Bs,I,X,N,Type)
+	I -> rat(Bs,I,N,Type)
     end.
 
-rat(Bs,_I,_X,0,_Type) -> 
+rat(Bs,_I,0,_Type) -> 
     {?CONTINUE,[],Bs};
-rat(Bs, I, X,N,Type) ->
+rat(Bs,I,N,Type) ->
+    X = varc:order_map(Bs#bs.vp, I),
     Bs1 = rat_var(Bs,X,Type),
-    case varp_formula:next_unbound(Bs1,I) of
+    case varc:next_unbound_index(Bs1#bs.vp,I) of
 	false -> {?CONTINUE,[],Bs1};
-	{I1,X1} -> rat(Bs1,I1,X1,N-1,Type)
+	I1 -> rat(Bs1,I1,N-1,Type)
     end.
 
 rat_var(Bs,V,Type) ->

@@ -103,15 +103,9 @@ display_order(Bs,Param) ->
 	false ->
 	    ok;
 	true ->
-	    Order = collect_order(Bs,varp_formula:first_init(Bs),[]),
+	    Order = varc:order_all(Bs#bs.vp),
 	    lists:foreach(fun(V) ->
 				  io:format("~s ",[varp_formula:fmt_var(Bs,V)])
 			  end, Order),
 	    io:format("\n")
-    end.
-
-collect_order(Bs,I,Acc) ->
-    case varp_formula:next_unbound(Bs,I) of
-	false -> lists:reverse(Acc);
-	{J,Xj} -> collect_order(Bs,J,[Xj|Acc])
     end.

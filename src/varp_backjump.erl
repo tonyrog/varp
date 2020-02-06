@@ -15,7 +15,7 @@
 
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
--compile(export_all).
+%% -compile(export_all).
 
 -define(ORDER_OPT(Ord,Ord2),
 	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},

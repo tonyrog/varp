@@ -8,7 +8,7 @@
 -module(varp_formula).
 
 %%-define(DEBUG, true).
--compile(export_all).
+%% -compile(export_all).
 -export([build/1, build/2]).
 -export([new/0, new/1]).
 -export([add_variable/1, add_variable/2]).
@@ -30,6 +30,7 @@
 -export([format_lit/2, format_lit/3]).
 -export([format_literals/2, format_literals/3]).
 -export([format_var/2]).
+-export([format_symbol/1]).
 -export([format_binding/1]).
 -export([filter_bindings/1]).
 -export([format_clause/2, format_clause/3]).
@@ -56,9 +57,10 @@
 -export([number_of_dead_edges/1]).
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
--export([clause_eval_counter/1]).
--export([clause_eval_counter/2]).
--export([eval_counter/1]).
+-export([clause_bcp_counter/1]).
+-export([clause_bcp_counter/2]).
+-export([conflict_counter/1]).
+-export([bcp_counter/1]).
 -export([order_sort/2, order_sort/4]).
 -export([order_sort_first/2]).
 -export([order_sort_last/2]).
@@ -81,7 +83,7 @@
 -export([conflicting_clause/2]).
 -export([get_clauses/3]).
 -export([get_clause_info/2, get_clause_info/3]).
--export([add_clause/2]).
+-export([add_clause/2, add_clause/3]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([clean_clauses/1, clean_clauses/2]).
@@ -497,13 +499,13 @@ number_of_bound(Bs) ->
 number_of_unbound(Bs) ->
     varc:get_number_of_unbound_variables(Bs#bs.vp).
 
-clause_eval_counter(Bs) ->
-    varc:get_clause_eval_counter(Bs#bs.vp).
+clause_bcp_counter(Bs) ->
+    varc:get_clause_bcp_counter(Bs#bs.vp).
 
-clause_eval_counter(Bs,N) ->
-    varc:get_clause_eval_counter(Bs#bs.vp,N).
+clause_bcp_counter(Bs,N) ->
+    varc:get_clause_bcp_counter(Bs#bs.vp,N).
 
-eval_counter(Bs) ->
+bcp_counter(Bs) ->
     varc:get_bcp_counter(Bs#bs.vp).
 
 conflict_counter(Bs) ->
@@ -3214,6 +3216,7 @@ proof_literal(Bs,Li) ->
 	    end
     end.
 
+-ifdef(not_used).
 lookup_literal(Bs,Li) when is_integer(Li) ->
     EmptyVs = empty_vs(Bs),
     if EmptyVs -> Li;
@@ -3228,6 +3231,7 @@ lookup_literal(Bs,Li) when is_integer(Li) ->
 		{ok,[{p,x,[I]}]} -> I
 	    end
     end.
+-endif.
 
 format_p({p,T,As}) when is_integer(T) ->
     [$T,integer_to_list(As)|format_params(As)];

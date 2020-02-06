@@ -2538,12 +2538,13 @@ static hlink_t* hlink_lookup(varp_t* vp,lit_t* lit,size_t size,uint32_t hvalue)
 // FIXME clauses should really be heap allocated?
 // except we need to garbage collect in that case when
 // deleting clauses...or
+// at least alpha is no problem (just delete and restart)
+// gamma need to be purged and copied somehow, copy active clauses?
 
 static clause_t* clause_alloc(varp_t* vp, int size)
 {
     UNUSED(vp);
     clause_t* cp;
-    int r;
     size_t nbytes;
     
     if (size < 1)
@@ -2554,8 +2555,8 @@ static clause_t* clause_alloc(varp_t* vp, int size)
       return NULL;
     }
 #else
-    if ((r=posix_memalign((void**)&cp, CLAUSE_ALIGNMENT, nbytes)) != 0) {
-	errno = r;
+    if (posix_memalign((void**)&cp, CLAUSE_ALIGNMENT, nbytes) != 0) {
+	// fixme: maybe handler return value as errno...
 	return NULL;
     }
 #endif
@@ -6049,6 +6050,9 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     }
     if (argv[1] == ATOM(xref)) {
 	return make_boolean(env, vp->opt.xref);
+    }
+    if (argv[1] == ATOM(hash)) {
+	return make_boolean(env, vp->opt.hash);
     }
     if (argv[1] == ATOM(activity)) {
 	switch(vp->opt.atype) {

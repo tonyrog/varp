@@ -10,7 +10,7 @@
 -export([options/0]).
 -export([run/2]).
 
--compile(export_all).
+%% -compile(export_all).
 
 %% -define(DEBUG, true).
 -include("varp.hrl").

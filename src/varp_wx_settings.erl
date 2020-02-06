@@ -20,8 +20,9 @@
 -export([settings_filename/0]).
 -export([home_directory/0]).
 
-%% -compile(export_all).
 %% -define(DEBUG, true).
+%% -compile(export_all).
+
 -include("varp.hrl").
 -include("varp_wx.hrl").
 

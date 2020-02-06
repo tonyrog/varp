@@ -38,3 +38,6 @@ osxapp:
 
 appimage_nw:
 	erl -noshell -s $(APP) start0 -s servator make_appimage $(APP)
+
+xref:
+	rebar xref

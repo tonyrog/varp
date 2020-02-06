@@ -10,7 +10,8 @@
 -export([run/2]).
 -export([options/0]).
 
--compile(export_all).
+%% -define(DEBUG, true).
+%% -compile(export_all).
 
 -include("varp.hrl").
 
@@ -160,11 +161,12 @@ cat(C,I,L) -> [C|cat(C,I-1,L)].
 
 %% return b1b2..bn!
 clause_bn(Bs, CL) ->
-    clause_bn_(Bs, varp_formula:first_unbound(Bs), CL, []).
+    clause_bn_(Bs, varc:first_unbound_index(Bs#bs.vp), CL, []).
 
 clause_bn_(_Bs, false, _CL, Acc) -> 
     lists:reverse(Acc);
-clause_bn_(Bs, {I,Xi}, CL, Acc) ->
+clause_bn_(Bs, I, CL, Acc) ->
+    Xi = varc:order_map(Bs#bs.vp, I),
     Bi = case lists:member(Xi, CL) of
 	     true -> if Xi < 0 -> $1;
 			Xi > 0 -> $0
@@ -179,19 +181,20 @@ clause_bn_(Bs, {I,Xi}, CL, Acc) ->
 			 $*
 		 end
 	 end,
-    clause_bn_(Bs, varp_formula:next_unbound(Bs, I), CL, [Bi | Acc]).
+    clause_bn_(Bs, varc:next_unbound_index(Bs#bs.vp, I), CL, [Bi | Acc]).
 
 %% get unbound mapped to "bit number"
 get_var_map(Bs) ->
     get_var_map_(Bs, #{}).
 
 get_var_map_(Bs, Map) ->
-    get_var_map_(Bs, varp_formula:first_unbound(Bs), Map, 1).
+    get_var_map_(Bs, varc:first_unbound_index(Bs#bs.vp), Map, 1).
 
 get_var_map_(_Bs, false, Map, _N) ->
     Map;
-get_var_map_(Bs, {I,Xi}, Map, J) ->
-    get_var_map_(Bs,varp_formula:next_unbound(Bs,I),maps:put(Xi,J,Map), J+1).
+get_var_map_(Bs, I, Map, J) ->
+    Xi = varc:order_map(Bs#bs.vp, I),
+    get_var_map_(Bs,varc:next_unbound_index(Bs,I),maps:put(Xi,J,Map), J+1).
 
 format_succ_cnf_clause(_Bs,CL) ->
     [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].
@@ -201,7 +204,7 @@ format_succ_snf_clause(Bs,CL) ->
 
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varc:clause_setfirst(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varc:clauseset_first(Bs#bs.vp), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;
