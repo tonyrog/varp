@@ -491,7 +491,7 @@ nbcp_p4() ->
     nbcp_loop(P4).
 
 symlist_sort_first(V, SymList) ->
-    varc:order_sort_first(V, [varc:find_symbol(V, Sym) || Sym <- SymList]).
+    varc:order_first(V, [varc:find_symbol(V, Sym) || Sym <- SymList]).
 
 nbcp_loop(V) ->
     false = varc:nbcp(V),
@@ -598,7 +598,7 @@ order_first() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first check
     ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_sort_first(V, [X5, X6]),
+    ok = varc:order_first(V, [X5, X6]),
     [X5, X6, X1, X2, X3, X4] = varc:order_all(V),
     ok.
 
@@ -606,7 +606,7 @@ order_last() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% last check
     ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_sort_last(V, [X1,X2]),
+    ok = varc:order_last(V, [X1,X2]),
     [X3, X4, X5, X6, X1, X2] = varc:order_all(V),
     ok.
 
@@ -614,8 +614,8 @@ order_first_and_last() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first & last check
     ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_sort_first(V, [X5, X6]),
-    ok = varc:order_sort_last(V, [X1,X2]),
+    ok = varc:order_first(V, [X5, X6]),
+    ok = varc:order_last(V, [X1,X2]),
     [X5, X6, X3, X4, X1, X2] = varc:order_all(V),
     ok.
 

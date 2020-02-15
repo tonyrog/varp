@@ -143,8 +143,8 @@ options() ->
 
      #{ long => "bump",
 	key => bump,
-	spec =>  float,
-	default => 1.0,
+	spec => integer,
+	default => 1,
 	description => "Bump value."},
 
      #{ long => "display",
@@ -328,12 +328,12 @@ restart(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    if RestartByCount ->
 		    varp_formula:proof_output(Bs,$c,"counter limit"),
 		    undo_until(Bs, Level, ?TOP_LEVEL),
-		    reorder(Bs, Param),
+		    %% reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       RestartByTimeout ->
 		    varp_formula:proof_output(Bs,$c,"timeout"),
 		    undo_until(Bs, Level, ?TOP_LEVEL),
-		    reorder(Bs, Param),
+		    %% reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       true ->
 		    next(Bs,Param,Level,MaxLearned,MR,Stack)
@@ -347,7 +347,7 @@ reorder(Bs,Param) ->
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
-	    ?dbg("Reorder: ~p\n", [Opts]),
+	    ?dbg1("Reorder: ~p\n", [Opts]),
 	    Seed = proplists:get_value(seed, Opts, -1),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
@@ -396,15 +396,13 @@ next(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    end;
 	Xj ->
 	    NextLevel = Level+1,
-	    ?dbg0("~s~s\n", [indent(NextLevel),varp_formula:format_lit(Bs,Xj)]),
+	    ?dbg("~s~s\n", [indent(NextLevel),varp_formula:format_lit(Bs,Xj)]),
 	    varc:set_level(Bs#bs.vp,NextLevel),
-	    true = varc:bind(Bs#bs.vp,Xj),
+	    true = varc:decide(Bs#bs.vp,Xj),
 	    timeout_or_cancel(Bs,Param,NextLevel,MaxLearned,MR,
 			      [{Xj,NextLevel}|Stack])
     end.
 
-indent(L) -> lists:duplicate(L, $>).
-    
 return(What, MR, Bs) ->
     case MR#m.method of
 	collect ->
@@ -476,6 +474,7 @@ set_bcp_counter(Bs, Value) ->
     counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, Value).
     
 undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
+    ?dbg("~s~s\n", [indentd(Level),varp_formula:format_lit(Bs,varc:get_decision(Bs#bs.vp, Level))]),
     varc:undo_level(Bs#bs.vp, Level),
     undo_until(Bs, Level-1, NewLevel);
 undo_until(Bs, Level, Level) ->
@@ -510,13 +509,6 @@ do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
 	    J3;
 	true -> 
 	    J2
-    end.
-
-do_clause_stat(Bs, Len) ->
-    if Len >= 1023 ->
-	    counters:add(Bs#bs.clen, 1024, 1);
-       true ->
-	    counters:add(Bs#bs.clen, Len, 1)
     end.
 
 do_stat(Bs, D1, D2) ->
@@ -621,19 +613,8 @@ display_stat(Bs,Param) ->
 	    ok
     end.
 
-add_conflict_clause(Bs,Clause=[L]) ->
-    ?dbg0("conflict UNIT clause: ~s @~w\n", 
-	  [varp_formula:format_clause(Bs, Clause),
-	   varc:info(Bs#bs.vp, level)]),
-    true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
-    varp_formula:proof_output(Bs,$a,Clause),
-    Bs;
-add_conflict_clause(Bs,Clause=[_,_|_]) ->
-    ?dbg("conflict clause: ~s @~w\n", 
-	 [varp_formula:format_clause(Bs, Clause),
-	  varc:info(Bs#bs.vp, level)]),
-    ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
-    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
-    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),
-    varp_formula:proof_output(Bs,$a,ClauseIndex),
-    Bs.
+-ifdef(DEBUG).
+indent(L) -> indent(L,$>).
+indentd(L) -> indent(L,$<).
+indent(L,C) -> lists:duplicate(L, C).
+-endif.

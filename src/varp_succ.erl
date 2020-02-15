@@ -56,8 +56,6 @@ succ(Bs, Param) ->
 
 succ(Fd, Type, Bs) ->
     N = count_number_of_clauses(Bs),
-    %% VarMap = get_var_map(Bs),
-
     M = varp_formula:info(Bs, number_of_unbound_variables),
     case Type of
 	cnf ->
@@ -161,12 +159,11 @@ cat(C,I,L) -> [C|cat(C,I-1,L)].
 
 %% return b1b2..bn!
 clause_bn(Bs, CL) ->
-    clause_bn_(Bs, varc:first_unbound_index(Bs#bs.vp), CL, []).
+    clause_bn_(Bs, varc:next_unbound(Bs#bs.vp), CL, []).
 
 clause_bn_(_Bs, false, _CL, Acc) -> 
     lists:reverse(Acc);
-clause_bn_(Bs, I, CL, Acc) ->
-    Xi = varc:order_map(Bs#bs.vp, I),
+clause_bn_(Bs, Xi, CL, Acc) ->
     Bi = case lists:member(Xi, CL) of
 	     true -> if Xi < 0 -> $1;
 			Xi > 0 -> $0
@@ -181,20 +178,19 @@ clause_bn_(Bs, I, CL, Acc) ->
 			 $*
 		 end
 	 end,
-    clause_bn_(Bs, varc:next_unbound_index(Bs#bs.vp, I), CL, [Bi | Acc]).
+    clause_bn_(Bs, varc:next_unbound(Bs#bs.vp, Xi), CL, [Bi | Acc]).
 
 %% get unbound mapped to "bit number"
 get_var_map(Bs) ->
     get_var_map_(Bs, #{}).
 
 get_var_map_(Bs, Map) ->
-    get_var_map_(Bs, varc:first_unbound_index(Bs#bs.vp), Map, 1).
+    get_var_map_(Bs, varc:next_unbound(Bs#bs.vp), Map, 1).
 
 get_var_map_(_Bs, false, Map, _N) ->
     Map;
-get_var_map_(Bs, I, Map, J) ->
-    Xi = varc:order_map(Bs#bs.vp, I),
-    get_var_map_(Bs,varc:next_unbound_index(Bs,I),maps:put(Xi,J,Map), J+1).
+get_var_map_(Bs, Xi, Map, J) ->
+    get_var_map_(Bs,varc:next_unbound(Bs,Xi),maps:put(Xi,J,Map), J+1).
 
 format_succ_cnf_clause(_Bs,CL) ->
     [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].

@@ -90,63 +90,62 @@ saturate_(Bs,K,Laps,Threshold) ->
     end.
 
 init_k(Bs,K,N,Level,Laps,Threshold) ->
-    case varc:first_unbound_index(Bs#bs.vp) of
+    case varc:next_unbound(Bs#bs.vp) of
 	false ->
 	    {?NOVAR,Bs};
-	I ->
-	    loop_k(Bs,I,K,N,Level,Laps,Threshold)
+	X ->
+	    loop_k(Bs,X,K,N,Level,Laps,Threshold)
     end.
 
-loop_k(Bs,I,K,N,Level,Laps,Threshold) ->
-    X = varc:order_map(Bs#bs.vp, I),
-    case push2_eq_eval(Bs,-X,Level) of
+loop_k(Bs,Xi,K,N,Level,Laps,Threshold) ->
+    case push2_eq_eval(Bs,-Xi,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level+1),Level+1]),
 	    pop2(Bs, Level),
-	    case eq_eval(Bs,X,Level) of
+	    case eq_eval(Bs,Xi,Level) of
 		false ->
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
 		true  -> 
-		    loop_k_next(Bs,I,K,N,Level,Laps,Threshold)
+		    loop_k_next(Bs,Xi,K,N,Level,Laps,Threshold)
 	    end;
 	true ->
 	    N1 = varp_formula:number_of_bound(Bs),
-	    case loop_k_next(Bs,I,K-1,N1,Level+2,Laps,Threshold) of
+	    case loop_k_next(Bs,Xi,K-1,N1,Level+2,Laps,Threshold) of
 		false ->
 		    ?dbg("~scontradiction, undo ~w\n", [indent(Level+1),Level+1]),
 		    pop2(Bs, Level),
-		    case eq_eval(Bs,X,Level) of
+		    case eq_eval(Bs,Xi,Level) of
 			false ->
 			    ?dbg("~scontradiction\n", [indent(Level)]),
 			    false;
 			true  -> 
-			    loop_k_next(Bs,I,K,N,Level,Laps,Threshold)
+			    loop_k_next(Bs,Xi,K,N,Level,Laps,Threshold)
 		    end;
 		{_Reason,Bs1} ->
 		    %% io:format("stop reason = ~w\n", [Reason]),
 		    Ls = varp_formula:get_bindings(Bs1,Level+2),
 		    ?dbg("~s~s/0: => {~s}\n", 
 			 [indent(Level),
-			  varp_formula:fmt_var(Bs1,X),
+			  varp_formula:fmt_var(Bs1,Xi),
 			  varp_formula:format_literals(Bs1,Ls)]),
 		    pop2(Bs, Level),
-		    case push2_eq_eval(Bs1,X,Level) of
+		    case push2_eq_eval(Bs1,Xi,Level) of
 			false ->
 			    ?dbg("~scontradiction, undo ~w\n", 
 				 [indent(Level+1),Level+1]),
 			    pop2(Bs, Level),
-			    eq_eval(Bs1,-X,Level),
-			    loop_k_next(Bs1,I,K,N,Level,Laps,Threshold);
+			    eq_eval(Bs1,-Xi,Level),
+			    loop_k_next(Bs1,Xi,K,N,Level,Laps,Threshold);
 			true ->
 			    N2 = varp_formula:number_of_bound(Bs),
-			    case loop_k_next(Bs1,I,K-1,N2,Level+2,Laps,Threshold) of
+			    case loop_k_next(Bs1,Xi,K-1,N2,Level+2,Laps,Threshold) of
 				false ->
 				    ?dbg("~scontradiction, undo ~w\n", 
 					 [indent(Level),Level]),
 				    pop2(Bs, Level),
-				    eq_eval(Bs1,-X,Level),
-				    loop_k_next(Bs1,I,K,N,Level,Laps,Threshold);
+				    eq_eval(Bs1,-Xi,Level),
+				    loop_k_next(Bs1,Xi,K,N,Level,Laps,Threshold);
 				{_Reason1,Bs2} ->
 				    %% io:format("stop reason = ~w\n", [_Reason1]),
 				    ?dbg("~s~s/1: => {~s}\n",
@@ -154,26 +153,26 @@ loop_k(Bs,I,K,N,Level,Laps,Threshold) ->
 					  varp_formula:fmt_literals(
 					    Bs2,
 					    varp_formula:get_bindings(Bs2,Level+1))]),
-				    Ys = varp_formula:intersect_bindings(Bs2,X,Ls),
+				    Ys = varp_formula:intersect_bindings(Bs2,Xi,Ls),
 				    ?dbg("~sintersect = {~s}\n", 
 					 [indent(Level),
 					  varp_formula:fmt_bind_list(Bs2,Ys)]),
 				    pop2(Bs2, Level),
 				    varp_formula:install_bindings(Bs,Level,Ys),
 				    true = varc:bcp(Bs2#bs.vp),
-				    loop_k_next(Bs2,I,K,N,Level,Laps,Threshold)
+				    loop_k_next(Bs2,Xi,K,N,Level,Laps,Threshold)
 			    end
 		    end
 	    end
     end.
 
-loop_k_next(Bs,I,K,N,Level,Laps,Threshold) ->
+loop_k_next(Bs,Xi,K,N,Level,Laps,Threshold) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,What} ->
 	    {What,Bs};
 	false ->
-	    case varc:next_unbound_index(Bs#bs.vp,I) of
+	    case varc:next_unbound(Bs#bs.vp,Xi) of
 		false ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
@@ -186,59 +185,58 @@ loop_k_next(Bs,I,K,N,Level,Laps,Threshold) ->
 				    init_k(Bs,K,N1,Level,Laps1,Threshold)
 			    end
 		    end;
-		I1 when K>1   -> loop_k(Bs,I1,K,N,Level,Laps,Threshold);
-		I1 when K=:=1 -> loop_1(Bs,I1,N,Level,Laps,Threshold)
+		Xj when K>1   -> loop_k(Bs,Xj,K,N,Level,Laps,Threshold);
+		Xj when K=:=1 -> loop_1(Bs,Xj,N,Level,Laps,Threshold)
 	    end
     end.
 
 init_1(Bs,N,Level,Laps,Threshold) ->
-    case varc:first_unbound_index(Bs#bs.vp) of
+    case varc:next_unbound(Bs#bs.vp) of
 	false ->
 	    loop_1_done(?NOVAR,Laps,Bs);
-	I ->
+	Xi ->
 	    varp_formula:clear_user_count(Bs),
-	    loop_1(Bs,I,N,Level,Laps,Threshold)
+	    loop_1(Bs,Xi,N,Level,Laps,Threshold)
     end.
 
-loop_1(Bs,I,N,Level,Laps,Threshold) ->
-    X = varc:order_map(Bs#bs.vp, I),
-    case push_eq_eval(Bs,-X,Level) of
+loop_1(Bs,Xi,N,Level,Laps,Threshold) ->
+    case push_eq_eval(Bs,-Xi,Level) of
 	false ->
 	    ?dbg("~scontradiction, undo ~w\n", [indent(Level),Level]),
 	    pop(Bs, Level),
-	    case eq_eval(Bs,X,Level+1) of
+	    case eq_eval(Bs,Xi,Level+1) of
 		false ->
-		    varp_formula:proof_output(Bs,$a,[X]),
+		    varp_formula:proof_output(Bs,$a,[Xi]),
 		    varp_formula:proof_output(Bs,$a,[]),
 		    %% L+1 ?  keep bindings?
 		    ?dbg("~scontradiction\n", [indent(Level)]),
 		    false;
 		true ->
-		    varp_formula:proof_output(Bs,$a,[X]),
+		    varp_formula:proof_output(Bs,$a,[Xi]),
 		    %% Ls = varp_formula:get_bindings(Bs, Level+1),
 		    varc:move_level(Bs#bs.vp, Level+1, Level),
 		    varc:set_level(Bs#bs.vp,Level),
-		    loop_1_next(Bs,I,N,Level,Laps,Threshold)
+		    loop_1_next(Bs,Xi,N,Level,Laps,Threshold)
 	    end;
 	true ->
 	    Ls = varp_formula:get_bindings(Bs,Level+1),
-	    set_user_count(Bs, -X, Level+1),
+	    set_user_count(Bs, -Xi, Level+1),
 	    pop(Bs,Level),
-	    case push_eq_eval(Bs,X,Level) of
+	    case push_eq_eval(Bs,Xi,Level) of
 		false ->
-		    varp_formula:proof_output(Bs,$a,[-X]),
+		    varp_formula:proof_output(Bs,$a,[-Xi]),
 		    ?dbg("~scontradiction, undo ~w\n", 
 			 [indent(Level),Level]),
 		    pop(Bs,Level),
-		    eq_eval(Bs,-X,Level),  %% or install Ls?
-		    loop_1_next(Bs,I,N,Level,Laps,Threshold);
+		    eq_eval(Bs,-Xi,Level),  %% or install Ls?
+		    loop_1_next(Bs,Xi,N,Level,Laps,Threshold);
 		true ->
 		    ?dbg("~s~s/1: => [~s]\n",
-			 [indent(Level),varp_formula:fmt_var(Bs,X),
+			 [indent(Level),varp_formula:fmt_var(Bs,Xi),
 			  varp_formula:fmt_bind_list(
 			    Bs, tl(varp_formula:get_bindings(Bs,Level+1)))]),
-		    set_user_count(Bs, X, Level+1),
-		    Ys = varp_formula:intersect_bindings(Bs, X, tl(Ls)),
+		    set_user_count(Bs, Xi, Level+1),
+		    Ys = varp_formula:intersect_bindings(Bs, Xi, tl(Ls)),
 		    %% FIXME: check if proof_output is active!
 		    case varp_formula:want_proof_output(Bs) of
 			false ->
@@ -250,9 +248,9 @@ loop_1(Bs,I,N,Level,Laps,Threshold) ->
 				      varp_formula:proof_output(Bs,$a,[-A,B]),
 				      varp_formula:proof_output(Bs,$a,[-B,A]);
 				 (A) ->
-				      %% X -> A, ~X -> A  (-X,A) (X, A)
-				      varp_formula:proof_output(Bs,$a,[-X,A]),
-				      varp_formula:proof_output(Bs,$a,[ X,A]),
+				      %% Xi -> A, ~Xi -> A  (-Xi,A) (Xi, A)
+				      varp_formula:proof_output(Bs,$a,[-Xi,A]),
+				      varp_formula:proof_output(Bs,$a,[ Xi,A]),
 				      varp_formula:proof_output(Bs,$a,[A])
 			      end, Ys)
 		    end,
@@ -264,18 +262,18 @@ loop_1(Bs,I,N,Level,Laps,Threshold) ->
 			    varp_formula:install_bindings(Bs,Level,Ys),
 			    true = varc:bcp(Bs#bs.vp)
 		    end,
-		    loop_1_next(Bs,I,N,Level,Laps,Threshold)
+		    loop_1_next(Bs,Xi,N,Level,Laps,Threshold)
 	    end
     end.
 
-loop_1_next(Bs,I,N,Level,Laps,Threshold) ->
+loop_1_next(Bs,Xi,N,Level,Laps,Threshold) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,What} ->
 	    ?dbg("terminate reaon=~w\n", [What]),
 	    loop_1_done(What,Laps,Bs);
 	false ->
-	    case varc:next_unbound_index(Bs#bs.vp,I) of
+	    case varc:next_unbound(Bs#bs.vp,Xi) of
 		false ->
 		    N1 = varp_formula:number_of_bound(Bs),
 		    if N1 - N =< Threshold ->
@@ -288,7 +286,7 @@ loop_1_next(Bs,I,N,Level,Laps,Threshold) ->
 				    init_1(Bs,N1,Level,Laps1,Threshold)
 			    end
 		    end;
-		I1 -> loop_1(Bs,I1,N,Level,Laps,Threshold)
+		Xj -> loop_1(Bs,Xj,N,Level,Laps,Threshold)
 	    end
     end.
 
@@ -336,8 +334,6 @@ eq_eval(Bs,X,Level) ->
     true = varc:bind(Bs#bs.vp,X),
     varc:bcp(Bs#bs.vp).
 
-indent(D) -> lists:duplicate(D, $\s).
-
 max_laps(1, L) when is_integer(L) -> {{L},{L}};
 max_laps(1, [L]) -> {{L},{L}};
 max_laps(2, L) when is_integer(L) -> {{L,L},{L,L}};
@@ -354,3 +350,35 @@ dec(K, {Ls,Ms}) ->
 	1 when K =:= 1 -> stop;
 	E -> {setelement(K, Ls, E-1), Ms}
     end.
+
+%% read "vector" of unbound variables starting from Var (must be unbound)
+vec(Vp, Var, N) ->
+    vec_(Vp, Var, N-1, [Var]).
+
+vec_(Vp, _Var, 0, Vs) -> 
+    Vs;
+vec_(Vp, Var, I, Vs) ->
+    case varc:next_unbound(Vp, Var) of
+	false ->
+	    Var0 = varc:next_unbound(Vp),
+	    vec_(Vp, Var0, I-1, [Var0|Vs]);
+	Var1 ->
+	    vec_(Vp, Var1, I-1, [Var1|Vs])
+    end.
+	    
+step(Vp, [V|Vec]) ->
+    case varc:next_unbound(Vp, V) of
+	false ->
+	    Vec1 = [V1|_] = step(Vp, Vec),
+	    case varc:next_unbound(Vp, V1) of
+		false -> Vec1;
+		V2 -> [V2|Vec1]
+	    end;
+	V1 ->
+	    [V1|Vec]
+    end.
+
+-ifdef(DEBUG).
+indent(D) -> lists:duplicate(D, $>).
+-endif.
+

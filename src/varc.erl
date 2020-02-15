@@ -26,6 +26,7 @@
 -export([literal_info/2, literal_info/3, literal_info_keys/0]).
 -export([value/2]).
 -export([bind/2, bind/3]).
+-export([decide/2, decide/3]).
 -export([subst/3]).
 -export([implication_clause/2]).
 -export([implication_level/2]).
@@ -71,10 +72,8 @@
 -export([queue_next/2]).
 -export([queue_clear/1]).
 -export([order_sort/2, order_sort/3, order_sort/4]).
--export([order_sort_first/2, order_sort_last/2]).
--export([next_unbound/1]).
--export([first_unbound_index/1, next_unbound_index/2]).
--export([order_map/2]).
+-export([order_first/2, order_last/2]).
+-export([next_unbound/1, next_unbound/2]).
 -export([order_all/1]).
 -export([decay/2]).
 -export([bump/3]).
@@ -244,6 +243,23 @@ bind(_Vp, X) when is_integer(X) ->
 bind(_Vp, X, Level) when is_integer(X),
 			is_integer(Level) ->
     ?nif_stub().
+
+
+%% decide literal, affected by phase!
+-spec decide(Vp::varc(), X::literal()) -> boolean().
+
+decide(_Vp, X) when is_integer(X) ->
+    ?nif_stub().
+
+
+%% decide literal at level, affected by phase!
+-spec decide(Vp::varc(), X::literal(), Level::integer()) -> boolean().
+
+decide(_Vp, X, Level) when is_integer(X),
+			   is_integer(Level) ->
+    ?nif_stub().
+
+
 
 %% X/Y substitute Y for X, replace all instances of Y with X
 -spec subst(Vp::varc(), X::literal(), Y::literal()) -> boolean().
@@ -489,12 +505,12 @@ order_sort(Vp, Key1, Key2) ->
 order_sort(_Vp, _Key1, _Key2, _Arg) ->
     ?nif_stub().
 
--spec order_sort_first(Vp::varc(), [literal()]) -> ok.
-order_sort_first(_Vp, _VarList) ->
+-spec order_first(Vp::varc(), [literal()]) -> ok.
+order_first(_Vp, _VarList) ->
     ?nif_stub().
 
--spec order_sort_last(Vp::varc(), List::[literal()]) -> ok.
-order_sort_last(_Vp, _List) ->
+-spec order_last(Vp::varc(), List::[literal()]) -> ok.
+order_last(_Vp, _List) ->
     ?nif_stub().
 
 clauseset_offset(_Vp, _Si) ->
@@ -537,34 +553,23 @@ get_queue_(Vp,I,Acc) ->
 
 %% return next unbound literal or false
 -spec next_unbound(Vp::varc()) ->
-			  integer() | false.
+			  literal() | false.
 next_unbound(_Vp) ->
     ?nif_stub().
 
--spec next_unbound_index(Vp::varc(), Index::integer()) ->
-				integer() | false.
-next_unbound_index(_Vp, _Index) ->
-    ?nif_stub().
-
--spec first_unbound_index(Vp::varc()) ->
-				 integer() | false.
-first_unbound_index(_Vp) ->
-    ?nif_stub().
-
-%% return literal from index
--spec order_map(Vp::varc(), Index::integer()) -> literal().
-order_map(_Vp, _Index) ->
+-spec next_unbound(Vp::varc(), Last::literal()) ->
+			  literal() | false.
+next_unbound(_Vp, _Last) ->
     ?nif_stub().
 
 %% utility to get a list of unbound literals
 order_all(Vp) ->
-    order_all_(Vp,first_unbound_index(Vp),[]).
+    order_all_(Vp,next_unbound(Vp),[]).
 
 order_all_(_Vp,false,Acc) ->
     lists:reverse(Acc);
-order_all_(Vp,I,Acc) ->
-    Xi = order_map(Vp, I),
-    order_all_(Vp, next_unbound_index(Vp, I), [Xi|Acc]).
+order_all_(Vp,Xi,Acc) ->
+    order_all_(Vp, next_unbound(Vp, Xi), [Xi|Acc]).
 
 info(Vp) ->
     [ {Key,info(Vp, Key)} || Key <- info_keys()].

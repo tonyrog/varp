@@ -12,7 +12,7 @@
 
 %% -compile(export_all).
 
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 -include("varp.hrl").
 
 -define(LEVEL, 1).
@@ -84,6 +84,7 @@ init(Bs) ->
 	false ->
 	    {model,[]};
 	Xi ->
+	    ?dbg("~sinit ~w @~w\n", [indent(?LEVEL),Xi,?LEVEL]),
 	    {true,[{0,[Xi,-Xi],?LEVEL}]}
     end.
 
@@ -92,8 +93,7 @@ next([{_,[],_}|Stack1],Bs) ->
     next(Stack1,Bs);
 next([{_,[Xi|Xs],Level}|Stack],Bs) ->
     varc:set_level(Bs#bs.vp,Level),
-    ?dbg0("~s~s\n", [indent(Level),varp_formula:format_lit(Bs,Xi)]),
-    case eq_eval(Bs,Xi,Level) of
+    case eqv(Bs,Xi,Level) of
 	false ->
 	    Stack1 = [{Xi,Xs,Level}|Stack],
 	    proof_output(Bs, Stack1),
@@ -104,6 +104,7 @@ next([{_,[Xi|Xs],Level}|Stack],Bs) ->
 		false ->
 		    {model,[{Xi,Xs,Level}|Stack]};
 		Xj ->
+		    ?dbg("~snext ~w @~w\n", [indent(Level),Xi,Level]),
 		    {true,[{0,[Xj,-Xj],Level+1},{Xi,Xs,Level}|Stack]}
 	    end
     end;
@@ -168,14 +169,11 @@ proof_output(Bs, Stack) ->
 	    varp_formula:proof_output(Bs,$a,Clause)
     end.
 
-eq_eval(Bs,L,_D) ->
-    ?dbg("~seq_eval@~w: ~w ~s", 
-	 [indent(_D),_D, L, varp_formula:fmt_var(Bs,L)]),
-    Res = eqv(Bs,L),
-    ?dbg(" = ~w\n", [Res]),
-    Res.
+eqv(Bs,L,_Level) ->
+    ?dbg("~sdecide+bcp ~s/~w\n", [indent(_Level),varp_formula:format_lit(Bs,L),
+				  varc:info(Bs#bs.vp, phase)]),
+    varc:decide(Bs#bs.vp,L) andalso varc:bcp(Bs#bs.vp).
 
-eqv(Bs,L) ->
-    varc:bind(Bs#bs.vp,L) andalso varc:bcp(Bs#bs.vp).
-
+-ifdef(DEBUG).
 indent(D) -> lists:duplicate(D, $>).
+-endif.

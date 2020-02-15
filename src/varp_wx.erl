@@ -108,12 +108,7 @@ start() ->
 		  S ->
 		      wxWindow:show(S#s.window),
 		      register_process(),
-		      case ?MODULE:main_loop(S) of
-			  {_Reason,S1} ->
-			      ok = varp_wx_settings:save(S1#s.setting_values);
-			  error ->
-			      ok
-		      end,
+		      ?MODULE:main_loop(S),
 		      wx:destroy()
 	      catch
 		  ?EXCEPTION(error,Reason,Trace) ->
@@ -631,6 +626,7 @@ handle_event(Event, S) ->
 		    ValueMap = varp_wx_settings:get_values(
 				 S#s.setting_widgets, S#s.setting_values),
 		    profile_update(S#s.config_profile, ValueMap),
+		    ok = varp_wx_settings:save(ValueMap),
 		    {noreply, S#s { setting_values = ValueMap }};
 	       S#s.setting_cancel =:= Obj ->
 		    wxPanel:hide(S#s.setting_panel),
@@ -1335,7 +1331,8 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
 	      number_of_subst_variables:=NS,
 	      number_of_clauses:=NC,
 	      number_of_dead_clauses:=ND,
-	      number_of_bcp:=NE
+	      number_of_bcp:=NE,
+	      max_level := ML
 	     }) ->
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
@@ -1343,8 +1340,8 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
     NBS = [integer_to_list(NB),"[/",integer_to_list(NS),"]"],
     Status = io_lib:format(
 	       "#Var: ~-8w #Bound: ~-16s #Clauses: ~-8w"
-	       "#Dead: ~-8w #Bcp: ~-10w #Time: ~s",
-	       [NV, NBS, NC, ND, NE, format_time(Time)]),
+	       "#Dead: ~-8w #Bcp: ~-10w #Depth: ~-8w #Time: ~s",
+	       [NV, NBS, NC, ND, NE, ML, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 
@@ -1384,13 +1381,17 @@ merge_info(Info1, Info2) ->
 	   number_of_subst_variables,
 	   number_of_clauses,
 	   number_of_dead_clauses,
-	   number_of_bcp],
+	   number_of_bcp,
+	   max_level
+	  ],
 	  Info1, Info2).
 
 merge_info_no_bound(Info1, Info2) ->
     minfo([number_of_clauses,
 	   number_of_dead_clauses,
-	   number_of_bcp],
+	   number_of_bcp,
+	   max_level
+	  ],
 	  Info1, Info2).
 
 minfo([Key|Ks], Src, Dst) ->
@@ -1403,17 +1404,19 @@ minfo([], _Src, Dst) ->
 	
 get_info(Bs) ->
     #{ number_of_variables =>
-	   varc:info(Bs#bs.vp,  number_of_variables),
+	   varc:info(Bs#bs.vp, number_of_variables),
        number_of_bound_variables => 
-	   varc:info(Bs#bs.vp,number_of_bound_variables),
+	   varc:info(Bs#bs.vp, number_of_bound_variables),
        number_of_subst_variables => 
-	   varc:info(Bs#bs.vp,number_of_subst_variables),
+	   varc:info(Bs#bs.vp, number_of_subst_variables),
        number_of_clauses =>
-	   varc:info(Bs#bs.vp,number_of_clauses),
+	   varc:info(Bs#bs.vp, number_of_clauses),
        number_of_dead_clauses =>
-	   varc:info(Bs#bs.vp,number_of_dead_clauses),
+	   varc:info(Bs#bs.vp, number_of_dead_clauses),
        number_of_bcp =>
-	   varc:info(Bs#bs.vp,bcp_counter)
+	   varc:info(Bs#bs.vp,bcp_counter),
+       max_level =>
+	   varc:info(Bs#bs.vp,max_level)
      }.
        
 call(undefined, _Request) ->

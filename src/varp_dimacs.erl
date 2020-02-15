@@ -14,6 +14,8 @@
 -export([from_cnf/1]).
 -export([format_error/1]).
 
+-export([order_var_list/2]).
+
 -import(lists, [reverse/1]).
 
 -define(l2a(X), list_to_atom((X))).
@@ -317,12 +319,30 @@ scan_section(Line,Sect=#{ decls := Decls, order := Order, syms := Sym }) ->
 		_ ->
 		    Sect
 	    end;
-	{ok,Ts=[{order,_Ln}|_],Ln1} ->
-	    {ok,{[{order,Order1}],_}} = varp_parse:parse(Ts ++ [{';',Ln1}]),
-	    Sect# { order => Order ++ Order1 };
+	{ok,Ts=[{order,_Ln}|Ts1],_Ln1} ->
+	    case order_var_list(Ts1, []) of
+		{ok, Order1} ->
+		    Sect# { order => Order ++ Order1 };
+		error ->
+		    io:format("bad order ~w\n", [Ts]),
+		    Sect
+	    end;
 	_Str ->
 	    %% io:format("scan = ~p\n", [_Str]),
 	    Sect
+    end.
+
+order_var_list([], Acc) ->
+    {ok,[{order_list,lists:reverse(Acc)}]};
+order_var_list([{',',_Ln}|Ts], Acc) ->
+    order_var_list(Ts, Acc);
+order_var_list([{decnum,_Ln,Str}|Ts], Acc) ->
+    order_var_list(Ts, [list_to_integer(Str)|Acc]);
+order_var_list(Ts, Acc) ->
+    case parse_symbol(Ts, {',',1}) of
+	false -> error;
+	{Sym,Ts1} ->
+	    order_var_list(Ts1, [Sym|Acc])
     end.
 
 parse_symbol(Ts, Separator) ->
@@ -333,8 +353,12 @@ parse_symbol(Ts, Separator) ->
 	Ts0 ->
 	    case varp_snf:parse(Ts0++[{'.',1}]) of
 		{ok,[Sym]} ->
-		    Rest = lists:dropwhile(fun(T) -> T =/= Separator end, Ts),
-		    {eval_sym(Sym), tl(Rest)};
+		    case lists:dropwhile(fun(T) -> T =/= Separator end, Ts) of
+			[] ->
+			    {eval_sym(Sym), []};
+			[_|Ts1] ->
+			    {eval_sym(Sym), Ts1}
+		    end;
 		{ok,_} ->
 		    false;
 		_ ->
@@ -352,4 +376,3 @@ eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).
 
 format_error(Error) ->
     io_lib:format("~p", [Error]).
-

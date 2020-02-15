@@ -49,19 +49,18 @@ run(Bs, Param) ->
     end.
 
 red(Bs,N,CMax,Type) ->
-    case varc:first_unbound_index(Bs#bs.vp) of
+    case varc:next_unbound(Bs#bs.vp) of
 	false -> {?CONTINUE,[],Bs};
-	I -> red(Bs,I,N,CMax,Type)
+	Xi -> red(Bs,Xi,N,CMax,Type)
     end.
 
-red(Bs,_I, 0,_CMax,_Type) -> 
+red(Bs,_X, 0,_CMax,_Type) -> 
     {?CONTINUE,[],Bs};
-red(Bs,I,N,CMax,Type) ->
-    X = varc:order_map(Bs#bs.vp, I),
+red(Bs,X,N,CMax,Type) ->
     Bs1 = add_var(Bs,X,CMax,Type),
-    case varp_formula:next_unbound_index(Bs1,I) of
+    case varp_formula:next_unbound(Bs1,X) of
 	false -> {?CONTINUE,[],Bs1};
-	I1 -> red(Bs1,I1,N-1,CMax,Type)
+	X1 -> red(Bs1,X1,N-1,CMax,Type)
     end.
 
 add_var(Bs,V,CMax,Type) ->

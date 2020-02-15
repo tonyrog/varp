@@ -45,19 +45,18 @@ run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
     end.
 
 rat(Bs,N,Type) ->
-    case varc:first_unbound_index(Bs#bs.vp) of
+    case varc:next_unbound(Bs#bs.vp) of
 	false -> {?CONTINUE,[],Bs};
-	I -> rat(Bs,I,N,Type)
+	Xi -> rat(Bs,Xi,N,Type)
     end.
 
-rat(Bs,_I,0,_Type) -> 
+rat(Bs,_X,0,_Type) -> 
     {?CONTINUE,[],Bs};
-rat(Bs,I,N,Type) ->
-    X = varc:order_map(Bs#bs.vp, I),
+rat(Bs,X,N,Type) ->
     Bs1 = rat_var(Bs,X,Type),
-    case varc:next_unbound_index(Bs1#bs.vp,I) of
+    case varc:next_unbound(Bs1#bs.vp,X) of
 	false -> {?CONTINUE,[],Bs1};
-	I1 -> rat(Bs1,I1,N-1,Type)
+	Y -> rat(Bs1,Y,N-1,Type)
     end.
 
 rat_var(Bs,V,Type) ->

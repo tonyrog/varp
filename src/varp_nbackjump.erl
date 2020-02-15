@@ -143,8 +143,8 @@ options() ->
 
      #{ long => "bump",
 	key => bump,
-	spec =>  float,
-	default => 1.0,
+	spec =>  integer,
+	default => 1,
 	description => "Bump value."},
 
      #{ long => "display",
@@ -316,11 +316,13 @@ move_to_gamma(_Bs, []) ->
 
 move_to_gamma(Bs, 1, Aix) ->
     %% io:format("Move UNIT ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
+    varp_formula:proof_output(Bs,$a,Aix),
     true = varc:move_clause(Bs#bs.vp, Aix, gamma),
     counters:add(Bs#bs.clen, 1, 1);
 move_to_gamma(Bs, Len, Aix) ->
     %% io:format("Move CLAUSE ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
-    {true,_Gix} = varc:move_clause(Bs#bs.vp, Aix, gamma),
+    {true,Gix} = varc:move_clause(Bs#bs.vp, Aix, gamma),
+    varp_formula:proof_output(Bs,$a,Gix),
     if Len >= 1023 ->
 	    counters:add(Bs#bs.clen, 1024, 1);
        true ->
@@ -353,7 +355,7 @@ restart(Bs,Param,Level,MaxLearned,MR) ->
 	true ->
 	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
-	    ?dbg0("purge\n",[]),
+	    ?dbg1("purge\n",[]),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
@@ -362,12 +364,12 @@ restart(Bs,Param,Level,MaxLearned,MR) ->
 	    if RestartByCount ->
 		    varp_formula:proof_output(Bs,$c,"counter limit"),
 		    undo_until(Bs, Level, ?TOP_LEVEL),
-		    reorder(Bs, Param),
+		    %% reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       RestartByTimeout ->
 		    varp_formula:proof_output(Bs,$c,"timeout"),
 		    undo_until(Bs, Level, ?TOP_LEVEL),
-		    reorder(Bs, Param),
+		    %% reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       true ->
 		    timeout_or_cancel(Bs,Param,MaxLearned,MR)
@@ -380,7 +382,7 @@ reorder(Bs, Param) ->
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
-	    ?dbg("Reorder: ~p\n", [Opts]),
+	    ?dbg1("Reorder: ~p\n", [Opts]),
 	    Seed = proplists:get_value(seed, Opts, -1),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
@@ -481,7 +483,7 @@ nbcp_(V, Level) ->
 		Xj ->
 		    NextLevel = Level+1,
 		    varc:set_level(V, NextLevel),
-		    varc:bind(V, Xj),
+		    varc:decide(V, Xj),
 		    nbcp_(V, NextLevel)
 	    end;
 	false ->
@@ -518,13 +520,6 @@ do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
 	    J3;
 	true -> 
 	    J2
-    end.
-
-do_clause_stat(Bs, Len) ->
-    if Len >= 1023 ->
-	    counters:add(Bs#bs.clen, 1024, 1);
-       true ->
-	    counters:add(Bs#bs.clen, Len, 1)
     end.
 
 do_stat(Bs, D1, D2) ->
@@ -628,16 +623,3 @@ display_stat(Bs,Param) ->
 	false ->
 	    ok
     end.
-
-add_conflict_clause(Bs,Clause=[L]) ->
-    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
-    true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
-    varp_formula:proof_output(Bs,$a,Clause),
-    Bs;
-add_conflict_clause(Bs,Clause=[_,_|_]) ->
-    ?dbg("conflict clause: ~s\n", [varp_formula:format_clause(Bs, Clause)]),
-    ClauseIndex = varp_formula:add_clause(Bs, Clause, ?GAMMA),
-    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
-    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,length(Clause)),
-    varp_formula:proof_output(Bs,$a,ClauseIndex),
-    Bs.

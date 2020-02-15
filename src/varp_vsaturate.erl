@@ -185,7 +185,6 @@ eq_eval(Bs,X,_D) ->
     ?dbg("~seq_eval: ~s\n", [indent(_D),varp_formula:fmt_lit(Bs,X)]),
     varc:bind(Bs#bs.vp,X) andalso varc:bcp(Bs#bs.vp).
 
-indent(D) -> lists:duplicate(D, $\s).
 
 %%
 %% initialize with first K unbound variables  [{Ik,Xk}, ..., {I1,X1}]
@@ -193,21 +192,19 @@ indent(D) -> lists:duplicate(D, $\s).
 init_vector(_Bs,0) ->
     [];
 init_vector(Bs,K) ->
-    case varc:first_unbound_index(Bs#bs.vp) of
+    case varc:next_unbound(Bs#bs.vp) of
 	false -> [];
-	I1 -> 
-	    X1 = varc:order_map(Bs#bs.vp,I1),
-	    init_vector_(Bs,K-1,I1,[{I1,X1}])
+	Xi -> 
+	    init_vector_(Bs,K-1,Xi,[Xi])
     end.
 
-init_vector_(_Bs,0,_I,Vec) -> 
+init_vector_(_Bs,0,_Xi,Vec) -> 
     Vec;
-init_vector_(Bs,K,I0,Vec) ->
-    case varc:next_unbound_index(Bs#bs.vp,I0) of
+init_vector_(Bs,K,Xi,Vec) ->
+    case varc:next_unbound(Bs#bs.vp,Xi) of
 	false -> Vec;
-	I1 -> 
-	    X1 = varc:order_map(Bs#bs.vp,I1),
-	    init_vector_(Bs,K-1,I1,[{I1,X1}|Vec])
+	Xj -> 
+	    init_vector_(Bs,K-1,Xj,[Xj|Vec])
     end.
 
 %%
@@ -216,38 +213,39 @@ init_vector_(Bs,K,I0,Vec) ->
 next_vector(Bs,Vec) ->
     next_vector_(Bs,Vec,0).
 
-next_vector_(Bs,[{I,_Xi}|Vec],Max) ->
-    case varc:next_unbound_index(Bs#bs.vp,I) of
+next_vector_(Bs,[Xi|Vec],Max) ->
+    case varc:next_unbound(Bs#bs.vp,Xi) of
 	false ->
-	    Vec1 = next_vector_(Bs,Vec,I),
+	    Vec1 = next_vector_(Bs,Vec,Xi),
 	    select_next(Bs,Vec1,Max);
-	J when Max>0, J >= Max ->
-	    Vec1 = next_vector_(Bs,Vec,I),
+	Xj when Max>0, Xj >= Max ->
+	    Vec1 = next_vector_(Bs,Vec,Xj),
 	    select_next(Bs,Vec1,Max);
-	J ->
-	    Xj = varc:order_map(Bs#bs.vp,J),
-	    [{J,Xj}|Vec]
+	Xj ->
+	    [Xj|Vec]
     end;
 next_vector_(_Bs,[],_MI) ->
     [].
 
 select_next(_Bs,[],_Max) -> [];
-select_next(Bs,Vec=[{K,_Xk}|_],Max) ->
-    case varc:next_unbound_index(Bs#bs.vp,K) of
+select_next(Bs,Vec=[Xk|_],Max) ->
+    case varc:next_unbound(Bs#bs.vp,Xk) of
 	false -> [];
-	J when Max>0, J >= Max -> [];
-	J ->
-	    Xj = varc:order_map(Bs#bs.vp,J),
-	    [{J,Xj}|Vec]
+	Xj when Max>0, Xj >= Max -> [];
+	Xj ->
+	    [Xj|Vec]
     end.
 
 %% add one extra element to "vector"
 expand_vector([], _Bs) -> [];
 expand_vector(Vec, Bs) ->
-    J = lists:max([I || {I,_} <- Vec]),
-    case varc:next_unbound_index(Bs#bs.vp,J) of
+    [Xj] = lists:last(Vec),
+    case varc:next_unbound(Bs#bs.vp,Xj) of
 	false -> Vec;
-	{K,Xk} ->
-	    Xk = varc:order_map(Bs#bs.vp,K),
-	    Vec++[{K,Xk}]
+	Xk ->
+	    Vec++[Xk]
     end.
+
+-ifdef(DEBUG).
+indent(D) -> lists:duplicate(D, $\s).
+-endif.

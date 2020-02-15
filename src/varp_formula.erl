@@ -62,13 +62,10 @@
 -export([conflict_counter/1]).
 -export([bcp_counter/1]).
 -export([order_sort/2, order_sort/4]).
--export([order_sort_first/2]).
--export([order_sort_last/2]).
--export([order_map/2]).
+-export([order_first/2]).
+-export([order_last/2]).
 -export([model/1, model/2]).
--export([next_unbound/1]).
--export([first_unbound_index/1]).
--export([next_unbound_index/2]).
+-export([next_unbound/1, next_unbound/2]).
 -export([info/3, debug/3]).
 -export([get_bindings/2]).
 -export([intersect_bindings/3]).
@@ -112,10 +109,11 @@ new(Options) when is_list(Options) ->
     new(maps:from_list(Options));  %% fixme validate?
 new(OptMap) when is_map(OptMap) ->
     NewOpts = [{qtype,maps:get(qtype,OptMap)},
-		    {xref,maps:get(xref,OptMap)},
-		    {hash,maps:get(hash,OptMap)},
-		    {edge,maps:get(edge,OptMap)},
-		    {activity, maps:get(activity,OptMap)}
+	       {xref,maps:get(xref,OptMap)},
+	       {hash,maps:get(hash,OptMap)},
+	       {phase,maps:get(phase,OptMap)},
+	       {edge,maps:get(edge,OptMap)},
+	       {activity, maps:get(activity,OptMap)}
 	      ],
     %% io:format("new(~w)\n", [NewOpts]),
     Vp  = varc:new(NewOpts),
@@ -402,18 +400,20 @@ make_variable(V, Bs) ->
 	    {{bool,N}, alias(V,N,Bs)}
     end.
 
-order_sort_last(Bs, VarList) ->
+order_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
     ?dbg("last=~w\n",[lists:reverse(RevLast)]),
-    ok = varc:order_sort_last(Bs#bs.vp, lists:reverse(RevLast)),
+    ok = varc:order_last(Bs#bs.vp, lists:reverse(RevLast)),
     Bs1.
 
-order_sort_first(Bs, VarList) ->
+order_first(Bs, VarList) ->
     {RevFirst,Bs1} = variable_list_(Bs,VarList,[]),
     ?dbg("first=~w\n",[lists:reverse(RevFirst)]),
-    ok = varc:order_sort_first(Bs#bs.vp, lists:reverse(RevFirst)),
+    ok = varc:order_first(Bs#bs.vp, lists:reverse(RevFirst)),
     Bs1.
 
+variable_list_(Bs, [X|Vs], Acc) when is_integer(X) ->
+    variable_list_(Bs, Vs, [X|Acc]);
 variable_list_(Bs, [V|Vs], Acc) ->
     case build_(V, Bs) of
 	{{bool,X}, Bs1} ->
@@ -514,14 +514,8 @@ conflict_counter(Bs) ->
 next_unbound(Bs) ->
     varc:next_unbound(Bs#bs.vp).
 
-first_unbound_index(Bs) ->
-    varc:first_unbound_index(Bs#bs.vp).
-
-next_unbound_index(Bs, Index) ->
-    varc:next_unbound_index(Bs#bs.vp, Index).
-
-order_map(Bs, Index) ->
-    varc:order_map(Bs#bs.vp, Index).
+next_unbound(Bs, X) ->
+    varc:next_unbound(Bs#bs.vp, X).
 
 get_bindings(Bs,Level) when is_integer(Level) ->
     varc:get_bindings(Bs#bs.vp, Level).
@@ -2935,26 +2929,22 @@ model_variables(Bs,Ws) ->
     lists:map(fun(W) -> get_var(W,Bs) end, Ws).
 
 each_unbound(Bs, Fun) ->
-    each_unbound_(Bs, Fun, first_unbound_index(Bs)).
+    each_unbound_(Bs, Fun, next_unbound(Bs)).
 
 each_unbound_(_Bs, _Fun, false) ->
     ok;
-each_unbound_(Bs, Fun, I) ->
-    case next_unbound_index(Bs, I) of
-	false -> ok;
-	I -> 
-	    Fun(order_map(Bs, I)),
-	    each_unbound_(Bs, Fun, I)
-    end.
+each_unbound_(Bs, Fun, Xi) ->
+    Fun(Xi),
+    each_unbound_(Bs, Fun, next_unbound(Bs,Xi)).
 
 fold_unbound(Bs, Fun, Acc) ->
-    fold_unbound_(Bs, Fun, Acc, first_unbound_index(Bs)).
+    fold_unbound_(Bs, Fun, Acc, next_unbound(Bs)).
 
 fold_unbound_(_Bs, _Fun, Acc, false) ->
     Acc;
-fold_unbound_(Bs, Fun, Acc, I) ->
-    Acc1 = Fun(order_map(Bs, I), Acc),
-    fold_unbound_(Bs, Fun, Acc1, next_unbound_index(Bs, I)).
+fold_unbound_(Bs, Fun, Acc, Xi) ->
+    Acc1 = Fun(Xi, Acc),
+    fold_unbound_(Bs, Fun, Acc1, next_unbound(Bs, Xi)).
 
 each_variable(Bs, Fun) ->
     each_variable_(Bs, Fun, 1, varc:info(Bs#bs.vp, number_of_variables)+1).

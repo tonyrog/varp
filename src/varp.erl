@@ -65,6 +65,12 @@
 
 global_options() ->
     [
+     #{ long => "phase",
+	key => phase,
+	spec => {enum,[?BOOL]},
+	default => true,
+	description => "Fixed phase selection."
+      },
      #{ long => "starexec",
 	key => starexec,
 	spec =>  {enum,[?BOOL]},
@@ -914,6 +920,10 @@ order_decl([Key1,Key2|Vs],Opts) when is_integer(Key1), is_integer(Key2) ->
     order_decl(Vs,[{order,[Key1,Key2]}|Opts]);
 order_decl([Key1|Vs],Opts) when is_integer(Key1) ->
     order_decl(Vs,[{order,[Key1]}|Opts]);
+order_decl([{order_list,Ls1}|Vs],[{order_list,Ls}|Opts]) ->
+    order_decl(Vs, [{order_list,Ls++Ls1}|Opts]);
+order_decl([{order_list,Ls1}|Vs],Opts) ->
+    order_decl(Vs, [{order_list,Ls1}|Opts]);
 order_decl([V|Vs],[{order_list,Ls}|Opts]) when is_tuple(V) ->
     order_decl(Vs, [{order_list,Ls++[V]}|Opts]);
 order_decl([V|Vs],Opts) when is_tuple(V) ->
