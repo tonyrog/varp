@@ -325,8 +325,7 @@ print_help({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
 		true -> ["|","-",ShortOpt]
 	     end],
     if TypeSpec =:= undefined ->
-	    io:format("  ~s\n    ~s\n\n", 
-		      [Names,Desc]);
+	    io:format("  ~s\n    ~s\n\n", [Names,Desc]);
        true ->
 	    io:format("  ~s = ~s (~s)\n    ~s\n\n", 
 		      [Names,format_spec(TypeSpec),
@@ -422,7 +421,9 @@ default_opts_([], OptMap) ->
     OptMap.
 
 setopt(Key, Value, OptMap, OptSpec) when is_atom(Key) ->
-    %% io:format("key=~w, value=~w\n", [Key,Value]),
+    ?dbg0("key=~w, value=~w\n", [Key,Value]),
+    ?dbg0("OptSpec = ~p\n", [OptSpec]),
+
     case maps:find(Key, OptSpec) of
 	{ok,OptInfo=#{ key := Key, spec := Spec }} ->
 	    OldValue = case maps:find(Key, OptMap) of
@@ -431,10 +432,10 @@ setopt(Key, Value, OptMap, OptSpec) when is_atom(Key) ->
 		       end,
 	    case validate_value(Key, Spec, Value, OldValue) of
 		{true,Value1} ->
-		    %%io:format("~p => ~p\n", [Key,Value1]),
+		    ?dbg0("~p => ~p\n", [Key,Value1]),
 		    OptMap# { Key => Value1 };
 		true ->
-		    %%io:format("~p => ~p\n", [Key,Value]),
+		    ?dbg0("~p => ~p\n", [Key,Value]),
 		    OptMap# { Key => Value };
 		false ->
 		    erlang:error(badarg)
@@ -479,7 +480,7 @@ validate_value(_Key,integer,Value,_Old) ->
 validate_value(_Key,float,Value,_Old) ->
     is_number(Value);
 validate_value(_Key,float01,Value,_Old) ->
-    is_float(Value) andalso (Value > 0.0) andalso (Value < 1.0);
+    is_number(Value) andalso (Value >= 0.0) andalso (Value =< 1.0);
 validate_value(_Key,string,Value,_Old) ->
     is_string(Value);
 validate_value(_Key,atom,Value,_Old) ->

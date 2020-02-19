@@ -31,13 +31,15 @@ all() ->
 	    clause_learn_d1,
 	    clause_learn_a1,
 	    watch1,
+
+	    %% mark intersect
+	    intersect1,
 	    
 	    %% order checks
 	    order_identity,
 	    order_user,
 	    order_degree,
 	    order_rank,
-	    order_activity,
 	    order_first, %% BUGGY
 	    order_last,  %% BUGGY
 	    order_first_and_last,
@@ -506,7 +508,7 @@ nbcp_loop(V) ->
     end.
     
 order_install() ->
-    V = varc:new([{activity, mvsids}]),
+    V = varc:new([]),
     X1 = var(V, <<"X1">>),
     X2 = var(V, <<"X2">>),
     X3 = var(V, <<"X3">>),
@@ -582,15 +584,6 @@ order_rank() ->
     [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
 
     ok = varc:order_sort(V, ?ORDER_RANK bor ?ORDER_ASCEND),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
-    ok.
-
-order_activity() ->
-    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
-    ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_DESCEND),
-    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
-
-    ok = varc:order_sort(V, ?ORDER_ACTIVITY  bor ?ORDER_ASCEND),
     [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
     ok.
 
@@ -852,6 +845,25 @@ subst6() ->
     print_clauses(V,true),
     ok.
 
+intersect1() ->
+    V = varc:new(),    
+    _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install 10 variables
+    varc:mark_literals(V, [1,3,5,7,9,11,13,15,17,19]),
+    varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
+    [] = varc:mark_list(V),
+
+    varc:mark_literals(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
+    varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
+    [10] = varc:mark_list(V),
+
+    varc:mark_literals(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
+    varc:mark_intersect(V, [2,4,6,-8,10,-12,14,16,18,20]),
+    [-8,-12] = varc:mark_list(V),
+
+    varc:mark_literals(V, []),
+    [] = varc:mark_list(V),
+
+    ok.
 
 watch1() ->
     V = varc:new(),

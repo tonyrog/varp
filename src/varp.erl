@@ -237,13 +237,6 @@ global_options() ->
 	 default => false,
 	 description => "use edge list, instead of 2-clauses."
        },
-      #{ long => "activity",
-	 key => activity,
-	 spec =>  {enum,[{"0",off},{"1",mvsids},{"2",cvsids},
-			 {"off",off},{"mvsids",mvsids},{"cvsids",cvsids}]},
-	 default => off,
-	 description => "enable activity handling during restarts."
-       },
       #{ long => "xref",
 	 key => xref,
 	 spec =>  {enum,[?BOOL]},
@@ -664,9 +657,8 @@ do_run(Do, Formula, GOpts) ->
     garbage_collect(self(),[{type,major}]),
     R.
 
-do_run_(Do, Formula, GOpts0) ->
+do_run_(Do, Formula, GOpts) ->
     %% special check to see if we need to set activate
-    GOpts = add_activity(Do, GOpts0),
     {Main,Bs} = case varp_formula:build(Formula,GOpts) of
 		    {{bool,Var0},Bs0} -> {Var0,Bs0};
 		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0};
@@ -755,44 +747,6 @@ do([{Plugin,Param}|Do],Acc0,Bs) ->
     end;
 do([], Acc, Bs) ->
     {?CONTINUE, Acc, Bs}.
-
-add_activity(Do, GOpts) ->
-    case maps:get(activity, GOpts, off) of
-	off ->
-	    case need_activity(Do) of
-		true ->
-		    %% io:format("activity mvsids added\n"),
-		    GOpts#{ activity => mvsids };
-		false -> GOpts
-	    end;
-	_ -> GOpts
-    end.
-
--define(NEED_ACT(Key), (((Key) band ?ORDER_MASK) =:= ?ORDER_ACTIVITY) ).
-%% Check if any order plugin contain ORDER_ACTIVITY then
-%% activate activity processing
-need_activity([{varp_order,Param}|Do]) ->
-    case maps:get(sort, Param, undefined) of
-	[Key1] ->
-	    ?NEED_ACT(Key1) orelse need_activity(Do);
-	[Key1,Key2] ->
-	    ?NEED_ACT(Key1) orelse ?NEED_ACT(Key2) orelse need_activity(Do)
-    end;
-need_activity([{varp_nbackjump,Param}|Do]) ->
-    Reorder = maps:get(reorder,Param,[]),
-    lists:any(
-      fun({_,{order,Order}}) ->
-	      case lists:keyfind(sort,1,Order) of
-		  {_,[Key1]} ->
-		      ?NEED_ACT(Key1);
-		  {_,[Key1,Key2]} ->
-		      ?NEED_ACT(Key1) orelse ?NEED_ACT(Key2)
-	      end
-      end, Reorder) orelse need_activity(Do);
-need_activity([_ | Do]) ->
-    need_activity(Do);
-need_activity([]) ->
-    false.
 
 combine_result(N, M) when is_integer(N), is_integer(M) ->
     N+M;

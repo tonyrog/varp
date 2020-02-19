@@ -6,6 +6,7 @@
 %%% Created : 22 Dec 2017 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_backtrack).
+-behaviour(varp_plugin).
 
 -export([options/0]).
 -export([run/2]).

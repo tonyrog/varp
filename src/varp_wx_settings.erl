@@ -256,15 +256,14 @@ get_values(NameMap, ValueMap) ->
 %%
 %% Convert from varp value info "widget" value
 %%
-value_import(Enum, {enum,Enums}) when is_atom(Enum) ->
+value_import(Enum, {enum,Enums}) ->
     case lists:keyfind(Enum, 2, Enums) of
-	false -> 0;  %% should warn about this
-	{Value,Enum} -> Value
+	false -> 
+	    ?warn("enum ~w not among enums ~p\n", [Enum, Enums]),
+	    0;
+	E ->
+	    list_index(E, Enums)-1
     end;
-value_import(Enum, {enum,Enums}) when is_integer(Enum), Enum >= 0 ->
-    %% "backwards" compatible
-    Max = lists:max([V || {V,_} <- Enums]),
-    min(Enum, Max);
 value_import(Value, string) when is_float(Value) ->
     io_lib_format:fwrite_g(Value);
 value_import(Value, string) when is_integer(Value) ->
@@ -273,6 +272,10 @@ value_import(Value, string) when is_list(Value) ->
     Value;
 value_import(Value, boolean) when is_boolean(Value) ->
     Value;
+value_import(Value, boolean) when Value =:= 0 ->
+    false;
+value_import(Value, boolean) when Value =:= 1 ->
+    true;
 value_import(Value, integer) when is_integer(Value) ->
     Value;
 %% number is represented as text by wxTextCtrl
@@ -283,13 +286,23 @@ value_import(Value, decimal) when is_integer(Value) ->
 value_import("", decimal) ->
     "0".
 
+list_index(E, List) ->
+    index_(E, List, 1).
+
+index_(E, [E|_], I) -> I;
+index_(E, [_|L], I) -> index_(E, L, I+1);
+index_(_E, [], _) -> 0.
+    
 %%
 %% Convert from "widget" value to varp value
 %%
 value_export(Value, {enum,Enums}) ->
-    case lists:keyfind(Value, 1, Enums) of
-	false -> 0;
-	{Value,Enum} -> Enum
+    %% assume? that Value is choice index 
+    try lists:nth(Value+1, Enums) of
+	{_Name,Enum} -> Enum
+    catch
+	error:_ ->
+	    0
     end;
 value_export(Value, string) when is_list(Value) ->
     Value;
@@ -349,29 +362,62 @@ varp_layout(I) when is_integer(I) ->
     Order = {vertical,#{ label => "Order" },
 	     [
 	      {horizontal,#{},
-	       [{choice,#{ value => 1, 
-			   choices => [{"+",ascend},{"-",descend}],
-			   name=> [profile,I,options,order,key1,dir]}},
+	       [{checkbox,#{ label => "Ascend",
+			     name=> [profile,I,options,order,key1,dir]}},
 		{radiobox,
 		 #{ name => [profile,I,options,order,key1,sort],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Deg",degree}, {"Rank",rank}, {"Activity",activity},
+		 [{"Deg",degree}, {"Rank",rank},
 		  {"User",user}, {"Rand",random}, {"Input",identity},
 		  {"Undef",undefined}]}
 	       ]},
 	      {horizontal,#{},
-	       [{choice,#{ value => 1,
-			   choices => [{"+",ascend},{"-",descend}],
-			   name=> [profile,I,options,order,key2,dir]}},
+	       [{checkbox,#{ label => "Ascend",
+			     name=> [profile,I,options,order,key1,dir]}},
 		{radiobox,
 		 #{ name => [profile,I,options,order,key2,sort],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Deg",degree},{"Rank",rank},{"Activity",activity},
+		 [{"Deg",degree},{"Rank",rank},
 		  {"User",user},{"Rand",random},{"Input",identity},
 		  {"Undef",undefined}]}
 	       ]}
 	     ]},
 
+    Saturate = 
+	{vertical,#{ label => "Saturate" },
+	 [
+	  {horizontal,#{},
+	   [{spin, #{ label => "Sequence",
+		      name => [profile,I,options,saturate,q],
+		      min => 0, max => 100,
+		      tooltip =>
+			  "Add q consecutive variables during saturation."
+		    }},
+	    {spin, #{ label => "Random",
+		      name => [profile,I,options,saturate,r],
+		      min => 0, max => 100,
+		      tooltip =>
+			  "Add r random variables during saturation."
+		    }}
+	   ]},
+	  {horizontal,#{},
+	   [
+	    {spin, #{ label => "Laps",
+		      name => [profile,I,options,saturate,laps],
+		      min => 0, max => 100,
+		      tooltip =>
+			  "Max saturation lap count"
+		    }},
+	    {spin, #{ label => "ThresLaps",
+		      name => [profile,I,options,saturate,threshold],
+		      min => 0, max => 100,
+		      tooltip =>
+			  "Threshold for bound variables during saturation"
+		      "round."
+		    }}
+	   ]}
+	 ]},
+			   
     Backjump = 
 	{horizontal, #{ label=>"Backjump" },
 	 [
@@ -419,9 +465,9 @@ varp_layout(I) when is_integer(I) ->
 		     min => 0, max => 1000000000 }},
 	    {space, ?VSPACE},
 	    {decimal,#{ label => "Max learned factor",
-		       name => [profile,I,options,backjump,max_learned_factor],
-		       default => 0,
-		       min => 0.0, max => 100.0 }},
+			name => [profile,I,options,backjump,max_learned_factor],
+			default => 0,
+			min => 0.0, max => 100.0 }},
 	    {space, ?VSPACE},
 	    {decimal,#{ label => "Max learned inc",
 			name => [profile,I,options,backjump,max_learned_inc],
@@ -441,21 +487,32 @@ varp_layout(I) when is_integer(I) ->
 	    {decimal,#{ label => "Restart interval",
 			name => [profile,I,options,backjump,restart_interval],
 			default => 0,
-			min => 0.0, max =>  2592000.0 }}  %% 30days
+			min => 0.0, max =>  2592000.0 }},  %% 30days
+	    {space, ?VSPACE},
+	    {decimal,#{ label => "Keep factor",
+			name => [profile,I,options,backjump,keep_factor],
+			default => 0.5,
+			min => 0.0, max => 1.0 }}
 	   ]},
 
 	  {space, ?HSPACE},
 
 	  {vertical, #{},
 	   [
-	    {decimal,#{ label => "Activity Decay",
-			name => [profile,I,options,backjump,decay],
-			default => 0.95,
-			min => 0.0, max => 1.0 }},
-	    {decimal,#{ label => "Activity Bump",
-			name => [profile,I,options,backjump,bump],
-			default => 1.0,
-			min => 0.0, max => 10.0 }}
+	    {vertical,#{ label => "Bump" },
+	     [
+	      {combobox, #{ choices =>
+				[{"none", ?BUMP_NONE},
+				 {"1", 1},{"2", 1},{"3", 1},{"4", 1},{"5", 1},
+				 {"next", ?BUMP_NEXT},
+				 {"log2", ?BUMP_LOG2},
+				 {"log10", ?BUMP_LOG10},
+				 {"rank", ?BUMP_RANK},
+				 {"10", 10}, {"15", 15}, {"20", 20}, {"50", 50},
+				 {"100", 100}],
+			    name => [profile,I,options,backjump,bump]
+			  }}
+	     ]}
 	   ]}
 	 ]},
 
@@ -467,11 +524,12 @@ varp_layout(I) when is_integer(I) ->
 			  {textctrl,#{ name => [profile,I,name] }}
 			 ]},
 			{space, ?HSPACE},
-			Backtrack, {space,?HSPACE}, Assoc]},
+			Backtrack, {space,?HSPACE}, Assoc,
+			{space,?HSPACE}, QType]},
       {space,?VSPACE},
-      QType,
-      {space,?VSPACE},
-      Order,
+      {horizontal,#{}, [
+			Order, {space,?HSPACE}, Saturate
+		       ]},
       {space,?VSPACE},
       Backjump
      ]}.
@@ -489,6 +547,10 @@ get_val_(wxSlider, Widget) ->
     wxSlider:getValue(Widget);
 get_val_(wxChoice, Widget) ->
     wxChoice:getSelection(Widget);
+get_val_(wxComboBox, Widget) ->
+    Sel = wxComboBox:getSelection(Widget),
+    %% io:format("wxComboBox getSelection = ~w\n", [Sel]),
+    Sel;
 get_val_(wxTextCtrl, Widget) ->
     Text = wxTextCtrl:getValue(Widget),
     try list_to_float(Text) of
@@ -528,6 +590,8 @@ set_value(wxSlider, Widget, Value) ->
     wxSlider:setValue(Widget, Value);
 set_value(wxChoice, Widget, Value) ->
     wxChoice:setSelection(Widget, Value);
+set_value(wxComboBox, Widget, Value) ->
+    wxComboBox:setSelection(Widget, Value);
 set_value(wxTextCtrl, Widget, Value) ->
     Text = if is_float(Value) -> io_lib_format:fwrite_g(Value);
 	      is_integer(Value) -> integer_to_list(Value);

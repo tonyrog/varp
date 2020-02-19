@@ -1,3 +1,14 @@
+- Bump values
+  -1  = next       put variable first, next to be assigned
+  -2  = log2(N)    N = number of unbound variables
+  -3  = log10(N)   N = number of unbound variables
+  -4  = rank       bump variable M if clause is of length M
+   0  = no
+   1  = move one position
+   2  = move two positions
+   ...
+   K  = move K positions   
+  
 - Check variables with degree = 1 (may be set = TRUE?)
 
 - Handle declaration of integers and sizes in snf and cnf formats

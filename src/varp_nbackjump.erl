@@ -6,6 +6,7 @@
 %%% Created : 23 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_nbackjump).
+-behaviour(varp_plugin).
 
 -export([run/2]).
 -export([options/0]).
@@ -24,18 +25,14 @@
 
 -define(REORDER_0,
 	[
-	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_RANDOM)},
-	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
-	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
-	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
+	 {1,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
+	 {2,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
 	]).
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)}
+	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_UNDEFINED)}
 	]).
 
 options() ->
@@ -135,15 +132,9 @@ options() ->
 	default => infinity,
 	description => "Restart interval in seconds"},
 
-     #{ long => "decay",
-	key => decay,
-	spec =>  float,
-	default => 0.95,
-	description => "Decay factor."},
-
      #{ long => "bump",
 	key => bump,
-	spec =>  integer,
+	spec => {union,[integer,{enum,[?BUMP]}]},
 	default => 1,
 	description => "Bump value."},
 
@@ -250,9 +241,6 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
     LClauses1 = varp_conflict:analyze_alpha(Bs,Level,
 					    maps:get(bump,Param),
 					    maps:get(minimize,Param)),
-    %% io:format("LClases1 = ~w\n", [LClauses1]),
-    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
-
     case lists:keysort(1, LClauses1) of
 	LClauses2 = [{1,_}|_] -> %% has unit! jump to top-level and install
 	    undo_until(Bs, Level, ?TOP_LEVEL),
@@ -355,7 +343,7 @@ restart(Bs,Param,Level,MaxLearned,MR) ->
 	true ->
 	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
-	    ?dbg1("purge\n",[]),
+	    ?dbg0("purge\n",[]),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
@@ -509,14 +497,11 @@ do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
     if  M, L > 0, D2 >= L, K > 0, D2 > 0, D1 >= K*D2 ->
 	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_OLLE_COUNT, 1),
 	    J3;
-
 	L > 0, D2 >= L -> 
-	    counters:add(Bs#bs.counters, 
-			 ?COUNTER_STUMBLE_COUNT, 1),
+	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT, 1),
 	    J3;
 	K > 0, D2 > 0, D1 >= K*D2 ->
-	    counters:add(Bs#bs.counters,
-			 ?COUNTER_OLLE_COUNT, 1),
+	    counters:add(Bs#bs.counters, ?COUNTER_OLLE_COUNT, 1),
 	    J3;
 	true -> 
 	    J2

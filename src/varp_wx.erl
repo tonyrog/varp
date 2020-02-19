@@ -20,6 +20,7 @@
 -export([output_model/4]).  %% varp callback
 
 %% warp_wx is also a plugin (monitor assignment etc)
+-behaviour(varp_plugin).
 -export([options/0, run/2]).
 
 %% debug export
@@ -33,6 +34,8 @@
 -define(ID_EXPORT_CNF, 100).
 -define(ID_EXPORT_SNF, 101).
 
+-define(BJK(I,Name), [profile,(I),options,backjump,Name]).
+-define(SAT(I,Name), [profile,(I),options,saturate,Name]).
 
 -record(s,
 	{
@@ -75,7 +78,6 @@
 
 -define(REORDER_0,
 	[
-	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_RANDOM)},
 	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
 	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
 	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
@@ -83,11 +85,7 @@
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	 {1,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
 	]).
 
 
@@ -788,27 +786,21 @@ solve(Mode, S, Bound) ->
 		    0 -> infinity;
 		    T -> T
 		end,
-    Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
-
+    Saturate = read_saturate_params(S,I),
     Method = read_param([profile,I],method,S,backjump),
-
     Order_1 = read_param(Pfx,[order,key1,sort],S,degree),
-    Dir_1   = read_param(Pfx,[order,key1,dir],S,descend),
+    Ascend_1   = read_param(Pfx,[order,key1,dir],S,false),
     Order_2 = read_param(Pfx,[order,key2,sort],S,degree),
-    Dir_2   = read_param(Pfx,[order,key2,dir],S,descend),
+    Ascend_2   = read_param(Pfx,[order,key2,dir],S,false),
     Assoc   = read_param(Pfx,[varp,assoc],S,none),
     QType   = read_param(Pfx,[varp,qtype],S,recursive),
-    AType = if Order_1 =:= activity; Order_2 =:= activity -> mvsids;
-	       true -> off
-	    end,
     %% _EdgeList = true,
     ?dbg("max  = ~p\n", [Max]),
     ?dbg("saturate = ~w\n", [Saturate]),
     ?dbg("method = ~w\n", [Method]),
-    ?dbg("order = ~w\n", [[{Order_1,Dir_1},{Order_2,Dir_2}]]),
+    ?dbg("order = ~w\n", [[{Order_1,Ascend_1},{Order_2,Ascend_2}]]),
     ?dbg("assoc = ~w\n", [Assoc]),
     ?dbg("qtype = ~w\n", [QType]),
-    ?dbg("activity = ~w\n", [AType]),
     ?dbg("timeout = ~w\n", [Timeout]),
 
     Formula = wxStyledTextCtrl:getText(S#s.formula),
@@ -822,7 +814,6 @@ solve(Mode, S, Bound) ->
 	{ok,{Sections,Form}} ->
 	    Options = [{method,count},{print,true},{timeout,Timeout},
 		       {assoc,Assoc},{qtype,QType},{xref,true},
-		       {activity,AType},
 		       {partial,Partial}
 		      ],
 	    GOpts = varp:load_option_list(Options),
@@ -837,22 +828,23 @@ solve(Mode, S, Bound) ->
 				[]
 			end;
 		   Order_2 =:= undefined ->
-			[{order,[{sort,[order(Dir_1,Order_1)]}]}];
+			[{order,[{sort,[order(Ascend_1,Order_1)]}]}];
 		   Order_1 =:= undefined ->
-			[{order,[{sort,[order(Dir_2,Order_2)]}]}];
-		   true -> [{order,[{sort,[order(Dir_1,Order_1),
-					   order(Dir_2,Order_2)]}]}]
+			[{order,[{sort,[order(Ascend_2,Order_2)]}]}];
+		   true -> [{order,[{sort,[order(Ascend_1,Order_1),
+					   order(Ascend_2,Order_2)]}]}]
 		end,
 	    Do =
 		[{wx,[{nbound,S#s.config_nbound},
 		      {window,S#s.window},
 		      {env, S#s.wx_env}]},
 		 {Mode,[]}] ++
-		case Saturate of
-		    0 -> [];
-		    _K -> [{saturate,[{level,1}]}]
-		end ++
 		Order ++
+		case lists:keyfind(level,1,Saturate) of
+		    {level,0} -> [];
+		    _ ->
+			[{saturate, Saturate}]
+		end ++
 		case Method of
 		    backjump ->
 			BjParams = read_backjump_params(S, I),
@@ -936,45 +928,51 @@ solve(Mode, S, Bound) ->
 	    output_error(S, varp:format_error(Message))
     end.
 
-order(Dir, Ord) ->
-    case Dir of
-	ascend  -> ?ORDER_ASCEND;
-	descend -> ?ORDER_DESCEND
-    end
+order(Ascend, Ord) ->
+    case Ascend of
+	0     -> ?ORDER_DESCEND;
+	false -> ?ORDER_DESCEND;
+	1     -> ?ORDER_ASCEND;
+	true  -> ?ORDER_ASCEND
+    end 
 	bor
     case Ord of
-	degree -> ?ORDER_DEGREE;
-	rank -> ?ORDER_RANK;
-	activity -> ?ORDER_ACTIVITY;
-	user -> ?ORDER_USER;
-	random -> ?ORDER_RANDOM;
-	identity -> ?ORDER_IDENTITY;
+	degree    -> ?ORDER_DEGREE;
+	rank      -> ?ORDER_RANK;
+	activity  -> ?ORDER_DEGREE; %% not used anymore
+	user      -> ?ORDER_USER;
+	random    -> ?ORDER_RANDOM;
+	identity  -> ?ORDER_IDENTITY;
 	undefined -> ?ORDER_UNDEFINED
     end.
-
-
--define(BJK(I,Name), [profile,(I),options,backjump,Name]).
 
 %% add inc_learned_factor - no units found for T seconds
 read_backjump_params(S,I) ->
     [
      %% {display,    true},
-     {minimize,   read_param(?BJK(I,minimize), S, true)},
-     {iorder,     read_param(?BJK(I,iorder), S, 0)},
-     {stumble,    read_param(?BJK(I,stumble), S, 0)},
+     {minimize,           read_param(?BJK(I,minimize), S, true)},
+     {iorder,             read_param(?BJK(I,iorder), S, 0)},
+     {stumble,            read_param(?BJK(I,stumble), S, 0)},
      {olle,               read_param(?BJK(I,olle), S, 0)},
      {stumble_olle,       read_param(?BJK(I,stumble_olle), S, false)},
      {max_conflicts,      read_param(?BJK(I,max_conflicts), S, 1) },
      {max_learned,        read_param(?BJK(I,max_learned), S, 0) },
      {max_learned_factor, read_param(?BJK(I,max_learned_factor), S, 0) },
      {max_learned_inc,    read_param(?BJK(I,max_learned_inc), S, 0)},
-     {keep_factor, read_param(?BJK(I,keep_factor), S, 0.8) },
-     {min_keep_clauses, read_param(?BJK(I,min_keep_clauses), S, 0)},
-     {restart_counter, read_param(?BJK(I,restart_counter), S, 0) },
-     {restart_interval, read_param(?BJK(I,restart_interval), S, 0)},
-     {decay, read_param(?BJK(I,decay), S, 0.95) },
-     {bump, read_param(?BJK(I,bump), S, 1.0) },
+     {keep_factor,        read_param(?BJK(I,keep_factor), S, 0.5) },
+     {min_keep_clauses,   read_param(?BJK(I,min_keep_clauses), S, 0)},
+     {restart_counter,    read_param(?BJK(I,restart_counter), S, 0) },
+     {restart_interval,   read_param(?BJK(I,restart_interval), S, 0)},
+     {bump,               read_param(?BJK(I,bump), S, 1) },
      {reorder, ?REORDER_1}
+    ].
+
+read_saturate_params(S,I) ->
+    [{level, wxSpinCtrl:getValue(S#s.config_saturate)},
+     {q, read_param(?SAT(I,q), S, 0)},
+     {r, read_param(?SAT(I,r), S, 0)},
+     {laps, read_param(?SAT(I,laps), S, 0)},
+     {threshold, read_param(?SAT(I,threshold), S, 0)}
     ].
 
 read_param(Pfx, Key, S, Default) when is_atom(Key) ->
@@ -1016,7 +1014,7 @@ export(Type, File, S) ->
 
 export(Type, File, S, Bound) ->
     I = profile_number(S),
-    Saturate  = wxSpinCtrl:getValue(S#s.config_saturate),
+    Saturate = read_saturate_params(S,I), %% FIXME: may depend on ORDER!!!
     Assoc     = read_param(?VKEY(I,assoc),S,none),
     Formula = wxStyledTextCtrl:getText(S#s.formula),
     Meta = maps:from_list(Bound),
@@ -1027,9 +1025,9 @@ export(Type, File, S, Bound) ->
 	    GOpts1 = varp:section_opts(Sections, GOpts),
 	    Do =
 		[{satisfy,[]}] ++
-		case Saturate of
-		    0 -> [];
-		    _K -> [{saturate,[{level,1}]}]
+		case lists:keyfind(level,1,Saturate) of
+		    {level,0} -> [];
+		    _ -> [{saturate,Saturate}]
 		end ++
 		[{cnf, [{type,Type},{file,File},{symbols,true}]}],
 
@@ -1073,7 +1071,6 @@ export(Type, File, S, Bound) ->
 	{error, Message} ->
 	    output_error(S, io_lib:format("~p\n", [Message]))
     end.
-
 
 mark_line(Stc, Line) ->
     wxStyledTextCtrl:setCaretLineBackground(Stc, {255, 50, 50}),

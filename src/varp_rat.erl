@@ -6,9 +6,9 @@
 %%% Created : 25 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_rat).
+-behaviour(varp_plugin).
 
--export([run/2]).
--export([options/0]).
+-export([run/2, options/0]).
 
 %% -compile(export_all).
 

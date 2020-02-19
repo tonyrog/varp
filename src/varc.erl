@@ -99,6 +99,25 @@
 -export([get_clause_bcp_counter/2]).
 -export([get_bcp_counter/1]).
 -export([get_conflict_counter/1]).
+%% utils
+-export([vec_create/3]).
+-export([vec_step/2]).
+-export([vec_extend/3]).
+-export([vec_extend_rand/3]).
+-export([vec_is_bound/2]).
+-export([vec_value/2]).
+-export([vec_bind/2]).
+-export([intersect/1, intersect/2]).
+-export([intersect_var/3]).
+-export([install_bindings/2, install_bindings/3]).
+-export([vec_sat/4, vec_sat/2]).
+-export([vec_sat_lap/4]).
+%% bindings
+-export([mark_literals/2]).
+-export([mark_intersect/2]).
+-export([mark_list/1]).
+%% -export([mark_tuple/1]).
+%% -export([mark_intersect_var/3])
 
 %% -define(debug, true).
 
@@ -136,7 +155,6 @@ new() ->
 %%    {xref, boolean()}           -- use cross references
 %%    {hash, boolean()}           -- install hash over clauses
 %%    {edge, boolean()}           -- use edge instead of 2-clauses
-%%    {activity,mvsids|off}       -- use activity in conflicts (off)
 %%
 
 new(Options) when is_list(Options) ->
@@ -198,7 +216,7 @@ find_symbol(_Vp, _Name) ->
 
 %%
 %% What::implication|implication_clause|implication_pos|
-%%       activity|level|degree|is_atom|symbol
+%%       level|degree|is_atom|symbol
 %%
 
 variable_info(_Vp,Index,_What)
@@ -210,7 +228,7 @@ variable_info(Vp, Index) ->
 
 variable_info_keys() ->
     [implication, implication_clause, implication_pos,
-     activity, level, degree, is_atom, symbol].
+     level, degree, is_atom, symbol].
 
 literal_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
@@ -241,7 +259,7 @@ bind(_Vp, X) when is_integer(X) ->
 -spec bind(Vp::varc(), X::literal(), Level::integer()) -> boolean().
 
 bind(_Vp, X, Level) when is_integer(X),
-			is_integer(Level) ->
+			 is_integer(Level) ->
     ?nif_stub().
 
 
@@ -599,7 +617,6 @@ info_keys() ->
      literal_integer,  %% true,false (integer or pointer)
      value_packing,    %% 1,4,undefined (variable value packing)
      edge,             %% true,false (edge_list is enabled or not)
-     activity,         %% conflict activity is enabled (used in sort activity)
      xref              %% xref is used (need for saturate with substitution)
     ].
 
@@ -651,3 +668,354 @@ get_bcp_counter(Vp) ->
 
 get_conflict_counter(Vp) ->
     info(Vp, conflict_counter).
+
+%% Utils
+
+%% bcp over vector [X1,X2,...]
+%% example X1,X2,X3
+%% -X1 -X2 -X3  = E0
+%% -X1 -X2  X3  = E1
+%% -X1  X2 -X3  = E2
+%% -X1  X2  X3  = E3
+%%  X1 -X2 -X3  = E4
+%%  X1 -X2  X3  = E5
+%%  X1  X2 -X3  = E6
+%%  X1  X2  X3  = E7
+%% 
+%%  Y10 = intersect(E0,E1,E2,E3)
+%%  Y11 = intersect(E4,E5,E6,E7)
+%%
+%%  Y20 = intersect(E2,E3,E6,E7)
+%%  Y21 = intersect(E0,E1,E4,E5)
+%% 
+%%  Y30 = intersect(E1,E3,E5,E7)
+%%  Y31 = intersect(E0,E2,E4,E6)
+%%
+%%  intersect_var(X1, Y10, Y11)
+%%  intersect_var(X2, Y20, Y21)
+%%  intersect_var(X3, Y30, Y31)
+%%
+vec_sat_lap(V, K, Q, R) ->
+    case vec_create(V, next_unbound(V), K) of
+	[] -> true;
+	Vec0 -> vec_sat_lap_(V, Vec0, Q, R)
+    end.
+
+%% FIXME? if a vector
+%% contain a constant, we should probably update the
+%% vector to speed up things (a bit)?
+vec_sat_lap_(V, Vec0, Q, R) ->
+    case vec_sat(V, Vec0, Q, R) of
+	false -> false;
+	true ->
+	    case vec_step(V, Vec0) of
+		false -> true;
+		Vec1 -> 
+		    ?debug("step ~w => ~w, ~w\n", 
+			  [Vec0, Vec1, vec_is_bound(V, Vec1)]),
+		    vec_sat_lap_(V, Vec1, Q, R)
+	    end
+    end.
+
+vec_sat(V, V0, Q, R) ->
+    ?debug("vec_sat = ~w\n", [V0]),
+    V1 = vec_extend(V, V0, Q),
+    V2 = vec_extend_rand(V, V1, R),
+    vec_sat(V, V2).
+
+vec_sat(V, Vec) when is_list(Vec) ->
+    set_level(V, 1),
+    case satv_(V,list_to_tuple(Vec)) of
+	false ->
+	    false;
+	[] ->
+	    true;
+	Bs ->
+	    ?debug("sat vec ~w = ~w\n", [Vec,Bs]),
+	    set_level(V, 0),
+	    case install_bindings(V, 0, Bs) of
+		true ->
+		    bcp(V);
+		false ->
+		    false
+	    end
+    end.
+
+satv_(V, Vt) when is_tuple(Vt) ->
+    N = tuple_size(Vt),
+    Bt = bcpv_(V,(1 bsl N)-1, N, Vt, []),
+    satvar_(V, 0, N, Vt, Bt, []).
+
+%% eval for variable I 
+satvar_(V, I, N, Vt, Bt, Bs) when I < N ->
+    Js = lists:seq(0, (1 bsl N)-1),
+    B1 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =/= 0]),
+    B0 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =:= 0]),
+    if B0 =:= false, B1 =:= false -> false;
+       B0 =:= false -> satvar_(V, I+1, N, Vt, Bt, B1++Bs);
+       B1 =:= false -> satvar_(V, I+1, N, Vt, Bt, B0++Bs);
+       true -> 
+	    Bsi = intersect_var(element(I+1,Vt), B0, B1),
+	    satvar_(V, I+1, N, Vt, Bt, Bsi++Bs)
+    end;
+satvar_(_V, N, N, _Vt, _Bt, Bs) ->
+    Bs.
+
+interv0(_V, As) ->
+    intersect(As).
+
+interv(_V, []) -> false;
+interv(V, [false|As]) -> interv(V, As);
+interv(V, [A|As]) -> mark_literals(V, A), interv_(V, As).
+
+interv_(V, [false|As]) -> interv_(V, As);
+interv_(V, [A|As]) -> mark_intersect(V, A), interv_(V, As);
+interv_(V, []) -> mark_list(V).
+
+%% eval all 2^N combinations of Vt
+bcpv_(_V,-1, _N, _Vt, Acc) ->
+    list_to_tuple(Acc);
+bcpv_(V,I, N, Vt, Acc) ->
+    set_level(V, 1),
+    case bindv(V, N, I, Vt) of
+	false ->
+	    undo_level(V, 1),
+	    bcpv_(V,I-1, N, Vt, [false|Acc]);
+	true ->
+	    set_level(V, 2),
+	    Ei = case bcp(V) of
+		     false -> false;
+		     true -> get_bindings(V, 2)
+		 end,
+	    undo_level(V, 2),
+	    undo_level(V, 1),
+	    bcpv_(V,I-1, N, Vt, [Ei|Acc])
+    end.
+
+%% given number I set vars in Vt according to bit
+bindv(_V, 0, _I, _Vt) ->
+    true;
+bindv(V, J, I, Vt) ->
+    Xj = if I band (1 bsl (J-1)) =/= 0 -> element(J,Vt); 
+	    true -> -element(J,Vt)
+	 end,
+    bind(V,Xj) andalso bindv(V,J-1,I,Vt).
+
+
+mark_literals(_V, _Bs) ->
+    ?nif_stub().
+    
+mark_intersect(_V, _Bs) ->
+    ?nif_stub().
+
+mark_list(_V) ->
+    ?nif_stub().
+
+intersect_var(Var, Bs0, Bs1) ->
+    intersect_var_(Var, Bs0, bindings_to_map(Bs1)).
+
+intersect_var_(Var, [X|Bs0], Map) ->
+    case maps:find(X, Map) of
+	{ok,true} ->
+	    [X | intersect_var_(Var, Bs0, Map)];
+	error ->
+	    case maps:find(-X, Map) of
+		{ok,true} ->
+		    [{Var,-X} | intersect_var_(Var, Bs0, Map)];
+		error ->
+		    intersect_var_(Var, Bs0, Map)
+	    end
+    end;
+intersect_var_(_Var, [], _Map) ->
+    [].
+
+%% intersect a list of list of bindings - return bindings
+intersect([]) -> false;
+intersect([A]) -> A;
+intersect([A,B]) -> intersect_(A,B);
+intersect([false|Bs]) -> intersect(Bs);
+intersect([A|Bs]) -> intersect__(Bs, bindings_to_map(A)).
+
+intersect__([false|Bs], Map) -> intersect__(Bs, Map);
+intersect__([B|Bs], Map) -> intersect__(Bs, inter_map(B, Map));
+intersect__([], Map) -> map_to_bindings(Map).
+
+%% intersect two binding lists
+intersect(As, Bs) -> intersect_(As, Bs).
+
+intersect_(false, Bs) -> Bs;
+intersect_(As, false) -> As;
+intersect_(As, Bs) -> inter_values(Bs, bindings_to_map(As)).
+
+inter_map(Bs, Map) ->
+    inter_map_(Bs, Map, #{}).
+
+inter_map_([B|Bs], Map, Dst) ->
+    case maps:find(B, Map) of
+	{ok,true} -> inter_map_(Bs, Map, Dst#{ B => true });
+	_ -> inter_map_(Bs, Map, Dst)
+    end;
+inter_map_([], _Map, Dst) ->
+    Dst.
+
+inter_values([B|Bs], Map) ->
+    case maps:find(B, Map) of
+	{ok,true} -> [B | inter_values(Bs, Map)];
+	_ -> inter_values(Bs, Map)
+    end;
+inter_values([], _Map) ->
+    [].
+
+%% make map of bindings into list of bindings
+map_to_bindings(Map) ->
+    [ X || {X,true} <- maps:to_list(Map)].
+
+%% make a set of bindings
+bindings_to_map(As) ->
+    bindings_to_map(As, #{}).
+bindings_to_map([A|As], Map) ->
+    bindings_to_map(As, Map#{ A => true });
+bindings_to_map([],Map) ->
+    Map.
+
+install_bindings(V,Bs) ->
+    install_bindings(V, info(V, level), Bs).
+
+install_bindings(_V,_Level,[]) ->
+    true;
+install_bindings(V,Level,Bs) ->
+    install_(V,Level,Bs).
+
+install_(V,Level,[X|Xs]) when is_integer(X) ->
+    true = bind(V, X),
+    install_(V,Level,Xs);
+install_(V,Level,[{X,X}|Xs]) ->
+    install_(V,Level,Xs);
+install_(V,Level=0,[{X,t}|Xs]) ->
+    true = bind(V, X),
+    install_(V,Level,Xs);
+install_(V,Level=0,[{X,f}|Xs]) ->
+    true = bind(V, -X),
+    install_(V,Level,Xs);
+install_(V,0,[{X,Y}|Xs]) ->
+    Xa = variable_info(V, X, is_atom),
+    Ya = variable_info(V, Y, is_atom),
+    if Ya, not Xa ->
+	    subst(V, Y, X);
+       true ->
+	    subst(V, X, Y)
+    end,
+    install_(V,0,Xs);
+install_(V,_Level,[{_X,_Y}|Xs]) ->
+    %% can not install X=Y on level > 0
+    install_(V,_Level,Xs);
+install_(_V,_Level,[]) ->
+    true.
+
+%%
+vec_value(V, Vec) ->
+    [case value(V, Xi) of
+	 undefined -> u;
+	 Vi -> Vi
+     end || Xi <- Vec].
+
+vec_bind(_V, []) ->
+    true;
+vec_bind(V, [Xi|Vec]) ->
+    bind(V, Xi) andalso vec_bind(V, Vec).
+
+%% read "vector" of unbound variables starting from Var (must be unbound)
+%% assume there are at least K unbound variables (FIXME)
+vec_create(_V, false, _K) ->
+    [];
+vec_create(V, Vi, K) ->
+    vec_create_(V, Vi, K-1, [Vi]).
+
+vec_create_(_V, _Vi, 0, Vec) -> 
+    Vec;
+vec_create_(V, Vi, I, Vec) ->
+    case next_unbound(V, Vi) of
+	false ->
+	    case next_unbound(V) of
+		false -> Vec;
+		Vj -> vec_create_(V, Vj, I-1, [Vj|Vec])
+	    end;
+	Vj ->
+	    vec_create_(V, Vj, I-1, [Vj|Vec])
+    end.
+
+%% add (at most) Q "next" elements to Vec (not already in Vec)
+vec_extend(V, Vec, Q) ->
+    vec_extend_(V, Vec, Q).
+
+vec_extend_(_V, Vec, 0) -> Vec;
+vec_extend_(V, Vec, I) -> 
+    case next_unbound_skip(V, hd(Vec), Vec) of
+	false -> Vec;
+	V1 -> vec_extend_(V, [V1|Vec], I-1)
+    end.
+
+%% add (at most) R random elements to Vec (not already in Vec)
+vec_extend_rand(V, Vec, R) ->
+    N = varc:get_number_of_variables(V),
+    M = varc:get_number_of_unbound_variables(V) - length(Vec),
+    vec_extend_rand_(V, Vec, N, M, R).
+
+vec_extend_rand_(_V, Vec, _N, _M, 0) -> Vec;
+vec_extend_rand_(_V, Vec, _N, M, _I) when M =< 0 -> Vec;
+vec_extend_rand_(V, Vec, N, M, I) ->
+    V1 = next_rand_unbound_skip(V, N, Vec),
+    vec_extend_rand_(V, [V1|Vec], N, M-1, I-1).
+
+vec_is_bound(_V, []) ->
+    false;
+vec_is_bound(V, [Xi|Vec]) ->
+    case is_bound(V, Xi) of
+	true -> true;
+	false -> vec_is_bound(V, Vec)
+    end.
+
+%% step vector (list) over variables
+vec_step(V, Vec) ->
+    vec_step(V, Vec, []).
+
+vec_step(_V, [], _Skip) ->
+    false;
+vec_step(V, [Vi|Vec], Skip) ->
+    case next_unbound_skip(V, Vi, Skip) of
+	false ->
+	    case vec_step(V, Vec, [Vi|Skip]) of
+		false -> false;
+		Vec1 = [Vj|_] ->
+		    case next_unbound_skip(V, Vj, Skip) of
+			false -> false;
+			Vk -> [Vk|Vec1]
+		    end
+	    end;
+	Vj -> [Vj|Vec]
+    end.
+
+next_unbound_skip(V, Vi, Skip) ->
+    case next_unbound(V, Vi) of
+	false -> false;
+	Vj ->
+	    case lists:member(Vj, Skip) of
+		true -> next_unbound_skip(V, Vj, Skip);
+		false -> Vj
+	    end
+    end.
+
+%% Select a random variables, that is not member of Skip, among
+%% variables in range 1..N
+%% FIXME: this may loop too long if few unbound variables are available!
+next_rand_unbound_skip(V, N, Skip) when N > 0 ->
+    J = rand:uniform(N),
+    case next_unbound(V, J) of
+	false ->
+	    next_rand_unbound_skip(V, N, Skip);
+	V1 ->
+	    case lists:member(V1, Skip) of
+		true -> next_rand_unbound_skip(V, N, Skip);
+		false -> V1
+	    end
+    end.

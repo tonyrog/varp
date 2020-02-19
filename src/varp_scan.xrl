@@ -40,7 +40,6 @@ degree              : {token,{'degree',TokenLine}}.
 random              : {token,{'random',TokenLine}}.
 identity            : {token,{'identity',TokenLine}}.
 user                : {token,{'user',TokenLine}}.
-activity            : {token,{'activity',TokenLine}}.
 true                : {token,{'true',TokenLine}}.
 false               : {token,{'false',TokenLine}}.
 and                 : {token,{'and',TokenLine}}.

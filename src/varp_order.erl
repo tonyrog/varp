@@ -6,6 +6,8 @@
 %%% Created : 18 Jun 2019 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_order).
+-behaviour(varp_plugin).
+
 -export([options/0, run/2]).
 
 -include("varp.hrl").
@@ -75,7 +77,7 @@ run(Bs, Param0) when is_record(Bs, bs), is_map(Param0) ->
     end.
 
 order_literals(Bs, Param) ->
-    ?dbg1("order params=~p\n", [Param]),
+    ?dbg0("order params=~p\n", [Param]),
     Seed = case maps:get(seed,Param) of
 	       -1 -> varp_formula:getopt(Bs,seed);
 	       S0 -> S0

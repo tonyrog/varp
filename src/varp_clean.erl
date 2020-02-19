@@ -6,6 +6,7 @@
 %%% Created : 25 Aug 2019 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_clean).
+-behaviour(varp_plugin).
 -export([options/0, run/2]).
 
 -include("varp.hrl").

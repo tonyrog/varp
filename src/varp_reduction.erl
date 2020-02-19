@@ -7,6 +7,7 @@
 %%% Created : 25 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_reduction).
+-behaviour(varp_plugin).
 
 -export([run/2]).
 -export([options/0]).

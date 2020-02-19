@@ -6,11 +6,25 @@
 %%% Created : 30 Sep 2019 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_plugin).
+-export([behaviour_info/1]).
 
 -export([run/2]).
 -export([options/0]).
 
 -include("varp.hrl").
+
+%%--------------------------------------------------------------------
+%% @doc
+%% Defines needed callback functions.
+%% @end
+%%--------------------------------------------------------------------
+-spec behaviour_info(Arg::callbacks) -> 
+                            list({FunctionName::atom(), Arity::integer()}).
+behaviour_info(callbacks) ->
+    [{options, 0}, {run, 2}];
+behaviour_info(_) ->
+    undefined.
+
 
 options() ->
     [ #{ long => "long-option-name",

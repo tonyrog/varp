@@ -3,8 +3,8 @@
 %%
 
 -module(varp_vsaturate).
-
--export([run/2]).
+-behaviour(varp_plugin).
+-export([run/2, options/0]).
 
 %% -compile(export_all).
 
@@ -19,6 +19,9 @@
 	end).
 
 -spec run(Bs::bs(), K::non_neg_integer()) -> false | bs().
+
+options() ->
+    [].
 
 run(Bs,K) when is_integer(K), K >= 1 ->
     varp_formula:info(Bs,"saturate-~w: pair:~w\n",
@@ -229,7 +232,7 @@ next_vector_(_Bs,[],_MI) ->
 
 select_next(_Bs,[],_Max) -> [];
 select_next(Bs,Vec=[Xk|_],Max) ->
-    case varc:next_unbound(Bs#bs.vp,Xk) of
+   case varc:next_unbound(Bs#bs.vp,Xk) of
 	false -> [];
 	Xj when Max>0, Xj >= Max -> [];
 	Xj ->

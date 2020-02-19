@@ -6,6 +6,7 @@
 %%% Created : 18 Jun 2019 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_cnf).
+-behaviour(varp_plugin).
 
 -export([run/2]).
 -export([options/0]).

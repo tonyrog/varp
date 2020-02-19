@@ -6,6 +6,7 @@
 %%% Created : 23 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
 -module(varp_backjump).
+-behaviour(varp_plugin).
 
 -export([run/2]).
 -export([options/0]).
@@ -23,19 +24,15 @@
 
 -define(REORDER_0,
 	[
-	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_RANDOM)},
-	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
-	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
-	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
+	 {1,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
+	 {2,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
 	]).
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {1,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {2,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {3,?ORDER_OPT(?ORDER_ACTIVITY,?ORDER_UNDEFINED)},
-	 {4,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
+	 {1,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
 	]).
 
 options() ->
@@ -52,7 +49,7 @@ options() ->
 	key => max,
 	spec => unsigned,
 	default => 1,
-	description => "Max number of models to count or collect, 0=all."
+	description => "Max number of models to count or collect, 0=all"
       },
      
      #{ long => "minimize",
@@ -60,7 +57,7 @@ options() ->
 	key => minimize,
 	spec => {enum,[?BOOL]},
 	default => true,
-	description => "Use conflict clause minimization."
+	description => "Use conflict clause minimization"
       },
 
      #{ long => "iorder",
@@ -73,19 +70,19 @@ options() ->
 	key => stumble,
 	spec => unsigned,
 	default => 0,
-	description => "extra backjump level"},
+	description => "Extra backjump level"},
 
      #{ long => "olle",
 	key => olle,
 	spec => float,
 	default => 0,
-	description => "extra backjump factor"},
+	description => "Extra backjump factor"},
      
      #{ long => "stumble-olle",
 	key => stumble_olle,
 	spec =>  {enum,[?BOOL]},
 	default => false,
-	description => "both backjump and factor"},
+	description => "Both backjump and factor"},
 
      #{ long => "max-conflicts",
 	key => max_conflicts,
@@ -135,15 +132,9 @@ options() ->
 	default => infinity,
 	description => "Restart interval in seconds"},
 
-     #{ long => "decay",
-	key => decay,
-	spec =>  float,
-	default => 0.95,
-	description => "Decay factory"},
-
      #{ long => "bump",
 	key => bump,
-	spec => integer,
+	spec => {union,[integer,{enum,[?BUMP]}]},
 	default => 1,
 	description => "Bump value."},
 
@@ -218,8 +209,6 @@ conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
     LClauses1 = varp_conflict:analyze(Bs,Level,
 				      maps:get(bump,Param),
 				      maps:get(minimize,Param)),
-    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
-
     case lists:keysort(1, LClauses1) of
 	LClauses2 = [{1,_}|_] -> %% has unit! jump to top-level and install
 	    undo_until(Bs, Level, ?TOP_LEVEL),
@@ -228,38 +217,45 @@ conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    main(Bs,Param,?TOP_LEVEL,MaxLearned,MR,Stack1);
 
 	[LClause={Len,Clause}] -> %% one clause only
-	    {_Len,D1,D2,J2,J3,_Clause} = jump_info(Bs,LClause),
+	    {_Len,D1,D2,J2,J3,Lj,_Clause} = jump_info(Bs,LClause),
 	    do_stat(Bs,D1,D2),
 	    L = maps:get(stumble,Param),
 	    K = maps:get(olle,Param),
 	    M = maps:get(stumble_olle,Param),
-	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
+	    {JType,JLevel} = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    undo_until(Bs, Level, JLevel),
 	    Stack1 = pop_until(Bs,Stack, JLevel),
 	    move_to_gamma(Bs,Len,Clause),
+	    if JType =:= olle ->
+		    io:format("olle=~w\n", [Lj]),
+		    undefined = varc:value(Bs#bs.vp, Lj),
+		    varc:order_first(Bs#bs.vp, [Lj]);
+	       true ->
+		    ok
+	    end,
 	    main(Bs,Param,JLevel,MaxLearned,MR,Stack1);
 	
 	LClauses2 ->
 	    JClauses1 = [jump_info(Bs,LClause) || LClause <- LClauses2],
 	    JClauses2 =
-		lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Clausea},
-			       {Lb,D1b,_D2b,_J2b,_J3b,_Clauseb}) ->
+		lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Lja,_Clausea},
+			       {Lb,D1b,_D2b,_J2b,_J3b,_Ljb,_Clauseb}) ->
 				   if D1a =:= D1b -> La < Lb;
 				      true -> D1a > D1b
 				   end
 			   end, JClauses1),
 	    [JClause|JClauses3] = JClauses2,
 	    LClauses4 = [{L,Clause} ||
-			    {L,_D1,_D2,_J2,_J3,Clause} <- JClauses3],
+			    {L,_D1,_D2,_J2,_J3,_Lj,Clause} <- JClauses3],
 	    LClauses5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
 				   LClauses4),
 	    L = maps:get(stumble,Param),
 	    K = maps:get(olle,Param),
 	    M = maps:get(stumble_olle,Param),
 
-	    {ALen,D1,D2,J2,J3,Aix} = JClause,
+	    {ALen,D1,D2,J2,J3,Lj,Aix} = JClause,
 	    do_stat(Bs,D1,D2),
-	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
+	    {JType,JLevel} = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    %% FIXME if JLevel = J3 then we SHOULD select
 	    %% corresponding literal for -L2/-L3 as next unbound
 	    undo_until(Bs, Level, JLevel),
@@ -267,24 +263,32 @@ conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    move_to_gamma(Bs, LClauses5),
 	    %% install the conflict clause
 	    move_to_gamma(Bs,ALen,Aix),
+	    if JType =:= olle ->
+		    undefined = varc:value(Bs#bs.vp, Lj),
+		    varc:order_first(Bs#bs.vp, [Lj]);
+	       true ->
+		    ok
+	    end,
 	    main(Bs,Param,JLevel,MaxLearned,MR,Stack1)
     end.
 
 %% jump_info(V, Cix) ->
 %%    varc:clause_info(V, Cix, jump).
 jump_info(Bs, {Len,Clause}) ->
-    case lists:sort(fun(A,B) -> A > B end,
-		    [varc:implication_level(Bs#bs.vp,Q) ||
-			Q <- Clause]) of
-	[J1,J2,J3|_] ->
+    Qj = lists:sort(fun({_Qa,Aj},{_Qb,Bj}) -> Aj > Bj end,
+		    [{Q,varc:implication_level(Bs#bs.vp,Q)} ||
+			Q <- Clause]),
+    %% io:format("Qj = ~w\n", [Qj]),
+    case Qj of
+	[{_Q1,J1},{Q2,J2},{_Q3,J3}|_] ->
 	    D1 = J1 - J2,
 	    D2 = J2 - J3,
-	    {Len,D1,D2,J2,J3,Clause};
-	[J1,J2] ->
+	    {Len,D1,D2,J2,J3,-Q2,Clause};
+	[{_Q1,J1},{Q2,J2}] ->
 	    J3 = ?TOP_LEVEL,
 	    D1 = J1 - J2,
 	    D2 = J2 - J3,
-	    {Len,D1,D2,J2,J3,Clause}
+	    {Len,D1,D2,J2,J3,-Q2,Clause}
     end.
 
 
@@ -319,6 +323,7 @@ restart(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	true ->
 	    undo_until(Bs, Level, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
+	    ?dbg0("purge\n",[]),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    ?dbg("MaxLearned = ~w => ~w\n", [MaxLearned,MaxLearned1]),
@@ -343,7 +348,6 @@ restart(Bs,Param,Level,MaxLearned,MR,Stack) ->
 reorder(Bs,Param) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    varc:decay(Bs#bs.vp, maps:get(decay,Param)),
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
@@ -396,7 +400,7 @@ next(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    end;
 	Xj ->
 	    NextLevel = Level+1,
-	    ?dbg("~s~s\n", [indent(NextLevel),varp_formula:format_lit(Bs,Xj)]),
+	    io:format("next=~w\n", [Xj]),
 	    varc:set_level(Bs#bs.vp,NextLevel),
 	    true = varc:decide(Bs#bs.vp,Xj),
 	    timeout_or_cancel(Bs,Param,NextLevel,MaxLearned,MR,
@@ -500,15 +504,15 @@ block_model([]) ->
 do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
     if  M, L > 0, D2 >= L, K > 0, D2 > 0, D1 >= K*D2 ->
 	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_OLLE_COUNT, 1),
-	    J3;
-	L > 0, D2 >= L -> 
+	    {olle,J3};
+	L > 0, D2 >= L ->
 	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT, 1),
-	    J3;
+	    {olle,J3};
 	K > 0, D2 > 0, D1 >= K*D2 ->
 	    counters:add(Bs#bs.counters, ?COUNTER_OLLE_COUNT, 1),
-	    J3;
+	    {olle,J3};
 	true -> 
-	    J2
+	    {pelle,J2}
     end.
 
 do_stat(Bs, D1, D2) ->

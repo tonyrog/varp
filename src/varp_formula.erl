@@ -112,8 +112,7 @@ new(OptMap) when is_map(OptMap) ->
 	       {xref,maps:get(xref,OptMap)},
 	       {hash,maps:get(hash,OptMap)},
 	       {phase,maps:get(phase,OptMap)},
-	       {edge,maps:get(edge,OptMap)},
-	       {activity, maps:get(activity,OptMap)}
+	       {edge,maps:get(edge,OptMap)}
 	      ],
     %% io:format("new(~w)\n", [NewOpts]),
     Vp  = varc:new(NewOpts),

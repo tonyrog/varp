@@ -252,10 +252,6 @@ odecl -> identity       : ?ORDER_IDENTITY bor ?ORDER_ASCEND.
 odecl -> '+' identity   : ?ORDER_IDENTITY bor ?ORDER_ASCEND.
 odecl -> '-' identity   : ?ORDER_IDENTITY bor ?ORDER_DESCEND.
 
-odecl -> activity       : ?ORDER_ACTIVITY bor ?ORDER_DESCEND.
-odecl -> '+' activity   : ?ORDER_ACTIVITY bor ?ORDER_ASCEND.
-odecl -> '-' activity   : ?ORDER_ACTIVITY bor ?ORDER_DESCEND.
-
 odecl -> user           : ?ORDER_USER bor ?ORDER_DESCEND.
 odecl -> '+' user       : ?ORDER_USER bor ?ORDER_ASCEND.
 odecl -> '-' user       : ?ORDER_USER bor ?ORDER_DESCEND.
