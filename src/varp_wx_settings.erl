@@ -169,20 +169,24 @@ is_unordered(_) ->
 %% [{x,a},{x,b}, {y,1}, {z,2}, {x,c}] could give
 %% [x,1] => a, [x,2] => b, [x,3] => c, [y] => 1, [z] => 2
 %%
+-define(DEF, {pos,?wxDefaultPosition},{size,?wxDefaultSize}).
 
 create(Parent, ValueMap) ->
-    Panel = wxPanel:new(Parent, []),
+    Panel = wxPanel:new(Parent, [?DEF]),
     %% Setup sizers
     MainSizer = wxStaticBoxSizer:new(?wxVERTICAL, Panel, 
 				     [{label, "Settings"}]),
-    Notebook = wxNotebook:new(Panel, 1, [{style, ?wxBK_DEFAULT%,
+    Notebook = wxNotebook:new(Panel, 1, 
+			      [{pos,?wxDefaultPosition},
+			       {size,?wxDefaultSize},
+			       {style, ?wxBK_DEFAULT%,
 					        %?wxBK_ALIGN_MASK,
 					        %?wxBK_TOP,
 					        %?wxBK_BOTTOM,
 					        %?wxBK_LEFT,
 					        %?wxBK_RIGHT,
 					        %?wxNB_MULTILINE % windows only
-					 }]),
+			       }]),
     %% Add to sizers
     wxSizer:add(MainSizer, Notebook, [{proportion, 1},
 				      {flag, ?wxEXPAND}]),
@@ -197,11 +201,11 @@ create(Parent, ValueMap) ->
     set_values(NameMap, ValueMap),
 
     Buttons = wxStaticBoxSizer:new(?wxHORIZONTAL,Panel,[]),
-    Apply = wxButton:new(Panel, ?wxID_ANY, [{label,"Apply"}]),
+    Apply = wxButton:new(Panel, ?wxID_ANY, [{label,"Apply"},?DEF]),
     wxButton:connect(Apply, command_button_clicked),
     wxButton:enable(Apply),
 
-    Cancel = wxButton:new(Panel, ?wxID_ANY, [{label,"Cancel"}]),
+    Cancel = wxButton:new(Panel, ?wxID_ANY, [{label,"Cancel"},?DEF]),
     wxButton:connect(Cancel, command_button_clicked),
     wxButton:enable(Cancel),
     wxSizer:add(Buttons, Apply),
@@ -408,7 +412,7 @@ varp_layout(I) when is_integer(I) ->
 		      tooltip =>
 			  "Max saturation lap count"
 		    }},
-	    {spin, #{ label => "ThresLaps",
+	    {spin, #{ label => "Threshold",
 		      name => [profile,I,options,saturate,threshold],
 		      min => 0, max => 100,
 		      tooltip =>

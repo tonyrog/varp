@@ -309,13 +309,19 @@ scan_section(Line,Sect=#{ decls := Decls, order := Order, syms := Sym }) ->
 	    case parse_symbol(Ts,{':',1}) of
 		{Symbol,[{decnum,_,Size},{'/',_},{signed,_}]} ->
 		    Sz = list_to_integer(Size),
-		    Sect#{ declare => Decls++[{Symbol,int,Sz}]};
+		    Arity = symbol_arity(Symbol),
+		    Decls1 = Decls#{ Symbol => {int,Arity,Sz}},
+		    Sect#{ declare => Decls1};
 		{Symbol,[{decnum,_,Size},{'/',_},{unsigned,_}]} ->
 		    Sz = list_to_integer(Size),
-		    Sect#{ declare => Decls++[{Symbol,uint,Sz}]};
+		    Arity = symbol_arity(Symbol),
+		    Decls1 = Decls#{ Symbol => {uint,Arity,Sz}},
+		    Sect#{ declare => Decls1};
 		{Symbol,[{decnum,_,Size}]} ->
+		    Arity = symbol_arity(Symbol),
 		    Sz = list_to_integer(Size),
-		    Sect#{ declare => Decls++[{Symbol,uint,Sz}]};
+		    Decls1 = Decls#{ Symbol => {uint,Arity,Sz}},
+		    Sect#{ declare => Decls1};
 		_ ->
 		    Sect
 	    end;
@@ -331,6 +337,9 @@ scan_section(Line,Sect=#{ decls := Decls, order := Order, syms := Sym }) ->
 	    %% io:format("scan = ~p\n", [_Str]),
 	    Sect
     end.
+
+symbol_arity({p,_S,Args}) -> length(Args);
+symbol_arity({bit_index,Sym,_I}) -> symbol_arity(Sym).
 
 order_var_list([], Acc) ->
     {ok,[{order_list,lists:reverse(Acc)}]};

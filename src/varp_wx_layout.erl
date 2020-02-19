@@ -25,7 +25,7 @@ create(Parent, {radiobox,Param,Choices}, NameMap) ->
 		       maps:get(position, Param, ?wxDefaultPosition),
 		       maps:get(size, Param, ?wxDefaultSize),
 		       Items,
-		       get_options(Param)),
+		       get_options(Param,false)),
     case maps:get(value, Param, none) of
 	none -> ok;
 	Value when is_integer(Value), Value >= 0 ->
@@ -352,8 +352,21 @@ options([]) ->
     [].
 
 get_options(Param) ->
-    options(maps:get(options, Param, [])).
+    get_options(Param,true).
 
+get_options(Param,AddDefault) ->
+    Options0 = options(maps:get(options, Param, [])),
+    %% add default size if missing
+    Options1 = case AddDefault andalso (not lists:keymember(size,1,Options0)) of
+		   true -> [{size,?wxDefaultSize}|Options0];
+		   false -> Options0
+	       end,
+    %% add default pos if missing
+    Options2 = case AddDefault andalso (not lists:keymember(pos,1,Options1)) of
+		   true -> [{pos,?wxDefaultPosition}|Options1];
+		   false -> Options1
+	       end,
+    Options2.
 
 style() ->
     #{

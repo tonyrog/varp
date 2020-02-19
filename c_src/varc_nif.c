@@ -3973,13 +3973,13 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    QSORT(sort_map, m, sizeof(int), cmp_keys, &kp);
 
 	    // setup variable phases & order
-	    k1 = ABS(sort_key[0]);
-	    k2 = ABS(sort_key[1]);
+	    k1 = abs(sort_key[0])-1;
+	    k2 = abs(sort_key[1])-1;
 	    for (i = 0; i < m; i++) {
 		int j = sort_map[i];
 		variable_t* var = vp->var_map[j];
 		float r = pkey[k1][j] - nkey[k1][j];
-		if (ABS(r) < EPSILON)
+		if (fabs(r) < EPSILON)
 		    r = (pkey[k2][j] - nkey[k2][j]);
 		var->phase = (r >= 0.0);
 		cdlist_insert_last(&vp->order_list, var);
