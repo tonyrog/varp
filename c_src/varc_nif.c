@@ -215,7 +215,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "get_clauses",         3,  varp_get_clauses ) \
     NIF( "get_decision",        2,  varp_get_decision ) \
     NIF( "get_undo_state",      2,  varp_get_undo_state ) \
-    NIF( "get_bindings",        4,  varp_get_bindings ) \
+    NIF( "get_bindings",        5,  varp_get_bindings ) \
     NIF( "get_nbindings",       4,  varp_get_nbindings ) \
     NIF( "get_number_of_bindings", 2,  varp_get_number_of_bindings ) \
     NIF( "order_sort",          4,  varp_order_sort ) \
@@ -7523,6 +7523,7 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     int level;
     bool_t clause_info = false;
     bool_t trail = false;
+    bool_t tuple = false;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -7531,6 +7532,8 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     if (!vif_get_boolean(env, argv[2], &clause_info))
 	return enif_make_badarg(env);
     if (!vif_get_boolean(env, argv[3], &trail))
+	return enif_make_badarg(env);
+    if (!vif_get_boolean(env, argv[4], &tuple))
 	return enif_make_badarg(env);
     
     if (level <= vp->level) {
@@ -7548,9 +7551,15 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 	    bp = bp->bound_next;
 	    i += s;
 	}
-	return enif_make_list_from_array(env, elements, size);
+	if (tuple)
+	    return enif_make_tuple_from_array(env, elements, size);
+	else
+	    return enif_make_list_from_array(env, elements, size);
     }
-    return enif_make_list(env, 0);
+    if (tuple)
+	return enif_make_tuple(env, 0);
+    else
+	return enif_make_list(env, 0);
 }
 
 //
