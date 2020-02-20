@@ -95,7 +95,7 @@ saturate(Bs,K,Q,R,Timeout,MaxLaps,Threshold) ->
     end.
 
 loop(Bs,K,Q,R,N,Level,Laps,Threshold) ->
-    ?dbg0("Laps=~w n=~w\n", [Laps, N]),
+    ?dbg1("Laps=~w n=~w\n", [Laps, N]),
     case lap(Bs, K, Q, R) of
 	true ->
 	    N1 = varp_formula:number_of_bound(Bs),
