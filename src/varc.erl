@@ -64,7 +64,7 @@
 -export([get_decision/2]).
 -export([get_undo_state/2]).
 -export([get_nbindings/2, get_nbindings/3, get_nbindings/4]).
--export([get_bindings/2, get_bindings/3, get_bindings/4]).
+-export([get_bindings/2, get_bindings/3, get_bindings/4, get_bindings/5]).
 -export([get_all_bindings/1]).
 -export([get_number_of_bindings/2]).
 -export([get_queue/1]).
@@ -495,13 +495,16 @@ get_all_bindings(V) ->
 
 %% get bindings on Level
 get_bindings(Vp, Level) ->
-    get_bindings(Vp, Level, false).
+    get_bindings(Vp, Level, false, false, false).
 
 %% get bindings and possible clause info on Level
 get_bindings(Vp, Level, ClauseInfo) ->
-    get_bindings(Vp, Level, ClauseInfo, false).
+    get_bindings(Vp, Level, ClauseInfo, false, false).
 
-get_bindings(_Vp, _Level, _ClauseInfo, _Trail) ->
+get_bindings(_Vp, Level, ClauseInfo, Trail) ->
+    get_bindings(_Vp, Level, ClauseInfo, Trail, false).
+
+get_bindings(_Vp, _Level, _ClauseInfo, _Trail, _Tuple) ->
     ?nif_stub().
 
 get_number_of_bindings(_Vp, _Level) ->
