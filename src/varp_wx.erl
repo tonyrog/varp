@@ -930,9 +930,11 @@ solve(Mode, S, Bound) ->
 
 order(Ascend, Ord) ->
     case Ascend of
-	0     -> ?ORDER_DESCEND;
-	false -> ?ORDER_DESCEND;
-	1     -> ?ORDER_ASCEND;
+	descend -> ?ORDER_DESCEND;  %% backwards compatible
+ 	0       -> ?ORDER_DESCEND;
+	false   -> ?ORDER_DESCEND;
+	ascend  -> ?ORDER_ASCEND;
+	1       -> ?ORDER_ASCEND;
 	true  -> ?ORDER_ASCEND
     end 
 	bor
