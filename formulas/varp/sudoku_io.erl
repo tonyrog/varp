@@ -4,7 +4,10 @@
 -export([output/3]).
 
 input(Line, _Acc) ->
-    Ns = [(I-$0) || I <- lists:sublist(Line,81)],
+    Translate = fun($.) -> 0;
+		   (X) when X >= $0, X =< $9 -> (X-$0)
+		end,
+    Ns = [Translate(I) || I <- lists:sublist(Line,81)],
     Ss = [{p,'S',[I,J]} || I <- lists:seq(1,9), J <- lists:seq(1,9)],
     NsSs = lists:zip(Ss, Ns),
     %% remove all zeros and inject indices
@@ -15,26 +18,30 @@ output(Fd, _Partial, Model) ->
     io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n", []),
     lists:foreach(
       fun(I) ->
-	      io:format(Fd,"|~w|~w|~w | ~w|~w|~w | ~w|~w|~w |\n",
+	      io:format(Fd,"|~s|~s|~s | ~s|~s|~s | ~s|~s|~s |\n",
 			[s(I,J,Model) || J <- lists:seq(1,9)])
       end, lists:seq(1,3)),
     io:format(Fd, "+=+=+==+==+=+==+==+=+==+\n", []),
     lists:foreach(
       fun(I) ->
-	      io:format(Fd,"|~w|~w|~w | ~w|~w|~w | ~w|~w|~w |\n",
+	      io:format(Fd,"|~s|~s|~s | ~s|~s|~s | ~s|~s|~s |\n",
 			[s(I,J,Model) || J <- lists:seq(1,9)])
       end, lists:seq(4,6)),
     io:format(Fd,"+=+=+==+==+=+==+==+=+==+\n",[]),
     lists:foreach(
 	  fun(I) ->
-		  io:format(Fd,"|~w|~w|~w | ~w|~w|~w | ~w|~w|~w |\n",
+		  io:format(Fd,"|~s|~s|~s | ~s|~s|~s | ~s|~s|~s |\n",
 			    [s(I,J,Model) || J <- lists:seq(1,9)])
 	  end, lists:seq(7,9)),
     io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n",[]),
     ok.
 
-s(I,J, [{{p,'S',[I,J,K]},true}|_Ms]) -> K;
-s(I,J, [_|Ms]) -> s(I,J,Ms).
+s(I,J, [{{p,'S',[I,J,K]},true}|_Ms]) ->
+    integer_to_list(K);
+s(I,J, [_|Ms]) -> 
+    s(I,J,Ms);
+s(_I, _J, []) -> %% allow for partial models
+    " ".
 
 input_loop(Fd, RecNo, Acc) ->
     case file:read_line(Fd) of
