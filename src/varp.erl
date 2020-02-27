@@ -71,6 +71,12 @@ global_options() ->
 	default => true,
 	description => "Fixed phase selection."
       },
+     #{ long => "use-phase",
+	key => use_phase,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Use variable phase saving."
+      },
      #{ long => "starexec",
 	key => starexec,
 	spec =>  {enum,[?BOOL]},

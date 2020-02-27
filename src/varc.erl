@@ -644,7 +644,11 @@ info_keys() ->
      literal_integer,  %% true,false (integer or pointer)
      value_packing,    %% 1,4,undefined (variable value packing)
      edge,             %% true,false (edge_list is enabled or not)
-     xref              %% xref is used (need for saturate with substitution)
+     xref,             %% xref is used (need for saturate with substitution)
+     hash,             %% hash is used
+     phase,            %% initial phase value
+     use_phase,        %% used saved phase value
+     turbo             %% use turbo eval
     ].
 
 get_number_of_variables(Vp) ->

@@ -458,7 +458,6 @@ typedef struct _variable_t     // :object_t
     cdlink_t link;             // variable order link
     struct _variable_t* bound_next;
     struct _variable_t* mark_next; // mark next
-    bool_t  phase;            // true is positive false is negative
     bool_t  is_atom;          // variable marked as input/atom
     uint8_t mark;             // mark0/mark1/markn...
     uint8_t flags;
@@ -466,6 +465,8 @@ typedef struct _variable_t     // :object_t
 #if !defined(LIT_VALUE) && !defined(PACKED_VALUE)
     ival_t    ivalue;
 #endif
+    ival_t    phase;           // last set value 
+    
     int ix;                    // variable index
     cix_t implication_clause;  // implication clause index
     pos_t literal_pos;         // position in implication clause
@@ -574,12 +575,13 @@ typedef struct _subscription_t { // :object_t
 
 typedef struct _varp_setting_t
 {
-    qtype_t  qtype;     // literal queue is fifo/lifo/recursive
-    bool_t   xref;      // xref used or not
-    bool_t   hash;      // clause has or not
-    bool_t   edge;      // keep edge list for 2-clauses
-    bool_t   phase;     // initial phase selection
-    bool_t   turbo;     // add turbo check after eval
+    qtype_t  qtype;      // literal queue is fifo/lifo/recursive
+    bool_t   xref;       // xref used or not
+    bool_t   hash;       // clause has or not
+    bool_t   edge;       // keep edge list for 2-clauses
+    bool_t   turbo;      // add turbo check after eval
+    bool_t   use_phase;  // use saved phase
+    ival_t   init_phase; // initial phase selection
     size_t   vsize;
     size_t   csize;
 } varp_config_t;
@@ -785,9 +787,11 @@ DECL_ATOM(system_limit);
 DECL_ATOM(t);
 DECL_ATOM(toggle);
 DECL_ATOM(true);
+DECL_ATOM(turbo);
 DECL_ATOM(undefined);
 DECL_ATOM(unit);
 DECL_ATOM(use);
+DECL_ATOM(use_phase);
 DECL_ATOM(user);
 DECL_ATOM(value_packing);
 DECL_ATOM(variable);
@@ -1191,11 +1195,6 @@ static int decompress_int(uint8_t* ptr)
 }
 #endif
 
-static inline ival_t phase_init(varp_t* vp)
-{
-    return vp->opt.phase ? I_TRUE : I_FALSE;
-}
-
 // Clause pointer from wlink_t pointer
 static inline clause_t* clause_pointer(wlink_t* wl)
 {
@@ -1432,8 +1431,6 @@ static inline void bnd_vv(varp_t* vp, variable_t* var)
 
 static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
 {
-    // enif_fprintf(stderr, "set_vv %d=%d\r\n", var->ix, !(ivalue&1));
-    {
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
 #if BYTE_ORDER == LITTLE_ENDIAN
@@ -1454,7 +1451,6 @@ static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
     var->ivalue = ivalue;
 #endif
 #endif
-    }
 }
 
 // return literal match variables value (only when bound)
@@ -1540,6 +1536,19 @@ static inline literal_t* lookup_literal(literal_t* lp)
 	    lp = bp;
     }
     return lp;
+}
+
+static inline int phase_export(variable_t* var)
+{
+    return (var->phase == I_FALSE) ? -var->ix : var->ix;
+}
+
+static inline ival_t phase_value(varp_t* vp, lit_t xp)
+{
+    literal_t* lp = l2ll(vp, xp);
+    if (vp->opt.use_phase)
+	return lp->var->phase;
+    return vp->opt.init_phase;
 }
 
 static inline bool_t variable_is_bound(varp_t* vp, variable_t* var)
@@ -2190,7 +2199,7 @@ static int next_unbound(varp_t* vp)
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var)) {
 	    vp->order_next = var;
-	    return var->phase ? var->ix : -var->ix;
+	    return phase_export(var);
 	}
 	vp->order_next = NULL;
     }
@@ -2204,7 +2213,7 @@ static int next_unbound_after(varp_t* vp, variable_t* var)
 	while(!cdlist_is_eol(var) && variable_is_bound(vp, var))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var))
-	    return var->phase ? var->ix : -var->ix;
+	    return phase_export(var);
     }
     return 0;
 }
@@ -2292,6 +2301,8 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
     var->implication_clause = cix;
     var->literal_pos = li;
     var->level = level;
+    if (cix != CLAUSE_NONE) // not a decision 
+	var->phase = ivalue;  // save for use with phase restore
     log_permanent(vp, lp, NULL, level);
 }
 
@@ -2436,7 +2447,7 @@ static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
 static void var_init(varp_t* vp, variable_t* var, int ix)
 {
     var->ix         = ix;
-    var->phase      = true;
+    var->phase      = vp->opt.init_phase;
     var->is_atom    = false;
     var->mark       = 0;
     var->flags      = 0;    
@@ -2951,10 +2962,12 @@ static void cleanup(varp_t* vp)
 static void default_config(varp_config_t* conf)
 {
     conf->qtype = recursive;
+    conf->xref  = false;    
     conf->hash  = false;
     conf->edge  = false;
-    conf->xref  = false;
-    conf->phase = true;
+    conf->turbo = false;
+    conf->init_phase = I_TRUE;
+    conf->use_phase  = false;
     conf->vsize  = DEFAULT_MAP_SIZE;
     conf->csize  = DEFAULT_MAP_SIZE;
 }
@@ -2991,11 +3004,17 @@ static int vif_config(ErlNifEnv* env, const ERL_NIF_TERM* elem,
     else if (elem[0] == ATOM(hash) && (elem[1] == ATOM(false))) {
 	opt->hash = false;
     }
+    else if (elem[0] == ATOM(use_phase) && (elem[1] == ATOM(true))) {
+	opt->use_phase = true;
+    }
+    else if (elem[0] == ATOM(use_phase) && (elem[1] == ATOM(false))) {
+	opt->use_phase = false;
+    }
     else if (elem[0] == ATOM(phase) && (elem[1] == ATOM(true))) {
-	opt->phase = true;
+	opt->init_phase = I_TRUE;
     }
     else if (elem[0] == ATOM(phase) && (elem[1] == ATOM(false))) {
-	opt->phase = false;
+	opt->init_phase = I_FALSE;
     }    
     else if (elem[0] == ATOM(edge) && (elem[1] == ATOM(true))) {
 	opt->edge = true;
@@ -3003,6 +3022,12 @@ static int vif_config(ErlNifEnv* env, const ERL_NIF_TERM* elem,
     else if (elem[0] == ATOM(edge) && (elem[1] == ATOM(false))) {
 	opt->edge = false;
     }
+    else if (elem[0] == ATOM(turbo) && (elem[1] == ATOM(true))) {
+	opt->turbo = true;
+    }
+    else if (elem[0] == ATOM(turbo) && (elem[1] == ATOM(false))) {
+	opt->edge = false;
+    }    
     else
 	return 0;
     return 1;
@@ -3153,7 +3178,6 @@ static int setup(varp_t* vp, varp_config_t* config)
     int i;
 
     vp->opt = *config;
-    vp->opt.turbo = false;
 
     vsize = MAX(1, vp->opt.vsize);
     csize = vp->opt.csize;
@@ -3561,8 +3585,7 @@ void dump_order(char* label, varp_t* vp)
 	enif_fprintf(stdout, "[o=%e]%s%s=%s ",
 		     var->link.order,
 		     nmark,
-		     format_literal(vp,
-				    vindex_ll(vp, var->phase ? var->ix : -var->ix)),
+		     format_literal(vp, vindex_ll(vp, phase_export(var))),
 		     format_ival(get_vv(vp,var))
 	    );
 	var = cdlist_next(var);
@@ -4020,7 +4043,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 		float r = pkey[k1][j] - nkey[k1][j];
 		if (fabs(r) < EPSILON)
 		    r = (pkey[k2][j] - nkey[k2][j]);
-		var->phase = (r >= 0.0);
+		var->phase = (r >= 0.0) ? I_TRUE : I_FALSE;
 		cdlist_insert_last(&vp->order_list, var);
 	    }
 	    vp->order_next = vp->var_map[sort_map[0]];
@@ -4272,7 +4295,7 @@ static ERL_NIF_TERM varp_decide(ErlNifEnv* env, int argc,
 				const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
-    lit_t xp;    
+    lit_t xp;
     varp_t* vp;
     int level = -1;
     
@@ -4286,12 +4309,10 @@ static ERL_NIF_TERM varp_decide(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
     }
     if (level < 0) level = vp->level;
-
-    if (!set_lit(env, vp, xp, phase_init(vp), level))
+    if (!set_lit(env, vp, xp, phase_value(vp, xp), level))
 	return ATOM(false);
     return ATOM(true);	
 }
-
 
 static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
@@ -5809,7 +5830,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     case uTOGGLE:
 	// note xp is already toggled by undo!
 	xp = vp->undo[level].decision;
-	put_l(vp, xp, phase_init(vp),-1, CLAUSE_NONE, level);
+	put_l(vp, xp, phase_value(vp, xp),-1, CLAUSE_NONE, level);
 	vp->undo[level].t = uDONE;
 	DBG_ORDER("%sNbcp: t=uTOGGLE decision=%s\r\n",
 		  indent(level), format_lit(vp, xp));
@@ -5821,7 +5842,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     default:
 	printf("unknown bcp state\r\n");
-	vp->caller_env = NULL;		
+	vp->caller_env = NULL;
 	return enif_make_badarg(env);
     }
     if (level == 0)
@@ -5830,7 +5851,7 @@ next:
     xp = vindex_l(vp, x);
     vp->undo[level].decision = xp;
     vp->undo[level].t = uSET;
-    put_l(vp, xp, phase_init(vp),-1, CLAUSE_NONE, level);
+    put_l(vp, xp, phase_value(vp, xp),-1, CLAUSE_NONE, level);
     DBG_ORDER("%sNbcp: next decision=%s\r\n",
 	      indent(level), format_lit(vp, xp));
 bcp:
@@ -5986,7 +6007,13 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return make_boolean(env, vp->opt.hash);
     }
     if (argv[1] == ATOM(phase)) {
-	return make_boolean(env, vp->opt.phase);
+	return make_boolean(env, (vp->opt.init_phase == I_TRUE));
+    }
+    if (argv[1] == ATOM(use_phase)) {
+	return make_boolean(env, vp->opt.use_phase);
+    }
+    if (argv[1] == ATOM(turbo)) {
+	return make_boolean(env, vp->opt.turbo);
     }    
     return enif_make_badarg(env);
 }
@@ -8061,9 +8088,11 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(t);
     LOAD_ATOM(toggle);
     LOAD_ATOM(true);
+    LOAD_ATOM(turbo);
     LOAD_ATOM(undefined);
     LOAD_ATOM(unit);
     LOAD_ATOM(use);
+    LOAD_ATOM(use_phase);
     LOAD_ATOM(user);
     LOAD_ATOM(value_packing);
     LOAD_ATOM(variable);
