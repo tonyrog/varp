@@ -21,7 +21,8 @@
 		    {"clean", "clean",       varp_clean},
 		    {"succ",  "succ",        varp_succ},
 		    {"validate", "validate", varp_validate},
-		    {"wx",     "wx",         varp_wx}
+		    {"wx",     "wx",         varp_wx},
+		    {"dbg",    "debug",      varp_debug}
 		   ]}
 	 ]},
   {applications,[kernel,stdlib]}

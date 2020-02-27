@@ -25,7 +25,7 @@ options() ->
 	key   => timeout,
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	default => infinity,
-	description => "Max time to run backtrack in milliseconds"
+	description => "Max time to run backtrack in seconds"
       },
      #{ long => "max",
 	short => "n",

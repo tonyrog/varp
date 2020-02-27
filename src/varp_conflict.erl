@@ -124,7 +124,7 @@ reason(V,L) ->
     end.
 
 get_trail(V, Level) ->
-    varc:get_bindings(V, Level, false, true).
+    varc:get_bindings_trail(V, Level).
 
 %% maps implementing set
 set_seen(Q, VarSet) ->

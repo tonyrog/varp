@@ -1309,7 +1309,7 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 	    mon_loop(Bs,Param,Mon,StartTime,PrevInfo)
     after 1000 ->
 	    Info1 = get_info(Bs),
-	    Info2 = merge_info_no_bound(Info1, PrevInfo),
+	    Info2 = merge_get_info(Info1, PrevInfo),
 	    update_info(Param,StartTime,Info2),
 	    mon_loop(Bs,Param,Mon,StartTime,Info2)
     end.
@@ -1331,16 +1331,18 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
 	      number_of_clauses:=NC,
 	      number_of_dead_clauses:=ND,
 	      number_of_bcp:=NE,
-	      max_level := ML
+	      max_level := XL,
+	      min_level := IL
 	     }) ->
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
 				    native, millisecond),
     NBS = [integer_to_list(NB),"[/",integer_to_list(NS),"]"],
+    MIMA = [integer_to_list(XL),"[/",integer_to_list(IL),"]"],
     Status = io_lib:format(
 	       "#Var: ~-8w #Bound: ~-16s #Clauses: ~-8w"
-	       "#Dead: ~-8w #Bcp: ~-10w #Depth: ~-8w #Time: ~s",
-	       [NV, NBS, NC, ND, NE, ML, format_time(Time)]),
+	       "#Dead: ~-8w #Bcp: ~-10w #Depth: ~-9s #Time: ~s",
+	       [NV, NBS, NC, ND, NE, MIMA, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 
@@ -1375,21 +1377,23 @@ f3i(N) when N >= 0, N < 1000 ->
 f2i(N) when N >= 0, N < 100 ->
     tl(integer_to_list(100 + N)).
 
+merge_get_info(Info1, Info2) ->
+    minfo([number_of_clauses,
+	   number_of_dead_clauses,
+	   number_of_bcp,
+	   max_level,
+	   min_level
+	  ],
+	  Info1, Info2).
+
 merge_info(Info1, Info2) ->
     minfo([number_of_bound_variables,
 	   number_of_subst_variables,
 	   number_of_clauses,
 	   number_of_dead_clauses,
 	   number_of_bcp,
-	   max_level
-	  ],
-	  Info1, Info2).
-
-merge_info_no_bound(Info1, Info2) ->
-    minfo([number_of_clauses,
-	   number_of_dead_clauses,
-	   number_of_bcp,
-	   max_level
+	   max_level,
+	   min_level
 	  ],
 	  Info1, Info2).
 
@@ -1415,7 +1419,9 @@ get_info(Bs) ->
        number_of_bcp =>
 	   varc:info(Bs#bs.vp,bcp_counter),
        max_level =>
-	   varc:info(Bs#bs.vp,max_level)
+	   varc:info(Bs#bs.vp,max_level),
+       min_level =>
+	   varc:info(Bs#bs.vp,min_level)
      }.
        
 call(undefined, _Request) ->

@@ -507,11 +507,12 @@ varp_layout(I) when is_integer(I) ->
 	     [
 	      {combobox, #{ choices =>
 				[{"none", ?BUMP_NONE},
-				 {"1", 1},{"2", 1},{"3", 1},{"4", 1},{"5", 1},
+				 {"1", 1},{"2", 2},{"3", 3},{"4", 4},{"5", 5},
 				 {"next", ?BUMP_NEXT},
 				 {"log2", ?BUMP_LOG2},
 				 {"log10", ?BUMP_LOG10},
 				 {"rank", ?BUMP_RANK},
+				 {"0.3", 0.3},{"0.5", 0.5},{"0.8", 0.8},
 				 {"10", 10}, {"15", 15}, {"20", 20}, {"50", 50},
 				 {"100", 100}],
 			    name => [profile,I,options,backjump,bump]

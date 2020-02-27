@@ -34,7 +34,10 @@ all() ->
 
 	    %% mark intersect
 	    intersect1,
-	    
+	    intersect2,
+	    intersect_var0,
+	    intersect_var1,
+
 	    %% order checks
 	    order_identity,
 	    order_user,
@@ -102,14 +105,14 @@ bindings1() ->
 
     %% FIXME tests are deependent on clause order!!
     Match1a = [X1,-X2,X3],
-    Match1a = varc:get_bindings(V, 1),
+    Match1a = varc:get_bindings_list(V, 1),
     Match1b = [X3,-X2,X1],
-    Match1b = varc:get_bindings(V, 1, false, true),
+    Match1b = varc:get_bindings_list(V, 1, false, true),
 
     Match2a = [-X4,X5,-X6],
-    Match2a = varc:get_bindings(V, 2),
+    Match2a = varc:get_bindings_list(V, 2),
     Match2b = [-X6,X5,-X4],
-    Match2b = varc:get_bindings(V, 2, false, true),
+    Match2b = varc:get_bindings_list(V, 2, false, true),
     ok.
 
 test1() ->
@@ -202,7 +205,7 @@ test3() ->
     true = varc:set_level(V, 1),
     true = varc:bind(V, X2),
     true = varc:bind(V, X3),
-    {varc:get_bindings(V, 1), varc:get_number_of_clauses(V)}.
+    {varc:get_bindings_list(V, 1), varc:get_number_of_clauses(V)}.
 
 %% Test all clause simplifications
 clause_simplify() ->
@@ -292,7 +295,7 @@ bcp_add() ->
     _Cix2 = clause(V, [X, -Z]),
     true = varc:bcp(V),
     Match = [-X,-Z,Y],
-    Match = varc:get_bindings(V, 0),
+    Match = varc:get_bindings_list(V, 0),
     dump(V).
 
 
@@ -301,7 +304,7 @@ eval_bindings(V, Xs) ->
     _ = [(true = varc:bind(V, X)) || X <- Xs ],
     varc:set_level(V, 2),
     true = varc:bcp(V),
-    R = varc:get_bindings(V, 2),
+    R = varc:get_bindings_list(V, 2),
     varc:undo_level(V, 2),
     varc:undo_level(V, 1),
     R.
@@ -817,7 +820,7 @@ subst5() ->
     io:format("clause after\n"),
     print_clauses(V,true),
     true = varc:bcp(V),
-    Bs = [X3,X4,X6] = lists:sort(varc:get_bindings(V,0)),
+    Bs = [X3,X4,X6] = lists:sort(varc:get_bindings_list(V,0)),
     io:format("bindings@0 = ~w\n", [Bs]),
     Bs.
 
@@ -846,23 +849,64 @@ subst6() ->
     ok.
 
 intersect1() ->
-    V = varc:new(),    
-    _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install 10 variables
+    V = varc:new(),
+    _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
     varc:mark_literals(V, [1,3,5,7,9,11,13,15,17,19]),
     varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
-    [] = varc:mark_list(V),
+    [] = varc:get_marked(V),
 
     varc:mark_literals(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
     varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
-    [10] = varc:mark_list(V),
+    [10] = varc:get_marked(V),
 
     varc:mark_literals(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
     varc:mark_intersect(V, [2,4,6,-8,10,-12,14,16,18,20]),
-    [-8,-12] = varc:mark_list(V),
+    [-8,-12] = varc:get_marked(V),
 
     varc:mark_literals(V, []),
-    [] = varc:mark_list(V),
+    [] = varc:get_marked(V),
+    ok.
 
+intersect2() ->
+    V = varc:new(),    
+    _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
+    varc:mark_literals(V, {1,3,5,7,9,11,13,15,17,19}),
+    varc:mark_intersect(V, {2,4,6,8,10,12,14,16,18,20}),
+    {} = varc:get_marked(V, true),
+
+    varc:mark_literals(V, {1,3,5,7,-8,9,10,11,-12,13,15,17,19}),
+    varc:mark_intersect(V, {2,4,6,8,10,12,14,16,18,20}),
+    {10} = varc:get_marked(V, true),
+
+    varc:mark_literals(V, {1,3,5,7,-8,9,-10,11,-12,13,15,17,19}),
+    varc:mark_intersect(V, {2,4,6,-8,10,-12,14,16,18,20}),
+    {-8,-12} = varc:get_marked(V, true),
+
+    varc:mark_literals(V, {}),
+    {} = varc:get_marked(V, true),
+    ok.
+
+intersect_var0() ->
+    X1 = 1, X2 = 2, X3 = 3, X4 = 4, X5 = 5, X6 = 6,
+    Bs0 = [-X2,X3,-X4,X5,X6],
+    Bs1 = [-X2,X3,X4,-X5],
+    Di = [-X2,X3,{X1,X4},{X1,-X5}],
+    Di = varc:intersect_var0(X1, Bs0, Bs1),
+    ok.
+
+intersect_var1() ->
+    V = varc:new(),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    X6 = var(V),
+    %% X1 -> {-X2,X3,X4,-X5}
+    varc:mark_literals(V, {-X2,X3,X4,-X5}),  
+    %% -X1 -> {-X2,X3,-X4,X5,X6}
+    Di = {-X2,X3,{X1,X4},{X1,-X5}},
+    Di = varc:mark_intersect_var(V, X1, {-X2,X3,-X4,X5,X6}, true),
     ok.
 
 watch1() ->
@@ -1169,7 +1213,7 @@ clause_learn_d1() ->
     
     true = varc:bcp(V),
     Match = [-A,B],
-    Match = varc:get_bindings(V, 0),
+    Match = varc:get_bindings_list(V, 0),
     ok.
 
 clause_learn_a1() ->
@@ -1232,11 +1276,49 @@ clause_learn_a1() ->
     
     true = varc:bcp(V),
     Match = [-A,B],
-    Match = varc:get_bindings(V, 0),
+    Match = varc:get_bindings_list(V, 0),
 
     io:format("DUMP5\n"),
     dump(V, false),
     ok.
+
+implication_depth() ->
+    V = varc:new(),
+    Y1 = var(V, <<"Y1">>),
+    Y2 = var(V, <<"Y2">>),
+    Y3 = var(V, <<"Y3">>),
+    Y4 = var(V, <<"Y4">>),
+    Y5 = var(V, <<"Y5">>),
+    Y6 = var(V, <<"Y6">>),
+    X  = var(V, <<"X">>),
+    clause(V, [-X, Y1]),
+    clause(V, [-X, Y2]),
+    clause(V, [-Y1,-Y2,Y3]),
+    clause(V, [-X,-Y2,Y4]),
+    clause(V, [-X,-Y3,Y5]),
+    clause(V, [-Y4,-Y5,Y6]),
+    true = bind_and_bcp(V, 1, X),
+    ?T = varc:value(V, Y1),
+    ?T = varc:value(V, Y2),
+    ?T = varc:value(V, Y3),
+    ?T = varc:value(V, Y4),
+    ?T = varc:value(V, Y5),
+    ?T = varc:value(V, Y6),
+    M0 = #{ X => 0 },
+    {1, M1} = depth(V, Y1, M0),
+    {1, M2} = depth(V, Y2, M1),
+    {2, M3} = depth(V, Y3, M2),
+    {2, M4} = depth(V, Y4, M3),
+    {3, M5} = depth(V, Y5, M4),
+    {4, _}  = depth(V, Y6, M5),
+    ok.
+
+depth(V, Yi, DepthMap) ->
+    Cix = varc:implication_clause(V, Yi),
+    Clause = varc:get_clause(V, Cix, Yi),
+    Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
+    {Depth, DepthMap#{ Yi => Depth }}.
+
 %% 
 %% bcp 999 clauses
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412

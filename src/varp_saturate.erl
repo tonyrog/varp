@@ -85,7 +85,9 @@ saturate(Bs,K,Q,R,Timeout,MaxLaps,Threshold) ->
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     Level = ?TOP_LEVEL,
     N = varp_formula:number_of_bound(Bs),
-    case loop(Bs1,K,Q,R,N,Level,MaxLaps,Threshold) of
+    FriendMap = varc:make_friend_map(Bs#bs.vp),
+    %% io:format("FriendMap = ~w\n", [FriendMap]),
+    case loop(Bs1,K,Q,R,N,Level,MaxLaps,Threshold,FriendMap) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
 	{Reason,Bs1} -> 
@@ -94,9 +96,9 @@ saturate(Bs,K,Q,R,Timeout,MaxLaps,Threshold) ->
 	    {Reason,[],Bs1#bs{ t_local = undefined }}
     end.
 
-loop(Bs,K,Q,R,N,Level,Laps,Threshold) ->
-    ?dbg0("Laps=~w n=~w\n", [Laps, N]),
-    case lap(Bs, K, Q, R) of
+loop(Bs,K,Q,R,N,Level,Laps,Threshold,FriendMap) ->
+    ?dbg1("Laps=~w n=~w\n", [Laps, N]),
+    case lap(Bs, K, Q, R, FriendMap) of
 	true ->
 	    N1 = varp_formula:number_of_bound(Bs),
 	    Laps1 = Laps-1,
@@ -105,7 +107,7 @@ loop(Bs,K,Q,R,N,Level,Laps,Threshold) ->
 	       Laps1 =:= 0 ->
 		    loop_done(?ITERATIONS,Laps,Bs);
 	       true ->
-		    loop(Bs,K,Q,R,N1,Level,Laps1,Threshold)
+		    loop(Bs,K,Q,R,N1,Level,Laps1,Threshold,FriendMap)
 	    end;
 	Result -> Result
     end.
@@ -118,30 +120,30 @@ loop_done(Reason, _Laps, Bs) ->
 %% R number of randomly selected variables
 %% Variables in every eval is K+Q+R
 
-lap(Bs, K, Q, R) ->
+lap(Bs, K, Q, R, FriendMap) ->
     case varc:vec_create(Bs#bs.vp, varc:next_unbound(Bs#bs.vp), K) of
 	[] -> true;
-	Vec0 -> lap_(Bs, Vec0, Q, R, 1)
+	Vec0 -> lap_(Bs, Vec0, Q, R, 1, FriendMap)
     end.
 
-lap_(Bs, Vec0, Q, R, Count) when Count band ?COUNT =:= 0 ->
+lap_(Bs, Vec0, Q, R, Count, FriendMap) when Count band ?COUNT =:= 0 ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,What} ->
 	    {What, Bs};
 	false ->
-	    lap__(Bs, Vec0, Q, R, Count)
+	    lap__(Bs, Vec0, Q, R, Count, FriendMap)
     end;
-lap_(Bs, Vec0, Q, R, Count) ->
-    lap__(Bs, Vec0, Q, R, Count).
+lap_(Bs, Vec0, Q, R, Count, FriendMap) ->
+    lap__(Bs, Vec0, Q, R, Count, FriendMap).
 
-lap__(Bs, Vec0, Q, R, Count) ->
-    case varc:vec_sat(Bs#bs.vp, Vec0, Q, R) of
+lap__(Bs, Vec0, Q, R, Count, FriendMap) ->
+    case varc:vec_sat(Bs#bs.vp, Vec0, Q, R, FriendMap) of
 	false -> false;
 	true ->
 	    case varc:vec_step(Bs#bs.vp, Vec0) of
 		false -> true;
-		Vec1 -> lap_(Bs, Vec1, Q, R, Count+1)
+		Vec1 -> lap_(Bs, Vec1, Q, R, Count+1, FriendMap)
 	    end
     end.
 

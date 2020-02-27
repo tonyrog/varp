@@ -65,6 +65,8 @@
 -export([get_undo_state/2]).
 -export([get_nbindings/2, get_nbindings/3, get_nbindings/4]).
 -export([get_bindings/2, get_bindings/3, get_bindings/4, get_bindings/5]).
+-export([get_bindings_list/2, get_bindings_list/3, get_bindings_list/4]).
+-export([get_bindings_trail/2]).
 -export([get_all_bindings/1]).
 -export([get_number_of_bindings/2]).
 -export([get_queue/1]).
@@ -75,7 +77,6 @@
 -export([order_first/2, order_last/2]).
 -export([next_unbound/1, next_unbound/2]).
 -export([order_all/1]).
--export([decay/2]).
 -export([bump/3]).
 -export([subscribe/2]).
 -export([clauseset_size/2]).
@@ -108,16 +109,16 @@
 -export([vec_value/2]).
 -export([vec_bind/2]).
 -export([intersect/1, intersect/2]).
--export([intersect_var/3]).
 -export([install_bindings/2, install_bindings/3]).
--export([vec_sat/4, vec_sat/2]).
+-export([vec_sat/5, vec_sat/4, vec_sat/2]).
 -export([vec_sat_lap/4]).
 %% bindings
 -export([mark_literals/2]).
 -export([mark_intersect/2]).
--export([mark_list/1]).
-%% -export([mark_tuple/1]).
-%% -export([mark_intersect_var/3])
+-export([get_marked/1, get_marked/2]).
+-export([mark_intersect_var/3, mark_intersect_var/4]).
+%% util
+-export([make_friend_map/1]).
 
 %% -define(debug, true).
 
@@ -132,10 +133,14 @@
 -define(BETA,  2).
 -define(ALPHA, 3).
 
+-define(BINDING_AS_TUPLE, true).
+
 -type varc() :: reference().
 -type literal() :: integer().
 -type sort_key() :: integer().
 -type sort_value() :: integer().
+-type binding() :: literal() | {literal(),literal()}.
+-type bindings() :: [binding()] | {binding()}.  %% variable size tuple?
 
 -define(nif_stub(),
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
@@ -309,7 +314,7 @@ conflicting_clause(Vp) ->
 conflicting_clause(_Vp, _Index) ->
     ?nif_stub().
 
--spec conflict(Vp::varc(), Level::integer(), Bump::float(),
+-spec conflict(Vp::varc(), Level::integer(), Bump::number(),
 	       ConflictNum::integer()) -> ClauseIndex::integer().
 conflict(_Vp, _Level, _Bump, _Index) ->
     ?nif_stub().    
@@ -403,10 +408,7 @@ compress_clause(_Vp,Index)
 use_clause(_Vp,_Index) ->
     ?nif_stub().
 
-decay(_Vp,Decay) when is_number(Decay) ->
-    ?nif_stub().
-
-%% bump variable
+-spec bump(Vp::varc(), Lit::literal(), Bump::number()) -> ok.
 bump(_Vp,_Lit,Bump) when is_number(Bump) ->
     ?nif_stub().
 
@@ -493,18 +495,40 @@ get_all_bindings(V) ->
     [{L,get_decision(V,L),get_bindings(V, L)} ||
 	L <- lists:seq(Level,0,-1)].
 
-%% get bindings on Level
-get_bindings(Vp, Level) ->
-    get_bindings(Vp, Level, false, false, false).
-
-%% get bindings and possible clause info on Level
-get_bindings(Vp, Level, ClauseInfo) ->
-    get_bindings(Vp, Level, ClauseInfo, false, false).
-
-get_bindings(_Vp, Level, ClauseInfo, Trail) ->
+get_bindings_list(_Vp, Level, ClauseInfo, Trail) ->
     get_bindings(_Vp, Level, ClauseInfo, Trail, false).
 
-get_bindings(_Vp, _Level, _ClauseInfo, _Trail, _Tuple) ->
+get_bindings_list(_Vp, Level, ClauseInfo) ->
+    get_bindings(_Vp, Level, ClauseInfo, false, false).
+
+get_bindings_list(_Vp, Level) ->
+    get_bindings(_Vp, Level, false, false, false).
+
+get_bindings_trail(_Vp, Level) ->
+    get_bindings(_Vp, Level, false, true, false).
+
+-spec get_bindings(Vp::varc(), Level::integer()) -> bindings().
+%% get bindings, as list, on level 'Level' without clause info
+get_bindings(Vp, Level) ->
+    get_bindings(Vp, Level, false, false, ?BINDING_AS_TUPLE).
+
+-spec get_bindings(Vp::varc(), Level::integer(), 
+		   ClauseInfo::boolean()) -> bindings().
+%% get bindings (as list) and possible clause info on Level
+get_bindings(Vp, Level, ClauseInfo) ->
+    get_bindings(Vp, Level, ClauseInfo, false, ?BINDING_AS_TUPLE).
+
+-spec get_bindings(Vp::varc(), Level::integer(), 
+		   ClauseInfo::boolean(), Trail::boolean()) -> bindings().
+%% get_bindings (as list)
+get_bindings(_Vp, Level, ClauseInfo, Trail) ->
+    get_bindings(_Vp, Level, ClauseInfo, Trail, ?BINDING_AS_TUPLE).
+
+-spec get_bindings(Vp::varc(), Level::integer(), 
+		   ClauseInfo::boolean(), Trail::boolean(),
+		   AsTuple::boolean()) -> bindings().
+
+get_bindings(_Vp, _Level, _ClauseInfo, _Trail, _AsTuple) ->
     ?nif_stub().
 
 get_number_of_bindings(_Vp, _Level) ->
@@ -721,9 +745,14 @@ vec_sat_lap_(V, Vec0, Q, R) ->
     end.
 
 vec_sat(V, V0, Q, R) ->
+    vec_sat(V, V0, Q, R, undefined).
+
+vec_sat(V, V0, Q, R, FriendMap) ->
     ?debug("vec_sat = ~w\n", [V0]),
+    %% V1 = vec_extend_friend(V, V0, Q, FriendMap),
     V1 = vec_extend(V, V0, Q),
     V2 = vec_extend_rand(V, V1, R),
+    ?debug("vec_sat = ~w => ~w\n", [V0, V2]),
     vec_sat(V, V2).
 
 vec_sat(V, Vec) when is_list(Vec) ->
@@ -736,7 +765,7 @@ vec_sat(V, Vec) when is_list(Vec) ->
 	Bs ->
 	    ?debug("sat vec ~w = ~w\n", [Vec,Bs]),
 	    set_level(V, 0),
-	    case install_bindings(V, 0, Bs) of
+	    case install_bindings0(V, Bs) of
 		true ->
 		    bcp(V);
 		false ->
@@ -745,8 +774,9 @@ vec_sat(V, Vec) when is_list(Vec) ->
     end.
 
 satv_(V, Vt) when is_tuple(Vt) ->
+    %% io:format("satv ~w\n", [Vt]),
     N = tuple_size(Vt),
-    Bt = bcpv_(V,(1 bsl N)-1, N, Vt, []),
+    Bt = bcpv_(V,(1 bsl N)-1, Vt, []),
     satvar_(V, 0, N, Vt, Bt, []).
 
 %% eval for variable I 
@@ -754,14 +784,22 @@ satvar_(V, I, N, Vt, Bt, Bs) when I < N ->
     Js = lists:seq(0, (1 bsl N)-1),
     B1 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =/= 0]),
     B0 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =:= 0]),
+    %% io:format("satvar_ Vt = ~w, B0 = ~w, B1 = ~w\n", [Vt, B0, B1]),
     if B0 =:= false, B1 =:= false -> false;
-       B0 =:= false -> satvar_(V, I+1, N, Vt, Bt, B1++Bs);
-       B1 =:= false -> satvar_(V, I+1, N, Vt, Bt, B0++Bs);
-       true -> 
-	    Bsi = intersect_var(element(I+1,Vt), B0, B1),
-	    satvar_(V, I+1, N, Vt, Bt, Bsi++Bs)
+       B0 =:= false, B1 =:= {} -> satvar_(V, I+1, N, Vt, Bt, Bs);
+       B1 =:= false, B0 =:= {} -> satvar_(V, I+1, N, Vt, Bt, Bs);
+       B0 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B1|Bs]);
+       B1 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B0|Bs]);
+       true ->
+	    case intersect_var(V, element(I+1,Vt), B0, B1) of
+		{} ->
+		    satvar_(V, I+1, N, Vt, Bt, Bs);
+		B2 ->
+		    satvar_(V, I+1, N, Vt, Bt, [B2|Bs])
+	    end
     end;
 satvar_(_V, N, N, _Vt, _Bt, Bs) ->
+    %% io:format("  Bs = ~w\n", [Bs]),
     Bs.
 
 interv0(_V, As) ->
@@ -773,17 +811,18 @@ interv(V, [A|As]) -> mark_literals(V, A), interv_(V, As).
 
 interv_(V, [false|As]) -> interv_(V, As);
 interv_(V, [A|As]) -> mark_intersect(V, A), interv_(V, As);
-interv_(V, []) -> mark_list(V).
+interv_(V, []) -> get_marked(V, true).
 
 %% eval all 2^N combinations of Vt
-bcpv_(_V,-1, _N, _Vt, Acc) ->
+bcpv_(_V,-1, _Vt, Acc) ->
     list_to_tuple(Acc);
-bcpv_(V,I, N, Vt, Acc) ->
+bcpv_(V,I, Vt, Acc) ->
+    %% io:format("bcpv I=~w\n", [I]),
     set_level(V, 1),
-    case bindv(V, N, I, Vt) of
+    case bindv(V, I, Vt) of
 	false ->
 	    undo_level(V, 1),
-	    bcpv_(V,I-1, N, Vt, [false|Acc]);
+	    bcpv_(V,I-1, Vt, [false|Acc]);
 	true ->
 	    set_level(V, 2),
 	    Ei = case bcp(V) of
@@ -792,44 +831,70 @@ bcpv_(V,I, N, Vt, Acc) ->
 		 end,
 	    undo_level(V, 2),
 	    undo_level(V, 1),
-	    bcpv_(V,I-1, N, Vt, [Ei|Acc])
+	    bcpv_(V,I-1, Vt, [Ei|Acc])
     end.
 
 %% given number I set vars in Vt according to bit
+bindv(V, I, Vt) ->
+    bindv(V, tuple_size(Vt), I, Vt).
+    
 bindv(_V, 0, _I, _Vt) ->
     true;
 bindv(V, J, I, Vt) ->
     Xj = if I band (1 bsl (J-1)) =/= 0 -> element(J,Vt); 
 	    true -> -element(J,Vt)
 	 end,
+    %% io:format("bindv J=~w Xj=~w\n", [J, Xj]),
     bind(V,Xj) andalso bindv(V,J-1,I,Vt).
 
+-spec mark_literals(Vp::varc(), Bs::bindings()) -> ok.
 
-mark_literals(_V, _Bs) ->
-    ?nif_stub().
-    
-mark_intersect(_V, _Bs) ->
+mark_literals(_Vp, _Bs) ->
     ?nif_stub().
 
-mark_list(_V) ->
+-spec mark_intersect(Vp::varc(), Bs::bindings()) -> ok.
+mark_intersect(_Vp, _Bs) ->
     ?nif_stub().
 
-intersect_var(Var, Bs0, Bs1) ->
-    intersect_var_(Var, Bs0, bindings_to_map(Bs1)).
+mark_intersect_var(Vp, Var, Bs0) ->
+    mark_intersect_var(Vp, Var, Bs0, ?BINDING_AS_TUPLE).
 
-intersect_var_(Var, [X|Bs0], Map) ->
+-spec mark_intersect_var(Vp::varc(), Var::literal(),
+			 Bs0::bindings(), AsTuple::boolean()) -> 
+				bindings().
+mark_intersect_var(_Vp, _Var, _Bs0, _AsTuple) ->
+    ?nif_stub().
+
+get_marked(Vp) ->
+    get_marked(Vp, ?BINDING_AS_TUPLE).
+
+-spec get_marked(Vp::varc(), AsTuple::boolean()) -> bindings().
+
+get_marked(_Vp, _Tuple) ->
+    ?nif_stub().
+
+intersect_var(Vp, Var, Bs0, Bs1) ->
+    mark_literals(Vp, Bs1),
+    mark_intersect_var(Vp, Var, Bs0, true).
+
+intersect_var0(_Vp, Var, Bs0, Bs1) ->
+    intersect_var0_(Var, Bs0, bindings_to_map(Bs1)).
+
+intersect_var0_(Var, [X|Bs0], Map) ->
     case maps:find(X, Map) of
 	{ok,true} ->
-	    [X | intersect_var_(Var, Bs0, Map)];
+	    %% !Var => X,  Var => X  
+	    [X | intersect_var0_(Var, Bs0, Map)];
 	error ->
 	    case maps:find(-X, Map) of
 		{ok,true} ->
-		    [{Var,-X} | intersect_var_(Var, Bs0, Map)];
+		    %% !Var => X  Var => !X
+		    [{Var,-X} | intersect_var0_(Var, Bs0, Map)];
 		error ->
-		    intersect_var_(Var, Bs0, Map)
+		    intersect_var0_(Var, Bs0, Map)
 	    end
     end;
-intersect_var_(_Var, [], _Map) ->
+intersect_var0_(_Var, [], _Map) ->
     [].
 
 %% intersect a list of list of bindings - return bindings
@@ -881,39 +946,80 @@ bindings_to_map([A|As], Map) ->
 bindings_to_map([],Map) ->
     Map.
 
-install_bindings(V,Bs) ->
-    install_bindings(V, info(V, level), Bs).
-
-install_bindings(_V,_Level,[]) ->
-    true;
-install_bindings(V,Level,Bs) ->
-    install_(V,Level,Bs).
-
-install_(V,Level,[X|Xs]) when is_integer(X) ->
-    true = bind(V, X),
-    install_(V,Level,Xs);
-install_(V,Level,[{X,X}|Xs]) ->
-    install_(V,Level,Xs);
-install_(V,Level=0,[{X,t}|Xs]) ->
-    true = bind(V, X),
-    install_(V,Level,Xs);
-install_(V,Level=0,[{X,f}|Xs]) ->
-    true = bind(V, -X),
-    install_(V,Level,Xs);
-install_(V,0,[{X,Y}|Xs]) ->
-    Xa = variable_info(V, X, is_atom),
-    Ya = variable_info(V, Y, is_atom),
-    if Ya, not Xa ->
-	    subst(V, Y, X);
-       true ->
-	    subst(V, X, Y)
-    end,
-    install_(V,0,Xs);
-install_(V,_Level,[{_X,_Y}|Xs]) ->
-    %% can not install X=Y on level > 0
-    install_(V,_Level,Xs);
-install_(_V,_Level,[]) ->
+install_bindings0(V,[B|Bs]) when is_tuple(B) ->
+    case install_tuple_bindings_(V, 0, 1, B) of
+	true -> install_bindings0(V, Bs);
+	false -> false
+    end;
+install_bindings0(V,[B|Bs]) when is_list(B) ->
+    case install_list_bindings_(V, 0, B) of
+	true -> install_bindings0(V, Bs);
+	false -> false
+    end;
+install_bindings0(_V,[]) ->
     true.
+
+
+install_bindings(V,Bs) when is_list(Bs) ->
+    install_list_bindings_(V, info(V, level), Bs);
+install_bindings(V,Bt) when is_tuple(Bt) ->
+    install_tuple_bindings_(V, info(V, level), 1, Bt).
+
+install_bindings(V,Level,Bs) when is_list(Bs) ->
+    install_list_bindings_(V, Level, Bs);
+install_bindings(V,Level,Bt) when is_tuple(Bt) ->
+    install_tuple_bindings_(V, Level, 1, Bt).
+
+install_tuple_bindings_(_V, _Level, I, Bt) when I > tuple_size(Bt) ->
+    true;
+install_tuple_bindings_(V, Level, I, Bt) when I =< tuple_size(Bt) ->
+    case element(I,Bt) of
+	X when is_integer(X) ->
+	    true = bind(V, X),
+	    install_tuple_bindings_(V,Level,I+1,Bt);	    
+	{X,Y} when Level =:= 0 ->
+	    Xa = variable_info(V, X, is_atom),
+	    Ya = variable_info(V, Y, is_atom),
+	    if Ya, not Xa ->
+		    subst(V, Y, X);
+	       true ->
+		    subst(V, X, Y)
+	    end,
+	    install_tuple_bindings_(V,Level,I+1,Bt);
+	{X,t} ->
+	    true = bind(V, X),
+	    install_tuple_bindings_(V,Level,I+1,Bt);
+	{X,f} ->
+	    true = bind(V, -X),
+	    install_tuple_bindings_(V,Level,I+1,Bt)
+    end.
+
+install_list_bindings_(_V,_Level,[]) ->
+    true;
+install_list_bindings_(V,Level,[B|Bs]) ->
+    case B of
+	X when is_integer(X) ->
+	    true = bind(V, X),
+	    install_list_bindings_(V,Level,Bs);
+	{X,X} ->
+	    install_list_bindings_(V,Level,Bs);
+	{X,t} ->
+	    true = bind(V, X),
+	    install_list_bindings_(V,Level,Bs);
+	{X,f} ->
+	    true = bind(V, -X),
+	    install_list_bindings_(V,Level,Bs);
+	{X,Y} when Level =:= 0 ->
+	    Xa = variable_info(V, X, is_atom),
+	    Ya = variable_info(V, Y, is_atom),
+	    if Ya, not Xa ->
+		    subst(V, Y, X);
+	       true ->
+		    subst(V, X, Y)
+	    end,
+	    install_list_bindings_(V,Level,Bs)
+    end.
+
 
 %%
 vec_value(V, Vec) ->
@@ -958,6 +1064,84 @@ vec_extend_(V, Vec, I) ->
 	V1 -> vec_extend_(V, [V1|Vec], I-1)
     end.
 
+-ifdef(not_used).
+vec_extend_friend(V, Vec, P, undefined) ->
+    vec_extend(V, Vec, P);
+%% locate P friends among friends to Vec
+vec_extend_friend(_V, Vec, 0, _FriendMap) ->
+    Vec;
+vec_extend_friend(V, Vec, P, FriendMap) ->
+    Vt = list_to_tuple(Vec),
+    case bcpv_(V, 0, Vt, []) of
+	{false} ->
+	    Vec;
+	{B0} -> 
+	    Vec ++ lists:sublist(tuple_to_list(B0), P)
+    end.
+-endif.
+
+vec_extend_friend(V, Vec, P, undefined) ->
+    vec_extend(V, Vec, P);
+vec_extend_friend(V, Vec=[Xi|_], P, FriendMap) ->
+    %% pick friend from -Xi
+    W = maps:get(-Xi, FriendMap, []) -- Vec,
+    Vec ++ lists:sublist(W, P).
+
+%%
+%% do a saturation run and build a reverse map
+%% X -> Y1 Y2 Y3 ...  then 
+%% friend(Y1, X)
+%% friend(Y2, X)
+%% friend(Y3, X)
+%%
+make_friend_map(V) ->
+    make_friend_map_(V, next_unbound(V), #{}).
+
+make_friend_map_(_V, false, Map) -> 
+    Map;
+make_friend_map_(V, Xi, Map0) ->
+    Map1 = add_lit_friends(V, Xi, Map0),
+    Map2 = add_lit_friends(V, -Xi, Map1),
+    make_friend_map_(V, next_unbound(V, Xi), Map2).
+
+add_lit_friends(V, Xi, Map) ->
+    set_level(V, 1),
+    case bind(V, Xi) of
+	false ->
+	    undo_level(V, 1),
+	    Map;
+	true ->
+	    set_level(V, 2),
+	    case bcp(V) of
+		false ->
+		    undo_level(V, 1),
+		    Map;
+		true ->
+		    Map1 = add_friends(get_bindings_list(V, 2), Xi, Map),
+		    undo_level(V, 2),
+		    undo_level(V, 1),
+		    Map1
+	    end
+    end.
+
+add_friends([Yi|Ys], X, Map) ->
+    Fs = maps:get(Yi, Map, []),
+    case lists:member(X, Fs) of
+	true ->
+	    add_friends(Ys, X, Map);
+	false ->
+	    add_friends(Ys, X, maps:put(Yi, [X|Fs], Map))
+    end;
+add_friends([], _X, Map) ->
+    Map.
+
+%% FIXME: add depth info for all friends?
+depth(V, Yi, DepthMap) ->
+    Cix = varc:implication_clause(V, Yi),
+    Clause = varc:get_clause(V, Cix, Yi),
+    Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
+    {Depth, DepthMap#{ Yi => Depth }}.
+    
 %% add (at most) R random elements to Vec (not already in Vec)
 vec_extend_rand(V, Vec, R) ->
     N = varc:get_number_of_variables(V),

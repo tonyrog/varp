@@ -41,7 +41,7 @@ options() ->
 	key   => timeout,
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	default => infinity,
-	description => "Max time to run backjump in milliseconds"
+	description => "Max time to run backjump in seconds"
       },
 
      #{ long => "max",
@@ -134,8 +134,8 @@ options() ->
 
      #{ long => "bump",
 	key => bump,
-	spec => {union,[integer,{enum,[?BUMP]}]},
-	default => 1,
+	spec => {union,[integer,float01,{enum,[?BUMP]}]},
+	default => 1, %% 0.5?
 	description => "Bump value."},
 
      #{ long => "display",
