@@ -43,7 +43,7 @@
 -export([keep_level/2]).
 -export([move_level/3]).
 -export([undo/1]).
--export([bcp/1]).
+-export([bcp/1, bcp/2, bcp/3]).
 -export([nbcp/1]).
 -export([add_clause/2]).
 -export([add_clause/3]).
@@ -76,7 +76,7 @@
 -export([order_sort/2, order_sort/3, order_sort/4]).
 -export([order_first/2, order_last/2]).
 -export([next_unbound/1, next_unbound/2]).
--export([order_all/1]).
+-export([order_all/1, phase_all/1]).
 -export([bump/3]).
 -export([subscribe/2]).
 -export([clauseset_size/2]).
@@ -105,18 +105,20 @@
 -export([vec_step/2]).
 -export([vec_extend/3]).
 -export([vec_extend_rand/3]).
+-export([vec_extend_friend/4]).
 -export([vec_is_bound/2]).
 -export([vec_value/2]).
 -export([vec_bind/2]).
 -export([intersect/1, intersect/2]).
 -export([install_bindings/2, install_bindings/3]).
--export([vec_sat/5, vec_sat/4, vec_sat/2]).
--export([vec_sat_lap/4]).
+-export([vec_sat/6, vec_sat/5, vec_sat/2]).
+-export([vec_sat_lap/5]).
 %% bindings
 -export([mark_literals/2]).
 -export([mark_intersect/2]).
 -export([get_marked/1, get_marked/2]).
 -export([mark_intersect_var/3, mark_intersect_var/4]).
+-export([intersect_var0/4]).
 %% util
 -export([make_friend_map/1]).
 
@@ -136,6 +138,7 @@
 -define(BINDING_AS_TUPLE, true).
 
 -type varc() :: reference().
+-type variable() :: pos_integer().
 -type literal() :: integer().
 -type sort_key() :: integer().
 -type sort_value() :: integer().
@@ -233,7 +236,7 @@ variable_info(Vp, Index) ->
 
 variable_info_keys() ->
     [implication, implication_clause, implication_pos,
-     level, degree, is_atom, symbol].
+     level, phase, degree, is_atom, symbol].
 
 literal_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
@@ -358,8 +361,21 @@ undo_level(_Vp,_Level) ->
 undo(_Vp) ->
     ?nif_stub().
 
+-spec bcp(Vp::varc()) ->
+		 false | true.
 bcp(_Vp) ->
     ?nif_stub().
+
+-spec bcp(Vp::varc(), TurboLiteralList::[literal()]) ->
+		 false | true | turbo.
+bcp(_Vp, _TurboLiteralList) ->
+    ?nif_stub().
+
+-spec bcp(Vp::varc(), TurboLiteralList::[literal()], TurboAll::boolean()) ->
+		 false | true | turbo | {turbo,[literal()]}.
+bcp(_Vp, _TurboLiteralList, _TurboAll) ->
+    ?nif_stub().
+
 
 nbcp(_Vp) ->
     ?nif_stub().
@@ -597,13 +613,12 @@ get_queue_(Vp,I,Acc) ->
     end.
 
 %% return next unbound literal or false
--spec next_unbound(Vp::varc()) ->
-			  literal() | false.
+-spec next_unbound(Vp::varc()) -> variable() | false.
 next_unbound(_Vp) ->
     ?nif_stub().
 
--spec next_unbound(Vp::varc(), Last::literal()) ->
-			  literal() | false.
+-spec next_unbound(Vp::varc(), Last::variable()) ->
+			  variable() | false.
 next_unbound(_Vp, _Last) ->
     ?nif_stub().
 
@@ -615,6 +630,9 @@ order_all_(_Vp,false,Acc) ->
     lists:reverse(Acc);
 order_all_(Vp,Xi,Acc) ->
     order_all_(Vp, next_unbound(Vp, Xi), [Xi|Acc]).
+
+phase_all(Vp) ->
+    [varc:variable_info(Vp,Vi,phase) || Vi <- order_all(Vp)].
 
 info(Vp) ->
     [ {Key,info(Vp, Key)} || Key <- info_keys()].
@@ -726,17 +744,20 @@ get_conflict_counter(Vp) ->
 %%  intersect_var(X2, Y20, Y21)
 %%  intersect_var(X3, Y30, Y31)
 %%
-vec_sat_lap(V, K, Q, R) ->
+vec_sat_lap(V,K,Q,F,R) ->
     case vec_create(V, next_unbound(V), K) of
 	[] -> true;
-	Vec0 -> vec_sat_lap_(V, Vec0, Q, R)
+	Vec0 -> vec_sat_lap_(V,Vec0,Q,F,R)
     end.
 
 %% FIXME? if a vector
 %% contain a constant, we should probably update the
 %% vector to speed up things (a bit)?
-vec_sat_lap_(V, Vec0, Q, R) ->
-    case vec_sat(V, Vec0, Q, R) of
+vec_sat_lap_(V,Vec0,Q,F,R) ->
+    vec_sat_lap_(V,Vec0,Q,F,R,undefined).
+
+vec_sat_lap_(V,Vec0,Q,F,R,FriendMap) ->
+    case vec_sat(V,Vec0,Q,F,R,FriendMap) of
 	false -> false;
 	true ->
 	    case vec_step(V, Vec0) of
@@ -744,20 +765,20 @@ vec_sat_lap_(V, Vec0, Q, R) ->
 		Vec1 -> 
 		    ?debug("step ~w => ~w, ~w\n", 
 			  [Vec0, Vec1, vec_is_bound(V, Vec1)]),
-		    vec_sat_lap_(V, Vec1, Q, R)
+		    vec_sat_lap_(V,Vec1,Q,F,R,FriendMap)
 	    end
     end.
 
-vec_sat(V, V0, Q, R) ->
-    vec_sat(V, V0, Q, R, undefined).
+vec_sat(V,V0,Q,F,R) ->
+    vec_sat(V,V0,Q,F,R,undefined).
 
-vec_sat(V, V0, Q, R, FriendMap) ->
-    ?debug("vec_sat = ~w\n", [V0]),
-    %% V1 = vec_extend_friend(V, V0, Q, FriendMap),
+vec_sat(V,V0,Q,F,R,FriendMap) ->
+    %% ?debug("vec_sat = ~w\n", [V0]),
     V1 = vec_extend(V, V0, Q),
-    V2 = vec_extend_rand(V, V1, R),
-    ?debug("vec_sat = ~w => ~w\n", [V0, V2]),
-    vec_sat(V, V2).
+    V2 = vec_extend_friend(V, V1, F, FriendMap),
+    V3 = vec_extend_rand(V, V2, R),
+    %% ?debug("vec_sat = ~w => ~w\n", [V0, V3]),
+    vec_sat(V, V3).
 
 vec_sat(V, Vec) when is_list(Vec) ->
     set_level(V, 1),
@@ -767,7 +788,7 @@ vec_sat(V, Vec) when is_list(Vec) ->
 	[] ->
 	    true;
 	Bs ->
-	    ?debug("sat vec ~w = ~w\n", [Vec,Bs]),
+	    ?debug("satv_ ~w = ~w\n", [Vec,Bs]),
 	    set_level(V, 0),
 	    case install_bindings0(V, Bs) of
 		true ->
@@ -825,6 +846,7 @@ bcpv_(V,I, Vt, Acc) ->
     set_level(V, 1),
     case bindv(V, I, Vt) of
 	false ->
+	    queue_clear(V),
 	    undo_level(V, 1),
 	    bcpv_(V,I-1, Vt, [false|Acc]);
 	true ->
@@ -1068,26 +1090,10 @@ vec_extend_(V, Vec, I) ->
 	V1 -> vec_extend_(V, [V1|Vec], I-1)
     end.
 
--ifdef(not_used).
 vec_extend_friend(V, Vec, P, undefined) ->
     vec_extend(V, Vec, P);
-%% locate P friends among friends to Vec
-vec_extend_friend(_V, Vec, 0, _FriendMap) ->
-    Vec;
-vec_extend_friend(V, Vec, P, FriendMap) ->
-    Vt = list_to_tuple(Vec),
-    case bcpv_(V, 0, Vt, []) of
-	{false} ->
-	    Vec;
-	{B0} -> 
-	    Vec ++ lists:sublist(tuple_to_list(B0), P)
-    end.
--endif.
-
-vec_extend_friend(V, Vec, P, undefined) ->
-    vec_extend(V, Vec, P);
-vec_extend_friend(V, Vec=[Xi|_], P, FriendMap) ->
-    %% pick friend from -Xi
+vec_extend_friend(_V, Vec=[Xi|_], P, FriendMap) ->
+    %% pick friends from -Xi
     W = maps:get(-Xi, FriendMap, []) -- Vec,
     Vec ++ lists:sublist(W, P).
 
@@ -1112,12 +1118,14 @@ add_lit_friends(V, Xi, Map) ->
     set_level(V, 1),
     case bind(V, Xi) of
 	false ->
+	    queue_clear(V),
 	    undo_level(V, 1),
 	    Map;
 	true ->
 	    set_level(V, 2),
 	    case bcp(V) of
 		false ->
+		    undo_level(V, 2),
 		    undo_level(V, 1),
 		    Map;
 		true ->

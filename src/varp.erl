@@ -77,6 +77,12 @@ global_options() ->
 	default => false,
 	description => "Use variable phase saving."
       },
+     #{ long => "turbo",
+	key => turbo,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Use turbo rule."
+      },
      #{ long => "starexec",
 	key => starexec,
 	spec =>  {enum,[?BOOL]},

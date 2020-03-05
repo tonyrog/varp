@@ -22,6 +22,9 @@ BIT   A * B = VALUE                    EVAL
 
 varp  -log=info -partial=1 satisfy order -sort='-degree,random' saturate -k=1 -q=1 -r=1 monitor bj --max-learned-factor=1 --max-learned-inc=1.1 --bump=log10 n=4611686138686472687  is_prime.varp
 
+harder = 4294967311*7158278837 = 30744573607938097307
+
+
 currently 163 * 157 is the first no 1-easy product
 using commute,{red,both},{adder,fast},{assoc,none}
 

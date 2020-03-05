@@ -27,6 +27,7 @@ all() ->
 	    bcp2,
 	    bcp3,
 	    bcp4,
+	    bcp_turbo1,
 	    clause_bcp,
 	    clause_learn_d1,
 	    clause_learn_a1,
@@ -276,6 +277,38 @@ bcp4() ->
     [Y] = eval_bindings(V, [-X,-Z,-T]),
     [Z] = eval_bindings(V, [-X,-Y,-T]),
 
+    ok.
+
+bcp_turbo1() ->
+    V = varc:new([{xref,true}]),
+    X = var(V, <<"X">>),
+    Y = var(V, <<"Y">>),
+    Y1 = var(V, <<"Y1">>),
+    Y2 = var(V, <<"Y2">>),
+    Y3 = var(V, <<"Y3">>),
+    A  = var(V, <<"A">>),
+    B  = var(V, <<"B">>),
+    Z1 = var(V, <<"Z1">>),
+    Z2 = var(V, <<"Z2">>),
+    Z3 = var(V, <<"Z3">>),
+
+    clause(V, [-X,A]),
+    clause(V, [-X,B]),
+    clause(V, [-A,Y1]),
+    clause(V, [-B,Y2]),
+    clause(V, [-A,-B,Y3]),
+    clause(V, [X, Z1, Y1]),
+    clause(V, [X, Z2, Y2]),
+    clause(V, [X, Z3, Y3]),
+    clause(V, [Y, Z1, Y1]),
+    clause(V, [Y, Z2, Y2]),
+    clause(V, [Y, Z3, Y3]),
+
+    varc:set_level(V, 1),
+    varc:bind(V, X),  %% X=1
+    turbo = varc:bcp(V, [X]),
+    turbo = varc:bcp(V, [Y]),
+    {turbo,[Y,X]} = varc:bcp(V, [X,Y], true),
     ok.
 
 bcp_add() ->
@@ -550,12 +583,14 @@ order_user() ->
 	      varc:set_user_count(V,-L,Cn)
       end, [{X1,12,10},{X2,11,13},{X3,16,14},{X4,15,17},{X5,20,18},{X6,19,21}]),
     ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
-    U1 = [X1,-X2,X3,-X4,X5,-X6],
-    U1 = varc:order_all(V),
+    %% U1 = [X1,-X2,X3,-X4,X5,-X6],
+    [X1,X2,X3,X4,X5,X6] = varc:order_all(V),
+    [1,-1,1,-1,1,-1] = varc:phase_all(V),
 
     ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
-    U2 = [-X6,X5,-X4,X3,-X2,X1],
-    U2 = varc:order_all(V),
+    %% U2 = [-X6,X5,-X4,X3,-X2,X1],
+    [X6,X5,X4,X3,X2,X1] = varc:order_all(V),
+    [-1,1,-1,1,-1,1] = varc:phase_all(V),
     ok.
 
 order_degree() ->
@@ -619,14 +654,17 @@ order_random() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
     ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1001),
-    Rand1001 = [X1,X6,-X3,X5,-X4,X2],
-    Rand1001 = varc:order_all(V),
+    %% Rand1001 = [X1,X6,-X3,X5,-X4,X2],
+    [X1,X6,X3,X5,X4,X2] = varc:order_all(V),
+    [1,1,-1,1,-1,1] = varc:phase_all(V),
+    
     %% io:format("random,1001, Vs = ~p\n", [Sort1]),
 
     ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1003),
-    Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
-    Rand1003 = varc:order_all(V),
+    %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
+    [X1,X4,X6,X2,X3,X5] = varc:order_all(V),
+    [-1,1,-1,-1,1,1] = varc:phase_all(V),
     %% io:format("random,1003, Vs = ~p\n", [Sort2]),
     ok.
 
@@ -853,18 +891,18 @@ intersect1() ->
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
     varc:mark_literals(V, [1,3,5,7,9,11,13,15,17,19]),
     varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
-    [] = varc:get_marked(V),
+    {} = varc:get_marked(V, true),
 
     varc:mark_literals(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
     varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
-    [10] = varc:get_marked(V),
+    {10} = varc:get_marked(V, true),
 
     varc:mark_literals(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
     varc:mark_intersect(V, [2,4,6,-8,10,-12,14,16,18,20]),
-    [-8,-12] = varc:get_marked(V),
+    {-8,-12} = varc:get_marked(V, true),
 
     varc:mark_literals(V, []),
-    [] = varc:get_marked(V),
+    {} = varc:get_marked(V, true),
     ok.
 
 intersect2() ->
@@ -891,7 +929,7 @@ intersect_var0() ->
     Bs0 = [-X2,X3,-X4,X5,X6],
     Bs1 = [-X2,X3,X4,-X5],
     Di = [-X2,X3,{X1,X4},{X1,-X5}],
-    Di = varc:intersect_var0(X1, Bs0, Bs1),
+    Di = varc:intersect_var0(dummy, X1, Bs0, Bs1),
     ok.
 
 intersect_var1() ->

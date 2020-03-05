@@ -1,17 +1,81 @@
-- Bump values
-  -1  = next       put variable first, next to be assigned
-  -2  = log2(N)    N = number of unbound variables
-  -3  = log10(N)   N = number of unbound variables
-  -4  = rank       bump variable M if clause is of length M
-   0  = no
-   1  = move one position
-   2  = move two positions
-   ...
-   K  = move K positions   
-  
-- Check variables with degree = 1 (may be set = TRUE?)
 
-- Handle declaration of integers and sizes in snf and cnf formats
+- turbo bcp(Vp, Turbo=true)
+
+  P/1
+	( P ... C1 )
+	( P ... C2 )
+	...
+	( p ... Cn )
+
+  if C1,C2...Cn are all true then
+     ( for Backjump add clause ( ~P ~C1 ~C2 ... ~Cn ) )
+     generate contradiction (return atom turbo)
+
+  Using turbo in backtrack
+  
+  set_level(Level=1),
+  Turbo = get_param(turbo),
+  true = bind(Vp, P)  -- set P=1
+  case bcp(Vp, Turbo) of
+     true ->
+	   Bs1 = get_bindings(Vp,Level),
+	   undo_level(Vp,Level),
+   	   true = bind(Vp, -P),
+	   case bcp(Vp, Turbo) of
+     		true ->
+		      Bs0 = get_bindings(Vp,Level),
+		      undo_level(Vp,Level),
+		      install(intersect(P, Bs0, Bs1));
+		_FalseOrTurbo ->
+		      undo_level(Vp,Level),
+		      install(Bs1)
+	   end;
+     TurboOrFalse ->
+     	   undo_level(Vp,Level),
+	   true = bind(Vp, -P),
+	   case bcp(Vp, TurboOrFalse==false) of
+     		true ->
+		      Bs0 = get_bindings(Vp,Level);
+		_FalseOrTurbo ->		      
+		      undo_level(Vp,Level),
+		      false
+	   end
+    end	  
+
+Run 
+
+- multiple bcp strategies (used when twl can not be used)
+
+  bcp_xref (clause,i)
+    - bitmap (max 64 literals) |BFM|BTM|Size | X1 ... Xn |
+	 Propagate Xi=FALSE:
+	   BTF |= (1 << i)
+	   if only one bit remain unbound set and propagte Xi
+	 Propagate Xi=TRUE
+ 	   BitsTrue |= (1 << i)
+	   kill clause (level=0)
+
+    - swap (clause,i)
+	 |Size|#unbound| X1..Xm Y1..Yn |
+
+	 Y1 .. Ym are bound while X1..Xm are unbound
+
+	 Propagate Xi=FALSE:
+	   swap (Xref.pos, Xm) set unbound--
+	   unbound=1 => propagate X1
+	 Propagate Xi=TRUE
+ 	   swap (Xref.pos, Xm) set unbound--
+
+
+- decide/bind next_unbound now returns variable, decide/bind will
+ control the sign, this allow for using the previous saved value.
+
+- various bump variants (OK)
+  
+- Check variables with degree = 1 (may be set = TRUE?) (included in turbo)
+
+- Handle declaration of integers and sizes in snf and cnf formats also
+ add variables that where bound "X[1] is t"
 
 - Save CNF from varp_wx, {satisfy, [saturate], cnf -f <file> } (OK)
 
