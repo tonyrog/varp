@@ -1,0 +1,12 @@
+#
+# Make the python/nif wrapper for varc.so
+#
+# make -f Makefile.varpy
+#
+CC = gcc
+CFLAGS = -fPIC -I/usr/include/python2.7 -shared
+PYNAME = varpy
+
+varpy.so: $(HOME)/erlang/pynif/c_src/pynif.c
+	$(CC) $(CFLAGS) -o varpy.so -DPYNIFNAME=$(PYNAME) varc_nif.o $<
+

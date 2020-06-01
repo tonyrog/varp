@@ -1254,6 +1254,7 @@ clause_learn_d1() ->
     Match = varc:get_bindings_list(V, 0),
     ok.
 
+
 clause_learn_a1() ->
     V = varc:new(),
     ok = varc:config(V, max_conflicting, 1),

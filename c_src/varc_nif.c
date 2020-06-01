@@ -489,7 +489,8 @@ typedef struct _symbol_t // :object_t
 typedef struct _wlink_t
 {
     struct _wlink_t* next;
-    long p;
+    // FIXME: store literal here in case of 2-clause! 
+    long p;  
 } wlink_t;
 
 #define CLAUSE_FLAG_INQUEUE   0x0001
@@ -1675,7 +1676,7 @@ static inline uint32_t literal_hash_del(uint32_t hvalue, lit_t l)
 static uint32_t literal_array_hash(varp_t* vp, lit_t* lit, size_t size)
 {
     UNUSED(vp);
-    uint32_t hvalue = size;
+    uint32_t hvalue = 0;
     
     while(size--) {
 	lit_t l = *lit++;
@@ -5259,7 +5260,7 @@ static inline literal_t* bcp_2_clause(varp_t* vp, clause_t* cp, wlink_t* wl1)
     COUNT(vp, CLAUSE_2);
 
     ASSERT (!vp->opt.edge);
-    l = cp->lit[wl1->p];
+    l = cp->lit[wl1->p];  // FIXME: make p = l for binary case!
     if ((lw = get_l(vp, l)) == I_TRUE) {
 	COUNT(vp, CLAUSE_D);
 	return EV_DEAD;

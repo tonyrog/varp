@@ -1,5 +1,11 @@
 
-- turbo bcp(Vp, Turbo=true)
+- test saturate over clauses!
+
+given a clause [A,B,C]
+try saturate over [A,B,C]
+
+
+- turbo bcp(Vp, [L1,..Ln], TryAllTurbo=false)
 
   P/1
 	( P ... C1 )
@@ -11,6 +17,8 @@
      ( for Backjump add clause ( ~P ~C1 ~C2 ... ~Cn ) )
      generate contradiction (return atom turbo)
 
+  for Overdrive then set ~C1,..~Cn and see if it holds
+  
   Using turbo in backtrack
   
   set_level(Level=1),
