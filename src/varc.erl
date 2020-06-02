@@ -158,7 +158,7 @@ new() ->
 
 %%
 %% new options
-%%    {size, Size::unsigned()}    -- inital variable tavle size
+%%    {size, Size::unsigned()}    -- inital variable table size
 %%    {qtype,lifo|fifo|recursive} -- use lifo/fifo strategy in bcp
 %%    {xref, boolean()}           -- use cross references
 %%    {hash, boolean()}           -- install hash over clauses
@@ -197,7 +197,7 @@ config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
 
 add_variable(Vp) ->
-    add_variable(Vp, true).
+    ?nif_stub().
 
 add_variable(_Vp, IsAtom) when is_boolean(IsAtom) ->
     ?nif_stub().

@@ -180,8 +180,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "clone",               2,  varp_clone ) \
     NIF( "info",                2,  varp_info )	  \
     NIF( "config",              3,  varp_config )	\
+    NIF( "add_variable",        1,  varp_add_variable ) \
     NIF( "add_variable",        2,  varp_add_variable ) \
-    NIF( "del_variable",        2,  varp_del_variable ) \
     NIF( "value",               2,  varp_value )	\
     NIF( "bind",                2,  varp_bind )		\
     NIF( "bind",                3,  varp_bind )		\
@@ -3335,20 +3335,21 @@ static int add_variables(varp_t* vp, size_t n)
     return (int)k;
 }
     
-// varc:add_variable(Vp:varc()) -> integer()
+// varc:add_variable(Vp:varc()[,Atom:boolean()]) -> integer()
 static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
 				      const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
     int i;
-    bool_t is_atom;
+    bool_t is_atom = 0;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!vif_get_boolean(env, argv[1], &is_atom))
-	return enif_make_badarg(env);
-
+    if (argc == 2) {
+	if (!vif_get_boolean(env, argv[1], &is_atom))
+	    return enif_make_badarg(env);
+    }
     if (dynvar_size(vp->var_map) >= VLIMIT)
 	enif_raise_exception(env, ATOM(system_limit));
     
@@ -3358,25 +3359,6 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     vp->var_map[i]->is_atom = is_atom;
 
     return enif_make_int(env, i);
-}
-
-
-// varc:del_variable(Vp:varc(), Index::integer()) -> integer()
-static ERL_NIF_TERM varp_del_variable(ErlNifEnv* env, int argc,
-				      const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    variable_t* var;
-    
-    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
-	return enif_make_badarg(env);
-    if (!vif_get_v(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
-
-    // check that variable is not referenced
-    // NOT implemented yet!
-    return enif_make_badarg(env);
 }
 
 // varc:add_symbol(Vp:varc(),integer(),term()) -> ok | error
@@ -6352,8 +6334,7 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
     }
 }
 
-
-// find_clause(vp, x1, ..., xn) -> index | false
+//
 // find_clause(vp, [x1, ..., xn]) -> index | false
 //
 static ERL_NIF_TERM varp_find_clause(ErlNifEnv* env, int argc,
@@ -6426,7 +6407,7 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
 	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
 	else {
-	    uint8_t buffer[5*csize];
+	    uint8_t buffer[5*csize+1];
 	    unsigned char* binptr;
 	    int n = 0;
 
@@ -6436,6 +6417,7 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
 		n += compress_int(x, &buffer[n]);
 		list = tail;
 	    }
+	    buffer[n++] = 0;
 	    binptr = enif_make_new_binary(env, n, &bin);
 	    memcpy(binptr, buffer, n);
 	}
@@ -6447,7 +6429,7 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
 	else {
 	    lit_t* lit = cp->lit;
 	    size_t csize = cp->size;
-	    uint8_t buffer[5*csize];
+	    uint8_t buffer[5*csize+1];
 	    unsigned char* binptr;
 	    int n = 0;
 	    int i;
@@ -7304,7 +7286,7 @@ static ERL_NIF_TERM make_jump_info(ErlNifEnv* env, varp_t* vp, clause_t* cp)
     dynvar_resize(vp->tlit, cp->size);
     memcpy(vp->tlit, cp->lit, cp->size*sizeof(lit_t));
     // since we only need the 3 top element we could do
-    // 3 buble sorts with special case on len = 2,3 
+    // 3 bubble sorts with special case on len = 2,3 
     QSORT(vp->tlit, cp->size, sizeof(lit_t), cmp_lev, vp);
 
     j1 = var_l(vp, vp->tlit[0])->level;
