@@ -2884,6 +2884,48 @@ static int vif_get_cix(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM term,cix_t* cixp)
     return 1;
 }
 
+
+int vif_get_list(ErlNifEnv* env, ERL_NIF_TERM list,
+		 unsigned int* lenp, ERL_NIF_TERM* elem)
+{
+    if (elem == NULL)
+	return enif_get_list_length(env, list, lenp);
+    else {
+	ERL_NIF_TERM tail;
+	int n = *lenp;
+	int i = 0;
+	while ((i < n) && enif_get_list_cell(env, list, &elem[i], &tail)) {
+	    i++;
+	    list = tail;
+	}
+	if (!enif_is_empty_list(env, list))
+	    return 0;
+	*lenp = i;
+	return 1;
+    }
+}
+
+// read a clause - list of literals
+int vif_get_literal_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
+			 unsigned int* lenp, literal_t** clause)
+{
+    if (clause == NULL)
+	return vif_get_list(env, list, lenp, NULL);
+    else {
+	int n = *lenp;
+	ERL_NIF_TERM elem[n];
+	int i;
+	if (!vif_get_list(env, list, lenp, elem))
+	    return 0;
+	n = *lenp;
+	for (i = 0; i < n; i++) {
+	    if (vif_get_literal(env, vp, elem[i], &clause[i]) < 0)
+		return 0;
+	}
+	return 1;
+    }
+}
+
 static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
 {
     return enif_make_int(env, export_ll(lp));
@@ -3018,6 +3060,7 @@ static int vif_config(ErlNifEnv* env, const ERL_NIF_TERM* elem,
     return 1;
 }
 
+// FIXME: change to option map!
 static int parse_new_opts(ErlNifEnv* env,ERL_NIF_TERM list,varp_new_opt_t* opt)
 {
     ERL_NIF_TERM head, tail;

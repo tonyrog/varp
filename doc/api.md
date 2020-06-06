@@ -250,10 +250,10 @@ for simple backtracking.
 
 ``` python
     def bt(v):
-        while !varp.nbcp(v):
+        while not varp.nbcp(v):
           if varp.undo(v) == False:
-            return False; # contradiction
-        return True; # model
+            return False # contradiction
+        return True # model
 ```
 
 

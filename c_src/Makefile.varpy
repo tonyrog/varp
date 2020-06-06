@@ -3,9 +3,18 @@
 #
 # make -f Makefile.varpy
 #
+
+# PYTHON = python2
+# PYTHON_VERSION = 2.7
+
+PYTHON = python3
+PYTHON_VERSION = 3.8
+
 CC = gcc
-CFLAGS = -fPIC -I/usr/include/python2.7 -shared
+CC_FLAGS = -fPIC -I/usr/include/python$(PYTHON_VERSION) -Wall -Wextra -Wno-unused-parameter -O2 -g
+LD_FLAGS = -shared
+
 PYNAME = varp
 
 varp.so: $(HOME)/erlang/pynif/c_src/pynif.c
-	$(CC) $(CFLAGS) -o varp.so -DPYNIFNAME=$(PYNAME) varc_nif.o $<
+	 $(CC) $(LD_FLAGS) $(CC_FLAGS) -o varp.so -DPYNIFNAME=$(PYNAME) varc_nif.o $<
