@@ -4083,6 +4083,24 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 //	return enif_make_badarg(env);
 
     // verify list and count number variables
+#if 0
+    if (vif_get_literal_list(env, argv[1], &size, NULL)) {
+	literal_t* literals[size];
+	int i;
+	if (!vif_get_literal_list(env, argv[1], &size, literals))
+	    return enif_make_badarg(env);
+	// insert all (reversed) first, will produce the correct order!
+	for (i = size-1; i >= 0; i--) {
+	    if (!cdlist_is_first(&vp->order_list, literals[i]->var)) {
+		cdlist_remove(&vp->order_list, literals[i]->var);
+		// FIXME insert before order_next!?
+		order_insert_first(vp, literals[i]->var);
+	    }
+	}
+    }
+    return enif_make_badarg(env);
+#endif
+    
     list = argv[1];
     size = 0;
     while (enif_get_list_cell(env, list, &head, &tail)) {
