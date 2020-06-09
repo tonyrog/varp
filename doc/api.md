@@ -570,10 +570,10 @@ kept while variables kept with only MARK0 are removed
 
 
 ``` python
-varp.mark_intersect_var(vp, x, tuple, [x1,...,xn]|(x1,...,xn)4)
+varp.mark_intersect_var(vp, x, [x1,...,xn]|(x1,...,xn), tuple)
 ```
 
 
 ``` python
-varp.get_marked(vp, x)
+varp.get_marked(vp, tuple)
 ```

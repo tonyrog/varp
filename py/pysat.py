@@ -42,7 +42,7 @@ def p4(V) :
 
 def var(V, Name):
     Vi = varp.add_variable(V)
-#    varp.add_symbol(V, Vi, Name)
+    varp.add_symbol(V, Vi, Name)
     return Vi
 
 def clause(V, List):
