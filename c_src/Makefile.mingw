@@ -1,8 +1,11 @@
 #
 # Makefile for Mingw
 #
-OSNAME := $(shell uname -s)
-MACHINE := $(shell uname -m)
+PYTHON = python3
+
+PYTHON_INCLUDE = -I "/c/Program Files/Python38/include"
+PYTHON_LDFLAGS = "/c/Program Files/Python38/python38.dll"
+
 ERLDIR	:= $(shell erl -noshell -eval "io:format([126,115,126,110],[code:root_dir()])" -s erlang halt)
 ERL_C_INCLUDE_DIR := "$(ERLDIR)/usr/include"
 CC = gcc
@@ -11,8 +14,7 @@ PRIVDIR=../priv
 CFLAGS += -O3
 CFLAGS += -D__WIN32__ -DWIN32 -D_MT -D_DLL -DEBUG_MEM -DDLOG_DEFAULT=DLOG_NONE
 CFLAGS += -Wall -Wextra -Wswitch-default -Wswitch-enum -D_THREAD_SAFE -D_REENTRANT -fno-common
-CFLAGS += -I$(ERL_C_INCLUDE_DIR)
-#LDFLAGS += -Wl--enable-stdcall-fixup
+CFLAGS += $(PYTHON_INCLUDE) -I$(ERL_C_INCLUDE_DIR)
 
 LD_SHARED	:= $(CC) -shared
 LIBS = -lkernel32 -luser32 -ladvapi32
@@ -21,6 +23,7 @@ debug: CFLAGS += -g
 debug: LDFLAGS += -g
 
 VARP_NIF = $(PRIVDIR)/varc_nif.dll
+VARP_PYD = $(PRIVDIR)/varp.pyd
 VARP_EXE = $(PRIVDIR)/Varp.exe
 
 VARP_NIF_OBJS = varc_nif.obj
@@ -29,6 +32,12 @@ debug release all: $(VARP_NIF) $(VARP_EXE)
 
 $(VARP_NIF): $(VARP_NIF_OBJS) 
 	$(LD_SHARED) -o $@ $(VARP_NIF_OBJS) $(LDFLAGS)
+
+$(VARP_PYD): varpy.o $(VARP_NIF_OBJS)
+	$(LD_SHARED) $(PYTHON_LDFLAGS) -o $@ varpy.o $(VARP_NIF_OBJS)
+
+varpy.o: $(HOME)/erlang/pynif/c_src/pynif.c
+	$(CC) $(CFLAGS) -o$@ -DPYNIFNAME=varp -c $<
 
 $(VARP_EXE): varp.c varp_res.o
 	$(CC) -o $(VARP_EXE) varp.c varp_res.o -mwindows $(LIBS)
