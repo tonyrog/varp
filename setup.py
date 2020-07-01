@@ -1,0 +1,21 @@
+import os
+
+def erlpath():
+    s = os.popen("erl -noshell -eval \"io:format('~s',[code:root_dir()])\" -s erlang halt")
+    p = s.read()
+    s.close()
+    return p
+
+from distutils.core import setup, Extension
+setup(name = 'varp',
+      version = '0.9.20',
+      author = "Tony Rogvall",
+      author_email = "tony@rogvall.se",
+      description = "Varp Package",
+      packages = ['varp'],
+      ext_modules = [
+          Extension(name = 'varp',
+                    define_macros = [("PYNIF",None),
+                                     ("PYNIFNAME","varp")],
+                    include_dirs = [erlpath()+"/usr/include"],
+                    sources = ['c_src/varc_nif.c','c_src/pynif.c'])])

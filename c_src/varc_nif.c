@@ -47,7 +47,7 @@
 // LIT_VALUE          store literal values instead of variable value
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
 //
-#define NIF_TRACE
+// #define NIF_TRACE
 #define TWL_BACKWARD
 #define LIT_INTEGER 32
 #define LIT_VALUE

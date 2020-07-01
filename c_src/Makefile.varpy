@@ -23,7 +23,7 @@ PYNAME = varp
 ../py/varp.so: ../py/pynif.o ../py/varc_nif.o
 	 $(LD_SHARED) -o $@ ../py/varc_nif.o ../py/pynif.o
 
-../py/pynif.o: $(HOME)/erlang/pynif/c_src/pynif.c
+../py/pynif.o: pynif.c
 	 $(CC) -c -o $@ -DPYNIFNAME=$(PYNAME) $(CFLAGS) $<
 
 ../py/varc_nif.o: varc_nif.c

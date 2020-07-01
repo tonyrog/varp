@@ -67,7 +67,7 @@ int enif_print(FILE* out, ERL_NIF_TERM term)
 int enif_get_list(ErlNifEnv* env, ERL_NIF_TERM list,
 		  int* lenp, ERL_NIF_TERM* elem)
 {
-    int len;
+    unsigned len;
     if (!enif_get_list_length(env, list, &len)) {
 	*lenp = -1;
 	return 0;
@@ -76,14 +76,14 @@ int enif_get_list(ErlNifEnv* env, ERL_NIF_TERM list,
 	*lenp = len;
 	return 1;
     }
-    else if (*lenp < len) {
+    else if (*lenp < (int)len) {
 	*lenp = len;
 	return 0;
     }
     else {
 	ERL_NIF_TERM tail;
 	int i;
-	for (i = 0; i < len; i++) {
+	for (i = 0; i < (int)len; i++) {
 	    enif_get_list_cell(env, list, &elem[i], &tail);
 	    list = tail;
 	}
