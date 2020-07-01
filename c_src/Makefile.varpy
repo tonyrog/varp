@@ -4,17 +4,27 @@
 # make -f Makefile.varpy
 #
 
-# PYTHON = python2
-# PYTHON_VERSION = 2.7
-
+# PYTHON = python2.7
 PYTHON = python3
-PYTHON_VERSION = 3.8
+
+PYTHON_CFLAGS = $(shell $(PYTHON)-config --cflags)
+PYTHON_LDFLAGS = $(shell $(PYTHON)-config --ldflags)
+
+ERLDIR	:= $(shell erl -noshell -eval "io:format([126,115,126,110],[code:root_dir()])" -s erlang halt)
+NIF_CFLAGS = -fPIC -I"$(ERLDIR)/usr/include" -O2 -Wall
 
 CC = gcc
-CC_FLAGS = -fPIC -I/usr/include/python$(PYTHON_VERSION) -Wall -Wextra -Wno-unused-parameter -O2 -g
-LD_FLAGS = -shared
+CFLAGS = -fPIC $(PYTHON_CFLAGS) -Wno-unused-parameter # -Wextra
+
+LD_SHARED = $(CC) -shared
 
 PYNAME = varp
 
-varp.so: $(HOME)/erlang/pynif/c_src/pynif.c
-	 $(CC) $(LD_FLAGS) $(CC_FLAGS) -o varp.so -DPYNIFNAME=$(PYNAME) varc_nif.o $<
+../py/varp.so: ../py/pynif.o ../py/varc_nif.o
+	 $(LD_SHARED) -o $@ ../py/varc_nif.o ../py/pynif.o
+
+../py/pynif.o: $(HOME)/erlang/pynif/c_src/pynif.c
+	 $(CC) -c -o $@ -DPYNIFNAME=$(PYNAME) $(CFLAGS) $<
+
+../py/varc_nif.o: varc_nif.c
+	$(CC) -c -o $@ -DPYNIF $(NIF_CFLAGS) $<

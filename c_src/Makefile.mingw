@@ -10,6 +10,7 @@ ERLDIR	:= $(shell erl -noshell -eval "io:format([126,115,126,110],[code:root_dir
 ERL_C_INCLUDE_DIR := "$(ERLDIR)/usr/include"
 CC = gcc
 PRIVDIR=../priv
+PYDIR=../py
 
 CFLAGS += -O3
 CFLAGS += -D__WIN32__ -DWIN32 -D_MT -D_DLL -DEBUG_MEM -DDLOG_DEFAULT=DLOG_NONE
@@ -23,12 +24,12 @@ debug: CFLAGS += -g
 debug: LDFLAGS += -g
 
 VARP_NIF = $(PRIVDIR)/varc_nif.dll
-VARP_PYD = $(PRIVDIR)/varp.pyd
 VARP_EXE = $(PRIVDIR)/Varp.exe
+VARP_PYD = $(PYDIR)/varp.pyd
 
 VARP_NIF_OBJS = varc_nif.obj
 
-debug release all: $(VARP_NIF) $(VARP_EXE)
+debug release all: $(VARP_NIF) $(VARP_EXE) $(VARP_PYD)
 
 $(VARP_NIF): $(VARP_NIF_OBJS) 
 	$(LD_SHARED) -o $@ $(VARP_NIF_OBJS) $(LDFLAGS)

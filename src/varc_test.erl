@@ -170,7 +170,7 @@ test2() ->
 %% Test clause / queue 
 %%    
 test3() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -280,7 +280,7 @@ bcp4() ->
     ok.
 
 bcp_turbo1() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Y1 = var(V, <<"Y1">>),
@@ -544,7 +544,7 @@ nbcp_loop(V) ->
     end.
     
 order_install() ->
-    V = varc:new([]),
+    V = varc:new(#{}),
     X1 = var(V, <<"X1">>),
     X2 = var(V, <<"X2">>),
     X3 = var(V, <<"X3">>),
@@ -670,7 +670,7 @@ order_random() ->
 
 
 subst0a() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     A = var(V),
     B = var(V),
     C = var(V),
@@ -691,7 +691,7 @@ subst0a() ->
     Bs.
 
 subst0b() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     A = var(V),
     B = var(V),
     C = var(V),
@@ -712,7 +712,7 @@ subst0b() ->
     Bs.
 
 subst0c() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     A = var(V),
     B = var(V),
     C = var(V),
@@ -733,7 +733,7 @@ subst0c() ->
     Bs.
 
 subst0d() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     X = var(V),
     Y = var(V),
 
@@ -752,7 +752,7 @@ subst0d() ->
     
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
-    V = varc:new([{xref,true}]), 
+    V = varc:new(#{xref=>true}), 
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -770,7 +770,7 @@ subst1() ->
 
 %% simply substitute {X1,X2} [X1/X2] => {X1}
 subst2() ->
-    V = varc:new([{xref,true}]), 
+    V = varc:new(#{xref=>true}), 
     X1 = var(V),
     X2 = var(V),
     C0 = clause(V, [X1,X2]),
@@ -785,7 +785,7 @@ subst2() ->
     ok.
 
 subst3() ->
-    V = varc:new([{xref,true}]), 
+    V = varc:new(#{xref=>true}), 
     X2 = var(V),
     X3 = var(V),
     C0 = clause(V, [-X2,X3]),
@@ -800,7 +800,7 @@ subst3() ->
     ok.
     
 subst4() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     X2 = var(V),
     X3 = var(V),
     X4 = var(V),
@@ -833,7 +833,7 @@ subst4() ->
     Bs.
 
 subst5() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     X2 = var(V),
     X3 = var(V),
     X4 = var(V),
@@ -863,7 +863,7 @@ subst5() ->
     Bs.
 
 subst6() ->
-    V = varc:new([{xref,true}]),
+    V = varc:new(#{xref=>true}),
     Y = var(V),
     B = var(V),
     C = var(V),
@@ -1016,7 +1016,7 @@ watch1() ->
     ok.
 
 edge_list0() ->
-    V = varc:new([{edge, true}]),
+    V = varc:new(#{edge=>true}),
     true = varc:info(V, edge),
 
     A = var(V),
@@ -1030,7 +1030,7 @@ edge_list0() ->
     ok.
 
 edge_list1() ->
-    V = varc:new([{edge, true}]),
+    V = varc:new(#{edge=>true}),
     true = varc:info(V, edge),
 
     A = var(V),
@@ -1048,7 +1048,7 @@ edge_list1() ->
     ok.
 
 edge_list2() ->
-    V = varc:new([{edge, true}]),
+    V = varc:new(#{edge=>true}),
     true = varc:info(V, edge),
 
     A = var(V),
@@ -1065,7 +1065,7 @@ edge_list2() ->
     ok.
 
 edge_list3() ->
-    V = varc:new([{edge, true}]),
+    V = varc:new(#{edge=>true}),
     true = varc:info(V, edge),
 
     A = var(V),
@@ -1152,7 +1152,7 @@ cnf_delete_sort() ->
     cnf_delete_sort(20, 3, 10).
 
 cnf_delete_sort(N, M, K) ->
-    V = varc:new([{xref,true},{hash,true}]),
+    V = varc:new(#{xref=>true,hash=>true}),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
@@ -1176,7 +1176,7 @@ cnf_sort_offset_delete() ->
     cnf_sort_offset_delete(20, 3, 10).
 
 cnf_sort_offset_delete(N, M, K) ->
-    V = varc:new([{xref,true},{hash,true}]),
+    V = varc:new(#{xref=>true,hash=>true}),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),

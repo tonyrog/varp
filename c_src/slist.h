@@ -70,7 +70,7 @@ LOCAL int slist_is_first(slist_t* list, void* elem)
 }
 
 // use is_eol when loop over list!
-// ptr = slist_fiest(list);
+// ptr = slist_first(list);
 // while(!slist_is_eol(ptr)) {
 //    ...
 //    ptr = slist_next(ptr)

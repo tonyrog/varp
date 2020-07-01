@@ -139,6 +139,7 @@
 
 -type varc() :: reference().
 -type variable() :: pos_integer().
+-type unsigned() :: non_neg_integer().
 -type literal() :: integer().
 -type sort_key() :: integer().
 -type sort_value() :: integer().
@@ -153,37 +154,50 @@ init() ->
     ?debug("Loading: ~s\n", [Nif]),
     erlang:load_nif(Nif, 0).
 
+-spec new() -> varc().
+	  
 new() ->
-    new([]).
+    new(#{}).
 
-%%
-%% new options
-%%    {size, Size::unsigned()}    -- inital variable table size
-%%    {qtype,lifo|fifo|recursive} -- use lifo/fifo strategy in bcp
-%%    {xref, boolean()}           -- use cross references
-%%    {hash, boolean()}           -- install hash over clauses
-%%    {edge, boolean()}           -- use edge instead of 2-clauses
-%%
+-type new_options() :: 
+	#{
+	  %% inital variable table size
+	  size  => unsigned(),
+	  %% use lifo/fifo strategy in bcp
+	  qtype => lifo|fifo|recursive,
+	  %% use cross references
+	  xref  => boolean(),
+	  %% install hash over clauses
+	  hash  => boolean(),
+	  %% use phase saving
+	  use_phase => boolean(),
+	  %% initial phase
+	  phase     => boolean(),
+	  %% use edge instead of 2-clauses
+	  edge      => boolean() }.
 
-new(Options) when is_list(Options) ->
+-spec new(new_options()) -> varc().
+
+new(Options) when is_map(Options) ->
     ?nif_stub().
-
-%%
-%% clone options 
-%%    new options +
-%%    {level, Level}     -- clone bindings up until level 'Level'
-%%    {set, delta}       -- clone clauseset DELTA
-%%    {set, gamma}       -- clone clauseset GAMMA
-%%    {set, beta}        -- clone clauseset BETA
-%%    {set, alpha}       -- clone clauseset ALPHA
-%%    {queue, boolean()} -- clone bcp queue
-%%
 
 clone(Vp) ->
-    clone(Vp, []).
+    clone(Vp, #{}).
 
-clone(_Vp, Options) when is_list(Options) ->
+-spec clone(Vp::varc(), Opts::clone_opts()) -> varc().
+-type clone_opts() :: #{
+			%% clone bindings up until level 'Level'
+			level => unsigned(),
+			%% clone clauseset(s)
+			set   => clauseset()|[clauseset()],
+			%% clone bcp queuea
+			queue => boolean() }.
+-type clauseset() :: delta|gamma|beta|alpha.
+
+
+clone(_Vp, Options) when is_map(Options) ->
     ?nif_stub().
+
 
 info(_Vp, Key) when is_atom(Key) ->
     ?nif_stub().
@@ -196,7 +210,7 @@ info(_Vp, Key) when is_atom(Key) ->
 config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
 
-add_variable(Vp) ->
+add_variable(_Vp) ->
     ?nif_stub().
 
 add_variable(_Vp, IsAtom) when is_boolean(IsAtom) ->
@@ -400,20 +414,25 @@ add_clause(_Vp,Ls,Si) when is_list(Ls), is_integer(Si), Si>=0, Si=<3 ->
 find_clause(_Vp,Ls) when is_list(Ls) ->
     ?nif_stub().
 
-get_clause(Vp,Index) ->
-    get_clause(Vp,Index,undefined,false).
+-spec get_clause(Vp::varc(), ClauseIndex::integer()) -> [literal()] | true.
 
-get_clause(Vp,Index,Skip) ->
-    get_clause(Vp,Index,Skip,false).
+get_clause(_Vp,_Index) when is_integer(_Index), _Index >= 0 ->
+    ?nif_stub().
+
+-spec get_clause(Vp::varc(), ClauseIndex::integer(),
+		 SkipLiteral::literal()) -> [literal()] | true.
+
+get_clause(_Vp,_Index,_Skip) when
+      is_integer(_Index), _Index >= 0 ->
+    ?nif_stub().
 
 -spec get_clause(Vp::varc(), ClauseIndex::integer(),
 		 SkipLiteral::literal(),Raw::boolean()) ->
 			[literal()] | true.
 
-get_clause(_Vp,Index,_SkipLiteral,Raw)
-  when is_boolean(Raw), is_integer(Index), Index >= 0 ->
+get_clause(_Vp,Index,_SkipLiteral,_Raw)
+  when is_integer(Index), Index >= 0, is_boolean(_Raw) ->
     ?nif_stub().
-
 
 -spec compress_clause(Vp::varc(), ClauseIndex::integer()) -> binary().
 
@@ -827,8 +846,8 @@ satvar_(_V, N, N, _Vt, _Bt, Bs) ->
     %% io:format("  Bs = ~w\n", [Bs]),
     Bs.
 
-interv0(_V, As) ->
-    intersect(As).
+%% interv0(_V, As) ->
+%%    intersect(As).
 
 interv(_V, []) -> false;
 interv(V, [false|As]) -> interv(V, As);
@@ -1148,11 +1167,11 @@ add_friends([], _X, Map) ->
     Map.
 
 %% FIXME: add depth info for all friends?
-depth(V, Yi, DepthMap) ->
-    Cix = varc:implication_clause(V, Yi),
-    Clause = varc:get_clause(V, Cix, Yi),
-    Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
-    {Depth, DepthMap#{ Yi => Depth }}.
+%% depth(V, Yi, DepthMap) ->
+%%    Cix = varc:implication_clause(V, Yi),
+%%    Clause = varc:get_clause(V, Cix, Yi),
+%%    Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
+%%    {Depth, DepthMap#{ Yi => Depth }}.
     
 %% add (at most) R random elements to Vec (not already in Vec)
 vec_extend_rand(V, Vec, R) ->

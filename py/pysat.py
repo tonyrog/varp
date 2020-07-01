@@ -57,8 +57,18 @@ def bt(v):
             return False # contradiction
     return True # model
 
-def main():
-    V = varp.new([])
+def main_p4():
+    V = varp.new({})
     p4(V)
     varp.set_level(V, 1)
     return bt(V)
+
+def main():
+    V = varp.new({ varp.xref: varp.true})
+    X1 = varp.add_variable(V)
+    X2 = varp.add_variable(V)
+    X3 = varp.add_variable(V)
+    X4 = varp.add_variable(V)
+    varp.add_clause(V, [X1,X2,X3])
+    varp.add_clause(V, [X4,X3,X2])
+    return "ok"

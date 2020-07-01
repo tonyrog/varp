@@ -74,7 +74,7 @@ LOCAL int dlist_is_first(dlist_t* list, void* elem)
 }
 
 // use is_eol when loop over list!
-// ptr = dlist_fiest(list);
+// ptr = dlist_first(list);
 // while(!dlist_is_eol(ptr)) {
 //    ...
 //    ptr = dlist_next(ptr)
