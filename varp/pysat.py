@@ -1,7 +1,6 @@
-#
-# Test run varp from python
-#
-import varp
+# using varc
+
+import varc
 
 def p4(V) :
     X1 = var(V, "P(1,1)")
@@ -41,34 +40,34 @@ def p4(V) :
     return V
 
 def var(V, Name):
-    Vi = varp.add_variable(V)
-    varp.add_symbol(V, Vi, Name)
+    Vi = varc.add_variable(V)
+    varc.add_symbol(V, Vi, Name)
     return Vi
 
 def clause(V, List):
-    Ci = varp.add_clause(V, List)
+    Ci = varc.add_clause(V, List)
     print(List)
     return Ci
 
 def bt(v):
-    while not varp.nbcp(v):
+    while not varc.nbcp(v):
         print("nbcp")
-        if varp.undo(v) == False:
+        if varc.undo(v) == False:
             return False # contradiction
     return True # model
 
 def main_p4():
-    V = varp.new({})
+    V = varc.new({})
     p4(V)
-    varp.set_level(V, 1)
+    varc.set_level(V, 1)
     return bt(V)
 
 def main():
-    V = varp.new({ varp.xref: varp.true})
-    X1 = varp.add_variable(V)
-    X2 = varp.add_variable(V)
-    X3 = varp.add_variable(V)
-    X4 = varp.add_variable(V)
-    varp.add_clause(V, [X1,X2,X3])
-    varp.add_clause(V, [X4,X3,X2])
+    V = varc.new({ varc.xref: varc.true})
+    X1 = varc.add_variable(V)
+    X2 = varc.add_variable(V)
+    X3 = varc.add_variable(V)
+    X4 = varc.add_variable(V)
+    varc.add_clause(V, [X1,X2,X3])
+    varc.add_clause(V, [X4,X3,X2])
     return "ok"

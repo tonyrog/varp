@@ -14,8 +14,8 @@ setup(name = 'varp',
       description = "Varp Package",
       packages = ['varp'],
       ext_modules = [
-          Extension(name = 'varp',
+          Extension(name = 'varc',
                     define_macros = [("PYNIF",None),
-                                     ("PYNIFNAME","varp")],
+                                     ("PYNIFNAME","varc")],
                     include_dirs = [erlpath()+"/usr/include"],
                     sources = ['c_src/varc_nif.c','c_src/pynif.c'])])
