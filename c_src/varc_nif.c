@@ -3056,7 +3056,7 @@ int vif_get_lit_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
 	    return 0;
 	n = *lenp;
 	for (i = 0; i < n; i++) {
-	    if (vif_get_lit(env, vp, elem[i], &clause[i]) < 0)
+	    if (!vif_get_lit(env, vp, elem[i], &clause[i]))
 		return 0;
 	}
 	return 1;
@@ -3084,7 +3084,7 @@ int vif_get_literal_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
 	    return 0;
 	n = *lenp;
 	for (i = 0; i < n; i++) {
-	    if (vif_get_literal(env, vp, elem[i], &clause[i]) < 0)
+	    if (!vif_get_literal(env, vp, elem[i], &clause[i]))
 		return 0;
 	}
 	return 1;
