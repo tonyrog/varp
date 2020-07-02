@@ -15,7 +15,6 @@
 #include <stdlib.h>
 #include <stddef.h>
 #include <errno.h>
-#include <unistd.h>
 #include <memory.h>
 #include <limits.h>
 #include <sys/time.h>
@@ -2082,21 +2081,23 @@ static uint32_t arc4_random(arc4_stream_t* as)
 
 static void arc4_stir(arc4_stream_t* as)
 {
-    FILE* f;
     int i;
     struct {
 	struct timeval tv;
-	pid_t pid;
 	uint8_t rnd[128 - sizeof(struct timeval) - sizeof(pid_t)];
     } rdat;
 
     gettimeofday(&rdat.tv, NULL);
-    rdat.pid = getpid();
-    if ((f = fopen(RANDOMDEV, "r")) != NULL) {
-	int r = fread(rdat.rnd, 1, sizeof(rdat.rnd), f);
-	(void) r;
-	fclose(f);
+#ifndef __WIN32__
+    {
+	FILE* f;
+	if ((f = fopen(RANDOMDEV, "r")) != NULL) {
+	    int r = fread(rdat.rnd, 1, sizeof(rdat.rnd), f);
+	    (void) r;
+	    fclose(f);
+	}
     }
+#endif
     arc4_add_random(as, (void *) &rdat, sizeof(rdat));
     for (i = 0; i < 1024; i++)
 	arc4_getbyte(as);
