@@ -14,10 +14,10 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <time.h>
 #include <errno.h>
 #include <memory.h>
 #include <limits.h>
-#include <sys/time.h>
 #include <math.h>
 #include <float.h>
 #include "erl_nif.h"
@@ -2083,11 +2083,11 @@ static void arc4_stir(arc4_stream_t* as)
 {
     int i;
     struct {
-	struct timeval tv;
+	time_t t;
 	uint8_t rnd[128 - sizeof(struct timeval) - sizeof(pid_t)];
     } rdat;
 
-    gettimeofday(&rdat.tv, NULL);
+    rdat.t = time(0);
 #ifndef __WIN32__
     {
 	FILE* f;
