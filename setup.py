@@ -7,12 +7,13 @@ def erlpath():
     return p
 
 from distutils.core import setup, Extension
-setup(name = 'varp',
+setup(name = 'varpy',
       version = '0.9.20',
+      url = "http://www.rogvall.se/apps",
       author = "Tony Rogvall",
       author_email = "tony@rogvall.se",
-      description = "Varp Package",
-      packages = ['varp'],
+      description = "Varpy Package",
+      packages = ['varpy'],
       ext_modules = [
           Extension(name = 'varc',
                     define_macros = [("PYNIF",None),
