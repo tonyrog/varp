@@ -6,7 +6,7 @@
 #define _GNU_SOURCE
 #endif
 
-#ifdef __WIN32__
+#if defined(__WIN32__) || defined(_WIN32)
 #include <windows.h>
 #endif
 
@@ -2084,11 +2084,13 @@ static void arc4_stir(arc4_stream_t* as)
     int i;
     struct {
 	time_t t;
-	uint8_t rnd[128 - sizeof(struct timeval) - sizeof(pid_t)];
+	uint8_t rnd[128 - sizeof(time_t)];
     } rdat;
 
+    memset(&rdat, 0, sizeof(rdat));
+
     rdat.t = time(0);
-#ifndef __WIN32__
+#if defined(__WIN32__) || defined(_WIN32)
     {
 	FILE* f;
 	if ((f = fopen(RANDOMDEV, "r")) != NULL) {
@@ -2742,7 +2744,7 @@ static clause_t* clause_alloc(varp_t* vp, int size)
     if (size < 1)
 	return NULL;
     nbytes = sizeof(clause_t) + sizeof(lit_t)*size;
-#if defined(__WIN32__)
+#if defined(__WIN32__) || defined(_WIN32)    
     if ((cp = _aligned_malloc(nbytes, CLAUSE_ALIGNMENT)) == NULL) {
       return NULL;
     }
@@ -2769,7 +2771,7 @@ static void clause_free(varp_t* vp, clause_t* cp)
 	    hash_unlink(vp, cp);
 	set_clause(vp, cix, NULL);
 	vp->cnum[si]--;
-#if defined(__WIN32__)
+#if defined(__WIN32__) || defined(_WIN32)
 	_aligned_free(cp);
 #else
 	free(cp);
@@ -4097,7 +4099,7 @@ void qsort_r(void *base, size_t nmemb, size_t size,
 #define QSORT(base,nmemb,size,compar,arg) \
     qsort_r((base),(nmemb),(size),(compar),(arg))
 #define QSORT_ARGS(a,b,arg) (a, b, arg)
-#elif defined(__WIN32__)
+#elif defined(__WIN32__) || defined(_WIN32)
 #define QSORT(base,nmemb,size,compar,arg) \
     qsort_s((base),(nmemb),(size),(compar),(arg))
 #define QSORT_ARGS(a,b,arg) (arg, a, b)
