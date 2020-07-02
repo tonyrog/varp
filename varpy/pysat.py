@@ -42,11 +42,12 @@ def p4(V) :
 def var(V, Name):
     Vi = varc.add_variable(V)
     varc.add_symbol(V, Vi, Name)
+    print("added variable " + Name + " = " + str(Vi))
     return Vi
 
 def clause(V, List):
     Ci = varc.add_clause(V, List)
-    print(List)
+    print("added clause " + str(List) + " = " + str(Ci))
     return Ci
 
 def bt(v):

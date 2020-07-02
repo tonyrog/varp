@@ -133,31 +133,31 @@ typedef enum {
 #define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
 
-#define DBG1(args...) enif_fprintf(stdout, args)
-#define DBG0(args...)
+#define DBG1(...) enif_fprintf(stdout, __VA_ARGS__)
+#define DBG0(...)
 
 #ifdef DEBUG
-#define DBG(args...) enif_fprintf(stdout, args)
+#define DBG(...) enif_fprintf(stdout, __VA_ARGS__)
 #else
-#define DBG(args...)
+#define DBG(...)
 #endif
 
 #if defined(DEBUG_BCP)
-#define DBG_BCP(args...) enif_fprintf(stdout, args)
+#define DBG_BCP(...) enif_fprintf(stdout, __VA_ARGS__)
 #else
-#define DBG_BCP(args...)
+#define DBG_BCP(...)
 #endif
 
 #if defined(DEBUG_NBCP)
-#define DBG_NBCP(args...) enif_fprintf(stdout, args)
+#define DBG_NBCP(...) enif_fprintf(stdout, __VA_ARGS__)
 #else
-#define DBG_NBCP(args...)
+#define DBG_NBCP(...)
 #endif
 
 #if defined(DEBUG_ORDER)
-#define DBG_ORDER(args...) enif_fprintf(stdout, args)
+#define DBG_ORDER(...) enif_fprintf(stdout, __VA_ARGS__)
 #else
-#define DBG_ORDER(args...)
+#define DBG_ORDER(...)
 #endif
 
 #if defined(DEBUG_BCP)
@@ -3313,8 +3313,8 @@ static int symtab_grow(varp_t* vp)
     size_t size0 = dynvar_size(vp->symtab);
     size_t size  = next_pow2(size0);
     int i;
-
-    fprintf(stderr, "symtab_grow\r\n");
+    
+    DBG("symtab_grow\r\n");
 
     if (dynvar_resize(vp->symtab, size) < 0)
 	return -1;
@@ -3380,7 +3380,7 @@ static symbol_t* symbol_create(varp_t* vp, variable_t* var, ErlNifBinary* bp,
     if (!is_term && (var->strname == NULL))
 	var->strname = (char*) sp->data;
     if (var->strname) {
-	fprintf(stderr, "create symbol '%s'\r\n", var->strname);
+	DBG("create symbol '%s'\r\n", var->strname);
     }
     return sp;
 }
@@ -3400,7 +3400,7 @@ static int symbol_insert(varp_t* vp,variable_t* var, symbol_t* sp)
     vp->symtab[i] = sp;
     vp->snum++;
     if (var->strname != NULL) {
-	fprintf(stderr, "insert symbol '%s' slot = %d\r\n", var->strname, i);
+	DBG("insert symbol '%s' slot = %d\r\n", var->strname, i);
     }
     return 0;
 }
