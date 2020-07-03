@@ -1367,13 +1367,27 @@ static inline void* dynarray_delete(dynarray_t* dp, int i)
 #define EXT  0x80
 #define MASK  0x7f
 
+#if defined(__WIN32__) || defined(_WIN32)
+static int CLZ(int x)
+{
+    int count = sizeof(x)*8;
+    while(x) {
+	x >>= 1;
+	count--;
+    }
+    return count;
+}
+#else
+#define CLZ(x)      __builtin_clz((x))
+#endif
+
 static int compress_int(int li, uint8_t* ptr)
 {
     int len;
     uint8_t* ptr0 = ptr;
 
     li = (li < 0) ? ((-li)<<1)+1 : li << 1;
-    len = sizeof(int)*8 - __builtin_clz(li);
+    len = sizeof(int)*8 - CLZ(li);
     while(len > 7) {
 	*ptr++ = (li & MASK) + EXT;
 	li >>= 7;
@@ -2120,7 +2134,7 @@ static void arc4_stir(arc4_stream_t* as)
     rdat.t = time(0);
     
 #if defined(__WIN32__) || defined(_WIN32)
-    for (i = 0; i < sizeof(rdata.rnd); i++)
+    for (i = 0; i < sizeof(rdat.rnd); i++)
 	rdat.rnd[i] = i;
 #else
     {
