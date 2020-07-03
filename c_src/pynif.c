@@ -1978,16 +1978,22 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
     }
     case LARGE_BIG_EXT: {  // t,n3,n2,n1,n0,s,d0,d1,...dn-1
 	size_t blen;
+	size_t r;
 	if (len < 6) return 0;
 	blen = get_uint32(ptr+1);
 	if (len < 6+blen) return 0;
 	DBG("decode_term: #digits=%ld, sign=%d\n", (long)blen, ptr[5]);
 	if (ptr[5]) { // sign, negate bytes
-	    unsigned char digits[blen+1];
-	    blen = negate_bytes(ptr+6, blen, digits);
-	    if ((*term = _PyLong_FromByteArray(digits, blen, 1, 1)) == NULL)
-		return 0;
-	}	
+	    STK_BEGIN(unsigned char, digits, blen+1) {
+		blen = negate_bytes(ptr+6, blen, digits);
+		if ((*term = _PyLong_FromByteArray(digits, blen, 1, 1)) == NULL)
+		    r = 0;
+		else
+		    r = blean;
+	    } STK_END(digits);
+	    if (r == 0)
+		return 0;	    
+	}
 	else {
 	    if ((*term = _PyLong_FromByteArray(ptr+6, blen, 1, 0)) == NULL)
 		return 0;
