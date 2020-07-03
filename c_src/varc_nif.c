@@ -8,6 +8,7 @@
 
 #if defined(__WIN32__) || defined(_WIN32)
 #include <windows.h>
+#include <malloc.h>
 #endif
 
 #include <stdio.h>
@@ -79,6 +80,12 @@
 #define true  1
 
 typedef uint8_t bool_t;
+
+#if defined(__WIN32__) || defined(_WIN32)
+#define TYPEOF(x) decltype(x)
+#else
+#define TYPEOF(x) __typeof__(x)
+#endif
 
 typedef enum {
     lifo = 0,
@@ -337,9 +344,9 @@ typedef struct _allocator_t
 #define DYN_UNDO_INIT    8 // 1024 at least 1 level 0 exit from start!
 
 // Grow factor
-#define DYN_GROW0 2.0000
-#define DYN_GROW1 1.6180
-#define DYN_GROW2 1.2500
+#define DYN_GROW0 2.0000f
+#define DYN_GROW1 1.6180f
+#define DYN_GROW2 1.2500f
 
 // switch limit
 #define DYN_GROW0_LIMIT 1024
@@ -382,7 +389,7 @@ typedef struct _dynarray_t // :object_t
      (name = name ## _dyn_.base, 0))
 #define dynvar_add(name)			\
     (dynarray_add(&name ## _dyn_), name = name ## _dyn_.base,		\
-     (__typeof__(name[0])*) DYN_ADDR(&name ## _dyn_, name ## _dyn_.size -1))
+     (TYPEOF(name[0])*) DYN_ADDR(&name ## _dyn_, name ## _dyn_.size -1))
 #define dynvar_clear(name)			\
     (dynarray_clear(&name ## _dyn_), name = NULL)
 
@@ -404,7 +411,7 @@ typedef struct _dynarray_t // :object_t
     ((dynarray_set_capacity(&name ## _dyn_[(i)], (size)) < 0) ? -1 :	\
      (name[(i)] = name ## _dyn_[(i)].base, 0))
 #define dynvec_add(name,i)				\
-    (__typeof__(name[(i)][0])*) dynarray_add(&name ## _dyn_[(i)])
+    (TYPEOF(name[(i)][0])*) dynarray_add(&name ## _dyn_[(i)])
 #define dynvec_clear(name,i)				\
     (dynarray_clear(&name ## _dyn_[(i)]), name[(i)] = NULL)
 
@@ -4717,13 +4724,19 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     for (i = 0; i < n; i++) {
 	lit_t li = cp->lit[i];
 	variable_t* var = var_l(vp, li);
-	if ((cix = var->implication_clause) == CLAUSE_NONE)
-	    *dynvar_add(vp->tlit) = li;
+	if ((cix = var->implication_clause) == CLAUSE_NONE) {
+	    // *dynvar_add(vp->tlit) = li;
+	    dynvar_resize(vp->tlit, i+1);
+	    vp->tlit[i] = li;
+	}
 	else {
 	    clause_t* dp = get_clause(vp, cix);
 	    bool_t is_sub = is_subclause(dp, neg_l(li), cp);
-	    if (!is_sub)
-		*dynvar_add(vp->tlit) = li;
+	    if (!is_sub) {
+		// *dynvar_add(vp->tlit) = li;
+		dynvar_resize(vp->tlit, i+1);
+		vp->tlit[i] = li;
+	    }
 	}
     }
     
@@ -5757,29 +5770,33 @@ static int bcp_turbo(varp_t* vp, lit_t xp)
     literal_t* lp = l2ll(vp, xp);
     xref_t* xptr  = dynarray_element(lp->xref, 0);
     size_t  n     = dynarray_size(lp->xref);
-    lit_t q[n+1];  // preparation for bj clause!
-    int j;
+    int r = 1;
 
 #if defined(DEBUG_BCP)
     if (!vp->opt.xref) enif_fprintf(stdout, "turbo without xref!\r\n");
 #endif
     if (n == 0)
-	return 0;
-    j = 1;
-    while(n--) {
-	clause_t* cp = get_clause(vp, xptr->cix);
-	if (cp != NULL) {
-	    enif_fprintf(stdout,"turbo check %s\r\n", format_lit(vp, xp));
-	    print_lit_array("trubo check", cp->lit, cp->size);
-	    if (!is_turbo_clause(vp,cp,xp,&q[j]))
-		return 0;
-	    j++;
+	return 0;    
+    
+    STK_BEGIN(lit_t, q, n+1) {
+	int j = 1;
+	while(n--) {
+	    clause_t* cp = get_clause(vp, xptr->cix);
+	    if (cp != NULL) {
+		enif_fprintf(stdout,"turbo check %s\r\n", format_lit(vp, xp));
+		print_lit_array("trubo check", cp->lit, cp->size);
+		if (!is_turbo_clause(vp,cp,xp,&q[j])) {
+		    r = 0;
+		    STK_LEAVE(q);
+		}
+		j++;
+	    }
+	    xptr++;
 	}
-	xptr++;
-    }
-    q[0] = xp;
-    print_lit_array("TURBO clause", q, j);
-    return 1;
+	q[0] = xp;
+	print_lit_array("TURBO clause", q, j);
+    } STK_END(q);
+    return r;
 }
 
 int bcp_is_looping(literal_t* lp)
@@ -6855,8 +6872,12 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 		    mark(vp, qp->var, MARK0);
 		    if (qlevel >= level)
 			step++;
-		    else
-			*dynvar_add(vp->tlit) = q;
+		    else {
+			// *dynvar_add(vp->tlit) = q;
+			int j = dynvar_size(vp->tlit);
+			dynvar_resize(vp->tlit, j+1);
+			vp->tlit[j] = q;
+		    }
 		}
 	    }
 	}
@@ -6867,7 +6888,10 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	lp = literal_vv(vp, trail);
 	u = ll2l(vp, lp);
 	if (step <= 1) {
-	    *dynvar_add(vp->tlit) = neg_l(u);
+	    // *dynvar_add(vp->tlit) = neg_l(u);
+	    int j = dynvar_size(vp->tlit);
+	    dynvar_resize(vp->tlit, j+1);
+	    vp->tlit[j] = neg_l(u);
 	    goto make_clause;
 	}
 	else {
@@ -7315,15 +7339,13 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 //    enif_fprintf(stdout, "SORTED clauses si=%d\n", si);
 //    print_clauseset(vp, si, n);
 
-
-    {
-	int rmap[n];
+    STK_BEGIN(int, rmap, n) {
 	int h = 0;
 	int m;
 
 	h = clauseset_plug_hole(vp, si, n-1);
 	m = n - h;
-
+	
 	for (i = 0; i < m; i++) {
 	    int j = GET_IX(cm[i]->cix);   // the old clause index
 	    rmap[j] = i;                  // point to new index
@@ -7364,7 +7386,8 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 
 //	enif_fprintf(stdout, "REMAPPED clauses si=%d\n", si);
 //	print_clauseset(vp, si, n);	
-    }
+    } STK_END0(rmap);
+    
     return ATOM(ok);
 }
 
@@ -7987,6 +8010,7 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
     int size;
     bool_t clause_info = false;
     bool_t trail = false;
+    ERL_NIF_TERM r;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -7997,8 +8021,8 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
     if (!enif_get_boolean(env, argv[3], &trail))
 	return enif_make_badarg(env);
     level = vp->level;
-    {
-	ERL_NIF_TERM elements[size];
+
+    STK_BEGIN(ERL_NIF_TERM, elements, size) {
 	int i = 0;
 	while((level >= 0) && (i < size)) {
 	    variable_t* bp = vp->undo[level].bs;
@@ -8012,8 +8036,9 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
 	    }
 	    level--;
 	}
-	return enif_make_list_from_array(env, elements, i);
-    }
+	r = enif_make_list_from_array(env, elements, i);
+    } STK_END0(elements);
+    return r;
 }
 
 // get_number_of_bindings(Vp, Level) -> unsigned()
@@ -8276,8 +8301,8 @@ static ERL_NIF_TERM varp_mark_intersect_var(ErlNifEnv* env, int argc,
 		    else
 			r = enif_make_list_from_array(env, element1, size);
 		}
-	    } STK_END0(elem);
-	} STK_END0(element1);
+	    } STK_END0(element1);
+	} STK_END0(elem);
 	return r;
     }
     else

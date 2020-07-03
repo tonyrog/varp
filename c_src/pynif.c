@@ -7,6 +7,7 @@
 
 #if defined(__WIN32__) || defined(_WIN32)
 #include <windows.h>
+#include <malloc.h>
 #else
 #include <stdarg.h>
 #include <stdint.h>
