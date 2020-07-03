@@ -1954,14 +1954,20 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	return 5;
     case SMALL_BIG_EXT: { // t,n0,s,d0,d1,...dn-1
 	size_t blen;
+	size_t r;
 	if (len < 3) return 0;
 	blen = get_uint8(ptr+1);
 	if (len < 3+blen) return 0;
 	DBG("decode_term: #digits=%ld, sign=%d\n", (long)blen, ptr[2]);
 	if (ptr[2]) { // sign, negate bytes
-	    unsigned char digits[blen+1];
-	    blen = negate_bytes(ptr+3, blen, digits);
-	    if ((*term = _PyLong_FromByteArray(digits, blen, 1, 1)) == NULL)
+	    STK_BEGIN(unsigned char, digits, blen+1) {
+		blen = negate_bytes(ptr+3, blen, digits);
+		if ((*term = _PyLong_FromByteArray(digits, blen, 1, 1)) == NULL)
+		    r = 0;
+		else
+		    r = blen;
+	    } STK_END(digits);
+	    if (r == 0)
 		return 0;
 	}
 	else {
@@ -2553,7 +2559,7 @@ static char* format_term(ERL_NIF_TERM term, char* ptr, int base, int ref)
     if (ref) {
 	char buf[16];
 	int len;
-	sprintf(buf, "%ld", Py_REFCNT(term));
+	sprintf(buf, "%lld", Py_REFCNT(term));
 	len = strlen(buf);
 	*ptr++ = '/';
 	memcpy(ptr, buf, len);
@@ -2565,12 +2571,14 @@ static char* format_term(ERL_NIF_TERM term, char* ptr, int base, int ref)
 int enif_print(FILE* out, ERL_NIF_TERM term)
 {
     ssize_t len = format_term_size(term, 10, 1);
-    char buf[len+1];
-    char* ptr;
-    
-    ptr = format_term(term, buf, 10, 1);
-    *ptr = '\0';
-    return fprintf(out, "%s", buf);
+    int r;
+    STK_BEGIN(char, buf, len+1) {
+	char* ptr;
+	ptr = format_term(term, buf, 10, 1);
+	*ptr = '\0';
+	r = fprintf(out, "%s", buf);
+    } STK_END(buf);
+    return r;
 }
 
 //
