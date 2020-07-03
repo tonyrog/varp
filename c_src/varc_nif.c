@@ -107,7 +107,7 @@ typedef enum {
 } ival_t;
 
 #define IMPORT(x)      (((x)<0) ? (((-(x))<<1)|1) : ((x)<<1))
-#define EXPORT(y)      (((y)&1) ? -((y)>>1) : ((y)>>1))
+#define EXPORT(y)      (((y)&1) ? -((int)((y)>>1)) : ((int)((y)>>1)))
 #define INDEX(x)       ((x)>>1)   // variable index
 #define NEGATE(x)      ((x)^1)
 #define SIGN(x)        ((x)&1)    // sign=1 if negative, positive otherwise
@@ -408,7 +408,28 @@ typedef struct _dynarray_t // :object_t
 #define dynvec_clear(name,i)				\
     (dynarray_clear(&name ## _dyn_[(i)]), name[(i)] = NULL)
 
-    
+
+#if defined(__WIN32__) || defined(_WIN32)
+#define ALLOC_STACK(n)  _malloca((n))
+#define FREE_STACK(ptr) _freea((ptr))
+#else
+#define ALLOC_STACK(n) alloca((n))
+#define FREE_STACK(ptr)
+#endif
+
+#define STK_BEGIN(type,name,n) do { type* name = ALLOC_STACK(sizeof(type)*(n)); do {
+#define STK_LEAVE(name) goto L##name
+#define STK_END0(name) } while(0); FREE_STACK((name)); } while(0)    
+#define STK_END(name)  } while(0); L##name: FREE_STACK((name)); } while(0)
+
+/*
+#define stk_alloc(rtype,type,name,n)				\
+    type* name = ALLOC_STACK(sizeof(type)*(n)); rtype R##name; int Q##name=0
+#define stk_return(name,value) do { R##name = (value); Q##name=1; goto L##name; } while(0)
+#define stk_dealloc(name) L##name: FREE_STACK((name))
+#define stk_leave(name) if (Q##name) return R##name
+*/
+
 #ifdef LIT_INTEGER
 #if LIT_INTEGER == 8
 typedef uint8_t ulit_t;
@@ -1315,8 +1336,8 @@ static inline void* dynarray_add(dynarray_t* dp)
 
 static inline void* dynarray_delete(dynarray_t* dp, int i)
 {
-    void* src;    
-    void* dst;
+    uint8_t* src;    
+    uint8_t* dst;
     size_t len;
     
     if ((i<0) || (dp == NULL) || (i >= (int)dp->size))
@@ -1352,7 +1373,7 @@ static int compress_int(int li, uint8_t* ptr)
 	len -= 7;
     }
     *ptr++ = (li & MASK);
-    return (ptr-ptr0);
+    return (int)(ptr-ptr0);
 }
 
 #if 0
@@ -2090,7 +2111,11 @@ static void arc4_stir(arc4_stream_t* as)
     memset(&rdat, 0, sizeof(rdat));
 
     rdat.t = time(0);
+    
 #if defined(__WIN32__) || defined(_WIN32)
+    for (i = 0; i < sizeof(rdata.rnd); i++)
+	rdat.rnd[i] = i;
+#else
     {
 	FILE* f;
 	if ((f = fopen(RANDOMDEV, "r")) != NULL) {
@@ -3052,17 +3077,23 @@ int vif_get_lit_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
 	return 1;
     }
     else {
-	int n = *lenp;
-	ERL_NIF_TERM elem[n];
 	int i;
-	if (!enif_get_list(env, list, lenp, elem))
-	    return 0;
-	n = *lenp;
-	for (i = 0; i < n; i++) {
-	    if (!vif_get_lit(env, vp, elem[i], &clause[i]))
-		return 0;
-	}
-	return 1;
+	int n = *lenp;
+	int r = 1;
+	STK_BEGIN(ERL_NIF_TERM, elem, n) {
+	    if (!enif_get_list(env, list, lenp, elem)) {
+		r = 0;
+		STK_LEAVE(elem);
+	    }
+	    n = *lenp;
+	    for (i = 0; i < n; i++) {
+		if (!vif_get_lit(env, vp, elem[i], &clause[i])) {
+		    r = 0;
+		    STK_LEAVE(elem);
+		}
+	    }
+	} STK_END(elem);
+	return r;
     }
 }
 
@@ -3081,16 +3112,22 @@ int vif_get_literal_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
     }
     else {
 	int n = *lenp;
-	ERL_NIF_TERM elem[n];
-	int i;
-	if (!enif_get_list(env, list, lenp, elem))
-	    return 0;
-	n = *lenp;
-	for (i = 0; i < n; i++) {
-	    if (!vif_get_literal(env, vp, elem[i], &clause[i]))
-		return 0;
-	}
-	return 1;
+	int r = 1;
+	STK_BEGIN(ERL_NIF_TERM, elem, n) {
+	    int i;
+	    if (!enif_get_list(env, list, lenp, elem)) {
+		r = 0;
+		STK_LEAVE(elem);
+	    }
+	    n = *lenp;
+	    for (i = 0; i < n; i++) {
+		if (!vif_get_literal(env, vp, elem[i], &clause[i])) {
+		    r = 0;
+		    STK_LEAVE(elem);
+		}
+	    }
+	} STK_END(elem);
+	return r;
     }
 }
 
@@ -4232,12 +4269,18 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     }
 
     n = (int)dynvar_size(vp->var_map);
-    
-    {
-	float nkey[2][n];
-	float pkey[2][n];
-	int sort_map[n];
-	int sort_key[2];    // sort order -1,-2,1,2 (0=not used)
+
+    STK_BEGIN(float, nkey1, n) {
+    STK_BEGIN(float, nkey2, n) {
+    STK_BEGIN(float, pkey1, n) {
+    STK_BEGIN(float, pkey2, n) {
+    STK_BEGIN(int, sort_map, n) {
+	float* nkey[2];
+	float* pkey[2];
+	int sort_key[2]; // sort order -1,-2,1,2 (0=not used)
+
+	nkey[0] = nkey1; nkey[1] = nkey2;
+	pkey[0] = pkey1; pkey[1] = pkey2;
 	
 	for (i = 1; i < 3; i++) {
 	    int k = i;
@@ -4268,7 +4311,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 		k = -k;
 	    sort_key[i-1] = k;
 	}
-
+	    
 	// install unbound variables
 	m = 0;
 	for (i = 1; i < n; i++) {
@@ -4278,13 +4321,13 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	
 	cdlist_init(&vp->order_list);
 	vp->order_next = NULL;   // make sure we do not point on moved variables
-    
+	
 	// sort unbound variables according to sort_keys
 	if (m > 0) {
 	    int i;
 	    int k1, k2;
 	    sort_param_t kp;
-
+	    
 	    kp.pkey[0] = pkey[0];
 	    kp.pkey[1] = pkey[1];
 	    kp.nkey[0] = nkey[0];
@@ -4310,7 +4353,12 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    dump_order("order_sort", vp);
 #endif
 	}
-    }
+    } STK_END0(sort_map);
+    } STK_END0(pkey2);
+    } STK_END0(pkey1);
+    } STK_END0(nkey2);
+    } STK_END0(nkey1);
+    
     ASSERT(valid_order(vp));
     return ATOM(ok);
 }
@@ -4325,20 +4373,24 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (vif_get_literal_list(env, vp, argv[1], &len, NULL)) {
-	literal_t* literals[len];
-	int i;
-	if (!vif_get_literal_list(env, vp, argv[1], &len, literals))
-	    return enif_make_badarg(env);
-	// insert all (reversed) first, will produce the correct order!
-	for (i = len-1; i >= 0; i--) {
-	    if (!cdlist_is_first(&vp->order_list, literals[i]->var)) {
-		cdlist_remove(&vp->order_list, literals[i]->var);
-		// FIXME insert before order_next!?
-		order_insert_first(vp, literals[i]->var);
+	ERL_NIF_TERM r = ATOM(ok);
+	STK_BEGIN(literal_t*, literals, len) {	
+	    int i;
+	    if (!vif_get_literal_list(env, vp, argv[1], &len, literals)) {
+		r = enif_make_badarg(env);
+		STK_LEAVE(literals);
 	    }
-	}
-	ASSERT(valid_order(vp));
-	return ATOM(ok);	
+	    // insert all (reversed) first, will produce the correct order!
+	    for (i = len-1; i >= 0; i--) {
+		if (!cdlist_is_first(&vp->order_list, literals[i]->var)) {
+		    cdlist_remove(&vp->order_list, literals[i]->var);
+		    // FIXME insert before order_next!?
+		    order_insert_first(vp, literals[i]->var);
+		}
+	    }
+	    ASSERT(valid_order(vp));
+	} STK_END(literals);
+	return r;
     }
     return enif_make_badarg(env);
 }
@@ -4356,18 +4408,22 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     if (vif_get_literal_list(env, vp, argv[1], &len, NULL)) {
-	literal_t* literals[len];
-	int i;
-	if (!vif_get_literal_list(env, vp, argv[1], &len, literals))
-	    return enif_make_badarg(env);
-	for (i = 0; i < (int)len; i++) {
-	    if (!cdlist_is_last(&vp->order_list, literals[i]->var)) {
-		order_remove(vp, literals[i]->var);
-		order_insert_last(vp, literals[i]->var);
+	ERL_NIF_TERM r = ATOM(ok);
+	STK_BEGIN(literal_t*, literals, len) {
+	    int i;
+	    if (!vif_get_literal_list(env, vp, argv[1], &len, literals)) {
+		r = enif_make_badarg(env);
+		STK_LEAVE(literals);
 	    }
-	}
+	    for (i = 0; i < (int)len; i++) {
+		if (!cdlist_is_last(&vp->order_list, literals[i]->var)) {
+		    order_remove(vp, literals[i]->var);
+		    order_insert_last(vp, literals[i]->var);
+		}
+	    }
+	} STK_END(literals);
 	ASSERT(valid_order(vp));
-	return ATOM(ok);	
+	return r;
     }
     return enif_make_badarg(env);
 }
@@ -6565,14 +6621,21 @@ static ERL_NIF_TERM varp_find_clause(ErlNifEnv* env, int argc,
     if (!enif_get_list_length(env, argv[1], &n))
 	return enif_make_badarg(env);
     else {
-	lit_t literals[n];
-	len = n;
-	if (!vif_get_lit_list(env, vp, argv[1], &len, literals))
-	    return enif_make_badarg(env);
-	len = sort_clause_array(vp, literals, len, true);
-	if ((cix = clause_find(vp, literals, len)) == CLAUSE_NONE)
-	    return enif_make_boolean(env, false);
-	return enif_make_int(env, (int)cix);
+	ERL_NIF_TERM r;
+	STK_BEGIN(lit_t, literals, n) {
+	    len = n;
+	    if (!vif_get_lit_list(env, vp, argv[1], &len, literals)) {
+		r = enif_make_badarg(env);
+		STK_LEAVE(literals);
+	    }
+	    len = sort_clause_array(vp, literals, len, true);
+	    if ((cix = clause_find(vp, literals, len)) == CLAUSE_NONE)
+		r = enif_make_boolean(env, false);
+	    else
+		r = enif_make_int(env, (int)cix);
+	} STK_END(literals);
+
+	return r;
     }
 }
 
@@ -6587,59 +6650,68 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
     varp_t* vp;
     cix_t  cix;
     clause_t* cp;
-    ERL_NIF_TERM bin;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_cix(env, vp, argv[1], &cix)) {
 	unsigned int len;
-
 	if (!enif_get_list_length(env, argv[1], &len))
 	    return enif_make_badarg(env);
 	else {
 	    int csize = len;
-	    ERL_NIF_TERM elem[csize];
-	    uint8_t buffer[5*csize+1];
-	    unsigned char* binptr;
-	    int x;
-	    int i;
-	    int n = 0;
+	    ERL_NIF_TERM r;
 	    
-	    if (!enif_get_list(env, argv[1], &csize, elem))
-		return enif_make_badarg(env);
-
-	    for (i = 0; i < csize; i++) {
-		if (!enif_get_int(env, elem[i], &x))
-		    return enif_make_badarg(env);
-		n += compress_int(x, &buffer[n]);
-	    }
-	    buffer[n++] = 0;
-	    binptr = enif_make_new_binary(env, n, &bin);
-	    memcpy(binptr, buffer, n);
+	    STK_BEGIN(ERL_NIF_TERM, elem, csize) {
+		STK_BEGIN(uint8_t, buffer, 5*csize+1) {
+		    unsigned char* binptr;
+		    int x;
+		    int i;
+		    int n = 0;
+	    
+		    if (!enif_get_list(env, argv[1], &csize, elem)) {
+			r = enif_make_badarg(env);
+			STK_LEAVE(buffer);
+		    }
+		    for (i = 0; i < csize; i++) {
+			if (!enif_get_int(env, elem[i], &x)) {
+			    r = enif_make_badarg(env);
+			    STK_LEAVE(buffer);
+			}
+			n += compress_int(x, &buffer[n]);
+		    }
+		    buffer[n++] = 0;
+		    binptr = enif_make_new_binary(env, n, &r);
+		    memcpy(binptr, buffer, n);
+		} STK_END(buffer);
+	    } STK_END0(elem);
+	    return r;
 	}
     }
     else {
+	ERL_NIF_TERM bin;
+
 	if ((cp = get_clause(vp, cix)) == NULL) {
 	    enif_make_new_binary(env, 0, &bin);
 	}
 	else {
 	    lit_t* lit = cp->lit;
 	    size_t csize = cp->size;
-	    uint8_t buffer[5*csize+1];
-	    unsigned char* binptr;
-	    int n = 0;
-	    int i;
+	    STK_BEGIN(uint8_t, buffer1, 5*csize+1) {
+		unsigned char* binptr;
+		int n = 0;
+		int i;
 	    
-	    for (i = 0; i < (int)csize; i++) {
-		int x = export_l(lit[i]);
-		n += compress_int(x, &buffer[n]);
-	    }
-	    buffer[n++] = 0;
-	    binptr = enif_make_new_binary(env, n, &bin);
-	    memcpy(binptr, buffer, n);
+		for (i = 0; i < (int)csize; i++) {
+		    int x = export_l(lit[i]);
+		    n += compress_int(x, &buffer1[n]);
+		}
+		buffer1[n++] = 0;
+		binptr = enif_make_new_binary(env, n, &bin);
+		memcpy(binptr, buffer1, n);
+	    } STK_END0(buffer1);		
 	}
+	return bin;
     }
-    return bin;
 }
 
 #define BUMP_RANK  -4  // bump implication clause number of steps
@@ -6963,7 +7035,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    cix_t cix;
+    cix_t cix = CLAUSE_NONE;
     clause_t* cp;
     int si;
     int ix;
@@ -6977,6 +7049,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 
 	list = argv[1];
 	size = 0;
+	// FIXME get_list_length!
 	while(enif_get_list_cell(env, list, &head, &tail)) {
 	    size++;
 	    list = tail;
@@ -6984,19 +7057,26 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
 	else {
-	    lit_t literals[size];
-	    lit_t* lpp = &literals[0];
-	
-	    list = argv[1];
-	    while(enif_get_list_cell(env, list, &head, &tail)) {
-		if (!vif_get_lit(env, vp, head, lpp))
-		    return enif_make_badarg(env);
-		lpp++;
-		list = tail;
-	    }
-	    size = sort_clause_array(vp, literals, size, true);
-	    if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE)
-		return enif_make_badarg(env);
+	    ERL_NIF_TERM r = ATOM(ok);
+	    STK_BEGIN(lit_t, literals, size) {
+		lit_t* lpp = &literals[0];
+		list = argv[1];
+		while(enif_get_list_cell(env, list, &head, &tail)) {
+		    if (!vif_get_lit(env, vp, head, lpp)) {
+			r = enif_make_badarg(env);
+			STK_LEAVE(literals);
+		    }
+		    lpp++;
+		    list = tail;
+		}
+		size = sort_clause_array(vp, literals, size, true);
+		if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE) {
+		    r = enif_make_badarg(env);
+		    STK_LEAVE(literals);
+		}
+	    } STK_END(literals);
+	    if (r != ATOM(ok))
+		return r;
 	}
     }
 
@@ -7869,22 +7949,24 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     if (level <= vp->level) {
 	int size    = (int)vp->undo[level].size;
 	variable_t* bp = vp->undo[level].bs;
-	ERL_NIF_TERM element[size];
-	int i = trail ? 0 : size-1;
-	int s  = trail ? 1 : -1;
-
-	while(bp) {
-	    if (clause_info)
-		element[i] = make_clause_info(env,vp,bp);
+	ERL_NIF_TERM r;
+	STK_BEGIN(ERL_NIF_TERM,element,size) {
+	    int i = trail ? 0 : size-1;
+	    int s  = trail ? 1 : -1;
+	    while(bp) {
+		if (clause_info)
+		    element[i] = make_clause_info(env,vp,bp);
+		else
+		    element[i] = make_binding(env,vp,bp);
+		bp = bp->bound_next;
+		i += s;
+	    }
+	    if (tuple)
+		r = enif_make_tuple_from_array(env, element, size);
 	    else
-		element[i] = make_binding(env,vp,bp);
-	    bp = bp->bound_next;
-	    i += s;
-	}
-	if (tuple)
-	    return enif_make_tuple_from_array(env, element, size);
-	else
-	    return enif_make_list_from_array(env, element, size);
+		r = enif_make_list_from_array(env, element, size);
+	} STK_END0(element);
+	return r;
     }
     if (tuple)
 	return enif_make_tuple(env, 0);
@@ -8086,24 +8168,26 @@ static ERL_NIF_TERM varp_get_marked(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     {
 	size_t size = vp->nmarked;
-	ERL_NIF_TERM elements[size];
-	int i = 0;
-	var = vp->marked_head;
-	while(var) {
-	    if (is_marked(var,MARK0)) {
-		int x = var->ix;
-		if (is_marked(var,MARKN))
-		    x = -x;
-		elements[i++] = enif_make_int(env, x);
+	ERL_NIF_TERM r;
+	STK_BEGIN(ERL_NIF_TERM, elements, size) {
+	    int i = 0;
+	    var = vp->marked_head;
+	    while(var) {
+		if (is_marked(var,MARK0)) {
+		    int x = var->ix;
+		    if (is_marked(var,MARKN))
+			x = -x;
+		    elements[i++] = enif_make_int(env, x);
+		}
+		var = var->mark_next;
 	    }
-	    var = var->mark_next;
-	}
-	ASSERT(i == (int)size);
-
-	if (tuple)
-	    return enif_make_tuple_from_array(env, elements, size);
-	else
-	    return enif_make_list_from_array(env, elements, size);
+	    ASSERT(i == (int)size);
+	    if (tuple)
+		r = enif_make_tuple_from_array(env,elements,size);
+	    else
+		r = enif_make_list_from_array(env,elements,size);
+	} STK_END0(elements);
+	return r;
     }
 }
 
@@ -8156,34 +8240,45 @@ static ERL_NIF_TERM varp_mark_intersect_var(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (enif_get_tuple(env, argv[2], &arity, &elem0)) { // as tuple
 	int size;
-	ERL_NIF_TERM element[arity];
-	if ((size=mark_intersect_var(env, vp, var, elem0, element, arity)) < 0)
-	    return enif_make_badarg(env);
-	if (tuple)
-	    return enif_make_tuple_from_array(env, element, size);
-	else
-	    return enif_make_list_from_array(env, element, size);
+	ERL_NIF_TERM r;
+	STK_BEGIN(ERL_NIF_TERM, element, arity) {
+	    if ((size=mark_intersect_var(env,vp,var,elem0,element,arity)) < 0) {
+		r = enif_make_badarg(env);
+		STK_LEAVE(element);
+	    }
+	    if (tuple)
+		r = enif_make_tuple_from_array(env,element,size);
+	    else
+		r = enif_make_list_from_array(env, element, size);
+	} STK_END(element);
+	return r;
     }
     else if (enif_get_list_length(env, argv[2], &len)) { // as list
-	ERL_NIF_TERM elem[len];
-	ERL_NIF_TERM element[len];	
-	ERL_NIF_TERM list;
-	ERL_NIF_TERM head, tail;
-	int i = 0;
-	int size;
+	ERL_NIF_TERM r;
+	STK_BEGIN(ERL_NIF_TERM, elem, len) {
+	    STK_BEGIN(ERL_NIF_TERM, element1, len) {
+		ERL_NIF_TERM list;
+		ERL_NIF_TERM head, tail;
+		int i = 0;
+		int size;
 	
-	list = argv[2];
-	while(enif_get_list_cell(env, list, &head, &tail)) {
-	    elem[i++] = head;
-	    list = tail;
-	}
-	ASSERT(i == (int)len);
-	if ((size=mark_intersect_var(env, vp, var, elem, element, len)) < 0)
-	    return enif_make_badarg(env);
-	if (tuple)
-	    return enif_make_tuple_from_array(env, element, size);
-	else
-	    return enif_make_list_from_array(env, element, size);	
+		list = argv[2];
+		while(enif_get_list_cell(env, list, &head, &tail)) {
+		    elem[i++] = head;
+		    list = tail;
+		}
+		ASSERT(i == (int)len);
+		if ((size=mark_intersect_var(env,vp,var,elem,element1,len))<0)
+		    r = enif_make_badarg(env);
+		else {
+		    if (tuple)
+			r = enif_make_tuple_from_array(env, element1, size);
+		    else
+			r = enif_make_list_from_array(env, element1, size);
+		}
+	    } STK_END0(elem);
+	} STK_END0(element1);
+	return r;
     }
     else
 	return enif_make_badarg(env);

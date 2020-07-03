@@ -4,13 +4,15 @@
 
 #include "pynif.h"
 
-#ifndef WIN32
+
+#if defined(__WIN32__) || defined(_WIN32)
+#include <windows.h>
+#else
 #include <stdarg.h>
 #include <stdint.h>
 #include <dlfcn.h>
-#else
-#include <windows.h>
 #endif
+
 #include <limits.h>
 #include <stddef.h>
 
@@ -30,6 +32,19 @@
 #define UNUSED(var) (void)var
 // #define DBG(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
 #define DBG(fmt, ...)
+
+#if defined(__WIN32__) || defined(_WIN32)
+#define ALLOC_STACK(n)  _malloca((n))
+#define FREE_STACK(ptr) _freea((ptr))
+#else
+#define ALLOC_STACK(n) alloca((n))
+#define FREE_STACK(ptr)
+#endif
+
+#define STK_BEGIN(type,name,n) do { type* name = ALLOC_STACK(sizeof(type)*(n)); do {
+#define STK_LEAVE(name) goto L##name
+#define STK_END0(name) } while(0); FREE_STACK((name)); } while(0)    
+#define STK_END(name)  } while(0); L##name: FREE_STACK((name)); } while(0)
 
 #ifdef Py_STRINGOBJECT_H
 
@@ -253,12 +268,13 @@ ERL_NIF_TERM enif_make_atom(ErlNifEnv* env, const char* name)
 
 ERL_NIF_TERM enif_make_atom_len(ErlNifEnv* env, const char* name, size_t len)
 {
-    ERL_NIF_TERM atom;
-    char name2[len+1];
-    memcpy(name2, name, len);
-    name2[len] = '\0';
-    make_atom(env, name2, 0, &atom);
-    return atom;
+    ERL_NIF_TERM r;
+    STK_BEGIN(char, name2, len+1) {
+	memcpy(name2, name, len);
+	name2[len] = '\0';
+	make_atom(env, name2, 0, &r);
+    } STK_END0(name2);
+    return r;
 }
 
 int enif_make_existing_atom(ErlNifEnv* env, const char* name, ERL_NIF_TERM* atom, ErlNifCharEncoding coding)
@@ -2003,91 +2019,94 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
     }
     case LIST_EXT: {
 	size_t n;
+	size_t r = 0;
 	if (len < 5) return 0;
 	n = get_uint32(ptr+1);
 	DBG("decode_term: list length=%ld\n", (long)n);
-	{
+	STK_BEGIN(PyObject*, seq1, n) {
 	    PyObject* list;
-	    PyObject* seq[n];
 	    size_t slen;
 	    int i;
-	    
-	    if ((slen = decode_seq(ptr+5, len-5, seq, n)) == 0)
-		return 0;
+	    if ((slen = decode_seq(ptr+5, len-5, seq1, n)) == 0)
+		STK_LEAVE(seq1);
 	    if (len-5-slen < 1)
-		return 0;
+		STK_LEAVE(seq1);
 	    if (ptr[5+slen] != NIL_EXT)
-		return 0;
+		STK_LEAVE(seq1);
 	    if ((list = PyList_New(n)) == NULL)
-		return 0;
+		STK_LEAVE(seq1);
 	    for (i = 0; i < (int)n; i++)
-		PyList_SET_ITEM(list, i, seq[i]);
-	    *term = list;	    
-	    return 5+slen+1;
-	}
+		PyList_SET_ITEM(list, i, seq1[i]);
+	    *term = list;
+	    r = 5+slen+1;
+	} STK_END(seq1);
+	return r;
     }
     case SMALL_TUPLE_EXT: {
 	size_t n;
+	size_t r = 0;
 	if (len < 2) return 0;
 	n = get_uint8(ptr+1);
 	DBG("decode_term: tuple length=%ld\n", (long)n);
-	{
+	STK_BEGIN(PyObject*, seq2, n) {	
 	    PyObject* tuple;
-	    PyObject* seq[n];
 	    size_t slen;
 	    int i;
 	    
-	    if ((slen = decode_seq(ptr+2, len-2, seq, n)) == 0)
-		return 0;
+	    if ((slen = decode_seq(ptr+2, len-2, seq2, n)) == 0)
+		STK_LEAVE(seq2);
 	    if ((tuple = PyTuple_New(n)) == NULL)
-		return 0;
+		STK_LEAVE(seq2);
 	    for (i = 0; i < (int)n; i++)
-		PyTuple_SetItem(tuple, i, seq[i]);
+		PyTuple_SetItem(tuple, i, seq2[i]);
 	    *term = tuple;
-	    return 2+slen;
-	}
+	    r = 2+slen;
+	} STK_END(seq2);
+	return r;
     }
     case LARGE_TUPLE_EXT: {
 	size_t n;
+	size_t r = 0;
 	if (len < 5) return 0;
 	n = get_uint32(ptr+1);
 	DBG("decode_term: tuple length=%ld\n",(long)n);
-	{
+	STK_BEGIN(PyObject*, seq3, n) {
 	    PyObject* tuple;
-	    PyObject* seq[n];
 	    size_t slen;
 	    int i;
 	    
-	    if ((slen = decode_seq(ptr+5, len-5, seq, n)) == 0)
-		return 0;
+	    if ((slen = decode_seq(ptr+5, len-5, seq3, n)) == 0)
+		STK_LEAVE(seq3);
 	    if ((tuple = PyTuple_New(n)) == NULL)
-		return 0;
+		STK_LEAVE(seq3);
 	    for (i = 0; i < (int)n; i++)
-		PyTuple_SetItem(tuple, i, seq[i]);
+		PyTuple_SetItem(tuple, i, seq3[i]);
 	    *term = tuple;
-	    return 2+slen;
-	}
+	    r = 2+slen;
+	} STK_END(seq3);
+	return r;
     }
     case MAP_EXT: {
 	size_t n;
+	size_t r = 0;
 	if (len < 5) return 0;
 	n = get_uint32(ptr+1);
 	DBG("decode_term: map length=%ld\n",(long)n);
-	{
+	STK_BEGIN(PyObject*, seq4, 2*n) {
 	    PyObject* dict;
-	    PyObject* seq[2*n];
 	    size_t slen;
 	    int i;
 	    
-	    if ((slen = decode_seq(ptr+5, len-5, seq, 2*n)) == 0)
-		return 0;
+	    if ((slen = decode_seq(ptr+5, len-5, seq4, 2*n)) == 0)
+		STK_LEAVE(seq4);
 	    if ((dict = PyDict_New()) == NULL)
-		return 0;
+		STK_LEAVE(seq4);
 	    for (i = 0; i < (int)n; i += 2)
-		PyDict_SetItem(dict, seq[i], seq[i+1]);
+		PyDict_SetItem(dict, seq4[i], seq4[i+1]);
 	    *term = dict;
-	    return 5+slen;
-	}
+	    r = 5+slen;
+	} STK_END(seq4);
+	return r;
     }
     default:
 	return 0;
@@ -2689,7 +2708,7 @@ pf248,pf249,pf250,pf251,pf252,pf253,pf254,pf255,
 };
 
 
-#ifdef WIN32
+#if defined(__WIN32__) || defined(_WIN32)
 #define RTLD_LAZY 0
 typedef HMODULE dl_handle_t;
 void * dlsym(HMODULE Lib, const char *func) {
