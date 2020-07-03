@@ -1960,13 +1960,13 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	if (len < 3+blen) return 0;
 	DBG("decode_term: #digits=%ld, sign=%d\n", (long)blen, ptr[2]);
 	if (ptr[2]) { // sign, negate bytes
-	    STK_BEGIN(unsigned char, digits, blen+1) {
-		blen = negate_bytes(ptr+3, blen, digits);
-		if ((*term = _PyLong_FromByteArray(digits, blen, 1, 1)) == NULL)
+	    STK_BEGIN(unsigned char, digits1, blen+1) {
+		blen = negate_bytes(ptr+3, blen, digits1);
+		if ((*term = _PyLong_FromByteArray(digits1,blen,1,1)) == NULL)
 		    r = 0;
 		else
 		    r = blen;
-	    } STK_END(digits);
+	    } STK_END0(digits1);
 	    if (r == 0)
 		return 0;
 	}
@@ -1984,13 +1984,13 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	if (len < 6+blen) return 0;
 	DBG("decode_term: #digits=%ld, sign=%d\n", (long)blen, ptr[5]);
 	if (ptr[5]) { // sign, negate bytes
-	    STK_BEGIN(unsigned char, digits, blen+1) {
-		blen = negate_bytes(ptr+6, blen, digits);
-		if ((*term = _PyLong_FromByteArray(digits, blen, 1, 1)) == NULL)
+	    STK_BEGIN(unsigned char, digits2, blen+1) {
+		blen = negate_bytes(ptr+6, blen, digits2);
+		if ((*term = _PyLong_FromByteArray(digits2,blen,1,1)) == NULL)
 		    r = 0;
 		else
-		    r = blean;
-	    } STK_END(digits);
+		    r = blen;
+	    } STK_END0(digits2);
 	    if (r == 0)
 		return 0;	    
 	}
@@ -2583,7 +2583,7 @@ int enif_print(FILE* out, ERL_NIF_TERM term)
 	ptr = format_term(term, buf, 10, 1);
 	*ptr = '\0';
 	r = fprintf(out, "%s", buf);
-    } STK_END(buf);
+    } STK_END0(buf);
     return r;
 }
 
