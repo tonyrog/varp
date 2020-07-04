@@ -31,8 +31,8 @@
 #define MAX_PYNIF_FUNCS 256
 
 #define UNUSED(var) (void)var
-// #define DBG(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
-#define DBG(fmt, ...)
+#define DBG(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
+// #define DBG(fmt, ...)
 
 #if defined(__WIN32__) || defined(_WIN32)
 #define ALLOC_STACK(n)  _malloca((n))
@@ -2565,7 +2565,7 @@ static char* format_term(ERL_NIF_TERM term, char* ptr, int base, int ref)
     if (ref) {
 	char buf[16];
 	int len;
-	sprintf(buf, "%lld", Py_REFCNT(term));
+	sprintf(buf, "%zd", Py_REFCNT(term));
 	len = strlen(buf);
 	*ptr++ = '/';
 	memcpy(ptr, buf, len);
