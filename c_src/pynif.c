@@ -1564,7 +1564,7 @@ ErlNifResourceType* enif_open_resource_type_x(
     DBG("rtp->tp_itemsize = %zd\r\n",  rtp->tp.tp_itemsize);
     
     if (PyType_Ready((PyTypeObject*) rtp) < 0) {
-	DBG("PyType_Ready failed\n");
+	DBG("%sPyType_Ready failed\n", "");
 	return NULL;
     }
     if (flags & ERL_NIF_RT_CREATE)
@@ -2625,12 +2625,12 @@ static PyObject* pynif_call(PyObject* self, PyObject* args, int j)
 	if (nif_ari[i] == argc) {
 	    int k = nif_fun[i];
 	    PyObject* r;
-	    DBG(stderr, "  NIF call %s/%d k=%d\r\n",
+	    DBG("  NIF call %s/%d k=%d\r\n",
 		nif_entry->funcs[k].name,
 		nif_entry->funcs[k].arity,
 		k);
 	    r = (*nif_entry->funcs[k].fptr)(&nif_env, argc, argv);
-	    DBG("NIF result: ");
+	    DBG("%sNIF result: ", "");
 	    if (r != NULL) {
 		Py_INCREF(r);
 		// enif_print(stderr, r);
