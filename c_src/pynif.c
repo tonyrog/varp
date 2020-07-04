@@ -2777,7 +2777,17 @@ static PyModuleDef def;
 #define MODNAME CAT2(init,PYNIFNAME)
 #endif
 
-PyMODINIT_FUNC MODNAME(void)
+#if defined(__WIN32__) || defined(_WIN32)
+#if (PY_MAJOR_VERSION > 3) || ((PY_MAJOR_VERSION==3) && (PY_MINOR_VERSION>=0))
+#define MODINIT __declspec(dllexport) PyObject*
+#else
+#define MODINIT __declspec(dllexport) void
+#endif
+#else
+#define MODINIT  PyObject*
+#endif
+
+MODINIT MODNAME(void)
 {
     // now convert all funcs into PyMethodDef array
     PyObject *obj_true;
