@@ -116,7 +116,7 @@ static void autodispose(ErlNifEnv* env, PyObject* obj)
     if (list != NULL) {
 	PyList_Append(list, obj);  // Append add a REF
 	Py_DecRef(obj);
-	DBG("append %p to autodispose refcount=%ld\r\n", obj, Py_REFCNT(obj));
+	DBG("append %p to autodispose refcount=%zd\r\n", obj, Py_REFCNT(obj));
     }
 }
 
@@ -293,7 +293,7 @@ static int get_string(PyObject* string, char* buf, unsigned len,
     if (str_len < len) {
 	memcpy(buf, str, str_len);
 	buf[str_len] = '\0';
-	return str_len+1;
+	return (int)str_len+1;
     }
     return 0;
 }
@@ -1252,7 +1252,7 @@ static ssize_t iolist_copy(ERL_NIF_TERM term, unsigned char* dst, ssize_t dlen)
 	char* src = PyByteArray_AsString(term);
 	if (slen > dlen) return -1;
 	memcpy(dst, src, slen);
-	DBG("copied %ld bytes from bytearray\r\n", slen);
+	DBG("copied %zd bytes from bytearray\r\n", slen);
 	return slen;
     }
     else if (String_Check(term)) {
@@ -1260,7 +1260,7 @@ static ssize_t iolist_copy(ERL_NIF_TERM term, unsigned char* dst, ssize_t dlen)
 	char* src = String_AsString(term);
 	if (slen > dlen) return -1;
 	memcpy(dst, src, slen);
-	DBG("copied %ld bytes from string\r\n", slen);
+	DBG("copied %zd bytes from string\r\n", slen);
 	return slen;
     }
     else if (PyList_Check(term)) {
@@ -1547,8 +1547,8 @@ ErlNifResourceType* enif_open_resource_type_x(
     ResourceType* rtp;
     UNUSED(env);  // FIXME store all reource types in environment?
 
-    DBG("PyType_Type.tp_basicsize = %ld\r\n", PyType_Type.tp_basicsize);
-    DBG("PyType_Type.tp_itemsize = %ld\r\n",  PyType_Type.tp_itemsize);
+    DBG("PyType_Type.tp_basicsize = %zd\r\n", PyType_Type.tp_basicsize);
+    DBG("PyType_Type.tp_itemsize = %zd\r\n",  PyType_Type.tp_itemsize);
 
     rtp = PyMem_Malloc(sizeof(ResourceType));
     memcpy(rtp, &TemplateType, sizeof(TemplateType));
@@ -1560,8 +1560,8 @@ ErlNifResourceType* enif_open_resource_type_x(
     // store callbacks
     rtp->ini = *init;
 
-    DBG("rtp->tp_basicsize = %ld\r\n", rtp->tp.tp_basicsize);
-    DBG("rtp->tp_itemsize = %ld\r\n",  rtp->tp.tp_itemsize);
+    DBG("rtp->tp_basicsize = %zd\r\n", rtp->tp.tp_basicsize);
+    DBG("rtp->tp_itemsize = %zd\r\n",  rtp->tp.tp_itemsize);
     
     if (PyType_Ready((PyTypeObject*) rtp) < 0) {
 	DBG("PyType_Ready failed\n");
@@ -1770,7 +1770,7 @@ static ssize_t bytesize_of_term(ERL_NIF_TERM term)
 	value = Integer_AsLong(term);
 	if ((value >= 0) && (value <= 0xff))
 	    return 1+1;  // small_integer (uint8)
-	else if ((value >= -2147483648) && (value <= 2147483647))	
+	else if ((value >= -2147483648) && (value <= 2147483647))
 	    return 1+4;  // integer (int32)
 	else // encode as bignum
 	    return 1+1+1+4; // size,sign,byte*4
