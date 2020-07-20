@@ -2134,7 +2134,7 @@ static void arc4_stir(arc4_stream_t* as)
     rdat.t = time(0);
     
 #if defined(__WIN32__) || defined(_WIN32)
-    for (i = 0; i < sizeof(rdat.rnd); i++)
+    for (i = 0; i < (int) sizeof(rdat.rnd); i++)
 	rdat.rnd[i] = i;
 #else
     {
