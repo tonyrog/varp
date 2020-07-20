@@ -1099,7 +1099,7 @@ int enif_map_iterator_prev(ErlNifEnv *env, ErlNifMapIterator *iter)
 }
 
 // FIXME: this is n^2!
-// possibly allow for at least NEXT beeing efficent
+// possibly allow for at least NEXT beeing efficient
 int enif_map_iterator_get_pair(ErlNifEnv *env, ErlNifMapIterator *iter,
 			       ERL_NIF_TERM *key, ERL_NIF_TERM *value)
 {
@@ -2768,8 +2768,6 @@ static PyMethodDef methods[MAX_PYNIF_FUNCS];
 #define RETURN_MODULE(m) return
 #endif
 
-
-
 #if (PY_MAJOR_VERSION > 3) || ((PY_MAJOR_VERSION==3) && (PY_MINOR_VERSION>=0))
 static PyModuleDef def;
 #define MODNAME CAT2(PyInit_,PYNIFNAME)
@@ -2777,17 +2775,31 @@ static PyModuleDef def;
 #define MODNAME CAT2(init,PYNIFNAME)
 #endif
 
-#if defined(__WIN32__) || defined(_WIN32)
-#if (PY_MAJOR_VERSION > 3) || ((PY_MAJOR_VERSION==3) && (PY_MINOR_VERSION>=0))
-#define MODINIT __declspec(dllexport) PyObject*
+#if defined(__cplusplus)
+#  define MODEXTERN extern "C"
 #else
-#define MODINIT __declspec(dllexport) void
-#endif
-#else
-#define MODINIT  PyObject*
+#  define MODEXTERN
 #endif
 
-MODINIT MODNAME(void)
+#if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
+#  define MODEXPORT MODEXTERN __declspec(dllexport)
+#else
+#  if defined(__GNUC__) && __GNUC__ >= 4
+#    define MODEXPORT MODEXTERN __attribute__ ((visibility("default")))
+#  elif defined (__SUNPRO_C) && (__SUNPRO_C >= 0x550)
+#    define MODEXPORT MODEXTERN __global
+#  else
+#    define MODEXPORT MODEXTERN
+#  endif
+#endif
+
+#if (PY_MAJOR_VERSION > 3) || ((PY_MAJOR_VERSION==3) && (PY_MINOR_VERSION>=0))
+#  define MODTYPE MODEXPORT PyObject*
+#else
+#  define MODTYPE MODEXPORT void
+#endif
+
+MODTYPE MODNAME(void)
 {
     // now convert all funcs into PyMethodDef array
     PyObject *obj_true;
