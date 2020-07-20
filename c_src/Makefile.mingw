@@ -31,20 +31,22 @@ VARP_NIF_OBJS = varc_nif.obj
 
 debug release all: $(VARP_NIF) $(VARP_EXE) $(VARP_PYD)
 
-$(VARP_NIF): $(VARP_NIF_OBJS) 
-	$(LD_SHARED) -o $@ $(VARP_NIF_OBJS) $(LDFLAGS)
+$(VARP_NIF): $(VARP_NIF_OBJS)  xnif_funcs.obj
+	$(LD_SHARED) -o $@ $(VARP_NIF_OBJS) xnif_funcs.obj $(LDFLAGS)
 
-$(VARP_PYD): varpy.o $(VARP_NIF_OBJS)
-	$(LD_SHARED) $(PYTHON_LDFLAGS) -o $@ varpy.o $(VARP_NIF_OBJS)
+$(VARP_PYD): varpy.obj $(VARP_NIF_OBJS)
+	$(LD_SHARED) $(PYTHON_LDFLAGS) -o $@ $(VARP_NIF_OBJS) varpy.obj
 
-varpy.o: $(HOME)/erlang/pynif/c_src/pynif.c
+varpy.obj: $(HOME)/erlang/pynif/c_src/pynif.c
 	$(CC) $(CFLAGS) -o$@ -DPYNIFNAME=varp -c $<
 
-$(VARP_EXE): varp.c varp_res.o
-	$(CC) -o $(VARP_EXE) varp.c varp_res.o -mwindows $(LIBS)
+$(VARP_EXE): varp.c varp_res.obj
+	$(CC) -o $(VARP_EXE) varp.c varp_res.obj -mwindows $(LIBS)
 
-varp_res.o: varp.rc
-	windres -i varp.rc -o varp_res.o
+varp_res.obj: varp.rc
+	windres -i varp.rc -o varp_res.obj
+
+xnif_funcs.obj:	xnif_funcs.h
 
 %.obj: %.c
 	$(CC) -c -o $@ $(CFLAGS) $<
