@@ -1547,6 +1547,10 @@ ErlNifResourceType* enif_open_resource_type_x(
     ResourceType* rtp;
     UNUSED(env);  // FIXME store all reource types in environment?
 
+    printf("stderr = %p\r\n", stderr);
+    
+    DBG("enif_open_resource_type_x called\r\n");
+
     DBG("PyType_Type.tp_basicsize = %zd\r\n", PyType_Type.tp_basicsize);
     DBG("PyType_Type.tp_itemsize = %zd\r\n",  PyType_Type.tp_itemsize);
 
@@ -2793,6 +2797,7 @@ static PyModuleDef def;
 MODEXPORT void xnif_init(ErlNifEnv* env)
 {
     UNUSED(env);
+    DBG("xnif_init called\r\n");
 }
 
 MODTYPE MODNAME(void)
