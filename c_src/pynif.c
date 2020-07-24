@@ -2828,8 +2828,10 @@ MODTYPE MODNAME(void)
     
     nif_entry = nif_init();
 
-    DBG("nif ABI version %d.%d min_erts=%s\r\n",
-	nif_entry->major, nif_entry->minor, nif_entry->min_erts);
+    DBG("nif %s, ABI version %d.%d min_erts=%s\r\n",
+	nif_entry->name, nif_entry->major, nif_entry->minor,
+	nif_entry->min_erts);
+    DBG("nif num_of_funcs=%d\r\n", nif_entry->num_of_funcs);
 
     if (nif_entry->num_of_funcs > MAX_PYNIF_FUNCS) {
 	fprintf(stderr, "sorry to many functions limit is %d \r\n",
@@ -2922,7 +2924,7 @@ MODTYPE MODNAME(void)
 
     if (nif_entry->load != NULL) {
 	ERL_NIF_TERM load_info = enif_make_int(&nif_env, 0);
-	DBG("calling load\r\n");	
+	DBG("calling load, addr=%p\r\n", nif_entry->load);	
 	int r = (*nif_entry->load)(&nif_env, &nif_env.priv_data, load_info);
 	if (r < 0) {
 	    DBG("load failed\r\n");
