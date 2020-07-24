@@ -5,7 +5,7 @@
 #include "pynif.h"
 
 
-#if defined(__WIN32__) || defined(_WIN32)
+#if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
 #include <windows.h>
 #include <malloc.h>
 #else
@@ -34,7 +34,7 @@
 #define DBG(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
 // #define DBG(fmt, ...)
 
-#if defined(__WIN32__) || defined(_WIN32)
+#if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
 #define ALLOC_STACK(n)  _malloca((n))
 #define FREE_STACK(ptr) _freea((ptr))
 #else
@@ -2723,7 +2723,7 @@ pf248,pf249,pf250,pf251,pf252,pf253,pf254,pf255,
 };
 
 
-#if defined(__WIN32__) || defined(_WIN32)
+#if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
 #define RTLD_LAZY 0
 typedef HMODULE dl_handle_t;
 void * dlsym(HMODULE Lib, const char *func) {
@@ -2736,16 +2736,6 @@ HMODULE dlopen(const CHAR *DLL, int unused) {
 #else
 typedef void * dl_handle_t;
 #endif
-
-void xnif_init()
-{
-    // called from for example varc_nif to initialize nif extensions that
-    // are used to glue erlang/python a bit better
-}
-
-// #ifndef PYNIFFILE
-// extern ErlNifEntry* nif_init(void);
-// #endif
 
 static int is_method_installed(PyMethodDef* methods, size_t num_methods,
 			       const char* name)
@@ -2799,6 +2789,12 @@ static PyModuleDef def;
 #  define MODTYPE MODEXPORT void
 #endif
 
+// function wrapper use when erlang code need special init (keep it)
+MODEXPORT void xnif_init(ErlNifEnv* env)
+{
+    UNUSED(env);
+}
+
 MODTYPE MODNAME(void)
 {
     // now convert all funcs into PyMethodDef array
@@ -2831,6 +2827,9 @@ MODTYPE MODNAME(void)
 #endif
     
     nif_entry = nif_init();
+
+    DBG("nif ABI version %d.%d min_erts=%s\r\n",
+	nif_entry->major, nif_entry->minor, nif_entry->min_erts);
 
     if (nif_entry->num_of_funcs > MAX_PYNIF_FUNCS) {
 	fprintf(stderr, "sorry to many functions limit is %d \r\n",

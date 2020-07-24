@@ -109,7 +109,7 @@ varpy.__t__ | varpy.__f__ | varpy.__undefined__
 
 
 ``` python
-varpy.bind(vp, x, [,leve])
+varpy.bind(vp, x, [,level])
 ```
 
 Bind variable x to True. If level is given then that level 
@@ -199,13 +199,13 @@ move (with warning) to a high level as wll.
 
 
 ``` python
-varpy.undo_level(vp, l)
+varpy.undo_level(vp, level)
 ```
 
-Undo all bindings on level 'l'
+Undo all bindings on level 'level'
 
 ``` python
-varpy.undo(varp)
+varpy.undo(vp)
 ```
 
 Undo bindings typically after an nbind. Undo will undo all bindings
@@ -213,7 +213,7 @@ until a decision and flip the variable if not already flipped.
 
 
 ``` python
-varpy.bcp(varp [,[x1,..,xn] [,all]])
+varpy.bcp(vp [,[x1,..,xn] [,all]])
 ```
 
 Run value propagation. Return True if no
@@ -221,7 +221,7 @@ contradiction is found, False otherwise.
 
 __[EXPERIMENTAL]__
 
-If literals x1..Xn are given they are checked for
+If literals x1..xn are given they are checked for
 "turbo" rule, that is if all clauses that xi
 is a part of are true regardless of the value of xi.
 If 'all' is true then all xi's must be true for the
@@ -232,7 +232,7 @@ __[EXPERIMENTAL]__
 
 
 ``` python
-varpy.nbcp(varp)
+varpy.nbcp(vp)
 ```
 
 decide and bind next unbound variables until either
@@ -242,9 +242,9 @@ nbcp can be use with undo to implement a tight loop
 for simple backtracking.
 
 ``` python
-    def bt(v):
-        while not varpy.nbcp(v):
-          if varpy.undo(v) == False:
+    def bt(vp):
+        while not varpy.nbcp(vp):
+          if varpy.undo(vp) == False:
             return False # contradiction
         return True # model
 ```
@@ -524,7 +524,7 @@ Set user value for literal x to count.
 varpy.conflict(vp, level, bump, i)
 ```
 
-Do conflict analysis, called with level where the conflict numner i was found
+Do conflict analysis, called with level where the conflict i was found
 and the bump factor that is applied to variables involved in the conflict.
 Return value is a clause index in clause-set varpy.__alpha__. This
 clause may then be minimized and later moved to varpy.__gamma__.
@@ -544,7 +544,7 @@ varpy.move_clause(vp, cix, set)
 
 Move clause cix to clause-set 'set'.
 This function is currently limited to clause in varpy.__alpha__
-and set must be varpy.__GAMMA__
+and set must be varpy.__gamma__
 
 
 ``` python
