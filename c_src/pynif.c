@@ -2797,6 +2797,7 @@ static PyModuleDef def;
 MODEXPORT void xnif_init(ErlNifEnv* env)
 {
     UNUSED(env);
+    printf("stderr = %p\r\n", stderr);    
     DBG("xnif_init called\r\n");
 }
 
