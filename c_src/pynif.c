@@ -1547,7 +1547,7 @@ ErlNifResourceType* enif_open_resource_type_x(
     ResourceType* rtp;
     UNUSED(env);  // FIXME store all reource types in environment?
 
-    printf("stderr = %p\r\n", stderr);
+    // printf("stderr = %p\r\n", stderr);
     
     DBG("enif_open_resource_type_x called\r\n");
 

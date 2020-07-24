@@ -8521,7 +8521,7 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     rinit.down = varp_down;
 
     // Create resource types
-    DBG("calling enif_open_rousource_type_x\r\n");
+    DBG("calling enif_open_resource_type_x\r\n");
     varp_res = enif_open_resource_type_x(env, "varp", &rinit,
 					 ERL_NIF_RT_CREATE,
 					 &tried);
