@@ -140,11 +140,11 @@ typedef enum {
 #define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
 
-#define DBG1(...) do { enif_fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
+#define DBG1(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 #define DBG0(...)
 
 #ifdef DEBUG
-#define DBG(...) do { enif_fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
+#define DBG(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 #else
 #define DBG(...)
 #endif
@@ -2922,7 +2922,7 @@ static int clauseset_hash_insert(varp_t* vp, int si)
     int i;
     size_t n = dynvec_size(vp->clauseset, si);
     
-    DBG("clauseset_hash_insert: si=%dm n=%d\r\n", si, n);
+    DBG("clauseset_hash_insert: si=%dm n=%ld\r\n", si, n);
     
     for (i = 0; i < (int)n; i++) {
 	clause_t* cp = get_clause(vp, MAKE_CIX(si,i));
@@ -4953,7 +4953,7 @@ static inline void xref_del(varp_t* vp, clause_t* cp, pos_t p)
 	    }
 	    xptr++;
 	}
-	DBG("xref not found for clause %lu pos = %ld\r\n", cp->cix, p);	
+	DBG("xref not found for clause %u pos = %d\r\n", cp->cix, p);	
     }
 }
 
@@ -5963,7 +5963,7 @@ static void bcp_unwatch(varp_t* vp)
 		}
 		else {
 		    DBG("%d: add edge lists w0=%d, w1=%d, w2=%d\r\n", cp->cix,
-			w0, w1);
+			w0, w1, w2);
 #ifdef DEBUG_EDGE
 		    print_sym_clause(vp, "EDGE-INSERT", cp);
 		    enif_fprintf(stdout, "a:%s=%s ",
