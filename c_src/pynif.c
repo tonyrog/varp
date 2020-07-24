@@ -31,8 +31,8 @@
 #define MAX_PYNIF_FUNCS 256
 
 #define UNUSED(var) (void)var
-#define DBG(fmt, ...) fprintf(stderr, fmt, __VA_ARGS__)
-// #define DBG(fmt, ...)
+#define DBG(...) fprintf(stderr, __VA_ARGS__)
+// #define DBG(...)
 
 #if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
 #define ALLOC_STACK(n)  _malloca((n))
@@ -1564,7 +1564,7 @@ ErlNifResourceType* enif_open_resource_type_x(
     DBG("rtp->tp_itemsize = %zd\r\n",  rtp->tp.tp_itemsize);
     
     if (PyType_Ready((PyTypeObject*) rtp) < 0) {
-	DBG("%sPyType_Ready failed\n", "");
+	DBG("PyType_Ready failed\n");
 	return NULL;
     }
     if (flags & ERL_NIF_RT_CREATE)
@@ -2630,7 +2630,7 @@ static PyObject* pynif_call(PyObject* self, PyObject* args, int j)
 		nif_entry->funcs[k].arity,
 		k);
 	    r = (*nif_entry->funcs[k].fptr)(&nif_env, argc, argv);
-	    DBG("%sNIF result: ", "");
+	    DBG("NIF result: ");
 	    if (r != NULL) {
 		Py_INCREF(r);
 		// enif_print(stderr, r);
@@ -2864,6 +2864,7 @@ MODTYPE MODNAME(void)
 	nif_fun[fi] = i;
 	fi++;
 	fun_end[j] = fi;
+	DBG("install function %s/%d\r\n", name, arity);
 
 	// install all function with same name
 	for (k = i+1; k < nif_entry->num_of_funcs; k++) {
@@ -2875,11 +2876,11 @@ MODTYPE MODNAME(void)
 		nif_fun[fi]  = k;
 		fi++;
 		fun_end[j] = fi;
+		DBG("install function %s/%d\r\n", name, arity);		
 	    }
 	}
     }
     
-
 #if (PY_MAJOR_VERSION > 3) || ((PY_MAJOR_VERSION==3) && (PY_MINOR_VERSION>=0))
     {
 	PyModuleDef_Init(&def);

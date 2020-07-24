@@ -53,7 +53,7 @@
 #define LIT_VALUE
 #define PACKED_VALUE 1
 // #define ASSERTIONS
-// #define DEBUG
+#define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
@@ -8506,6 +8506,7 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
 
+    DBG("varp_load called\r\n");
 #ifdef DEBUG_MEM
     debug_mem_init();
 #endif
@@ -8531,6 +8532,8 @@ static int varp_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data,
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
 
+    DBG("varp_upgrade called\r\n");    
+
     rinit.dtor = varp_dtor;
     rinit.stop = varp_stop;
     rinit.down = varp_down;
@@ -8549,6 +8552,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data)
 {
     UNUSED(env);
     UNUSED(priv_data);
+    DBG("varp_unload called\r\n");    
 }
 
 ERL_NIF_INIT(varc, varp_funcs,
