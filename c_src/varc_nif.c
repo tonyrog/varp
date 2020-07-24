@@ -140,11 +140,11 @@ typedef enum {
 #define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
 
-#define DBG1(...) enif_fprintf(stdout, __VA_ARGS__)
+#define DBG1(...) do { enif_fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 #define DBG0(...)
 
 #ifdef DEBUG
-#define DBG(...) enif_fprintf(stdout, __VA_ARGS__)
+#define DBG(...) do { enif_fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 #else
 #define DBG(...)
 #endif
@@ -8506,9 +8506,7 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
 
-    printf("VARP_LOAD CALLED\r\n");
-    fflush(stdout);
-    // DBG("varp_load called\r\n");
+    DBG("varp_load called\r\n");
 #ifdef DEBUG_MEM
     debug_mem_init();
 #endif
@@ -8524,6 +8522,7 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
 					 &tried);
     load_atoms(env);
     *priv_data = 0;
+    printf("varp_load done\r\n");
     return 0;
 }
 

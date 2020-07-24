@@ -31,7 +31,7 @@
 #define MAX_PYNIF_FUNCS 256
 
 #define UNUSED(var) (void)var
-#define DBG(...) fprintf(stderr, __VA_ARGS__)
+#define DBG(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 // #define DBG(...)
 
 #if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
