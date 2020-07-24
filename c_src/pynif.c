@@ -2923,7 +2923,7 @@ MODTYPE MODNAME(void)
     if (nif_entry->load != NULL) {
 	ERL_NIF_TERM load_info = enif_make_int(&nif_env, 0);
 	DBG("calling load\r\n");	
-	int r = nif_entry->load(&nif_env, &nif_env.priv_data, load_info);
+	int r = (*nif_entry->load)(&nif_env, &nif_env.priv_data, load_info);
 	if (r < 0) {
 	    DBG("load failed\r\n");
 	    RETURN_FAIL;
