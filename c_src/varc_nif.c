@@ -8506,7 +8506,9 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
 
-    DBG("varp_load called\r\n");
+    printf("VARP_LOAD CALLED\r\n");
+    fflush(stdout);
+    // DBG("varp_load called\r\n");
 #ifdef DEBUG_MEM
     debug_mem_init();
 #endif
