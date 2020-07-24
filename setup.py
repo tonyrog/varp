@@ -19,4 +19,4 @@ setup(name = 'varpy',
                     define_macros = [("PYNIF",None),
                                      ("PYNIFNAME","varc")],
                     include_dirs = [erlpath()+"/usr/include"],
-                    sources = ['c_src/varc_nif.c','c_src/pynif.c'])])
+                    sources = ['c_src/pynif.c','c_src/varc_nif.c'])])
