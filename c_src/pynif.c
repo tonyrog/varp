@@ -2876,7 +2876,7 @@ MODTYPE MODNAME(void)
 		nif_fun[fi]  = k;
 		fi++;
 		fun_end[j] = fi;
-		DBG("install function %s/%d\r\n", name, arity);		
+		DBG("install function %s/%d\r\n", name, arity);
 	    }
 	}
     }
@@ -2895,6 +2895,8 @@ MODTYPE MODNAME(void)
 	m = Py_InitModule(STRINGIFY(PYNIFNAME), methods);
     }
 #endif
+    DBG("module created\r\n");
+    
     memset(&nif_env, 0, sizeof(ErlNifEnv));
 
     nif_env.atoms = PyDict_New();
@@ -2917,11 +2919,16 @@ MODTYPE MODNAME(void)
     nif_env.module = m;
     nif_env.self   = m;
 
+
     if (nif_entry->load != NULL) {
 	ERL_NIF_TERM load_info = enif_make_int(&nif_env, 0);
+	DBG("calling load\r\n");	
 	int r = nif_entry->load(&nif_env, &nif_env.priv_data, load_info);
-	if (r < 0)
+	if (r < 0) {
+	    DBG("load failed\r\n");
 	    RETURN_FAIL;
+	}
     }
+    DBG("load done\r\n");
     RETURN_MODULE(m);
 }
