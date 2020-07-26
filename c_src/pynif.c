@@ -31,8 +31,8 @@
 #define MAX_PYNIF_FUNCS 256
 
 #define UNUSED(var) (void)var
-#define DBG(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
-// #define DBG(...)
+//#define DBG(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
+#define DBG(...)
 
 #if (defined(__WIN32__) || defined(_WIN32) || defined(_WIN32_))
 #define ALLOC_STACK(n)  _malloca((n))
@@ -190,6 +190,22 @@ int enif_get_uint(ErlNifEnv* env, ERL_NIF_TERM term, unsigned int* ip)
 }
 
 ERL_NIF_TERM enif_make_uint(ErlNifEnv* env, unsigned i)
+{
+    UNUSED(env);
+    return Integer_FromUnsignedLong((unsigned long) i);
+}
+
+int enif_get_uint64(ErlNifEnv* env, ERL_NIF_TERM term, uint64_t* ip)
+{
+    unsigned long value;
+    if (!enif_get_ulong(env, term, &value))
+	return 0;
+    // range check!
+    *ip = value;
+    return 1;
+}
+
+ERL_NIF_TERM enif_make_uint64(ErlNifEnv* env, uint64_t i)
 {
     UNUSED(env);
     return Integer_FromUnsignedLong((unsigned long) i);
@@ -2797,8 +2813,6 @@ static PyModuleDef def;
 MODEXPORT void xnif_init(ErlNifEnv* env)
 {
     UNUSED(env);
-    printf("stderr = %p\r\n", stderr);    
-    DBG("xnif_init called\r\n");
 }
 
 MODTYPE MODNAME(void)

@@ -53,7 +53,7 @@
 #define LIT_VALUE
 #define PACKED_VALUE 1
 // #define ASSERTIONS
-#define DEBUG
+// #define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
@@ -8506,28 +8506,22 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
 
-    printf("stderr = %p\r\n", stderr);
-
     DBG("varp_load called\r\n");
 #ifdef DEBUG_MEM
     debug_mem_init();
 #endif
-    DBG("calling xnif_init\r\n");
     xnif_init(env);
-
 
     rinit.dtor = varp_dtor;
     rinit.stop = varp_stop;
     rinit.down = varp_down;
 
     // Create resource types
-    DBG("calling enif_open_resource_type_x\r\n");
     varp_res = enif_open_resource_type_x(env, "varp", &rinit,
 					 ERL_NIF_RT_CREATE,
 					 &tried);
     load_atoms(env);
     *priv_data = 0;
-    printf("varp_load done\r\n");
     return 0;
 }
 
