@@ -17,6 +17,7 @@ setup(name = 'varpy',
       ext_modules = [
           Extension(name = 'varc',
                     define_macros = [("PYNIF",None),
-                                     ("PYNIFNAME","varc")],
+                                     ("PYNIFNAME","varc"),
+                                     ("STATIC_ERLANG_DRIVER", None)],
                     include_dirs = [erlpath()+"/usr/include"],
                     sources = ['c_src/varc_nif.c','c_src/pynif.c'])])
