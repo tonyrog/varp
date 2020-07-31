@@ -8,15 +8,15 @@ varpy.new(options)
 ```
 Create a new varp instance from a dict of options
 
-* {varpy.__size__: size}
+* {'size': size}
   Initial variable table size 
-* {varpy.__qtype__: varpy.lifo|varpy.fifo|varpy.recursive}
+* {'qtype': 'lifo'|'fifo'|'recursive'}
   use lifo/fifo strategy in bcp
-* {varpy.__xref__: x}
+* {'xref': x}
   use cross references if x is True
-* {varpy.__hash__: x}
+* {'hash': x}
   use hash table for clauses if x is True
-* {varpy.__edge__: x}
+* {'edge': x}
   use edge tables for 2-clauses if x is True
 
 ``` python
@@ -26,11 +26,11 @@ varpy.clone(vp, options)
 Clone the varp instance using setting options from new with the
 follow additions.
 
-* {varpy.__level__: l}
+* {'level': l}
   clone bindings up until level l
-* {varpy.__set__ :  varpy.__delta__+varpy.__gamma__+varpy.__beta__+varpy.__alpha__}
+* {'set':  'delta'|'gamma'|'beta'|'alpha'}
   clone clauseset DELTA, GAMMA, BETA, ALPHA
-* {varpy.__queue__, x}
+* {'queue', x}
   clone bcp queue if x is True
 
 ``` python
@@ -39,38 +39,38 @@ varpy.info(vp,  item)
 
 Get varp information 
 
-* varpy.__bcp\_counter__
-* varpy.__conflict\_counter__
-* varpy.__max\_conflicting__
-* varpy.__num\_conflicting__
-* varpy.__number\_of\_variables__
-* varpy.__number\_of\_clauses__
-* varpy.__number\_of\_edges__
-* varpy.__number\_of\_dead_clauses__
-* varpy.__number\_of\_dead_edges__
-* varpy.__number\_of\_learnt_clauses__
-* varpy.__number\_of\_bound_variables__
-* varpy.__number\_of\_subst_variables__
-* varpy.__number\_of\_unbound_variables__
-* varpy.__clause\_n\_counter__
-* varpy.__clause\_2\_counter__
-* varpy.__clause\_3\_counter__
-* varpy.__clause\_d\_counter__
-* varpy.__edge\_2\_counter__
-* varpy.__edge\_d\_counter__
-* varpy.__size__
-* varpy.__qtype__
-* varpy.__max\_level__
-* varpy.__min\_level__
-* varpy.__max\_bound__
-* varpy.__literal\_size__
-* varpy.__literal\_integer__
-* varpy.__value\_packing__
-* varpy.__edge__
-* varpy.__xref__
-* varpy.__hash__
-* varpy.__phase__
-* varpy.__use\_phase__
+* 'bcp\_counter'
+* 'conflict\_counter'
+* 'max\_conflicting'
+* 'num\_conflicting'
+* 'number\_of\_variables'
+* 'number\_of\_clauses'
+* 'number\_of\_edges'
+* 'number\_of\_dead_clauses'
+* 'number\_of\_dead_edges'
+* 'number\_of\_learnt_clauses'
+* 'number\_of\_bound_variables'
+* 'number\_of\_subst_variables'
+* 'number\_of\_unbound_variables'
+* 'clause\_n\_counter'
+* 'clause\_2\_counter'
+* 'clause\_3\_counter'
+* 'clause\_d\_counter'
+* 'edge\_2\_counter'
+* 'edge\_d\_counter'
+* 'size'
+* 'qtype'
+* 'max\_level'
+* 'min\_level'
+* 'max\_bound'
+* 'literal\_size'
+* 'literal\_integer'
+* 'value\_packing'
+* 'edge'
+* 'xref'
+* 'hash'
+* 'phase'
+* 'use\_phase'
 
 
 ``` python
@@ -79,16 +79,16 @@ varpy.config(vp, item, value)
 
 Set configurable items in varp
 
-*    varpy.__max\_conflicting__
+* 'max\_conflicting'
  set max number of conflicts during bcp (<= MAX_CONFLICTING=1024)
-*    varpy.__xref__
+*  'xref'
  turn on (True) or off (False) cross reference handling
-*    varpy.__hash__
+* 'hash'
  turn on (True) or off (False) hash table handling		
-*    varpy.__qtype__
+* 'qtype'
  set style of literal queueing in bcp
  where value is one of 
- varpy.__lifo__ | varpy.__fifo__ | varpy.__recursive__
+ 'lifo' | 'fifo' | 'recursive'
 	
 
 ``` python
@@ -152,7 +152,7 @@ varpy.conflicting_clause(vp, i)
 ```
 
 Return the i'th conflicting clause during the last bcp. The number
-of conflicting clauses that can be returned is __num_conflicting__.
+of conflicting clauses that can be returned is 'num_conflicting'.
 
 ``` python
 varpy.is_variable(vp, x)
@@ -257,12 +257,11 @@ varpy.add_clause(vp, [x1,...,xn] [,clause_set])
 Create a new clause, given as a literal list and return the
 new clause index. All varables indices must already have been
 created by calling add_variable. The clause create is installed
-in one of four clause sets: varpy.__delta__, varpy.__gamma__, 
-varpy.__alpha__, varpy.__beta__.
-The varpy.__delta__ clause-set is use to store the "problem" formula
-clauses while varpy.__gamma__ is used for storing learnt clauses. 
+in one of four clause sets: 'delta', 'gamma', 'alpha', 'beta'.
+The 'delta' clause-set is use to store the "problem" formula
+clauses while 'gamma' is used for storing learnt clauses. 
 However the conflict clauses created by varpy.conflict are create in 
-varpy.__alpha__ and then, by user, moved into varpy.gamma.
+'alpha' and may then, by user, moved into 'gamma'.
 
 
 ``` python
@@ -318,12 +317,12 @@ varpy.clause_info(vp, cix, item)
 
 Get information about clause given by clause index cix
 
-* varpy.__length__
-* varpy.__jump__
-* varpy.__status__
-* varpy.__watch0__
-* varpy.__watch1__
-* varpy.__watch__
+* 'length'
+* 'jump'
+* 'status'
+* 'watch0'
+* 'watch1'
+* 'watch'
 
 
 ``` python
@@ -332,14 +331,14 @@ varpy.variable_info(vp, x, item)
 
 Get information about variable x
 
-* varpy.__implication__
-* varpy.__implication\_clause__
-* varpy.__implication\_pos__
-* varpy.__level__
-* varpy.__phase__
-* varpy.__is\_atom__
-* varpy.__degree__
-* varpy.__symbol__
+* 'implication'
+* 'implication\_clause'
+* 'implication\_pos'
+* 'level'
+* 'phase'
+* 'is\_atom'
+* 'degree'
+* 'symbol'
 	
 ``` python
 varpy.literal_info(vp, x, item)
@@ -347,16 +346,18 @@ varpy.literal_info(vp, x, item)
 
 Get information about literal x
 
-* varpy.__degree__
-* varpy.__user__
-* varpy.__edge__
-* varpy.__symbol__
+* 'degree'
+* 'user'
+* 'edge'
+* 'symbol'
 
 ``` python
 varpy.del_clause(vp, cix | [x1,...,xn])
 ```
 
-Delete clause cix or [x1,...,xn] from clause sets.
+Delete clause cix or [x1,...,xn] from clause sets. Note: When deleting
+clauses by giving it as a list, then hashing may be enable to gain
+reasonable speed.
 
 ``` python
 varpy.clean_clause(vp, cix)
@@ -480,38 +481,39 @@ Flags
 varpy.clauseset_size(vp, set)
 ```
 
-where set is one of varpy.__delta__, varpy.__gamma__, 
-varpy.__alpha__, varpy.__beta__
+where set is one of 'delta', 'gamma', 'alpha', 'beta'
 
 
 ``` python
 varpy.clauseset_offset(vp, set)
 ```
 
-get offset where set is one of varpy.__delta__, varpy.__gamma__, 
-varpy.__alpha__, varpy.__beta__
+get offset where set is one of 'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
 varpy.clauseset_offset(vp, set, offset)
 ```
 
-set offset where set is one of varpy.__delta__, varpy.__gamma__, 
-varpy.__alpha__, varpy.__beta__
+set offset where set is one of 'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
-varpy.clauseset_sort(vp, set)
+varpy.clauseset_sort(vp, s)
 ```
 
-get offset where set is one of varpy.__delta__, varpy.__gamma__, 
-varpy.__alpha__, varpy.__beta__
-
-``` python
-varpy.clauseset_first(vp, set)
-```
+sort clauses in clause set __s__ where __s__ is one of 
+'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
-varpy.clauseset_next(vp, set)
+varpy.clauseset_first(vp, s)
 ```
+
+get clause index of first clause in clause set __s__
+
+``` python
+varpy.clauseset_next(vp, s)
+```
+
+get clause index to the next clause in clause set __s__
 
 ``` python
 varpy.set_user_count(vp, x, count)
@@ -519,15 +521,14 @@ varpy.set_user_count(vp, x, count)
 
 Set user value for literal x to count.
 
-
 ``` python
 varpy.conflict(vp, level, bump, i)
 ```
 
 Do conflict analysis, called with level where the conflict i was found
 and the bump factor that is applied to variables involved in the conflict.
-Return value is a clause index in clause-set varpy.__alpha__. This
-clause may then be minimized and later moved to varpy.__gamma__.
+Return value is a clause index in clause-set 'alpha'. This
+clause may then be minimized and later moved to 'gamma'.
 
 
 ``` python
@@ -543,8 +544,8 @@ varpy.move_clause(vp, cix, set)
 ```
 
 Move clause cix to clause-set 'set'.
-This function is currently limited to clause in varpy.__alpha__
-and set must be varpy.__gamma__
+This function is currently limited to clause in 'alpha'
+and set must be 'gamma'
 
 
 ``` python
@@ -563,10 +564,10 @@ kept while variables kept with only MARK0 are removed
 
 
 ``` python
-varpy.mark_intersect_var(vp, x, [x1,...,xn]|(x1,...,xn), tuple)
+varpy.mark_intersect_var(vp, x, [x1,...,xn]|(x1,...,xn), as_tuple)
 ```
 
 
 ``` python
-varpy.get_marked(vp, tuple)
+varpy.get_marked(vp, as_tuple)
 ```

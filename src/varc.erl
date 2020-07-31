@@ -199,7 +199,7 @@ clone(_Vp, Options) when is_map(Options) ->
     ?nif_stub().
 
 
-info(_Vp, Key) when is_atom(Key) ->
+info(_Vp, Key) when is_atom(Key); is_list(Key) ->
     ?nif_stub().
 
 %% set config

@@ -777,6 +777,10 @@ ErlNifFunc varp_funcs[] =
 #define LOAD_ATOM_STRING(name,string)			\
     atm_##name = enif_make_atom(env,string)
 
+
+#define EQUAL_KEY(env, name, arg)				\
+    (((arg) == ATOM(name)) || (equal_string(env, ATOM(name), arg)))
+
 DECL_ATOM(alpha);
 DECL_ATOM(atom);
 DECL_ATOM(bcp_counter);
@@ -1156,6 +1160,18 @@ static void obj_free(allocator_t* ap, void* ptr)
 #else
     slist_insert_last(&ap->free_list, ptr);
 #endif
+}
+
+static int equal_string(ErlNifEnv* env, ERL_NIF_TERM atm, ERL_NIF_TERM arg)
+{
+    char buf[256];
+    ERL_NIF_TERM xatm;
+    // fixme: hash all atoms at load time
+    if (enif_get_string(env, arg, buf, sizeof(buf), ERL_NIF_LATIN1) <= 0)
+	return 0;
+    if (!enif_make_existing_atom(env, buf, &xatm, ERL_NIF_LATIN1))
+	return 0;
+    return (atm == xatm);
 }
 
 // return 2^r when 2^r > size
@@ -2973,13 +2989,13 @@ static int vif_get_si(ErlNifEnv* env, ERL_NIF_TERM arg, int* si)
 	    return 0;
 	*si = value;
     }
-    else if (arg == ATOM(delta))
+    else if (EQUAL_KEY(env, delta, arg))
 	*si = DELTA;
-    else if (arg == ATOM(gamma))
+    else if (EQUAL_KEY(env, gamma, arg))
 	*si = GAMMA;
-    else if (arg == ATOM(alpha))
+    else if (EQUAL_KEY(env, alpha, arg))
 	*si = ALPHA;
-    else if (arg == ATOM(beta))
+    else if (EQUAL_KEY(env, beta, arg))
 	*si = BETA;
     else
 	return 0;
@@ -3242,51 +3258,51 @@ static int vif_config(ErlNifEnv* env,
 		      const ERL_NIF_TERM value,
 		      varp_config_t* opt)
 {
-    if (key == ATOM(size)) {
-	if (value == ATOM(default))
+    if (EQUAL_KEY(env, size, key)) {
+	if (EQUAL_KEY(env, default, value))
 	    opt->vsize = DEFAULT_MAP_SIZE;
 	else if (!vif_get_size_t(env, value, &opt->vsize))
 	    return 0;
 	else if ((opt->vsize < 2) || (opt->vsize > MAX_MAP_SIZE))
 	    return 0;
     }
-    else if ((key == ATOM(qtype)) && (value == ATOM(fifo))) {
+    else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, fifo, value)) {
 	opt->qtype = fifo;
     }
-    else if ((key == ATOM(qtype)) && (value == ATOM(lifo))) {
+    else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, lifo, value)) {
 	opt->qtype = lifo;
     }
-    else if ((key == ATOM(qtype)) && (value == ATOM(recursive))) {
+    else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, recursive, value)) {
 	opt->qtype = recursive;
     }	
-    else if (key == ATOM(xref) && enif_is_true(env, value)) {
+    else if (EQUAL_KEY(env, xref, key) && enif_is_true(env, value)) {
 	opt->xref = true;
     }
-    else if (key == ATOM(xref) && enif_is_false(env, value)) {
+    else if (EQUAL_KEY(env, xref, key) && enif_is_false(env, value)) {
 	opt->xref = false;
     }
-    else if (key == ATOM(hash) && enif_is_true(env, value)) {
+    else if (EQUAL_KEY(env, hash, key) && enif_is_true(env, value)) {
 	opt->hash = true;
     }
-    else if (key == ATOM(hash) && enif_is_false(env, value)) {
+    else if (EQUAL_KEY(env, hash, key) && enif_is_false(env, value)) {
 	opt->hash = false;
     }
-    else if (key == ATOM(use_phase) && enif_is_true(env, value)) {
+    else if (EQUAL_KEY(env, use_phase, key) && enif_is_true(env, value)) {
 	opt->use_phase = true;
     }
-    else if (key == ATOM(use_phase) && enif_is_false(env, value)) {
+    else if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
 	opt->use_phase = false;
     }
-    else if (key == ATOM(phase) && enif_is_true(env, value)) {
+    else if (EQUAL_KEY(env, phase, key) && enif_is_true(env, value)) {
 	opt->init_phase = I_TRUE;
     }
-    else if (key == ATOM(phase) && enif_is_false(env, value)) {
+    else if (EQUAL_KEY(env, phase, key) && enif_is_false(env, value)) {
 	opt->init_phase = I_FALSE;
     }
-    else if (key == ATOM(edge) && enif_is_true(env, value)) {
+    else if (EQUAL_KEY(env, edge, key) && enif_is_true(env, value)) {
 	opt->edge = true;
     }
-    else if (key == ATOM(edge) && enif_is_false(env, value)) {
+    else if (EQUAL_KEY(env, edge, key) && enif_is_false(env, value)) {
 	opt->edge = false;
     }
     else
@@ -3310,14 +3326,14 @@ static int vif_clone_config(ErlNifEnv* env,
 			    varp_clone_opt_t* opt)
 {
     if (!vif_config(env, key, value, &opt->config)) {
-	if (key == ATOM(level)) {
+	if (EQUAL_KEY(env, level, key)) {
 	    int level;
 	    if (!enif_get_int(env, value, &level)) return 0;
 	    if (level < -1) return 0;
 	    opt->level = level;
 	    return 0;
 	}
-	else if (key == ATOM(set)) {
+	else if (EQUAL_KEY(env, set, key)) {
 	    int si;
 	    if (!vif_get_si(env, value, &si)) {
 		int len = 4; // max 4 elements
@@ -3335,7 +3351,7 @@ static int vif_clone_config(ErlNifEnv* env,
 	    opt->clauseset |= (1 << si);
 	    return 1;
 	}
-	else if (key == ATOM(queue)) {
+	else if (EQUAL_KEY(env, queue, key)) {
 	    bool_t queue;
 	    if (!enif_get_boolean(env, value, &queue))
 		return 0;
@@ -3790,30 +3806,30 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
     if (!vif_get_variable(env, vp, argv[1], &var))
 	return enif_make_badarg(env);
 
-    if (argv[2] == ATOM(implication)) {
+    if (EQUAL_KEY(env, implication, argv[2])) {
 	return enif_make_tuple3(env,
 				make_cix(env, var->implication_clause),
 				enif_make_int(env, var->literal_pos),
 				enif_make_int(env, var->level));
     }
-    if (argv[2] == ATOM(implication_clause))
+    if (EQUAL_KEY(env, implication_clause, argv[2]))
 	return make_cix(env, var->implication_clause);
-    if (argv[2] == ATOM(implication_pos))
+    if (EQUAL_KEY(env, implication_pos, argv[2]))
 	return enif_make_int(env, var->literal_pos);
-    if (argv[2] == ATOM(level))
+    if (EQUAL_KEY(env, level, argv[2]))
 	return enif_make_int(env, var->level);
-    if (argv[2] == ATOM(phase))
+    if (EQUAL_KEY(env, phase, argv[2]))
 	return enif_make_int(env, (var->phase == I_TRUE) ? 1 : -1);
-    if (argv[2] == ATOM(is_atom))
+    if (EQUAL_KEY(env, is_atom, argv[2]))
 	return enif_make_boolean(env, var->is_atom);
-    if (argv[2] == ATOM(degree)) {
+    if (EQUAL_KEY(env, degree, argv[2])) {
 	if (!vp->opt.xref)
 	    return enif_make_badarg(env);
 	return enif_make_uint(env,
 			      dynarray_size(var->lit[0].xref) +
 			      dynarray_size(var->lit[1].xref));
     }
-    if (argv[2] == ATOM(symbol)) {
+    if (EQUAL_KEY(env, symbol, argv[2])) {
 	symbol_t* sp = var->names;
 	ERL_NIF_TERM list = enif_make_list(env, 0);
 	while(sp != NULL) {
@@ -3844,14 +3860,14 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_literal(env, vp, argv[1], &lp))
 	return enif_make_badarg(env);
-    if (argv[2] == ATOM(degree)) {
+    if (EQUAL_KEY(env, degree, argv[2])) {
 	if (!vp->opt.xref)
 	    return enif_make_badarg(env);
 	return enif_make_uint(env, dynarray_size(lp->xref));
     }
-    if (argv[2] == ATOM(user))
+    if (EQUAL_KEY(env, user, argv[2]))
 	return enif_make_uint(env, lp->user);
-    if (argv[2] == ATOM(edge)) {
+    if (EQUAL_KEY(env, edge, argv[2])) {
 	ERL_NIF_TERM list = enif_make_list(env, 0);
 	edge_t* ep = lp->elist;
 	
@@ -3862,7 +3878,7 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	}
 	return list;	
     }
-    if (argv[2] == ATOM(symbol)) {
+    if (EQUAL_KEY(env, symbol, argv[2])) {
 	symbol_t* sp = lp->var->names;
 	ERL_NIF_TERM list = enif_make_list(env, 0);
 	while(sp != NULL) {
@@ -6216,70 +6232,70 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    if (argv[1] == ATOM(bcp_counter)) {
+    if (EQUAL_KEY(env, bcp_counter, argv[1])) {
 	return enif_make_uint64(env, vp->bcp_counter);
     }
-    if (argv[1] == ATOM(level)) {
+    if (EQUAL_KEY(env, level, argv[1])) {
 	return enif_make_uint(env, vp->level);
     }
-    if (argv[1] == ATOM(conflict_counter)) {
+    if (EQUAL_KEY(env, conflict_counter, argv[1]) ) {
 	return enif_make_uint64(env, vp->conflict_counter);
     }    
-    if (argv[1] == ATOM(max_conflicting)) {
+    if (EQUAL_KEY(env, conflict_counter, argv[1])) {
 	return enif_make_int(env, vp->max_conflicting);
     }
-    if (argv[1] == ATOM(number_of_conflicting_clauses)) {
+    if (EQUAL_KEY(env, number_of_conflicting_clauses, argv[1])) {
 	return enif_make_int(env, vp->num_conflicting);
     } 
-    if (argv[1] == ATOM(number_of_variables)) {
+    if (EQUAL_KEY(env, number_of_variables, argv[1])) {
 	return enif_make_int(env, dynvar_size(vp->var_map)-1);
     }
-    if (argv[1] == ATOM(number_of_clauses)) {
+    if (EQUAL_KEY(env, number_of_clauses, argv[1])) {
 	return enif_make_int(env, get_number_of_clauses(vp));
     }
-    if (argv[1] == ATOM(number_of_edges)) {
+    if (EQUAL_KEY(env, number_of_edges, argv[1])) {
 	return enif_make_int(env, vp->nedge);
     }
-    if (argv[1] == ATOM(number_of_dead_clauses)) {
+    if (EQUAL_KEY(env, number_of_dead_clauses, argv[1])) {
 	return enif_make_int(env, vp->cdead);
     }
-    if (argv[1] == ATOM(number_of_dead_edges)) {
+    if (EQUAL_KEY(env, number_of_dead_edges, argv[1])) {
 	return enif_make_int(env, vp->edead);
     }    
-    if (argv[1] == ATOM(number_of_learnt_clauses)) {
+    if (EQUAL_KEY(env, number_of_learnt_clauses, argv[1])) {
 	return enif_make_int(env, vp->cnum[1]);
     }    
-    if (argv[1] == ATOM(number_of_bound_variables)) {
+    if (EQUAL_KEY(env, number_of_bound_variables, argv[1])) {
 	return enif_make_int(env, vp->num_bound);
     }
-    if (argv[1] == ATOM(number_of_subst_variables)) {
+    if (EQUAL_KEY(env, number_of_subst_variables, argv[1])) {
 	return enif_make_int(env, vp->num_subst);
     }    
-    if (argv[1] == ATOM(number_of_unbound_variables)) {
+    if (EQUAL_KEY(env, number_of_unbound_variables, argv[1])) {
 	return enif_make_int(env, (dynvar_size(vp->var_map)-1) - vp->num_bound);
     }
-    if (argv[1] == ATOM(clause_n_counter)) {
+    if (EQUAL_KEY(env, clause_n_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_N]);
     }
-    if (argv[1] == ATOM(clause_2_counter)) {
+    if (EQUAL_KEY(env, clause_2_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_2]);
     }
-    if (argv[1] == ATOM(clause_3_counter)) {
+    if (EQUAL_KEY(env, clause_3_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_3]);
     }
-    if (argv[1] == ATOM(clause_d_counter)) {
+    if (EQUAL_KEY(env, clause_d_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_D]);
     }
-    if (argv[1] == ATOM(edge_2_counter)) {
+    if (EQUAL_KEY(env, edge_2_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[EDGE_2]);
     }
-    if (argv[1] == ATOM(edge_d_counter)) {
+    if (EQUAL_KEY(env, edge_d_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[EDGE_D]);
     }
-    if (argv[1] == ATOM(size)) {
+    if (EQUAL_KEY(env, size, argv[1])) {
 	return enif_make_uint(env, vp->opt.vsize);
     }
-    if (argv[1] == ATOM(qtype)) {
+    if (EQUAL_KEY(env, qtype, argv[1])) {
 	switch(vp->opt.qtype) {
 	case lifo: return ATOM(lifo);
 	case fifo: return ATOM(fifo);
@@ -6287,51 +6303,51 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	default: return ATOM(undefined);
 	}
     }
-    if (argv[1] == ATOM(max_level)) {
+    if (EQUAL_KEY(env, max_level, argv[1])) {
 	int level = vp->max_level;
 	vp->max_level = 0; // and reset
 	return enif_make_int(env, level);
     }
-    if (argv[1] == ATOM(min_level)) {
+    if (EQUAL_KEY(env, min_level, argv[1])) {
 	int level = vp->min_level == MAX_INT32 ? 0 : vp->min_level;
 	vp->min_level = MAX_INT32; // and reset
 	return enif_make_int(env, level);
     }    
-    if (argv[1] == ATOM(max_bound)) {
+    if (EQUAL_KEY(env, max_bound, argv[1])) {
 	int bound = vp->max_bound;
 	vp->max_bound = 0;
 	return enif_make_int(env, bound);
     }    
-    if (argv[1] == ATOM(literal_size)) {
+    if (EQUAL_KEY(env, literal_size, argv[1])) {
 	return enif_make_uint(env, 8*sizeof(lit_t));
     }
-    if (argv[1] == ATOM(literal_integer)) {
+    if (EQUAL_KEY(env, literal_integer, argv[1])) {
 #ifdef LIT_INTEGER
 	return enif_make_boolean(env, true);
 #else
 	return enif_make_boolean(env, false);
 #endif
     }
-    if (argv[1] == ATOM(value_packing)) {
+    if (EQUAL_KEY(env, value_packing, argv[1])) {
 #ifdef PACKED_VALUE
 	return enif_make_uint(env, PACKED_VALUE);
 #else
 	return ATOM(undefined);
 #endif
     }
-    if (argv[1] == ATOM(edge)) {
+    if (EQUAL_KEY(env, edge, argv[1])) {
 	return enif_make_boolean(env, vp->opt.edge);
     }
-    if (argv[1] == ATOM(xref)) {
+    if (EQUAL_KEY(env, xref, argv[1])) {
 	return enif_make_boolean(env, vp->opt.xref);
     }
-    if (argv[1] == ATOM(hash)) {
+    if (EQUAL_KEY(env, hash, argv[1])) {
 	return enif_make_boolean(env, vp->opt.hash);
     }
-    if (argv[1] == ATOM(phase)) {
+    if (EQUAL_KEY(env, phase, argv[1])) {
 	return enif_make_boolean(env, (vp->opt.init_phase == I_TRUE));
     }
-    if (argv[1] == ATOM(use_phase)) {
+    if (EQUAL_KEY(env, use_phase, argv[1])) {
 	return enif_make_boolean(env, vp->opt.use_phase);
     }
     return enif_make_badarg(env);
@@ -6347,7 +6363,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    if (argv[1] == ATOM(max_conflicting)) {
+    if (EQUAL_KEY(env, max_conflicting, argv[1])) {
 	int value;
 	if (!enif_get_int(env, argv[2], &value) || (value < 0))
 	    return enif_make_badarg(env);
@@ -6357,7 +6373,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->max_conflicting = value;
 	return ATOM(ok);
     }
-    else if (argv[1] == ATOM(xref)) {
+    else if (EQUAL_KEY(env, xref, argv[1])) {
 	bool_t enable;
 
 	if (!enif_get_boolean(env, argv[2], &enable))
@@ -6383,7 +6399,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return ATOM(ok);
     }
-    else if (argv[1] == ATOM(hash)) {
+    else if (EQUAL_KEY(env, hash, argv[1])) {
 	bool_t enable;
 	if (!enif_get_boolean(env, argv[2], &enable))
 	    return enif_make_badarg(env);
@@ -6407,12 +6423,12 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return ATOM(ok);
     }
-    else if (argv[1] == ATOM(qtype)) {
-	if (argv[2] == ATOM(fifo))
+    else if (EQUAL_KEY(env, qtype, argv[1])) {
+	if (EQUAL_KEY(env, fifo, argv[2]))
 	    vp->opt.qtype = fifo;
-	else if (argv[2] == ATOM(lifo))
+	else if (EQUAL_KEY(env, lifo, argv[2]))
 	    vp->opt.qtype = lifo;
-	else if (argv[2] == ATOM(recursive))
+	else if (EQUAL_KEY(env, recursive, argv[2]))
 	    vp->opt.qtype = recursive;
 	else
 	    return enif_make_badarg(env);
