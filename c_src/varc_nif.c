@@ -861,6 +861,11 @@ DECL_ATOM(watch);
 DECL_ATOM(watch0);
 DECL_ATOM(watch1);
 DECL_ATOM(xref);
+DECL_ATOM(none);
+DECL_ATOM(log2);
+DECL_ATOM(log10);
+DECL_ATOM(rank);
+DECL_ATOM(next);
 
 #ifdef DEBUG_MEM
 #define VARP_ALLOC(n)       debug_alloc((n))
@@ -3790,7 +3795,7 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
     if (is_term) enif_release_binary(&bin);
     if (sp != NULL)
 	return enif_make_int(env, sp->var->ix);
-    return ATOM(false);
+    return enif_make_boolean(env, false);
 }
 
 // get variable info
@@ -4013,7 +4018,7 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
 	    return enif_make_int(env, i);
 	}
     }
-    return ATOM(false);
+    return enif_make_boolean(env, false);
 }
 
 #define ORDER_UNDEFINED  0x00   // "zero" order
@@ -4488,8 +4493,6 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     }
 }
 
-// retrieve implication clause
-// return {ClauseIndex, LiteralPosition, Level}
 static ERL_NIF_TERM varp_implication_clause(ErlNifEnv* env, int argc,
 					    const ERL_NIF_TERM argv[])
 {
@@ -7709,8 +7712,19 @@ static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (enif_get_double(env, argv[2], &bumpf))
 	bump = dynvar_size(vp->var_map)*bumpf;
-    else if (!enif_get_int(env, argv[2], &bump))
-	return enif_make_badarg(env);	
+    else if (!enif_get_int(env, argv[2], &bump)) {
+	if (EQUAL_KEY(env, next, argv[2]))
+	    bump = BUMP_NEXT;
+	else if (EQUAL_KEY(env, log2, argv[2]))
+	    bump = BUMP_LOG2;
+	else if (EQUAL_KEY(env, log10, argv[2]))
+	    bump = BUMP_LOG10;
+	else if (EQUAL_KEY(env, rank, argv[2]))
+	    bump = BUMP_RANK;
+	else if (EQUAL_KEY(env, none, argv[2]))
+	    bump = BUMP_NONE;	
+	return enif_make_badarg(env);
+    }
     variable_bump(vp, var, bump);
     return ATOM(ok);
 }
@@ -8458,6 +8472,11 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(watch0);
     LOAD_ATOM(watch1);
     LOAD_ATOM(xref);
+    LOAD_ATOM(none);
+    LOAD_ATOM(log2);
+    LOAD_ATOM(log10);
+    LOAD_ATOM(rank);
+    LOAD_ATOM(next);    
     LOAD_ATOM_STRING(exclamation_mark, "!");
 }
 

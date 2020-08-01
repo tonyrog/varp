@@ -636,9 +636,9 @@ get_queue_(Vp,I,Acc) ->
 next_unbound(_Vp) ->
     ?nif_stub().
 
--spec next_unbound(Vp::varc(), Last::variable()) ->
+-spec next_unbound(Vp::varc(), Previous::variable()) ->
 			  variable() | false.
-next_unbound(_Vp, _Last) ->
+next_unbound(_Vp, _Previous) ->
     ?nif_stub().
 
 %% utility to get a list of unbound literals
@@ -658,7 +658,6 @@ info(Vp) ->
 
 info_keys() ->
     [
-     max_clause_length,
      number_of_clauses,
      number_of_dead_clauses,
      number_of_edges,
@@ -684,8 +683,7 @@ info_keys() ->
      xref,             %% xref is used (need for saturate with substitution)
      hash,             %% hash is used
      phase,            %% initial phase value
-     use_phase,        %% used saved phase value
-     turbo             %% use turbo eval
+     use_phase         %% used saved phase value
     ].
 
 get_number_of_variables(Vp) ->
