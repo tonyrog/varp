@@ -31,6 +31,12 @@
 
 #define EPSILON (4*FLT_EPSILON) // 1.19e-07
 
+#include "vsn.h"
+
+#ifndef VARP_VSN
+#define VARP_VSN "0.0.0-unknown"
+#endif
+
 //
 // configurations
 // NIF_TRACE
@@ -257,9 +263,11 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "conflict",            4,  varp_conflict ) \
     NIF( "minimize",            2,  varp_minimize ) \
     NIF( "move_clause",         3,  varp_move_clause ) \
-    NIF( "mark_literals",       2,  varp_mark_literals ) \
-    NIF( "mark_intersect",      2,  varp_mark_intersect ) \
-    NIF( "mark_intersect_var",  4,  varp_mark_intersect_var ) \
+    NIF( "unmark",              1,  varp_unmark ) \
+    NIF( "mark",                2,  varp_mark ) \
+    NIF( "mark",                3,  varp_mark ) \
+    NIF( "intersect_marks",     2,  varp_intersect_marks ) \
+    NIF( "intersect_var",       4,  varp_intersect_var ) \
     NIF( "get_marked",          2,  varp_get_marked)
 
 // Declare all nif functions
@@ -836,6 +844,7 @@ DECL_ATOM(number_of_variables);
 DECL_ATOM(off);
 DECL_ATOM(ok);
 DECL_ATOM(phase);
+DECL_ATOM(init_phase);
 DECL_ATOM(qtype);
 DECL_ATOM(queue);
 DECL_ATOM(recursive);
@@ -866,6 +875,7 @@ DECL_ATOM(log2);
 DECL_ATOM(log10);
 DECL_ATOM(rank);
 DECL_ATOM(next);
+DECL_ATOM(version);
 
 #ifdef DEBUG_MEM
 #define VARP_ALLOC(n)       debug_alloc((n))
@@ -2443,7 +2453,7 @@ static int next_unbound(varp_t* vp)
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var)) {
 	    vp->order_next = var;
-	    return var->ix; // phase_export(var);
+	    return var->ix;
 	}
 	vp->order_next = NULL;
     }
@@ -2457,7 +2467,7 @@ static int next_unbound_after(varp_t* vp, variable_t* var)
 	while(!cdlist_is_eol(var) && variable_is_bound(vp, var))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var))
-	    return var->ix; // phase_export(var);
+	    return var->ix;
     }
     return 0;
 }
@@ -3298,10 +3308,10 @@ static int vif_config(ErlNifEnv* env,
     else if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
 	opt->use_phase = false;
     }
-    else if (EQUAL_KEY(env, phase, key) && enif_is_true(env, value)) {
+    else if (EQUAL_KEY(env, init_phase, key) && enif_is_true(env, value)) {
 	opt->init_phase = I_TRUE;
     }
-    else if (EQUAL_KEY(env, phase, key) && enif_is_false(env, value)) {
+    else if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
 	opt->init_phase = I_FALSE;
     }
     else if (EQUAL_KEY(env, edge, key) && enif_is_true(env, value)) {
@@ -5469,11 +5479,11 @@ static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    unsigned int level;
+    int level;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_uint(env, argv[1], &level))
+    if (!enif_get_int(env, argv[1], &level) || (level < 0))
 	return enif_make_badarg(env);
     set_level(vp, level);
     return enif_make_boolean(env, true);
@@ -6192,7 +6202,7 @@ next:
     xp = vindex_l(vp, x);
     vp->undo[level].decision = xp;
     vp->undo[level].t = uSET;
-    put_l(vp, xp, decide_phase(vp, xp),-1, CLAUSE_NONE, level);
+    put_l(vp, xp, decide_phase(vp, xp), -1, CLAUSE_NONE, level);
     DBG_ORDER("%sNbcp: next decision=%s\r\n",
 	      indent(level), format_lit(vp, xp));
 bcp:
@@ -6347,12 +6357,15 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, hash, argv[1])) {
 	return enif_make_boolean(env, vp->opt.hash);
     }
-    if (EQUAL_KEY(env, phase, argv[1])) {
+    if (EQUAL_KEY(env, init_phase, argv[1])) {
 	return enif_make_boolean(env, (vp->opt.init_phase == I_TRUE));
     }
     if (EQUAL_KEY(env, use_phase, argv[1])) {
 	return enif_make_boolean(env, vp->opt.use_phase);
     }
+    if (EQUAL_KEY(env, version, argv[1])) {
+	return enif_make_string(env, VARP_VSN, ERL_NIF_LATIN1);
+    }    
     return enif_make_badarg(env);
 }
 
@@ -8000,7 +8013,7 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     int level;
     bool_t clause_info = false;
     bool_t trail = false;
-    bool_t tuple = false;
+    bool_t as_tuple = false;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -8010,7 +8023,7 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_boolean(env, argv[3], &trail))
 	return enif_make_badarg(env);
-    if (!enif_get_boolean(env, argv[4], &tuple))
+    if (!enif_get_boolean(env, argv[4], &as_tuple))
 	return enif_make_badarg(env);
     
     if (level <= vp->level) {
@@ -8028,14 +8041,14 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 		bp = bp->bound_next;
 		i += s;
 	    }
-	    if (tuple)
+	    if (as_tuple)
 		r = enif_make_tuple_from_array(env, element, size);
 	    else
 		r = enif_make_list_from_array(env, element, size);
 	} STK_END0(element);
 	return r;
     }
-    if (tuple)
+    if (as_tuple)
 	return enif_make_tuple(env, 0);
     else
 	return enif_make_list(env, 0);
@@ -8123,24 +8136,52 @@ static inline void mark1_literal(varp_t* vp, literal_t* lp)
     }
 }
 
+static ERL_NIF_TERM varp_unmark(ErlNifEnv* env, int argc,
+				const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    unmark_all(vp);
+    return ATOM(ok);
+}
 
-// Mark all literals in the list with MARK0 | MARKN
-static ERL_NIF_TERM varp_mark_literals(ErlNifEnv* env, int argc,
-				       const ERL_NIF_TERM argv[])
+// Mark, with MARK0 list of literals, tuple of literals or bindings
+// on a level optionally concat, do not clear marks before assigning new
+static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
     const ERL_NIF_TERM* elem;
     int arity;
-    ERL_NIF_TERM list;
-    ERL_NIF_TERM head, tail;
+    int level;
+    bool_t unmark = true;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    
-    unmark_all(vp);
-    
-    if (enif_get_tuple(env, argv[1], &arity, &elem)) { // as tuple
+    if (argc >= 3) {
+	if (!enif_get_boolean(env, argv[2], &unmark))
+	    return enif_make_badarg(env);
+    }
+	
+    if (unmark)
+	unmark_all(vp);
+
+    if (enif_get_int(env, argv[1], &level)) {
+	variable_t* bp;
+	if ((level < 1) || (level >= (int)dynvar_size(vp->undo)))
+	    return enif_make_badarg(env);
+	bp = vp->undo[level].bs;
+	while(bp != NULL) {
+	    literal_t* lp = var_literal(vp, bp);
+	    mark0_literal(vp, lp);
+	    bp = bp->bound_next;
+	}	
+    }
+    else if (enif_get_tuple(env, argv[1], &arity, &elem)) { // as tuple
+	// FIXME: transactional	(validate all arguments before loop)
 	int i;
 	for (i = 0; i < arity; i++) {
 	    literal_t* lp;
@@ -8150,7 +8191,10 @@ static ERL_NIF_TERM varp_mark_literals(ErlNifEnv* env, int argc,
 	}
     }
     else {  // as list
-	list = argv[1];
+        // FIXME: transactional	(validate all arguments before loop)
+	ERL_NIF_TERM list = argv[1];
+	ERL_NIF_TERM head, tail;
+	
 	while(enif_get_list_cell(env, list, &head, &tail)) {
 	    literal_t* lp;
 	    if (!vif_get_ll(env, vp, head, &lp))
@@ -8160,53 +8204,18 @@ static ERL_NIF_TERM varp_mark_literals(ErlNifEnv* env, int argc,
 	}
 	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
-    }	
+    }
     return ATOM(ok);
 }
 
-// Mark all literals that are marked as MARK0 with MARK1 (MARKN is checked)
-// Then marked variables with both MARK0 and MARK1 are kept and
-// marked as MARK0 together with MARKN flags, other marks are removed
-// 
-static ERL_NIF_TERM varp_mark_intersect(ErlNifEnv* env, int argc,
-					const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    const ERL_NIF_TERM* elem;
-    int arity;
-    ERL_NIF_TERM list;
-    ERL_NIF_TERM head, tail;
-    variable_t*  var;
-    variable_t** vpp;
-    
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (enif_get_tuple(env, argv[1], &arity, &elem)) { // as tuple
-	int i;
-	for (i = 0; i < arity; i++) {
-	    literal_t* lp;
-	    if (!vif_get_ll(env, vp, elem[i], &lp))
-		return enif_make_badarg(env);
-	    mark1_literal(vp, lp);
-	}
-    }
-    else {
-	list = argv[1];
-	while(enif_get_list_cell(env, list, &head, &tail)) {
-	    literal_t* lp;
-	    if (!vif_get_ll(env, vp, head, &lp))
-		return enif_make_badarg(env);
-	    mark1_literal(vp, lp);
-	    list = tail;
-	}
-	if (!enif_is_empty_list(env, list))
-	    return enif_make_badarg(env);
-    }
 
-    // remove elements not marked with both MARK0 and MARK1 and
-    // remove MARK1 in case an element as both MARK0 and MARK1
-    vpp = &vp->marked_head;
+// remove elements not marked with both MARK0 and MARK1 and
+// remove MARK1 in case an element as both MARK0 and MARK1
+static void intersect_marked(varp_t* vp)
+{
+    variable_t** vpp = &vp->marked_head;
+    variable_t*  var;
+    
     while((var=*vpp) != NULL) {
 	if (all_marked(var, MARK0|MARK1)) { // both marked
 	    unmark(var, MARK1);             // keep MARK0 and MARKN
@@ -8219,6 +8228,61 @@ static ERL_NIF_TERM varp_mark_intersect(ErlNifEnv* env, int argc,
 	    var->mark = 0;          // not on list any more!
 	}
     }
+}
+
+// Mark all literals that are marked as MARK0 with MARK1 (MARKN is checked)
+// Then marked variables with both MARK0 and MARK1 are kept and
+// marked as MARK0 together with MARKN flags, other marks are removed
+// 
+static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
+					 const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    const ERL_NIF_TERM* elem;
+    int arity;
+    int level;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+
+    if (enif_get_int(env, argv[1], &level)) {
+	if ((level < 1) || (level >= (int)dynvar_size(vp->undo)))
+	    return enif_make_badarg(env);
+	variable_t* bp = vp->undo[level].bs;
+
+	while(bp != NULL) {
+	    literal_t* lp = var_literal(vp, bp);
+	    mark1_literal(vp, lp);
+	    bp = bp->bound_next;
+	}
+    }
+    else if (enif_get_tuple(env, argv[1], &arity, &elem)) { // as tuple
+        // FIXME: transactional	(validate all arguments before loop)	
+	int i;
+	for (i = 0; i < arity; i++) {
+	    literal_t* lp;
+	    if (!vif_get_ll(env, vp, elem[i], &lp))
+		return enif_make_badarg(env);
+	    mark1_literal(vp, lp);
+	}
+    }
+    else {
+	ERL_NIF_TERM list = argv[1];
+	ERL_NIF_TERM head, tail;
+	
+	// FIXME: transactional	(validate all arguments before loop)
+	while(enif_get_list_cell(env, list, &head, &tail)) {
+	    literal_t* lp;
+	    if (!vif_get_ll(env, vp, head, &lp))
+		return enif_make_badarg(env);
+	    mark1_literal(vp, lp);
+	    list = tail;
+	}
+	if (!enif_is_empty_list(env, list))
+	    return enif_make_badarg(env);
+    }
+    intersect_marked(vp);
     return ATOM(ok);
 }
 
@@ -8287,27 +8351,57 @@ static int mark_intersect_var(ErlNifEnv* env, varp_t* vp,
     return j;
 }
 
-// intersect bindings (var=0) with bindings installed (var=1) return bindings
-static ERL_NIF_TERM varp_mark_intersect_var(ErlNifEnv* env, int argc,
-					    const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
+				       const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
     const ERL_NIF_TERM* elem0;
-    int arity;    
+    int arity;
+    int level;    
     unsigned len;
     ERL_NIF_TERM var;
     lit_t x;
-    bool_t tuple = false;
+    bool_t as_tuple = false;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     var = argv[1];
     if (!vif_get_lit(env, vp, argv[1], &x))
 	return enif_make_badarg(env);
-    if (!enif_get_boolean(env, argv[3], &tuple))
+    if (!enif_get_boolean(env, argv[3], &as_tuple))
 	return enif_make_badarg(env);
-    if (enif_get_tuple(env, argv[2], &arity, &elem0)) { // as tuple
+
+    if (enif_get_int(env, argv[2], &level)) {
+	if ((level < 1) || (level >= (int)dynvar_size(vp->undo)))
+	    return enif_make_badarg(env);
+	int n = vp->undo[level].size;
+	variable_t* bp = vp->undo[level].bs;
+	int size = 0;
+	ERL_NIF_TERM r;
+	
+	STK_BEGIN(ERL_NIF_TERM, element, n) {
+	    while(bp != NULL) {
+		literal_t* xp = var_literal(vp, bp);
+		if (is_marked(xp->var, MARK0)) {
+		    int neg = is_marked(xp->var,MARKN);
+		    if (neg == xp->neg)
+			element[size++] = make_literal(env, xp);
+		    else {
+			ERL_NIF_TERM nx = make_literal(env, neg_ll(xp));
+			element[size++] = enif_make_tuple2(env, var, nx);
+		    }
+		}
+		bp = bp->bound_next;
+	    }
+	    if (as_tuple)
+		r = enif_make_tuple_from_array(env,element,size);
+	    else
+		r = enif_make_list_from_array(env, element,size);	    
+	} STK_END0(element);
+	return r;
+    }
+    else if (enif_get_tuple(env, argv[2], &arity, &elem0)) { // as tuple
 	int size;
 	ERL_NIF_TERM r;
 	STK_BEGIN(ERL_NIF_TERM, element, arity) {
@@ -8315,7 +8409,7 @@ static ERL_NIF_TERM varp_mark_intersect_var(ErlNifEnv* env, int argc,
 		r = enif_make_badarg(env);
 		STK_LEAVE(element);
 	    }
-	    if (tuple)
+	    if (as_tuple)
 		r = enif_make_tuple_from_array(env,element,size);
 	    else
 		r = enif_make_list_from_array(env, element, size);
@@ -8340,7 +8434,7 @@ static ERL_NIF_TERM varp_mark_intersect_var(ErlNifEnv* env, int argc,
 		if ((size=mark_intersect_var(env,vp,var,elem,element1,len))<0)
 		    r = enif_make_badarg(env);
 		else {
-		    if (tuple)
+		    if (as_tuple)
 			r = enif_make_tuple_from_array(env, element1, size);
 		    else
 			r = enif_make_list_from_array(env, element1, size);
@@ -8446,7 +8540,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(number_of_variables);
     LOAD_ATOM(off);
     LOAD_ATOM(ok);
-    LOAD_ATOM(phase);
+    LOAD_ATOM(phase);    
+    LOAD_ATOM(init_phase);
     LOAD_ATOM(qtype);
     LOAD_ATOM(queue);
     LOAD_ATOM(recursive);
@@ -8476,7 +8571,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(log2);
     LOAD_ATOM(log10);
     LOAD_ATOM(rank);
-    LOAD_ATOM(next);    
+    LOAD_ATOM(next);
+    LOAD_ATOM(version);
     LOAD_ATOM_STRING(exclamation_mark, "!");
 }
 

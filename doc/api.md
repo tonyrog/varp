@@ -41,6 +41,7 @@ varpy.info(vp,  item)
 
 Get varp information 
 
+* version
 * 'bcp\_counter'
 * 'conflict\_counter'
 * 'max\_conflicting'
@@ -71,7 +72,7 @@ Get varp information
 * 'edge'
 * 'xref'
 * 'hash'
-* 'phase'
+* 'init\_phase'
 * 'use\_phase'
 
 
@@ -523,42 +524,41 @@ Flags
 
 
 ``` python
-varpy.clauseset_size(vp, set)
+varpy.clauseset_size(vp, s)
 ```
 
-Where __set__ is one of 'delta', 'gamma', 'alpha', 'beta'
-
+Where __s__ is one of 'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
-varpy.clauseset_offset(vp, set)
+varpy.clauseset_offset(vp, s)
 ```
 
-Get offset where __set__ is one of 'delta', 'gamma', 'alpha', 'beta'
+Get offset where __s__ is one of 'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
-varpy.clauseset_offset(vp, set, offset)
+varpy.clauseset_offset(vp, s, offset)
 ```
 
-Set offset where __set__ is one of 'delta', 'gamma', 'alpha', 'beta'
+Set offset where __s__ is one of 'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
-varpy.clauseset_sort(vp, set)
+varpy.clauseset_sort(vp, s)
 ```
 
-Sort clauses in clause set __set__ where __set__ is one of 
+Sort clauses in clause set __s__ where __s__ is one of 
 'delta', 'gamma', 'alpha', 'beta'
 
 ``` python
-varpy.clauseset_first(vp, set)
+varpy.clauseset_first(vp, s)
 ```
 
-get clause index of first clause in clauseset __set__
+get clause index of first clause in clauseset __s__
 
 ``` python
-varpy.clauseset_next(vp, set)
+varpy.clauseset_next(vp, s)
 ```
 
-get clause index to the next clause in clauseset __set__
+get clause index to the next clause in clauseset __s__
 
 ``` python
 varpy.set_user_count(vp, x, count)
@@ -571,7 +571,7 @@ varpy.conflict(vp, level, bump, i)
 ```
 
 Do conflict analysis, called with level where the conflict i was found
-and the bump factor that is applied to variables involved in the conflict.
+and the __bump__ factor that is applied to variables involved in the conflict.
 Return value is a clause index in clauseset 'alpha'. This
 clause may then be minimized and later moved to 'gamma'.
 
@@ -592,27 +592,39 @@ Move clause __cix__ to clauseset __set__.
 __NOTE__ that this function is currently limited to clause in 'alpha'
 and set must be 'gamma'
 
-
 ``` python
-varpy.mark_literals(vp, [x1,...,xn] | (x1,...,xn))
+varpy.unmark(vp)
 ```
 
-Mark variables __x1__..__xn__ with MARK0
+Clear all marks
 
 ``` python
-varpy.mark_intersect(vp, [x1,...,xn] | (x1,...,xn))
+varpy.mark(vp, l | [x1,...,xn] | (x1,...,xn), [clear])
 ```
 
-Add MARK1 to all variables __x1__..__xn__ marked with MARK0.
-Then variables marked with both MARK0 and MARK1 are
-kept while variables kept with only MARK0 are removed
+Mark variables __x1__..__xn__ or all bindind on level __l__.
+Optionally if __clear__ is __False__ then marks are concatinated to the 
+previous marks, otherwise the marks are cleared before adding new ones.
+
+``` python
+varpy.intersect_marks(vp, l | [x1,...,xn] | (x1,...,xn))
+```
+
+Keep all marks that are present in bindings on level __l__ or
+the literals __x1__...__xn__. Clear the other marks.
 
 
 ``` python
-varpy.mark_intersect_var(vp, x, [x1,...,xn]|(x1,...,xn), as_tuple)
+varpy.intersect_var(vp, x, l | [x1,...,xn]|(x1,...,xn), as_tuple)
 ```
 
+Return all marks that are present in bindings on level __l__ or
+the literals __x1__..__xn__. Return the marks in a list if
+__as_tuple_ if __False__ or as a tuple if __as_tuple__ is __True__.
 
 ``` python
 varpy.get_marked(vp, as_tuple)
 ```
+
+Return the marks in a list if
+__as_tuple_ if __False__ or as a tuple if __as_tuple__ is __True__.

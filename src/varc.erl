@@ -86,6 +86,8 @@
 -export([clauseset_next/2]).
 -export([set_user_count/3]).
 
+-export([version/0]).
+-export([i/0, i/1]).
 -export([info/1, info_keys/0]).
 -export([get_max_clause_length/1]).
 -export([get_number_of_variables/1]).
@@ -114,10 +116,11 @@
 -export([vec_sat/6, vec_sat/5, vec_sat/2]).
 -export([vec_sat_lap/5]).
 %% bindings
--export([mark_literals/2]).
--export([mark_intersect/2]).
+-export([unmark/1]).
+-export([mark/2, mark/3]).
+-export([intersect_marks/2]).
 -export([get_marked/1, get_marked/2]).
--export([mark_intersect_var/3, mark_intersect_var/4]).
+-export([intersect_var/3, intersect_var/4]).
 -export([intersect_var0/4]).
 %% util
 -export([make_friend_map/1]).
@@ -145,6 +148,7 @@
 -type sort_value() :: integer().
 -type binding() :: literal() | {literal(),literal()}.
 -type bindings() :: [binding()] | {binding()}.  %% variable size tuple?
+-type level() :: integer().
 
 -define(nif_stub(),
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
@@ -278,7 +282,7 @@ bind(_Vp, X) when is_integer(X) ->
 
 
 %% bind literal at level
--spec bind(Vp::varc(), X::literal(), Level::integer()) -> boolean().
+-spec bind(Vp::varc(), X::literal(), Level::level()) -> boolean().
 
 bind(_Vp, X, Level) when is_integer(X),
 			 is_integer(Level) ->
@@ -293,7 +297,7 @@ decide(_Vp, X) when is_integer(X) ->
 
 
 %% decide literal at level, affected by phase!
--spec decide(Vp::varc(), X::literal(), Level::integer()) -> boolean().
+-spec decide(Vp::varc(), X::literal(), Level::level()) -> boolean().
 
 decide(_Vp, X, Level) when is_integer(X),
 			   is_integer(Level) ->
@@ -314,7 +318,7 @@ implication_clause(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec implication_level(Vp::varc(), Lit::literal()) ->
-			       Level::integer().
+	  Level::level().
 implication_level(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
@@ -331,7 +335,7 @@ conflicting_clause(Vp) ->
 conflicting_clause(_Vp, _Index) ->
     ?nif_stub().
 
--spec conflict(Vp::varc(), Level::integer(), Bump::number(),
+-spec conflict(Vp::varc(), Level::level(), Bump::number(),
 	       ConflictNum::integer()) -> ClauseIndex::integer().
 conflict(_Vp, _Level, _Bump, _Index) ->
     ?nif_stub().    
@@ -354,20 +358,22 @@ is_equal(_Vp, LitA, LitB) when is_integer(LitA),
 			       is_integer(LitB) ->
     ?nif_stub().
 
-set_level(_Vp,Level) when is_integer(Level), Level >= 0 ->
+-spec set_level(Vp::varc(), Level::level()) -> ok.
+
+set_level(_Vp, Level) when is_integer(Level), Level >= 0 ->
     ?nif_stub().
 
--spec keep_level(Vp::varc(), Level::integer()) -> ok.
+-spec keep_level(Vp::varc(), Level::level()) -> ok.
 
 keep_level(_Vp,_Level) ->
     ?nif_stub().
 
--spec move_level(Vp::varc(), From::integer(), To::integer()) -> ok.
+-spec move_level(Vp::varc(), From::level(), To::level()) -> ok.
 
 move_level(_Vp,_From,_To) ->
     ?nif_stub().
 
--spec undo_level(Vp::varc(), Level::integer()) -> ok.
+-spec undo_level(Vp::varc(), Level::level()) -> ok.
 
 undo_level(_Vp,_Level) ->
     ?nif_stub().
@@ -498,12 +504,12 @@ queue_clear(_Vp) ->
     ?nif_stub().
 
 %% get decision variable (bind) on Level
--spec get_decision(Vp::varc(), Level::integer()) ->
+-spec get_decision(Vp::varc(), Level::level()) ->
 			  literal().
 get_decision(_Vp, _Level) ->
     ?nif_stub().
 
--spec get_undo_state(Vp::varc(), Level::integer()) ->
+-spec get_undo_state(Vp::varc(), Level::level()) ->
 			    'undefined'|'set'|'toggle'|'done'.
 get_undo_state(_Vp, _Level) ->
     ?nif_stub().
@@ -542,24 +548,24 @@ get_bindings_list(_Vp, Level) ->
 get_bindings_trail(_Vp, Level) ->
     get_bindings(_Vp, Level, false, true, false).
 
--spec get_bindings(Vp::varc(), Level::integer()) -> bindings().
+-spec get_bindings(Vp::varc(), Level::level()) -> bindings().
 %% get bindings, as list, on level 'Level' without clause info
 get_bindings(Vp, Level) ->
     get_bindings(Vp, Level, false, false, ?BINDING_AS_TUPLE).
 
--spec get_bindings(Vp::varc(), Level::integer(), 
+-spec get_bindings(Vp::varc(), Level::level(), 
 		   ClauseInfo::boolean()) -> bindings().
 %% get bindings (as list) and possible clause info on Level
 get_bindings(Vp, Level, ClauseInfo) ->
     get_bindings(Vp, Level, ClauseInfo, false, ?BINDING_AS_TUPLE).
 
--spec get_bindings(Vp::varc(), Level::integer(), 
+-spec get_bindings(Vp::varc(), Level::level(), 
 		   ClauseInfo::boolean(), Trail::boolean()) -> bindings().
 %% get_bindings (as list)
 get_bindings(_Vp, Level, ClauseInfo, Trail) ->
     get_bindings(_Vp, Level, ClauseInfo, Trail, ?BINDING_AS_TUPLE).
 
--spec get_bindings(Vp::varc(), Level::integer(), 
+-spec get_bindings(Vp::varc(), Level::level(), 
 		   ClauseInfo::boolean(), Trail::boolean(),
 		   AsTuple::boolean()) -> bindings().
 
@@ -653,6 +659,28 @@ order_all_(Vp,Xi,Acc) ->
 phase_all(Vp) ->
     [varc:variable_info(Vp,Vi,phase) || Vi <- order_all(Vp)].
 
+version() ->
+    varc:info(new(), version).
+
+i() ->
+    Vt = new(),
+    _ = [ io:format("~w: ~p\n", [Key,info(Vt, Key)]) || 
+	    Key <- 
+		[version,
+		 literal_size,
+		 literal_integer,
+		 value_packing,
+		 edge,
+		 xref,
+		 hash,
+		 init_phase,
+		 use_phase]],
+    ok.
+
+i(Vp) ->
+    _ = [ io:format("~w: ~w\n", [Key,info(Vp, Key)]) || Key <- info_keys()],
+    ok.
+
 info(Vp) ->
     [ {Key,info(Vp, Key)} || Key <- info_keys()].
 
@@ -676,13 +704,14 @@ info_keys() ->
      edge_d_counter,
      size,
      level,
+     version,
      literal_size,     %% 8,16,32,64 (sizeof literal)
      literal_integer,  %% true,false (integer or pointer)
      value_packing,    %% 1,4,undefined (variable value packing)
      edge,             %% true,false (edge_list is enabled or not)
      xref,             %% xref is used (need for saturate with substitution)
      hash,             %% hash is used
-     phase,            %% initial phase value
+     init_phase,       %% initial phase value
      use_phase         %% used saved phase value
     ].
 
@@ -833,7 +862,7 @@ satvar_(V, I, N, Vt, Bt, Bs) when I < N ->
        B0 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B1|Bs]);
        B1 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B0|Bs]);
        true ->
-	    case intersect_var(V, element(I+1,Vt), B0, B1) of
+	    case intersect_bindings(V, element(I+1,Vt), B0, B1) of
 		{} ->
 		    satvar_(V, I+1, N, Vt, Bt, Bs);
 		B2 ->
@@ -849,10 +878,10 @@ satvar_(_V, N, N, _Vt, _Bt, Bs) ->
 
 interv(_V, []) -> false;
 interv(V, [false|As]) -> interv(V, As);
-interv(V, [A|As]) -> mark_literals(V, A), interv_(V, As).
+interv(V, [A|As]) -> mark(V, A), interv_(V, As).
 
 interv_(V, [false|As]) -> interv_(V, As);
-interv_(V, [A|As]) -> mark_intersect(V, A), interv_(V, As);
+interv_(V, [A|As]) -> mark(V, A), interv_(V, As);
 interv_(V, []) -> get_marked(V, true).
 
 %% eval all 2^N combinations of Vt
@@ -890,23 +919,38 @@ bindv(V, J, I, Vt) ->
     %% io:format("bindv J=~w Xj=~w\n", [J, Xj]),
     bind(V,Xj) andalso bindv(V,J-1,I,Vt).
 
--spec mark_literals(Vp::varc(), Bs::bindings()) -> ok.
+-spec unmark(Vp::varc()) -> ok.
 
-mark_literals(_Vp, _Bs) ->
+unmark(_Vp) ->
     ?nif_stub().
 
--spec mark_intersect(Vp::varc(), Bs::bindings()) -> ok.
-mark_intersect(_Vp, _Bs) ->
+-spec mark(Vp::varc(), Bs::bindings()|level()) -> ok.
+
+mark(_Vp, _Bs) ->
     ?nif_stub().
 
-mark_intersect_var(Vp, Var, Bs0) ->
-    mark_intersect_var(Vp, Var, Bs0, ?BINDING_AS_TUPLE).
+-spec mark(Vp::varc(), Bs::bindings()|level(), Clear::boolean()) -> ok.
 
--spec mark_intersect_var(Vp::varc(), Var::literal(),
-			 Bs0::bindings(), AsTuple::boolean()) -> 
-				bindings().
-mark_intersect_var(_Vp, _Var, _Bs0, _AsTuple) ->
+mark(_Vp, _Bs, _Clear) ->
     ?nif_stub().
+
+-spec intersect_marks(Vp::varc(), Bs::bindings()|level()) -> ok.
+intersect_marks(_Vp, _Bs) ->
+    ?nif_stub().
+
+intersect_var(Vp, Var, Bs0) ->
+    intersect_var(Vp, Var, Bs0, ?BINDING_AS_TUPLE).
+
+intersect_bindings(Vp, Var, Bs0, Bs1) ->
+    mark(Vp, Bs1),
+    intersect_var(Vp, Var, Bs0, true).
+
+-spec intersect_var(Vp::varc(), Var::literal(),
+		    Bs0::bindings()|level(), AsTuple::boolean()) -> 
+	  bindings().
+intersect_var(_Vp, _Var, _Bs0, _AsTuple) ->
+    ?nif_stub().
+
 
 get_marked(Vp) ->
     get_marked(Vp, ?BINDING_AS_TUPLE).
@@ -916,9 +960,6 @@ get_marked(Vp) ->
 get_marked(_Vp, _Tuple) ->
     ?nif_stub().
 
-intersect_var(Vp, Var, Bs0, Bs1) ->
-    mark_literals(Vp, Bs1),
-    mark_intersect_var(Vp, Var, Bs0, true).
 
 intersect_var0(_Vp, Var, Bs0, Bs1) ->
     intersect_var0_(Var, Bs0, bindings_to_map(Bs1)).

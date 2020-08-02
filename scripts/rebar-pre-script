@@ -1,0 +1,8 @@
+#!/bin/sh
+
+SCRIPT=`basename $0`
+SCRIPTDIR=`dirname $0`
+VARP_DIR=`cd ${SCRIPTDIR}/.. && pwd`
+
+VSN=`git describe --tags --long --abbrev=1`
+echo "#define VARP_VSN \"$VSN\"" > $VARP_DIR/c_src/vsn.h
