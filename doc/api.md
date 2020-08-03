@@ -100,15 +100,15 @@ varpy.add_variable(vp [,is_atom])
 
 Create a new variable. The variables is return as an index to the
 next available variable in the variable table. Mark the new variable
-as atom if is_atom is True. The atom status may later be queried with
-variable info. is\_atom defaults to True.
+as atom if is_atom is __True__. The atom status may later be queried with
+variable info. is\_atom defaults to __True__.
 
 ``` python
 varpy.value(vp, x)
 ```
 
-Return variable value as varp constant 
-varpy.__t__ | varpy.__f__ | varpy.__undefined__
+Return __True__ | __False__ | __None__,
+Value, None is return if variables undefined.
 
 
 ``` python
@@ -276,7 +276,7 @@ However the conflict clause(s) created by varpy.conflict are created in
 varpy.get_clause(vp, cix [, skip | varpy.undefined [, raw]] )
 ```
 
-Retrive a clause as list given the clause index __cix__.
+Retrieve a clause as list given the clause index __cix__.
 If literal __x__ is given then literal __x__ is removed 
 from the clause list returned. if __raw__ is __True__ then literals 
 bound on level=0 are also return as normal, otherwise they are

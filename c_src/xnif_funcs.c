@@ -5,11 +5,13 @@
 #include "xnif_funcs.h"
 ERL_NIF_TERM ATOM_TRUE;
 ERL_NIF_TERM ATOM_FALSE;
+ERL_NIF_TERM ATOM_UNDEF;
 
 void xnif_init(ErlNifEnv* env)
 {
     ATOM_TRUE = enif_make_atom(env, "true");
     ATOM_FALSE = enif_make_atom(env, "false");
+    ATOM_UNDEF = enif_make_atom(env, "undefined");
 }
 
 int enif_is_true(ErlNifEnv* env, ERL_NIF_TERM term)
@@ -46,6 +48,12 @@ ERL_NIF_TERM enif_make_boolean(ErlNifEnv* env, int value)
 {
     (void) env;
     return value ? ATOM_TRUE : ATOM_FALSE;
+}
+
+ERL_NIF_TERM enif_make_undefined(ErlNifEnv* env)
+{
+    (void) env;
+    return ATOM_UNDEF;
 }
 
 int enif_get_number(ErlNifEnv* env,ERL_NIF_TERM arg,double* dp)

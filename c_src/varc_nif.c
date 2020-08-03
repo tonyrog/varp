@@ -809,7 +809,6 @@ DECL_ATOM(edge_2_counter);
 DECL_ATOM(edge_d_counter);
 DECL_ATOM(error);
 DECL_ATOM(exclamation_mark);
-DECL_ATOM(f);
 DECL_ATOM(false);
 DECL_ATOM(fifo);
 DECL_ATOM(flags);
@@ -854,7 +853,6 @@ DECL_ATOM(size);
 DECL_ATOM(status);
 DECL_ATOM(symbol);
 DECL_ATOM(system_limit);
-DECL_ATOM(t);
 DECL_ATOM(toggle);
 DECL_ATOM(true);
 DECL_ATOM(turbo);
@@ -1518,7 +1516,7 @@ static inline int export_ll(literal_t* lp)
 static inline ERL_NIF_TERM external_ll(ErlNifEnv* env,literal_t* lp)
 {
     if (lp->var->ix == 0)
-	return lp->neg ? ATOM(f): ATOM(t);
+	return enif_make_boolean(env, !lp->neg);
     else {
 	int x = export_ll(lp);
 	return enif_make_int(env, x);
@@ -1553,9 +1551,9 @@ static inline ERL_NIF_TERM external_l(ErlNifEnv* env,lit_t l)
 {
 #ifdef LIT_INTEGER
     if (l == ULIT_TRUE)
-	return ATOM(t);
+	return enif_make_boolean(env, true);
     else if (l == ULIT_FALSE)
-	return ATOM(f);
+	return enif_make_boolean(env, false);
     else
 	return enif_make_int(env, export_l(l));
 #else
@@ -3032,9 +3030,9 @@ static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
 	    return 0;
 	}
     }
-    else if (arg == ATOM(t))
+    else if (enif_is_true(env, arg))
 	*lpp = LL_TRUE(vp);
-    else if (arg == ATOM(f))
+    else if (enif_is_false(env, arg))
 	*lpp = LL_FALSE(vp);
     else return 0;
     return 1;
@@ -3054,8 +3052,8 @@ static int vif_get_l(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg, lit_t* l)
 	    return 0;
 	}
     }
-    else if (arg == ATOM(t)) *l = L_TRUE(vp);
-    else if (arg == ATOM(f)) *l = L_FALSE(vp);
+    else if (enif_is_true(env, arg)) *l = L_TRUE(vp);
+    else if (enif_is_false(env, arg)) *l = L_FALSE(vp);
     else return 0;
     return 1;
 }
@@ -3191,9 +3189,6 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
 static void symbol_clear(symbol_t* sp)
 {
     while(sp) {
-	if (!sp->is_term) {
-	    fprintf(stderr, "clear symbol '%s'\r\n", sp->data);
-	}
 	VARP_FREE(sp->data);
 	sp = (symbol_t*) sp->link.next;
     }
@@ -4481,7 +4476,7 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 }
 
 //
-// value(Vct,X) -> t|f|undefined.
+// value(Vct,X) -> true|false|undefined.
 //
 static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
 			     const ERL_NIF_TERM argv[])
@@ -4495,11 +4490,12 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     if (!vif_get_lit(env, vp, argv[1], &x))
 	return enif_make_badarg(env);
     switch(get_l(vp, x)) {
-    case I_TRUE:  return ATOM(t);
-    case I_FALSE: return ATOM(f);
-    case I_UNDEF: return ATOM(undefined);
+    case I_TRUE:  return enif_make_boolean(env, true);
+    case I_FALSE: return enif_make_boolean(env, false);
+    case I_UNDEF: return enif_make_undefined(env);
     case I_BOUND: return ATOM(undefined);
-    default: return enif_make_int(env, 0);
+    default:
+	return enif_make_badarg(env);
     }
 }
 
@@ -7971,7 +7967,7 @@ static ERL_NIF_TERM varp_get_decision(ErlNifEnv* env, int argc,
     if (!enif_get_int(env, argv[1], &level) || (level<0) || (level > vp->level))
 	return enif_make_badarg(env);
     if (vp->undo[level].decision == L_FALSE(vp))
-	return ATOM(f);
+	return enif_make_boolean(env, false);
     else
 	return enif_make_int(env, export_l(vp->undo[level].decision));
 }
@@ -8506,7 +8502,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(edge_2_counter);
     LOAD_ATOM(edge_d_counter);    
     LOAD_ATOM(error);
-    LOAD_ATOM(f);
     LOAD_ATOM(false);
     LOAD_ATOM(fifo);
     LOAD_ATOM(flags);
@@ -8551,7 +8546,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(status);
     LOAD_ATOM(symbol);
     LOAD_ATOM(system_limit);
-    LOAD_ATOM(t);
     LOAD_ATOM(toggle);
     LOAD_ATOM(true);
     LOAD_ATOM(turbo);

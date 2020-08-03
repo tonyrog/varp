@@ -14,6 +14,7 @@ extern int enif_is_false(ErlNifEnv* env, ERL_NIF_TERM term);
 extern int enif_is_boolean(ErlNifEnv* env, ERL_NIF_TERM term);
 extern int enif_get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, bool_t* bool);
 extern ERL_NIF_TERM enif_make_boolean(ErlNifEnv* env, int value);
+extern ERL_NIF_TERM enif_make_undefined(ErlNifEnv* env);
 extern int enif_get_number(ErlNifEnv* env,ERL_NIF_TERM arg,double* dp);
 extern int enif_print(FILE* out, ERL_NIF_TERM term);
 extern int enif_get_list(ErlNifEnv* env, ERL_NIF_TERM list,

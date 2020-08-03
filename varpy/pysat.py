@@ -2,6 +2,8 @@
 
 import varc
 
+print("loaded varpy version " + varc.info(varc.new({}), 'version'))
+
 def p4(V) :
     X1 = var(V, "P(1,1)")
     X2 = var(V, "P(1,2)")
@@ -42,17 +44,16 @@ def p4(V) :
 def var(V, Name):
     Vi = varc.add_variable(V)
     varc.add_symbol(V, Vi, Name)
-    print("added variable " + Name + " = " + str(Vi))
+    # print("added variable " + Name + " = " + str(Vi))
     return Vi
 
 def clause(V, List):
     Ci = varc.add_clause(V, List)
-    print("added clause " + str(List) + " = " + str(Ci))
+    # print("added clause " + str(List) + " = " + str(Ci))
     return Ci
 
 def bt(v):
     while not varc.nbcp(v):
-        print("nbcp")
         if varc.undo(v) == False:
             return False # contradiction
     return True # model
@@ -64,7 +65,7 @@ def main_p4():
     return bt(V)
 
 def main():
-    V = varc.new({ varc.xref: varc.true})
+    V = varc.new({ 'xref' : True })
     X1 = varc.add_variable(V)
     X2 = varc.add_variable(V)
     X3 = varc.add_variable(V)

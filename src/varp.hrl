@@ -8,8 +8,8 @@
 -ifndef(__VARP_HRL__).
 -define(__VARP_HRL__, true).
 
--define(T,  t).
--define(F,  f).
+-define(T,  true).
+-define(F,  false).
 
 -define(TOP_LEVEL, 0).
 

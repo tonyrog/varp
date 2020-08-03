@@ -368,6 +368,11 @@ ERL_NIF_TERM enif_make_boolean(ErlNifEnv* env, int value)
     return value ? Py_True : Py_False;
 }
 
+ERL_NIF_TERM enif_make_undefined(ErlNifEnv* env)
+{
+    return Py_None;
+}
+
 int enif_get_atom(ErlNifEnv* env, ERL_NIF_TERM atom, char* buf, unsigned len,
 		  ErlNifCharEncoding coding)
 {

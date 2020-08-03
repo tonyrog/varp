@@ -269,7 +269,7 @@ literal_info_keys() ->
 %%
 %% Get literal value 
 %%
--spec value(Vp::varc(), Lit::literal()) -> t | f | undefined.
+-spec value(Vp::varc(), Lit::literal()) -> true | false | undefined.
 
 value(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
