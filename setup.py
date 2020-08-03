@@ -8,7 +8,7 @@ def erlpath():
 
 from distutils.core import setup, Extension
 setup(name = 'varpy',
-      version = '0.9.20',
+      version = '0.9.24',
       url = "http://www.rogvall.se/apps",
       author = "Tony Rogvall",
       author_email = "tony@rogvall.se",
