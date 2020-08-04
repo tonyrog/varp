@@ -237,6 +237,9 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "get_clauses",         3,  varp_get_clauses ) \
     NIF( "get_decision",        2,  varp_get_decision ) \
     NIF( "get_undo_state",      2,  varp_get_undo_state ) \
+    NIF( "get_bindings",        2,  varp_get_bindings ) \
+    NIF( "get_bindings",        3,  varp_get_bindings ) \
+    NIF( "get_bindings",        4,  varp_get_bindings ) \
     NIF( "get_bindings",        5,  varp_get_bindings ) \
     NIF( "get_nbindings",       4,  varp_get_nbindings ) \
     NIF( "get_number_of_bindings", 2,  varp_get_number_of_bindings ) \
@@ -801,7 +804,7 @@ DECL_ATOM(conflict);
 DECL_ATOM(conflict_counter);
 DECL_ATOM(dead);
 DECL_ATOM(default);
-DECL_ATOM(degree);
+// DECL_ATOM(degree);
 DECL_ATOM(delta);
 DECL_ATOM(done);
 DECL_ATOM(edge);
@@ -841,7 +844,6 @@ DECL_ATOM(number_of_subst_variables);
 DECL_ATOM(number_of_unbound_variables);
 DECL_ATOM(number_of_variables);
 DECL_ATOM(off);
-DECL_ATOM(ok);
 DECL_ATOM(phase);
 DECL_ATOM(init_phase);
 DECL_ATOM(qtype);
@@ -860,7 +862,7 @@ DECL_ATOM(undefined);
 DECL_ATOM(unit);
 DECL_ATOM(use);
 DECL_ATOM(use_phase);
-DECL_ATOM(user);
+// DECL_ATOM(user);
 DECL_ATOM(value_packing);
 DECL_ATOM(variable);
 DECL_ATOM(varp);
@@ -871,9 +873,30 @@ DECL_ATOM(xref);
 DECL_ATOM(none);
 DECL_ATOM(log2);
 DECL_ATOM(log10);
-DECL_ATOM(rank);
+//DECL_ATOM(rank);
 DECL_ATOM(next);
 DECL_ATOM(version);
+// sort
+DECL_ATOM(identity);
+DECL_ATOM(p_identity);
+DECL_ATOM(n_identity);
+DECL_ATOM(e_identity);
+DECL_ATOM(random);
+DECL_ATOM(p_random);
+DECL_ATOM(n_random);
+DECL_ATOM(e_random);
+DECL_ATOM(degree);
+DECL_ATOM(p_degree);
+DECL_ATOM(n_degree);
+DECL_ATOM(e_degree);
+DECL_ATOM(rank);
+DECL_ATOM(p_rank);
+DECL_ATOM(n_rank);
+DECL_ATOM(e_rank);
+DECL_ATOM(user);
+DECL_ATOM(p_user);
+DECL_ATOM(n_user);
+DECL_ATOM(e_user);
 
 #ifdef DEBUG_MEM
 #define VARP_ALLOC(n)       debug_alloc((n))
@@ -3735,7 +3758,7 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     return enif_make_int(env, i);
 }
 
-// varc:add_symbol(Vp:varc(),integer(),term()) -> ok | error
+// varc:add_symbol(Vp:varc(),integer(),term()) -> ok
 static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
@@ -3762,7 +3785,9 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 
     if ((sp = symbol_lookup(vp, &bin, hvalue, is_term)) != NULL) {
 	if (is_term) enif_release_binary(&bin);
-	return ATOM(error);
+	if (sp->var->ix == var->ix)
+	    return enif_make_ok(env);
+	return enif_make_badarg(env);
     }
 
     if ((sp = symbol_create(vp, var, &bin, hvalue, is_term)) == NULL)
@@ -3771,7 +3796,7 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
     if (symbol_insert(vp, var, sp) < 0)
 	return enif_make_badarg(env);
 
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 // varc:find_variable(Vp:varc(),term()) -> false | integer().
@@ -4284,6 +4309,106 @@ static void order_insert_before(varp_t* vp,variable_t* anchor,variable_t* var)
     order_move_next(vp, var);
 }
 
+static int vif_get_order(ErlNifEnv* env, ERL_NIF_TERM arg, int* orderp)
+{
+    int order;
+    
+    if (enif_get_int(env, arg, &order)) {
+	if ((order < 0) || (order > 0xff))
+	    return 0;
+	if (((order & 0x3f) > 6) || ((order & 0x3f) == 5))
+	    return 0;
+	*orderp = order;
+	return 1;
+    }
+    if (enif_is_undefined(env, arg)) {
+	*orderp = ORDER_UNDEFINED;
+	return 1;
+    }
+    if (EQUAL_KEY(env, identity, arg)) {
+	*orderp = ORDER_IDENTITY | ORDER_DESCEND;
+	return 1;
+    }
+    if (EQUAL_KEY(env, p_identity, arg)) {
+	*orderp = ORDER_IDENTITY | ORDER_ASCEND;
+	return 1;
+    }
+    if (EQUAL_KEY(env, n_identity, arg)) {
+	*orderp = ORDER_IDENTITY | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, e_identity, arg)) {
+	*orderp = ORDER_IDENTITY | ORDER_INTERLEAVE;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, random, arg)) {
+	*orderp = ORDER_RANDOM | ORDER_DESCEND;
+	return 1;
+    }
+    if (EQUAL_KEY(env, p_random, arg)) {
+	*orderp = ORDER_RANDOM | ORDER_ASCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, n_random, arg)) {
+	*orderp = ORDER_RANDOM | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, e_random, arg)) {
+	*orderp = ORDER_RANDOM | ORDER_INTERLEAVE;
+	return 1;
+    }
+    if (EQUAL_KEY(env, degree, arg)) {
+	*orderp = ORDER_DEGREE | ORDER_DESCEND;
+	return 1;
+
+    }
+    if (EQUAL_KEY(env, p_degree, arg)) {
+	*orderp = ORDER_DEGREE | ORDER_ASCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, n_degree, arg)) {
+	*orderp = ORDER_DEGREE | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, e_degree, arg)) {
+	*orderp = ORDER_DEGREE | ORDER_INTERLEAVE;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, rank, arg)) {
+	*orderp = ORDER_RANK | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, p_rank, arg)) {
+	*orderp = ORDER_RANK | ORDER_ASCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, n_rank, arg)) {
+	*orderp = ORDER_RANK | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, e_rank, arg)) {
+	*orderp = ORDER_RANK | ORDER_INTERLEAVE;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, user, arg)) {
+	*orderp = ORDER_USER | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, p_user, arg)) {
+	*orderp = ORDER_USER | ORDER_ASCEND;
+	return 1;
+    }
+    if (EQUAL_KEY(env, n_user, arg)) {
+	*orderp = ORDER_USER | ORDER_DESCEND;
+	return 1;	
+    }
+    if (EQUAL_KEY(env, e_user, arg)) {
+	*orderp = ORDER_USER | ORDER_INTERLEAVE;
+	return 1;	
+    }
+    return 0;
+}
+
 static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
@@ -4296,9 +4421,9 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    if (!enif_get_int(env, argv[1], &order[0]))
+    if (!vif_get_order(env, argv[1], &order[0]))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[2], &order[1]))
+    if (!vif_get_order(env, argv[2], &order[1]))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[3], &arg))
 	return enif_make_badarg(env);
@@ -4407,7 +4532,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     } STK_END0(nkey1);
     
     ASSERT(valid_order(vp));
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
@@ -4420,8 +4545,8 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (vif_get_literal_list(env, vp, argv[1], &len, NULL)) {
-	ERL_NIF_TERM r = ATOM(ok);
-	STK_BEGIN(literal_t*, literals, len) {	
+	ERL_NIF_TERM r = enif_make_ok(env);
+	STK_BEGIN(literal_t*, literals, len) {
 	    int i;
 	    if (!vif_get_literal_list(env, vp, argv[1], &len, literals)) {
 		r = enif_make_badarg(env);
@@ -4455,7 +4580,7 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     if (vif_get_literal_list(env, vp, argv[1], &len, NULL)) {
-	ERL_NIF_TERM r = ATOM(ok);
+	ERL_NIF_TERM r = enif_make_ok(env);
 	STK_BEGIN(literal_t*, literals, len) {
 	    int i;
 	    if (!vif_get_literal_list(env, vp, argv[1], &len, literals)) {
@@ -4493,9 +4618,8 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     case I_TRUE:  return enif_make_boolean(env, true);
     case I_FALSE: return enif_make_boolean(env, false);
     case I_UNDEF: return enif_make_undefined(env);
-    case I_BOUND: return ATOM(undefined);
-    default:
-	return enif_make_badarg(env);
+    case I_BOUND: return enif_make_undefined(env);
+    default: return enif_make_badarg(env);
     }
 }
 
@@ -4685,7 +4809,7 @@ static ERL_NIF_TERM varp_set_user_count(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     xp = vindex_ll(vp, x);
     xp->user = count;
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 
@@ -4791,7 +4915,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	    cix = cp->cix;
 	    clause_free(vp, cp);
 	    clauseset_plug_hole(vp, ALPHA, GET_IX(cix));
-	    return ATOM(undefined); // It is a copy
+	    return enif_make_boolean(env, false); // It is a copy
 	}
 	memcpy(cp->lit, vp->tlit, size*sizeof(lit_t));
 	cp->hvalue = hvalue;
@@ -5501,7 +5625,7 @@ static ERL_NIF_TERM varp_undo_level(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (level < (int)dynvar_size(vp->undo))
 	undo_level(vp, level);
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 //
@@ -5520,7 +5644,7 @@ static ERL_NIF_TERM varp_keep_level(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (level < (int)dynvar_size(vp->undo))
 	keep_level(vp, level);
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 //
@@ -5549,7 +5673,7 @@ static ERL_NIF_TERM varp_move_level(ErlNifEnv* env, int argc,
 	move_level(vp, src, dst);
 	vp->caller_env = NULL;	
     }
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 // use 2-lower bits on 0 pointer to signal cases
@@ -6341,7 +6465,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 #ifdef PACKED_VALUE
 	return enif_make_uint(env, PACKED_VALUE);
 #else
-	return ATOM(undefined);
+	return enif_make_boolean(env, false);
 #endif
     }
     if (EQUAL_KEY(env, edge, argv[1])) {
@@ -6383,7 +6507,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->max_conflicting = MAX_CONFLICTING;
 	else
 	    vp->max_conflicting = value;
-	return ATOM(ok);
+	return enif_make_ok(env);
     }
     else if (EQUAL_KEY(env, xref, argv[1])) {
 	bool_t enable;
@@ -6409,7 +6533,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    }
 	    vp->opt.xref = false;
 	}
-	return ATOM(ok);
+	return enif_make_ok(env);
     }
     else if (EQUAL_KEY(env, hash, argv[1])) {
 	bool_t enable;
@@ -6433,7 +6557,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->hnum = 0;
 	    vp->opt.hash = false;
 	}
-	return ATOM(ok);
+	return enif_make_ok(env);
     }
     else if (EQUAL_KEY(env, qtype, argv[1])) {
 	if (EQUAL_KEY(env, fifo, argv[2]))
@@ -6444,7 +6568,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->opt.qtype = recursive;
 	else
 	    return enif_make_badarg(env);
-	return ATOM(ok);
+	return enif_make_ok(env);
     }
     return enif_make_badarg(env);
 }
@@ -6959,7 +7083,7 @@ make_clause:
     hvalue = literal_array_hash(vp, vp->tlit, size);
     // check if this clause alread exist in alpha
     if ((cix=clauseset_find(vp,vp->tlit,size,ALPHA,hvalue)) != CLAUSE_NONE)
-	return ATOM(undefined); // It is a copy
+	return enif_make_boolean(env, false);  // It is a copy
     if ((cp = clause_alloc(vp, size)) == NULL)
 	return enif_make_badarg(env);
     memcpy(cp->lit, vp->tlit, sizeof(lit_t)*size);
@@ -7123,7 +7247,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
 	else {
-	    ERL_NIF_TERM r = ATOM(ok);
+	    ERL_NIF_TERM r = enif_make_ok(env);
 	    STK_BEGIN(lit_t, literals, size) {
 		lit_t* lpp = &literals[0];
 		list = argv[1];
@@ -7141,7 +7265,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 		    STK_LEAVE(literals);
 		}
 	    } STK_END(literals);
-	    if (r != ATOM(ok))
+	    if (r != enif_make_ok(env)) // fixme: check if exception
 		return r;
 	}
     }
@@ -7172,8 +7296,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     validate_twl(vp);
     validate_implication_clause(vp);
 #endif
-
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 // may only clean clause on level 0!
@@ -7194,7 +7317,7 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
     if (vp->level != 0)
 	return enif_make_badarg(env);
     if ((cp = get_clause(vp,cix)) == NULL)
-	return ATOM(ok);
+	return enif_make_ok(env);
 
     size = cp->size;
     lit  = cp->lit;
@@ -7211,12 +7334,12 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
     cp->size = size;
 
     clause_link(vp, cp);
-    return ATOM(ok);
+    return enif_make_ok(env);
     
 remove:
     DBG("  %lu-removed\r\n", size);
     clause_free(vp, cp);
-    return ATOM(ok);
+    return enif_make_ok(env);    
 
 error:
     return enif_make_badarg(env);    
@@ -7246,7 +7369,7 @@ static ERL_NIF_TERM varp_clean_edges(ErlNifEnv* env, int argc,
 	else
 	    epp = (edge_t**) &(ep->link.next);
     }
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 static int cmp_xref QSORT_ARGS(const void* a, const void* b,void* arg)
@@ -7372,7 +7495,7 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     
     if ((n=(int)dynvec_size(vp->clauseset, si)) == 0)
-	return ATOM(ok);
+	return enif_make_ok(env);
 
     cm = vp->clauseset[si];
 
@@ -7429,8 +7552,8 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 //	enif_fprintf(stdout, "REMAPPED clauses si=%d\n", si);
 //	print_clauseset(vp, si, n);	
     } STK_END0(rmap);
-    
-    return ATOM(ok);
+
+    return enif_make_ok(env);
 }
 
 static ERL_NIF_TERM varp_clauseset_size(ErlNifEnv* env, int argc,
@@ -7462,7 +7585,7 @@ static ERL_NIF_TERM varp_clauseset_offset(ErlNifEnv* env, int argc,
 	if (!enif_get_uint(env, argv[2], &offs))
 	    return enif_make_badarg(env);
 	vp->coffs[si] = offs;
-	return ATOM(ok);
+	return enif_make_ok(env);
     }
     return enif_make_uint(env, vp->coffs[si]);
 }
@@ -7675,7 +7798,7 @@ static ERL_NIF_TERM varp_clause_info(ErlNifEnv* env, int argc,
 	else if (cp->flags & CLAUSE_FLAG_INQUEUE)
 	    return ATOM(inqueue);
 	else
-	    return ATOM(ok);
+	    return enif_make_ok(env);
     }
     if (argv[2] == ATOM(watch0))
 	return enif_make_long(env,cp->wl[0].p);
@@ -7703,7 +7826,7 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
     if ((cp = get_clause(vp, cix)) == NULL)
 	return enif_make_badarg(env);
     cp->stamp = vp->bcp_counter;
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
@@ -7735,31 +7858,31 @@ static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     }
     variable_bump(vp, var, bump);
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 static int vif_get_sub_flag(ErlNifEnv* env, ERL_NIF_TERM term, uint32_t* flag)
 {
     UNUSED(env);
-    if (term == ATOM(variable))
+    if (EQUAL_KEY(env, variable, term))
 	*flag = SUB_FLAG_VAR;    
-    else if (term == ATOM(atom))
+    else if (EQUAL_KEY(env, atom, term))
 	*flag = SUB_FLAG_ATOM;
-    else if (term == ATOM(number_of_variables))
+    else if (EQUAL_KEY(env, number_of_variables, term))
 	*flag = SUB_FLAG_NUM_VARS;
-    else if (term == ATOM(number_of_bound_variables))
+    else if (EQUAL_KEY(env, number_of_bound_variables,term))
 	*flag = SUB_FLAG_NUM_BOUND;
-    else if (term == ATOM(number_of_subst_variables))
+    else if (EQUAL_KEY(env,number_of_subst_variables,term))
 	*flag = SUB_FLAG_NUM_SUBST;    
-    else if (term == ATOM(number_of_clauses))
+    else if (EQUAL_KEY(env,number_of_clauses,term))
 	*flag = SUB_FLAG_NUM_CLAUSES;
-    else if (term == ATOM(number_of_dead_clauses))
+    else if (EQUAL_KEY(env,number_of_dead_clauses,term))
 	*flag = SUB_FLAG_NUM_DEAD;
-    else if (term == ATOM(max_level))
+    else if (EQUAL_KEY(env,max_level,term))
 	*flag = SUB_FLAG_MAX_LEVEL;
-    else if (term == ATOM(max_bound))
+    else if (EQUAL_KEY(env,max_bound,term))
 	*flag = SUB_FLAG_MAX_BOUND;
-    else if (term == ATOM(min_level))
+    else if (EQUAL_KEY(env, min_level, term))
 	*flag = SUB_FLAG_MIN_LEVEL;
     else
 	return 0;
@@ -7826,8 +7949,7 @@ static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
     // link in first
     sp->link.next = (cdlink_t*) vp->subs;
     vp->subs = sp;
-	
-    return ATOM(ok);	
+    return enif_make_ok(env);	
 }
 
 static ERL_NIF_TERM make_edge_list(ErlNifEnv* env, varp_t* vp,
@@ -8008,19 +8130,26 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
     varp_t* vp;
     int level;
     bool_t clause_info = false;
-    bool_t trail = false;
-    bool_t as_tuple = false;
+    bool_t trail       = false;
+    bool_t as_tuple    = true;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &level) || (level<0))
 	return enif_make_badarg(env);
-    if (!enif_get_boolean(env, argv[2], &clause_info))
-	return enif_make_badarg(env);
-    if (!enif_get_boolean(env, argv[3], &trail))
-	return enif_make_badarg(env);
-    if (!enif_get_boolean(env, argv[4], &as_tuple))
-	return enif_make_badarg(env);
+    
+    if (argc >= 3) {
+	if (!enif_get_boolean(env, argv[2], &clause_info))
+	    return enif_make_badarg(env);
+	if (argc >= 4) {
+	    if (!enif_get_boolean(env, argv[3], &trail))
+		return enif_make_badarg(env);
+	    if (argc >= 5) {
+		if (!enif_get_boolean(env, argv[4], &as_tuple))
+		    return enif_make_badarg(env);
+	    }
+	}
+    }
     
     if (level <= vp->level) {
 	int size    = (int)vp->undo[level].size;
@@ -8062,7 +8191,6 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
     int level;
     int size;
     bool_t clause_info = false;
-    bool_t trail = false;
     ERL_NIF_TERM r;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
@@ -8070,8 +8198,6 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
     if (!enif_get_int(env, argv[1], &size) || (size < 0))
 	return enif_make_badarg(env);
     if (!enif_get_boolean(env, argv[2], &clause_info))
-	return enif_make_badarg(env);
-    if (!enif_get_boolean(env, argv[3], &trail))
 	return enif_make_badarg(env);
     level = vp->level;
 
@@ -8140,7 +8266,7 @@ static ERL_NIF_TERM varp_unmark(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     unmark_all(vp);
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 // Mark, with MARK0 list of literals, tuple of literals or bindings
@@ -8201,7 +8327,7 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 	if (!enif_is_empty_list(env, list))
 	    return enif_make_badarg(env);
     }
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 
@@ -8279,7 +8405,7 @@ static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
     }
     intersect_marked(vp);
-    return ATOM(ok);
+    return enif_make_ok(env);
 }
 
 // return a list/tuple of literals that are marked with MARK0 (|MARKN)
@@ -8495,7 +8621,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(conflict_counter);    
     LOAD_ATOM(dead);
     LOAD_ATOM(default);
-    LOAD_ATOM(degree);    
+    // LOAD_ATOM(degree);    
     LOAD_ATOM(delta);
     LOAD_ATOM(done);
     LOAD_ATOM(edge);
@@ -8534,7 +8660,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(number_of_unbound_variables);
     LOAD_ATOM(number_of_variables);
     LOAD_ATOM(off);
-    LOAD_ATOM(ok);
     LOAD_ATOM(phase);    
     LOAD_ATOM(init_phase);
     LOAD_ATOM(qtype);
@@ -8553,7 +8678,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(unit);
     LOAD_ATOM(use);
     LOAD_ATOM(use_phase);
-    LOAD_ATOM(user);
+    // LOAD_ATOM(user);
     LOAD_ATOM(value_packing);
     LOAD_ATOM(variable);
     LOAD_ATOM(varp);
@@ -8564,10 +8689,30 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(none);
     LOAD_ATOM(log2);
     LOAD_ATOM(log10);
-    LOAD_ATOM(rank);
+    // LOAD_ATOM(rank);
     LOAD_ATOM(next);
     LOAD_ATOM(version);
     LOAD_ATOM_STRING(exclamation_mark, "!");
+    LOAD_ATOM(identity);
+    LOAD_ATOM_STRING(p_identity, "identity");
+    LOAD_ATOM_STRING(n_identity, "identity");
+    LOAD_ATOM_STRING(e_identity, "identity");
+    LOAD_ATOM(random);
+    LOAD_ATOM_STRING(p_random, "random");
+    LOAD_ATOM_STRING(n_random, "random");
+    LOAD_ATOM_STRING(e_random, "random");
+    LOAD_ATOM(degree);
+    LOAD_ATOM_STRING(p_degree, "degree");
+    LOAD_ATOM_STRING(n_degree, "degree");
+    LOAD_ATOM_STRING(e_degree, "degree");
+    LOAD_ATOM(rank);
+    LOAD_ATOM_STRING(p_rank, "rank");
+    LOAD_ATOM_STRING(n_rank, "rank");
+    LOAD_ATOM_STRING(e_rank, "rank");
+    LOAD_ATOM(user);
+    LOAD_ATOM_STRING(p_user, "user");
+    LOAD_ATOM_STRING(n_user, "user");
+    LOAD_ATOM_STRING(e_user, "user");    
 }
 
 static void varp_down(ErlNifEnv* env, void* obj,

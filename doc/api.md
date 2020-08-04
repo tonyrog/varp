@@ -373,8 +373,7 @@ varpy.clean_clause(vp, cix)
 ```
 
 Cleanup clause by removing all false literals on level 0.
-if clause is contradictory then exception is raised, else
-varpy.__ok__ is returned.
+if clause is contradictory then exception is raised
 
 
 ``` python
@@ -414,28 +413,80 @@ Return the undo state on level __l__
 * varpy.__undef__
 
 ``` python
-varpy.get_bindings(vp, level, clauseinfo, as_trail, as_tuple)
+varpy.get_bindings(vp, l, clauseinfo, as_trail, as_tuple)
 ```
 
+Return all bindings on level __l__. Return them in order of when
+binding where made if __as_trail__ is __True__ otherwise the bidnings
+are returned as latest binding first. if __as_tuple__ is __True__ then
+bindings are returned as a tuple otherwise a list is returned.
+
+if clauseinfo is __True__ then a list of
+tuples (literal, pos, implication\_clause) are returned otherwise
+a list of literals are returned. A negative literal means that the
+variable is bound to __False__ a positive literal means that the
+variable is bound to __True__.
+
 ``` python
-varpy.get_nbindings(vp, count clauseinfo, as_trail)
+varpy.get_nbindings(vp, count, clauseinfo)
 ```
+
+Return a maximum of __count__ bindings with the latest binding first.
+
+if clauseinfo is __True__ then a list of
+tuples (literal, pos, implication\_clause) are returned otherwise
+a list of literals are returned. A negative literal means that the
+variable is bound to __False__ a positive literal means that the
+variable is bound to __True__.
 
 ``` python
 varpy.get_number_of_bindings(vp, l)
 ```
 
+Return number of bindings on level __l__.
+
 ``` python
 varpy.order_sort(vp, key1, key2, arg)
 ```
 
-``` python
-varpy.order_first(vp, [x1,...,xn])
-```
+Order variables according to __key1__ and then __key2__, an optional
+__arg__ may be supplied when needed by sorting.
+
+The sort keys available are:
+* 'identity'
+ Sort according to when the variable number, this mostly corresponds 
+to when the variable was created.
+* 'random'
+ Sort variables using a uniform distribution, an integer
+seed may be given as __arg__.
+* 'degree'
+ Sort literals according to the number of time they occur in the clauses.
+* 'rank'
+ Sort literals according to the sum of ranks for all occurences in
+all clauses. The rank for literal x is defined as the
+sum of 1/|ci| for all clauses ci where x is a member.
+* 'user'
+ Sort literals according to a user value, that can be set by
+using the varpy.__set\_user\_cunt__(vp, x, unsigned)
+
+If the sort key is prefixed with a '+' then sorting is
+ascending. If prefix is '-' then the sort is descending, wich
+is also the default.
 
 ``` python
-varpy.order_last(vp, [x1,...,xn])
+varpy.order_first(vp, [x1,..,xn])
 ```
+
+Update current sort order so that literals __x1__..__xn__
+are placed first.
+
+
+``` python
+varpy.order_last(vp, [x1,..,xn])
+```
+
+Update current sort order so that literals __x1__..__xn__
+are placed last.
 
 ``` python
 varpy.next_unbound(varp [, previous])
@@ -485,9 +536,8 @@ If no assoication is found __False__ is returned.
 varpy.use_clause(vp, cix)
 ```
 
-Mark clause __cix__ as "used" by assigning a timestamp count to the
-clause. This timestamp is based on the bcp counter, the number of
-bcp that has been run since __vp__ instance was created.
+Update the clause __cix__ timestamp to the current bcp\_counter,
+the number of bcp's that has been run since __vp__ instance was created.
 
 ``` python
 varpy.bump(vp, x, n)
@@ -511,17 +561,16 @@ varpy.subscribe(vp, flag|[flag])
 
 Flags
 
-* varpy.__variable__
-* varpy.__atom__
-* varpy.__number\_of\_variables__
-* varpy.__number\_of\_bound_variables__
-* varpy.__number\_of\_subst_variables__
-* varpy.__number\_of\_clauses__
-* varpy.__number\_of\_dead_clauses__
-* varpy.__max\_level__
-* varpy.__max\_bound__
-* varpy.__min\_level__
-
+* 'variable'
+* 'atom'
+* 'number\_of\_variables'
+* 'number\_of\_bound_variables'
+* 'number\_of\_subst_variables'
+* 'number\_of\_clauses'
+* 'number\_of\_dead_clauses'
+* 'max\_level'
+* 'max\_bound'
+* 'min\_level'
 
 ``` python
 varpy.clauseset_size(vp, s)
@@ -545,8 +594,9 @@ Set offset where __s__ is one of 'delta', 'gamma', 'alpha', 'beta'
 varpy.clauseset_sort(vp, s)
 ```
 
-Sort clauses in clause set __s__ where __s__ is one of 
-'delta', 'gamma', 'alpha', 'beta'
+Sort clauses in the clause set __s__, where __s__ is one of 
+'delta', 'gamma', 'alpha', 'beta'. The clauses are sorted
+according to the internal use counter set by varpy.use\_clause.
 
 ``` python
 varpy.clauseset_first(vp, s)

@@ -342,6 +342,12 @@ int enif_is_false(ErlNifEnv* env, ERL_NIF_TERM term)
     return 0;
 }
 
+int enif_is_undefined(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    if (term == Py_None) return 1;
+    return 0;
+}
+
 int enif_get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, int* value)
 {
     if (PyBool_Check(term)) {
@@ -369,6 +375,11 @@ ERL_NIF_TERM enif_make_boolean(ErlNifEnv* env, int value)
 }
 
 ERL_NIF_TERM enif_make_undefined(ErlNifEnv* env)
+{
+    return Py_None;
+}
+
+ERL_NIF_TERM enif_make_ok(ErlNifEnv* env)
 {
     return Py_None;
 }

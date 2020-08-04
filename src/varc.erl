@@ -548,28 +548,44 @@ get_bindings_list(_Vp, Level) ->
 get_bindings_trail(_Vp, Level) ->
     get_bindings(_Vp, Level, false, true, false).
 
--spec get_bindings(Vp::varc(), Level::level()) -> bindings().
+-spec get_bindings(Vp::varc(), Level::level()) -> 
+	  bindings().
+
 %% get bindings, as list, on level 'Level' without clause info
-get_bindings(Vp, Level) ->
-    get_bindings(Vp, Level, false, false, ?BINDING_AS_TUPLE).
+get_bindings(_Vp, Level) when 
+      is_integer(Level) ->
+    ?nif_stub().
+
+-spec get_bindings(Vp::varc(), Level::level(), ClauseInfo::boolean()) ->
+	  bindings().
+
+%% get bindings, as tuple, on level 'Level' with optional clause info
+get_bindings(_Vp, Level, ClauseInfo) when 
+      is_integer(Level),
+      is_boolean(ClauseInfo) ->
+    ?nif_stub().
 
 -spec get_bindings(Vp::varc(), Level::level(), 
-		   ClauseInfo::boolean()) -> bindings().
-%% get bindings (as list) and possible clause info on Level
-get_bindings(Vp, Level, ClauseInfo) ->
-    get_bindings(Vp, Level, ClauseInfo, false, ?BINDING_AS_TUPLE).
+		   ClauseInfo::boolean(), Trail::boolean()) ->
+	  bindings().
 
--spec get_bindings(Vp::varc(), Level::level(), 
-		   ClauseInfo::boolean(), Trail::boolean()) -> bindings().
-%% get_bindings (as list)
-get_bindings(_Vp, Level, ClauseInfo, Trail) ->
-    get_bindings(_Vp, Level, ClauseInfo, Trail, ?BINDING_AS_TUPLE).
+%% get bindings, as tuple, on level 'Level' with optional clause info
+%% if Trail is true then return bindings in reversed order
+get_bindings(_Vp, Level, ClauseInfo, Trail) when
+      is_integer(Level),
+      is_boolean(ClauseInfo),
+      is_boolean(Trail) ->
+    ?nif_stub().
 
 -spec get_bindings(Vp::varc(), Level::level(), 
 		   ClauseInfo::boolean(), Trail::boolean(),
 		   AsTuple::boolean()) -> bindings().
 
-get_bindings(_Vp, _Level, _ClauseInfo, _Trail, _AsTuple) ->
+get_bindings(_Vp, Level, ClauseInfo, Trail, AsTuple)  
+  when is_integer(Level),
+       is_boolean(ClauseInfo),
+       is_boolean(Trail),
+       is_boolean(AsTuple) ->
     ?nif_stub().
 
 get_number_of_bindings(_Vp, _Level) ->

@@ -6,12 +6,14 @@
 ERL_NIF_TERM ATOM_TRUE;
 ERL_NIF_TERM ATOM_FALSE;
 ERL_NIF_TERM ATOM_UNDEF;
+ERL_NIF_TERM ATOM_OK;
 
 void xnif_init(ErlNifEnv* env)
 {
     ATOM_TRUE = enif_make_atom(env, "true");
     ATOM_FALSE = enif_make_atom(env, "false");
     ATOM_UNDEF = enif_make_atom(env, "undefined");
+    ATOM_OK    = enif_make_atom(env, "ok");
 }
 
 int enif_is_true(ErlNifEnv* env, ERL_NIF_TERM term)
@@ -24,6 +26,12 @@ int enif_is_false(ErlNifEnv* env, ERL_NIF_TERM term)
 {
     (void) env;
     return (term == ATOM_FALSE);
+}
+
+int enif_is_undefined(ErlNifEnv* env, ERL_NIF_TERM term)
+{
+    (void) env;
+    return (term == ATOM_UNDEF);
 }
 
 int enif_is_boolean(ErlNifEnv* env, ERL_NIF_TERM term)
@@ -54,6 +62,12 @@ ERL_NIF_TERM enif_make_undefined(ErlNifEnv* env)
 {
     (void) env;
     return ATOM_UNDEF;
+}
+
+ERL_NIF_TERM enif_make_ok(ErlNifEnv* env)
+{
+    (void) env;
+    return ATOM_OK;
 }
 
 int enif_get_number(ErlNifEnv* env,ERL_NIF_TERM arg,double* dp)

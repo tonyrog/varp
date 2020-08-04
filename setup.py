@@ -6,9 +6,15 @@ def erlpath():
     s.close()
     return p
 
+def vsn():
+    s = os.popen("git describe --tags --abbrev=0")
+    p = s.read()
+    s.close()
+    return p
+
 from distutils.core import setup, Extension
 setup(name = 'varpy',
-      version = '0.9.24',
+      version = vsn(),
       url = "http://www.rogvall.se/apps",
       author = "Tony Rogvall",
       author_email = "tony@rogvall.se",

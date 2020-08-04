@@ -1,2 +1,2 @@
 from varc import *
-from .pysat import *
+from .varp import *

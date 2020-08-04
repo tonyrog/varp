@@ -5,4 +5,9 @@ SCRIPTDIR=`dirname $0`
 VARP_DIR=`cd ${SCRIPTDIR}/.. && pwd`
 
 VSN=`git describe --tags --abbrev=0`
-echo "#define VARP_VSN \"$VSN\"" > $VARP_DIR/c_src/vsn.h
+VSN_TXT=`cat $VARP_DIR/vsn.txt 2> /dev/null`
+if [ "$VSN" != "$VSN_TXT" ];
+then
+   echo $VSN > $VARP_DIR/vsn.txt
+   echo "#define VARP_VSN \"$VSN\"" > $VARP_DIR/c_src/vsn.h
+fi
