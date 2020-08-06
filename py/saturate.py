@@ -1,8 +1,59 @@
 # functions to 1-"saturate" a formula
 import varpy
 
+# saturate variable x return bindings or False
 def saturate_var(vp, x):
+    if eval(vp, -x):
+        varpy.mark(vp, 2)
+        undo(vp)
+        if eval(vp, x):
+            bs = varpy.intersect_var(vp, x, 2, True)
+            varpy.unmark(vp)
+            undo(vp)
+            return bs
+        else:
+            varpy.mark(vp, 1)
+            bs = varpy.get_marked(vp, True)
+            varpy.unmark(vp)
+            return bs
+    else:
+        undo(vp)
+        if eval(vp, x):
+            bs = varpy.get_bindings(vp, 2)
+            undo(vp)
+            return bs
+        else:
+            undo(vp)            
+            return False
+
+def eval(vp, x):
     varpy.set_level(vp, 1)
-    varpy.bind(vp, x)
-    varpy.set_level(vp, 2)
-    varpy.bcp(vp)
+    if varpy.bind(vp, x):
+        varpy.set_level(vp, 2)
+        return varpy.bcp(vp)
+    else:
+        return False
+
+def undo(vp):
+    varpy.undo_level(vp, 2)
+    varpy.undo_level(vp, 1)
+
+def test():
+    vp = varpy.new({'xref':True})
+    x1 = varpy.add_variable(vp)
+    x2 = varpy.add_variable(vp)
+    x3 = varpy.add_variable(vp)
+    x4 = varpy.add_variable(vp)
+    x5 = varpy.add_variable(vp)    
+    varpy.add_clause(vp, [-x1, x2])
+    varpy.add_clause(vp, [x1, x2])
+    varpy.add_clause(vp, [-x1, -x3])
+    varpy.add_clause(vp, [x1, -x3])
+    varpy.add_clause(vp, [-x1, -x4])
+    varpy.add_clause(vp, [x1, x4])
+    varpy.add_clause(vp, [-x1, x5])
+    varpy.add_clause(vp, [x1, -x5])        
+
+    r = saturate_var(vp, x1)
+    print("saturate x1 ")
+    print(r)

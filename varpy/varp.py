@@ -4,14 +4,23 @@ import varc
 
 print("loaded varpy version " + varc.info(varc.new({}), 'version'))
         
-def get_bindings_list(vp, level, clauseinfo=False, trail=False):
-    return varc.get_bindings(vp, level, clauseinfo, trail, False)
-
-def bt(v):
-    while not varc.nbcp(v):
-        if varc.undo(v) == False:
+def bt(vp):
+    while not varc.nbcp(vp):
+        if varc.undo(vp) == False:
             return False # contradiction
     return True # model
+
+def model(vp):
+    n = varc.info(vp, 'number_of_variables')
+    return [symbol(vp, x) for x in range(1,n+1) if varc.value(vp, x)]
+
+def symbol(vp, x):
+    s = varc.variable_info(vp, x, 'symbol')
+    if s == []: return "x("+str(x)+")"
+    else: return str(s[0],'utf-8')
+    
+def get_bindings_list(vp, level, clauseinfo=False, trail=False):
+    return varc.get_bindings(vp, level, clauseinfo, trail, False)
 
 def i(vp=False):
     if vp == False:
@@ -39,3 +48,17 @@ def i(vp=False):
 def il(vp, keylist):
     for key in keylist:
         print(key + ": " + str(varc.info(vp, key)))        
+
+def ic(vp):
+    i_clauseset(vp, 'delta')
+    i_clauseset(vp, 'gamma')
+    i_clauseset(vp, 'alpha')
+    i_clauseset(vp, 'beta')
+
+def i_clauseset(vp, s):
+    i = varc.clauseset_first(vp,s)
+    if not isinstance(i, bool): print("clause set " + s)
+    while not isinstance(i, bool):
+        c = varc.get_clause(vp, i)
+        print(str(i)+": "+str(c))
+        i = varc.clauseset_next(vp,i)
