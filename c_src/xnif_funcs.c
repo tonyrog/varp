@@ -40,13 +40,13 @@ int enif_is_boolean(ErlNifEnv* env, ERL_NIF_TERM term)
     return enif_is_true(env,term) || enif_is_false(env, term);
 }
 
-int enif_get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, bool_t* bool)
+int enif_get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, int* val)
 {
     (void) env;
     if (enif_is_true(env, term))
-	*bool = true;
+	*val = 1;
     else if (enif_is_false(env, term))
-	*bool = false;
+	*val = 0;
     else
 	return 0;
     return 1;

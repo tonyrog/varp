@@ -10,9 +10,23 @@ def bt(vp):
             return False # contradiction
     return True # model
 
+def bt_all(vp):
+    count = 0
+    b = bt(vp)
+    if b:
+        print(model(vp))
+        count += 1
+        while b and varc.undo(vp):
+            b = bt(vp)
+            if b:
+                print(model(vp))
+                count += 1
+    return count
+
 def model(vp):
     n = varc.info(vp, 'number_of_variables')
-    return [symbol(vp, x) for x in range(1,n+1) if varc.value(vp, x)]
+    return [symbol(vp, x) for x in range(1,n+1)
+            if varc.value(vp, x) and varc.variable_info(vp, x, 'is_atom')]
 
 def symbol(vp, x):
     s = varc.variable_info(vp, x, 'symbol')
