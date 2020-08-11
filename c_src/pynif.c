@@ -316,36 +316,22 @@ static int get_string(PyObject* string, char* buf, unsigned len,
 
 int enif_is_boolean(ErlNifEnv* env, ERL_NIF_TERM term)
 {
-    if (PyBool_Check(term))
-	return 1;
-    else if (Integer_Check(term)) {
-	long i = Integer_AsLong(term);
-	if ((i == 0) || (i == 1))
-	    return 1;
-    }
-    return 0;
+    return PyBool_Check(term);
 }
 
 int enif_is_true(ErlNifEnv* env, ERL_NIF_TERM term)
 {
-    if (term == Py_True) return 1;
-    else if (Integer_Check(term) && (Integer_AsLong(term) == 1))
-	return 1;
-    return 0;
+    return (term == Py_True);
 }
 
 int enif_is_false(ErlNifEnv* env, ERL_NIF_TERM term)
 {
-    if (term == Py_False) return 1;
-    else if (Integer_Check(term) && (Integer_AsLong(term) == 0))
-	return 1;
-    return 0;
+    return (term == Py_False);
 }
 
 int enif_is_undefined(ErlNifEnv* env, ERL_NIF_TERM term)
 {
-    if (term == Py_None) return 1;
-    return 0;
+    return (term == Py_None);
 }
 
 int enif_get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, int* value)
@@ -358,13 +344,6 @@ int enif_get_boolean(ErlNifEnv* env, ERL_NIF_TERM term, int* value)
 	else
 	    return 0;
 	return 1;
-    }
-    else if (Integer_Check(term)) {
-	long i = Integer_AsLong(term);
-	if ((i == 0) || (i == 1)) {
-	    *value = i;
-	    return 1;
-	}
     }
     return 0;
 }
