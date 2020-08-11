@@ -85,7 +85,7 @@ def half_adder(vp, y, z, x=None, co=None):
 def full_adder(vp, y, z, ci=False, x=None, co=None):
     if x == None: x = varpy.add_variable(vp)
     if co == None: co = varpy.add_variable(vp)
-    x1 = xor_gate(vp,y,z,x)
+    x1 = xor_gate(vp,y,z,x)  # hmmmm check x!
     x = xor_gate(vp,x1,ci)
     a1 = and_gate(vp,x1,ci)
     a2 = and_gate(vp,y,z)
