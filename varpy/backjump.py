@@ -1,7 +1,6 @@
 # basic backjump implementation
 import varpy
-import pigeon
-import circuit
+from .pigeon import *
 
 def bj(vp):
     varpy.config(vp, 'max_conflicting', 1)
@@ -47,10 +46,10 @@ def test2():
     c = var(vp, "c")
     d = var(vp, "d")
     e = var(vp, "e")
-    f = circuit.eq1(vp, [circuit.or_gate(vp,a,b),
-                         circuit.or_gate(vp,a,c),
-                         circuit.or_gate(vp,b,c),
-                         circuit.or_gate(vp,d,e)])
+    f = varpy.eq1(vp, [varpy.or_gate(vp,a,b),
+                       varpy.or_gate(vp,a,c),
+                       varpy.or_gate(vp,b,c),
+                       varpy.or_gate(vp,d,e)])
     varpy.bind(vp, f)
     if bj(vp):
         print(varpy.model(vp))
