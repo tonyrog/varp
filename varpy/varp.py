@@ -1,6 +1,7 @@
 # using varc
 
 import varc
+import time
 
 print("loaded varpy version " + varc.info(varc.new({}), 'version'))
         
@@ -10,17 +11,33 @@ def bt(vp):
             return False # contradiction
     return True # model
 
-def bt_all(vp):
+def bt_one(vp):
+    t0 = time.time_ns()  # >= 3.7
+    r = bt(vp)
+    t1 = time.time_ns()
+    print("result found in " + str((t1-t0) // 1000) + "us")
+    return r
+
+def bt_done(count, limit):
+    if limit == None: return False
+    elif count >= limit: return True
+    else: return False
+
+# limit>=1 !
+def bt_all(vp, limit=None):
+    t0 = time.time_ns()  # >= 3.7
     count = 0
     b = bt(vp)
     if b:
         print(model(vp))
         count += 1
-        while b and varc.undo(vp):
+        while b and varc.undo(vp) and not bt_done(count, limit):
             b = bt(vp)
             if b:
                 print(model(vp))
                 count += 1
+    t1 = time.time_ns()
+    print(str(count) + " models found in " + str((t1-t0) // 1000) + "us")
     return count
 
 def model(vp):

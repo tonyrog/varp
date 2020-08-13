@@ -6501,24 +6501,29 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-
+    ERL_NIF_TERM key;
+    ERL_NIF_TERM value;
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    if (EQUAL_KEY(env, max_conflicting, argv[1])) {
-	int value;
-	if (!enif_get_int(env, argv[2], &value) || (value < 0))
+    key = argv[1];
+    value = argv[2];
+
+    if (EQUAL_KEY(env, max_conflicting, key)) {
+	int ivalue;
+	if (!enif_get_int(env, value, &ivalue) || (ivalue < 0))
 	    return enif_make_badarg(env);
-	if ((value == 0) || (value > MAX_CONFLICTING))
+	if ((ivalue == 0) || (ivalue > MAX_CONFLICTING))
 	    vp->max_conflicting = MAX_CONFLICTING;
 	else
-	    vp->max_conflicting = value;
+	    vp->max_conflicting = ivalue;
 	return enif_make_ok(env);
     }
-    else if (EQUAL_KEY(env, xref, argv[1])) {
+    if (EQUAL_KEY(env, xref, key)) {
 	int enable;
 
-	if (!enif_get_boolean(env, argv[2], &enable))
+	if (!enif_get_boolean(env, value, &enable))
 	    return enif_make_badarg(env);
 
 	if (enable && !vp->opt.xref) { // xref all clauses
@@ -6541,9 +6546,9 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
-    else if (EQUAL_KEY(env, hash, argv[1])) {
+    if (EQUAL_KEY(env, hash, key)) {
 	int enable;
-	if (!enif_get_boolean(env, argv[2], &enable))
+	if (!enif_get_boolean(env, value, &enable))
 	    return enif_make_badarg(env);
 	if (enable && !vp->opt.hash) {      // hash all clauses
 	    size_t n = vp->cnum[DELTA]+vp->cnum[GAMMA]+vp->cnum[BETA];
@@ -6565,18 +6570,35 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
-    else if (EQUAL_KEY(env, qtype, argv[1])) {
-	if (EQUAL_KEY(env, fifo, argv[2]))
+    if (EQUAL_KEY(env, qtype, key)) {
+	if (EQUAL_KEY(env, fifo, value))
 	    vp->opt.qtype = fifo;
-	else if (EQUAL_KEY(env, lifo, argv[2]))
+	else if (EQUAL_KEY(env, lifo, value))
 	    vp->opt.qtype = lifo;
-	else if (EQUAL_KEY(env, recursive, argv[2]))
+	else if (EQUAL_KEY(env, recursive, value))
 	    vp->opt.qtype = recursive;
 	else
 	    return enif_make_badarg(env);
 	return enif_make_ok(env);
     }
+    if (EQUAL_KEY(env, use_phase, key) && enif_is_true(env, value)) {
+	vp->opt.use_phase = true;
+	return enif_make_ok(env);
+    }
+    if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
+	vp->opt.use_phase = false;
+	return enif_make_ok(env);	
+    }
+    if (EQUAL_KEY(env, init_phase, key) && enif_is_true(env, value)) {
+	vp->opt.init_phase = I_TRUE;
+	return enif_make_ok(env);
+    }
+    if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
+	vp->opt.init_phase = I_FALSE;
+	return enif_make_ok(env);	
+    }
     return enif_make_badarg(env);
+
 }
 
 //
