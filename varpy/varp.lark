@@ -2,16 +2,15 @@ start: definitions
 | definitions lexpr
 | lexpr
 
-definitions: definition
-| definitions definition
+definitions: definition+
 
-definition: "define" pexpr lexpr ";"
-| "declare" pdecls ";"
-| "literals" ldecls ";"
-| "order" odecls ";"
-| "assert" expr ";"
-| "input" IDENTIFIER ";"
-| "output" IDENTIFIER ";"
+?definition: "define" pexpr lexpr ";" -> define
+| "declare" pdecls ";"  -> declare
+| "literals" ldecls ";" -> literals
+| "order" odecls ";" -> order
+| "assert" expr ";" -> assert
+| "input" IDENTIFIER ";" -> input
+| "output" IDENTIFIER ";" -> output
 
 ?primary_expr: IDENTIFIER
 | constant
@@ -19,11 +18,11 @@ definition: "define" pexpr lexpr ";"
 | "{" expr "}" -> vec
 
 ?postfix_expr:  primary_expr
-| postfix_expr "[" expr "]"
-| postfix_expr "(" ")"
-| postfix_expr "(" argument_expr_list ")"
-| postfix_expr "." IDENTIFIER
-| postfix_expr "->" IDENTIFIER
+| postfix_expr "[" expr "]" -> index
+| postfix_expr "(" ")" -> call
+| postfix_expr "(" argument_expr_list ")" -> call
+| postfix_expr "." IDENTIFIER -> field
+| postfix_expr "->" IDENTIFIER -> pointer
 
 ?argument_expr_list: assignment_expr
 	    | argument_expr_list "," assignment_expr
@@ -34,64 +33,63 @@ definition: "define" pexpr lexpr ";"
 unary_operator:  "+" | "-" | "~"
 
 ?multiplicative_expr: unary_expr
-| multiplicative_expr "*" unary_expr
-| multiplicative_expr "/" unary_expr
-| multiplicative_expr "%" unary_expr
+| multiplicative_expr "*" unary_expr -> mult
+| multiplicative_expr "/" unary_expr -> div
+| multiplicative_expr "%" unary_expr -> rem
 
 ?additive_expr: multiplicative_expr
-| additive_expr "+" multiplicative_expr
-| additive_expr "-" multiplicative_expr
+| additive_expr "+" multiplicative_expr -> add
+| additive_expr "-" multiplicative_expr -> sub
 
 ?shift_expr: additive_expr
-| shift_expr "<<" additive_expr
-| shift_expr ">>" additive_expr
+| shift_expr "<<" additive_expr -> shl
+| shift_expr ">>" additive_expr -> shr
 
 ?relational_expr: shift_expr
-| relational_expr "<" shift_expr
-| relational_expr ">" shift_expr
-| relational_expr "<=" shift_expr
-| relational_expr ">=" shift_expr
+| relational_expr "<" shift_expr  -> lt
+| relational_expr ">" shift_expr  -> gt
+| relational_expr "<=" shift_expr -> lte
+| relational_expr ">=" shift_expr -> gte
 
 ?equality_expr: relational_expr
-| equality_expr "==" relational_expr
-| equality_expr "!=" relational_expr
+| equality_expr "==" relational_expr -> eq
+| equality_expr "!=" relational_expr -> neq
 
 ?and_expr: equality_expr
-| and_expr "&" equality_expr
+| and_expr "&" equality_expr -> band
 
 ?exclusive_or_expr: and_expr
-| exclusive_or_expr "^" and_expr
+| exclusive_or_expr "^" and_expr -> bxor
 
 ?inclusive_or_expr: exclusive_or_expr
-|  inclusive_or_expr "|" exclusive_or_expr
+|  inclusive_or_expr "|" exclusive_or_expr -> bor
 
 ?logical_and_expr: inclusive_or_expr
-| logical_and_expr "&&" inclusive_or_expr
+| logical_and_expr "&&" inclusive_or_expr -> and
 
 ?logical_or_expr: logical_and_expr
-|  logical_or_expr "||" logical_and_expr
+|  logical_or_expr "||" logical_and_expr -> or
 
 ?conditional_expr: logical_or_expr
-| logical_or_expr "?" logical_or_expr ":" conditional_expr
+| logical_or_expr "?" logical_or_expr ":" conditional_expr -> cond
 
 ?assignment_expr: conditional_expr
-|  conditional_expr ".." conditional_expr
-|  unary_expr "=" assignment_expr
+|  conditional_expr ".." conditional_expr -> range
+|  unary_expr "=" assignment_expr -> assign
 
-?expr: assignment_expr
-| expr "," assignment_expr
+?expr: assignment_expr ("," assignment_expr)*
 
-constant: HEXNUM
+?constant: HEXNUM
 | OCTNUM
 | DECNUM
 | BINNUM
 
-integer: BINNUM
+?integer: BINNUM
 | OCTNUM
 | DECNUM
 | HEXNUM
 
-qtype: "E!" -> one
+?qtype: "E!" -> one
 | "E"      -> any
 | "A"      -> all
 | "ALL"    -> all
@@ -120,63 +118,73 @@ quantifier: "[" "ALL" "]"  -> all
 | "[" "ODD" "]"    -> odd
 | "[" "EVEN" "]"   -> even
 | "[" "E" "]"      -> any
-| "[" "E!" "]"     ->  one
+| "[" "E!" "]"     -> one
 | "[" "A" "]"      -> all
-| "[" qtype expr "]"
+| "[" qtype expr "]" -> quant
 
 // Declaration of integers (can be extended)
-pdecl: pexpr ":" sexpr "/signed"
-| pexpr ":" sexpr "/unsigned"
-| pexpr ":" sexpr
+?pdecl: pexpr ":" sexpr "/signed" -> signed
+| pexpr ":" sexpr "/unsigned" -> unsigned
+| pexpr ":" sexpr -> unsigned
 
-pdecls: pdecl | pdecls "," pdecl
+?pdecls: pdecl ("," pdecl)*
 
-ldecls: ldecl | ldecls "," ldecl
+?ldecls: ldecl ("," ldecl)*
 
-ldecl: IDENTIFIER
+?ldecl: IDENTIFIER
 
-odecls: odecl | odecls "," odecl
+?odecls: odecl ("," odecl)*
 
-odecl: "rank" | "+rank" | "-rank"
-| "degree" | "+degree" | "-degree"
-| "random" | "+random" | "-random"
-| "identity" | "+identity" | "-identity"
-| "user" | "+user" | "-user"
-| oexpr
+?odecl: "rank" -> rank
+| "+rank" -> p_rank
+| "-rank" -> n_rank
+| "degree" -> degree
+| "+degree" -> p_degree
+| "-degree" -> n_degree
+| "random" -> random
+| "+random" -> p_random
+| "-random" -> n_random
+| "identity" -> identity
+| "+identity" -> p_identity
+| "-identity" -> n_identity
+| "user" -> user
+| "+user" -> p_user
+| "-user" -> n_user
+| oexpr 
 
 // bit collection
-oexpr: pexpr
-| pexpr "[" expr "]"
-| pexpr "[" expr ":" expr "]"
-| pexpr "[" expr ":" expr ":" expr "]"
-| pexpr ":" sexpr "/" "signed"
-| pexpr ":" sexpr "/" "unsigned"
+?oexpr: pexpr
+| pexpr "[" expr "]" -> bitindex
+| pexpr "[" expr ":" expr "]" -> bitrange
+| pexpr "[" expr ":" expr ":" expr "]" -> bitrange
+| pexpr ":" sexpr "/" "signed"  -> signed
+| pexpr ":" sexpr "/" "unsigned" -> unsigned
 |  "!" pexpr
 
 // Logic expression
-lexpr_var: pexpr
-| pcexpr ":" sexpr "/signed"
-| pcexpr ":" sexpr "/unsigned"
-| pcexpr ":" sexpr
+?lexpr_var: pexpr
+| pcexpr ":" sexpr "/signed" -> signed
+| pcexpr ":" sexpr "/unsigned" -> unsigned
+| pcexpr ":" sexpr -> unsigned
 
-lexpr_const: integer | IDENTIFIER
+?lexpr_const: integer | IDENTIFIER
 
-?lexpr0: "true"
-|  "false"
+?lexpr0: "true" -> true
+|  "false" -> false
 |  lexpr_var
 |  lexpr_const
-|  "-" lexpr0
-|  "not" lexpr0
-|  "!" lexpr0
-|  "~" lexpr0
+|  "-" lexpr0  -> neg
+|  "not" lexpr0 -> not
+|  "!" lexpr0 -> not
+|  "~" lexpr0 -> bnot
 |  "(" lexpr ")"
-|  "{" lexprs "}"
-|  IDENTIFIER "(" lexprs ")"
+|  "{" lexprs "}" -> vec
+|  IDENTIFIER "(" lexprs ")" -> mcall
 |  quantifier "(" lexprs ")"
 |  quantifier lexpr0
-|  lexpr0 "[" expr "]"
-|  lexpr0 "[" expr ":" expr "]"
-|  lexpr0 "[" expr ":" expr ":" expr "]"
+|  lexpr0 "[" expr "]" -> bitindex
+|  lexpr0 "[" expr ":" expr "]" -> bitrange
+|  lexpr0 "[" expr ":" expr ":" expr "]" -> bitrange
 
 
 ?lexpr10: lexpr0
@@ -185,61 +193,61 @@ lexpr_const: integer | IDENTIFIER
 | lexpr10 "%" lexpr0
 
 ?lexpr20: lexpr10
-| lexpr20 "+" lexpr10
-| lexpr20 "-" lexpr10
+| lexpr20 "+" lexpr10  -> add
+| lexpr20 "-" lexpr10  -> sub
 
 ?lexpr30: lexpr20
-| lexpr30 "<<" lexpr20
-| lexpr30 ">>" lexpr20
-| lexpr30 "<<<" lexpr20
-| lexpr30 ">>>" lexpr20
+| lexpr30 "<<" lexpr20  -> shl
+| lexpr30 ">>" lexpr20  -> shr
+| lexpr30 "<<<" lexpr20 -> rshl
+| lexpr30 ">>>" lexpr20 -> rshr
 
 ?lexpr40: lexpr30
-| lexpr40 "<"  lexpr30
-| lexpr40 "<=" lexpr30
-| lexpr40 ">"  lexpr30
-| lexpr40 ">=" lexpr30
+| lexpr40 "<"  lexpr30  -> less
+| lexpr40 "<=" lexpr30  -> less_equal
+| lexpr40 ">"  lexpr30  -> greater
+| lexpr40 ">=" lexpr30  -> greter_equal
 
 ?lexpr41: lexpr40
-| lexpr41 "==" lexpr40
-| lexpr41 ":=" lexpr40
-| lexpr41 "!=" lexpr40
+| lexpr41 "==" lexpr40  -> equal
+| lexpr41 ":=" lexpr40  -> alias
+| lexpr41 "!=" lexpr40  -> not_equal
 
 ?lexpr43: lexpr41
-| lexpr43 "&" lexpr41
+| lexpr43 "&" lexpr41 -> band
 
 ?lexpr45: lexpr43
-| lexpr45 "^" lexpr43
+| lexpr45 "^" lexpr43 -> bxor
 
 ?lexpr47: lexpr45
 | lexpr47 "|" lexpr45
 
 ?lexpr50: lexpr47
-| lexpr50 "and" lexpr47
-| lexpr50 "&&"  lexpr47
+| lexpr50 "and" lexpr47 -> and
+| lexpr50 "&&"  lexpr47 -> and
 
 ?lexpr60: lexpr50
-| lexpr60 "xor" lexpr50
+| lexpr60 "xor" lexpr50 -> xor
 
 ?lexpr70: lexpr60
-| lexpr70 "or"  lexpr60
-| lexpr70 "||"  lexpr60
+| lexpr70 "or"  lexpr60 -> or
+| lexpr70 "||"  lexpr60 -> or
 
 ?lexpr80: lexpr70
-| lexpr80 "->"  lexpr70
-| lexpr80 "imp" lexpr70
-| lexpr80 "implies" lexpr70
+| lexpr80 "->"  lexpr70 -> imp
+| lexpr80 "imp" lexpr70 -> imp
+| lexpr80 "implies" lexpr70 -> imp
 
 ?lexpr90: lexpr80
-| lexpr90 "equ" lexpr80
-| lexpr90 "equivalent" lexpr80
-| lexpr90 "<->" lexpr80
+| lexpr90 "equ" lexpr80 -> equ
+| lexpr90 "equivalent" lexpr80 -> equ
+| lexpr90 "<->" lexpr80 -> equ
 
-lexpr: lexpr90
+?lexpr: lexpr90
 
-lexprs: lexpr "," lexprs | lexpr
+?lexprs: lexpr ("," lexpr)*
 
-sexpr: "(" expr ")"
+?sexpr: "(" expr ")"
 | integer
 | "char"
 | "short"
@@ -247,17 +255,21 @@ sexpr: "(" expr ")"
 | "int"
 | IDENTIFIER
 
-pexpr: SYMBOL | SYMBOL "(" ")" | SYMBOL "(" expr ")"
+?pexpr: SYMBOL
+| SYMBOL "(" ")"
+| SYMBOL "(" expr ")" -> symbol
 
-pcexpr: pexpr | integer | IDENTIFIER
+?pcexpr: pexpr | integer | IDENTIFIER
 
 IDENTIFIER: LETTER (LETTER|DIGIT)*
-SYMBOL: UCASE_LETTER (UCASE_LETTER|DIGIT)*
+SYMBOL.2: UCASE_LETTER (UCASE_LETTER|DIGIT)*
 
-HEXNUM: "0"("x"|"X")? HEXDIGIT+
-BINNUM: "0"("b"|"B")? ("0"|"1")+
+HEXNUM: "0"("x"|"X") HEXDIGIT+
+BINNUM: "0"("b"|"B") ("0"|"1")+
 OCTNUM: "0" DIGIT+
 DECNUM: DIGIT+
+
+COMMENT: "//" /[^\n]/*  // line comment
 
 %import common.DIGIT
 %import common.HEXDIGIT
@@ -266,3 +278,4 @@ DECNUM: DIGIT+
 %import common.WS
 
 %ignore WS
+%ignore COMMENT
