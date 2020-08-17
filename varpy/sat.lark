@@ -1,0 +1,20 @@
+// test grammar for simple SAT formula format
+?start: formula
+
+formula: imp
+
+?imp: or
+      | imp "imp" or  -> imp
+      | imp "->" or   -> imp
+?or: and
+      | or "or" and   -> or
+      | or "#" and   -> or
+?and: atom
+      | and "and" atom  -> and
+      | and "&" atom  -> and
+?atom: NAME              -> var
+      | "not" atom        -> not
+      | "(" formula ")"
+%import common.CNAME -> NAME
+%import common.WS
+%ignore WS

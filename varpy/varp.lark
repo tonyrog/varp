@@ -1,0 +1,268 @@
+start: definitions
+| definitions lexpr
+| lexpr
+
+definitions: definition
+| definitions definition
+
+definition: "define" pexpr lexpr ";"
+| "declare" pdecls ";"
+| "literals" ldecls ";"
+| "order" odecls ";"
+| "assert" expr ";"
+| "input" IDENTIFIER ";"
+| "output" IDENTIFIER ";"
+
+?primary_expr: IDENTIFIER
+| constant
+| "(" expr ")"
+| "{" expr "}" -> vec
+
+?postfix_expr:  primary_expr
+| postfix_expr "[" expr "]"
+| postfix_expr "(" ")"
+| postfix_expr "(" argument_expr_list ")"
+| postfix_expr "." IDENTIFIER
+| postfix_expr "->" IDENTIFIER
+
+?argument_expr_list: assignment_expr
+	    | argument_expr_list "," assignment_expr
+
+?unary_expr: postfix_expr
+	| unary_operator unary_expr
+
+unary_operator:  "+" | "-" | "~"
+
+?multiplicative_expr: unary_expr
+| multiplicative_expr "*" unary_expr
+| multiplicative_expr "/" unary_expr
+| multiplicative_expr "%" unary_expr
+
+?additive_expr: multiplicative_expr
+| additive_expr "+" multiplicative_expr
+| additive_expr "-" multiplicative_expr
+
+?shift_expr: additive_expr
+| shift_expr "<<" additive_expr
+| shift_expr ">>" additive_expr
+
+?relational_expr: shift_expr
+| relational_expr "<" shift_expr
+| relational_expr ">" shift_expr
+| relational_expr "<=" shift_expr
+| relational_expr ">=" shift_expr
+
+?equality_expr: relational_expr
+| equality_expr "==" relational_expr
+| equality_expr "!=" relational_expr
+
+?and_expr: equality_expr
+| and_expr "&" equality_expr
+
+?exclusive_or_expr: and_expr
+| exclusive_or_expr "^" and_expr
+
+?inclusive_or_expr: exclusive_or_expr
+|  inclusive_or_expr "|" exclusive_or_expr
+
+?logical_and_expr: inclusive_or_expr
+| logical_and_expr "&&" inclusive_or_expr
+
+?logical_or_expr: logical_and_expr
+|  logical_or_expr "||" logical_and_expr
+
+?conditional_expr: logical_or_expr
+| logical_or_expr "?" logical_or_expr ":" conditional_expr
+
+?assignment_expr: conditional_expr
+|  conditional_expr ".." conditional_expr
+|  unary_expr "=" assignment_expr
+
+?expr: assignment_expr
+| expr "," assignment_expr
+
+constant: HEXNUM
+| OCTNUM
+| DECNUM
+| BINNUM
+
+integer: BINNUM
+| OCTNUM
+| DECNUM
+| HEXNUM
+
+qtype: "E!" -> one
+| "E"      -> any
+| "A"      -> all
+| "ALL"    -> all
+| "ANY"    -> any
+| "ONE"    -> one
+| "NONE"   -> none
+| "EQ"     -> eq
+| "NEQ"    -> neq
+| "GT"     -> gt
+| "GTE"    -> gte
+| "LT"     -> lt
+| "LTE"    -> lte
+| "SUM"    -> sum
+| "PROD"   -> prod
+| "PARITY" -> parity
+| "ODD"    -> odd
+| "EVEN"   -> even
+
+quantifier: "[" "ALL" "]"  -> all
+| "[" "ANY" "]"  -> any
+| "[" "NONE" "]" -> none
+| "[" "ONE"  "]" -> one
+| "[" "SUM" "]"  -> sum
+| "[" "PROD" "]" -> prod
+| "[" "PARITY" "]" -> parity
+| "[" "ODD" "]"    -> odd
+| "[" "EVEN" "]"   -> even
+| "[" "E" "]"      -> any
+| "[" "E!" "]"     ->  one
+| "[" "A" "]"      -> all
+| "[" qtype expr "]"
+
+// Declaration of integers (can be extended)
+pdecl: pexpr ":" sexpr "/signed"
+| pexpr ":" sexpr "/unsigned"
+| pexpr ":" sexpr
+
+pdecls: pdecl | pdecls "," pdecl
+
+ldecls: ldecl | ldecls "," ldecl
+
+ldecl: IDENTIFIER
+
+odecls: odecl | odecls "," odecl
+
+odecl: "rank" | "+rank" | "-rank"
+| "degree" | "+degree" | "-degree"
+| "random" | "+random" | "-random"
+| "identity" | "+identity" | "-identity"
+| "user" | "+user" | "-user"
+| oexpr
+
+// bit collection
+oexpr: pexpr
+| pexpr "[" expr "]"
+| pexpr "[" expr ":" expr "]"
+| pexpr "[" expr ":" expr ":" expr "]"
+| pexpr ":" sexpr "/" "signed"
+| pexpr ":" sexpr "/" "unsigned"
+|  "!" pexpr
+
+// Logic expression
+lexpr_var: pexpr
+| pcexpr ":" sexpr "/signed"
+| pcexpr ":" sexpr "/unsigned"
+| pcexpr ":" sexpr
+
+lexpr_const: integer | IDENTIFIER
+
+?lexpr0: "true"
+|  "false"
+|  lexpr_var
+|  lexpr_const
+|  "-" lexpr0
+|  "not" lexpr0
+|  "!" lexpr0
+|  "~" lexpr0
+|  "(" lexpr ")"
+|  "{" lexprs "}"
+|  IDENTIFIER "(" lexprs ")"
+|  quantifier "(" lexprs ")"
+|  quantifier lexpr0
+|  lexpr0 "[" expr "]"
+|  lexpr0 "[" expr ":" expr "]"
+|  lexpr0 "[" expr ":" expr ":" expr "]"
+
+
+?lexpr10: lexpr0
+|  lexpr10 "*" lexpr0
+| lexpr10 "/" lexpr0
+| lexpr10 "%" lexpr0
+
+?lexpr20: lexpr10
+| lexpr20 "+" lexpr10
+| lexpr20 "-" lexpr10
+
+?lexpr30: lexpr20
+| lexpr30 "<<" lexpr20
+| lexpr30 ">>" lexpr20
+| lexpr30 "<<<" lexpr20
+| lexpr30 ">>>" lexpr20
+
+?lexpr40: lexpr30
+| lexpr40 "<"  lexpr30
+| lexpr40 "<=" lexpr30
+| lexpr40 ">"  lexpr30
+| lexpr40 ">=" lexpr30
+
+?lexpr41: lexpr40
+| lexpr41 "==" lexpr40
+| lexpr41 ":=" lexpr40
+| lexpr41 "!=" lexpr40
+
+?lexpr43: lexpr41
+| lexpr43 "&" lexpr41
+
+?lexpr45: lexpr43
+| lexpr45 "^" lexpr43
+
+?lexpr47: lexpr45
+| lexpr47 "|" lexpr45
+
+?lexpr50: lexpr47
+| lexpr50 "and" lexpr47
+| lexpr50 "&&"  lexpr47
+
+?lexpr60: lexpr50
+| lexpr60 "xor" lexpr50
+
+?lexpr70: lexpr60
+| lexpr70 "or"  lexpr60
+| lexpr70 "||"  lexpr60
+
+?lexpr80: lexpr70
+| lexpr80 "->"  lexpr70
+| lexpr80 "imp" lexpr70
+| lexpr80 "implies" lexpr70
+
+?lexpr90: lexpr80
+| lexpr90 "equ" lexpr80
+| lexpr90 "equivalent" lexpr80
+| lexpr90 "<->" lexpr80
+
+lexpr: lexpr90
+
+lexprs: lexpr "," lexprs | lexpr
+
+sexpr: "(" expr ")"
+| integer
+| "char"
+| "short"
+| "long"
+| "int"
+| IDENTIFIER
+
+pexpr: SYMBOL | SYMBOL "(" ")" | SYMBOL "(" expr ")"
+
+pcexpr: pexpr | integer | IDENTIFIER
+
+IDENTIFIER: LETTER (LETTER|DIGIT)*
+SYMBOL: UCASE_LETTER (UCASE_LETTER|DIGIT)*
+
+HEXNUM: "0"("x"|"X")? HEXDIGIT+
+BINNUM: "0"("b"|"B")? ("0"|"1")+
+OCTNUM: "0" DIGIT+
+DECNUM: DIGIT+
+
+%import common.DIGIT
+%import common.HEXDIGIT
+%import common.LETTER
+%import common.UCASE_LETTER
+%import common.WS
+
+%ignore WS
