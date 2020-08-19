@@ -1,4 +1,5 @@
 # basic backjump implementation
+# the use of := operator require 3.8 to be used
 import varpy
 from .pigeon import *
 

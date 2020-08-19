@@ -84,38 +84,37 @@
 | DECNUM
 | HEXNUM
 
-!qtype: "E!" -> one
-| "E"      -> any
-| "A"      -> all
-| "ALL"    -> all
-| "ANY"    -> any
-| "ONE"    -> one
-| "NONE"   -> none
-| "EQ"     -> eq
-| "NEQ"    -> neq
-| "GT"     -> gt
-| "GTE"    -> gte
-| "LT"     -> lt
-| "LTE"    -> lte
-| "SUM"    -> sum
-| "PROD"   -> prod
-| "PARITY" -> parity
-| "ODD"    -> odd
-| "EVEN"   -> even
+?quantifier: "[" "ALL" "]" -> all
+| "[" "ANY" "]"      -> any
+| "[" "NONE" "]"     -> none
+| "[" "ONE"  "]"     -> one
+| "[" "SUM" "]"      -> sum
+| "[" "PROD" "]"     -> prod
+| "[" "PARITY" "]"   -> parity
+| "[" "ODD" "]"      -> odd
+| "[" "EVEN" "]"     -> even
+| "[" "E" "]"        -> any
+| "[" "E!" "]"       -> one
+| "[" "A" "]"        -> all
+| "[" "E!" exprs "]" -> one
+| "[" "E"  exprs "]" -> any
+| "[" "A" exprs "]"      -> all
+| "[" "ALL" exprs "]"    -> all
+| "[" "ANY" exprs "]"    -> any
+| "[" "ONE" exprs "]"    -> one
+| "[" "NONE" exprs "]"   -> none
+| "[" "EQ" exprs "]"     -> eq
+| "[" "NEQ" exprs "]"    -> neq
+| "[" "GT" exprs "]"     -> gt
+| "[" "GTE" exprs "]"    -> gte
+| "[" "LT" exprs "]"     -> lt
+| "[" "LTE" exprs "]"    -> lte
+| "[" "SUM" exprs "]"    -> sum
+| "[" "PROD" exprs "]"   -> prod
+| "[" "PARITY" exprs "]" -> parity
+| "[" "ODD" exprs "]"    -> odd
+| "[" "EVEN" exprs "]"   -> even
 
-?quantifier: "[" "ALL" "]"  -> all
-| "[" "ANY" "]"  -> any
-| "[" "NONE" "]" -> none
-| "[" "ONE"  "]" -> one
-| "[" "SUM" "]"  -> sum
-| "[" "PROD" "]" -> prod
-| "[" "PARITY" "]" -> parity
-| "[" "ODD" "]"    -> odd
-| "[" "EVEN" "]"   -> even
-| "[" "E" "]"      -> any
-| "[" "E!" "]"     -> one
-| "[" "A" "]"      -> all
-| "[" qtype exprs "]" -> quant
 
 ?pdecls: pdecl ("," pdecl)* -> list
 
@@ -175,8 +174,8 @@
 |  "(" lexpr ")"
 |  "{" lexprs "}" -> vec
 |  IDENTIFIER "(" lexprs ")" -> call
-|  quantifier "(" lexprs ")"
-|  quantifier lexpr0
+|  quantifier "(" lexprs ")" -> quant
+|  quantifier lexpr0 -> quant
 |  lexpr0 "[" expr "]" -> bitindex
 |  lexpr0 "[" expr ":" expr "]" -> bitrange
 |  lexpr0 "[" expr ":" expr ":" expr "]" -> bitrange
@@ -251,7 +250,7 @@
 
 ?pexpr: SYMBOL
 | SYMBOL "(" ")"
-| SYMBOL "(" expr ")" -> symbol
+| SYMBOL "(" exprs ")" -> symbol
 
 ?pcexpr: pexpr | integer | IDENTIFIER
 
