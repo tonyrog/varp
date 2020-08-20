@@ -25,6 +25,19 @@ def xor_clauses(vp, y, z, x):
     clause(vp,[inv(x),y,z])
     return x
 
+# x = not y
+def inv_clauses(vp, y, x):
+    clause(vp,[x,y])
+    clause(vp,[inv(x),inv(y)])
+    return x
+
+def inv_gate(vp, y, x=None):
+    if x == None: x = varpy.add_variable(vp)
+    return inv_clauses(vp, y, x)
+
+def inv_pin(vp, y):
+    return inv(y)
+
 # x = y OR z
 def or_gate(vp, y, z, x=None):
     if x == None: x = varpy.add_variable(vp)
@@ -36,12 +49,12 @@ def nor_gate(vp, y, z, x=None):
     return inv(or_clauses(vp, y, z, x))
 
 # x = y -> z (NOT y OR z)
-def imply_gate(vp, y, z, x=None):
+def imp_gate(vp, y, z, x=None):
     if x == None: x = varpy.add_variable(vp)
     return or_clauses(vp, inv(y), z, x)
 
 # x = y -/> z ( NOT (y -> z) ) = NOT (NOT y OR Z) =  (y AND NOT z)
-def nimply_gate(vp, y, z, x=None):
+def nimp_gate(vp, y, z, x=None):
     if x == None: x = varpy.add_variable(vp)
     return and_clauses(vp, y, inv(z), x)
 
@@ -131,7 +144,7 @@ def var(vp, name):
     return x
 
 def clause(vp, ls):
-    # print(str(ls))
+    print(str(ls))
     ci = varpy.add_clause(vp, ls)
     return ci
 
