@@ -59,7 +59,7 @@
 #define LIT_VALUE
 #define PACKED_VALUE 1
 // #define ASSERTIONS
-// #define DEBUG
+#define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
@@ -199,6 +199,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "config",              3,  varp_config )	\
     NIF( "add_variable",        1,  varp_add_variable ) \
     NIF( "add_variable",        2,  varp_add_variable ) \
+    NIF( "add_variables",       2,  varp_add_variables ) \
+    NIF( "add_variables",       3,  varp_add_variables ) \
     NIF( "value",               2,  varp_value )	\
     NIF( "bind",                2,  varp_bind )		\
     NIF( "bind",                3,  varp_bind )		\
@@ -389,8 +391,8 @@ typedef struct _dynarray_t // :object_t
 
 #define dynvar_size(name) name ## _dyn_.size
 #define dynvar_capacity(name) name ## _dyn_.capacity
-#define dynvar_init(name, size)			\
-    ((dynarray_init(&name ## _dyn_, #name, (size), sizeof(name[0])) < 0) ? -1 : \
+#define dynvar_init(name, capacity)			\
+    ((dynarray_init(&name ## _dyn_, #name, (capacity), sizeof(name[0])) < 0) ? -1 : \
      (name = name ## _dyn_.base, 0))
 #define dynvar_resize(name, size)				\
     ((dynarray_resize(&name ## _dyn_, (size)) < 0) ? -1 :	\
@@ -412,8 +414,8 @@ typedef struct _dynarray_t // :object_t
 
 #define dynvec_size(name,i) name ## _dyn_[(i)].size
 #define dynvec_capacity(name,i) name ## _dyn_[(i)].capacity
-#define dynvec_init(name,i,vtag,size)					\
-    ((dynarray_init(&name ## _dyn_[(i)], #name vtag,(size),sizeof(name[(i)][0])) < 0) ? -1 : \
+#define dynvec_init(name,i,vtag,capacity)				\
+    ((dynarray_init(&name ## _dyn_[(i)], #name vtag,(capacity),sizeof(name[(i)][0])) < 0) ? -1 : \
      (name[(i)] = name ## _dyn_[(i)].base, 0))
 #define dynvec_resize(name,i,size)				\
     ((dynarray_resize(&name ## _dyn_[(i)], (size)) < 0) ? -1 :	\
@@ -488,6 +490,7 @@ typedef struct _literal_t // :slink_t
     struct _wlink_t* wlist;    // list of watch positions
     struct _edge_t* elist;     // list of 2-clause triggers
     dynarray_t* xref;          // cross references when enabled
+    dynarray_t* sref;          // list of symbol/pos references
 } literal_t;
 
 typedef uint32_t cix_t;             // clause index type <<set:2,index:30>>
@@ -498,6 +501,12 @@ typedef int32_t  pos_t;             // literal position type (-1 = invalid)
 #define MAKE_CIX(si,ix)  (((si)<<30)|(ix))
 #define GET_SI(cix)      ((int)(((cix)>>30) & 3))
 #define GET_IX(cix)      ((cix)&0x3FFFFFFF)
+
+typedef struct _sref_t
+{
+    struct _symbol_t* sp;
+    int pos;
+} sref_t;
 
 typedef struct _xref_t
 {
@@ -538,20 +547,18 @@ typedef struct _variable_t     // :object_t
     cix_t implication_clause;  // implication clause index
     pos_t literal_pos;         // position in implication clause
     int  level;                // implication clause level
-    char* strname;             // string formated name or NULL
-    struct _symbol_t* names;   // list of aliases
     literal_t lit[2];          // literal containers LIT_POS=0 LIT_NEG=1
 } variable_t;
 
 typedef struct _symbol_t // :object_t
 {
     OBJECT_LINK;
-    struct _symbol_t* anext;  // alias link
     uint32_t hvalue;          // symbol hash
     bool_t is_term;           // either name is a term or name is binary string
+    bool_t is_scalar;         // if simple variable
     uint8_t* data;            // raw data
     size_t   size;            // raw len
-    variable_t*  var;
+    dynvar(lit_t*, lit);      // list of literals
 } symbol_t;
 
 typedef struct _wlink_t
@@ -1963,17 +1970,41 @@ static uint32_t literal_array_hash(varp_t* vp, lit_t* lit, size_t size)
     return hvalue;
 }
 
+char* symbol_strname(symbol_t* sp)
+{
+    if (sp->is_term)
+	return "term"; // fixme format term!
+    else
+	return (char*) sp->data;
+}
+
+// format the name of the first symbol alias
+char* literal_strname(literal_t* lp)
+{
+    sref_t* sr = dynarray_element(lp->sref, 0);
+    if (sr != NULL)
+	return symbol_strname(sr->sp);
+    else
+	return "";
+}
+
+// format the name of the first symbol alias
+char* variable_strname(variable_t* var)
+{
+    return literal_strname(&var->lit[LIT_POS]);
+}
+
 // FIXME make thread safe
 char* format_variable(variable_t* var)
 {
     static char vn1[32];
     static char vn2[32];
     static char* varname = vn2;
-
+    
     varname = (varname == vn1) ? vn2 : vn1;
 
-    if (var->strname != NULL)
-	snprintf(varname, sizeof(vn1), "%s", var->strname);
+    if (dynarray_element(var->lit[LIT_POS].sref, 0) != NULL)
+	snprintf(varname, sizeof(vn1), "%s", variable_strname(var));
     else
 	snprintf(varname, sizeof(vn1), "%d", var->ix);
     return varname;
@@ -1994,8 +2025,8 @@ char* format_literal(varp_t* vp, literal_t* lp)
     // alternate to allow to printf arguments!!
     litname = (litname == ln1) ? ln2 : ln1;
     n = lp->neg ? "!" : "";
-    if (lp->var->strname != NULL)
-	snprintf(litname, sizeof(ln1), "%s%s", n, lp->var->strname);
+    if (dynarray_element(lp->sref, 0) != NULL)
+	snprintf(litname, sizeof(ln1), "%s%s", n, literal_strname(lp));
     else
 	snprintf(litname, sizeof(ln1), "%s$%d", n, lp->var->ix);
     return litname;
@@ -2717,6 +2748,7 @@ static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
     lp->wlist    = NULL;
     lp->elist    = NULL;
     lp->xref     = NULL;
+    lp->sref     = NULL;
 }
 
 static void var_init(varp_t* vp, variable_t* var, int ix)
@@ -2731,8 +2763,6 @@ static void var_init(varp_t* vp, variable_t* var, int ix)
     var->implication_clause = CLAUSE_NONE;
     var->literal_pos = -1;
     var->level = -1;
-    var->strname = NULL;
-    var->names = NULL;
     clr_vv(vp, var);
     ll_init(&var->lit[LIT_POS], var, false);
     ll_init(&var->lit[LIT_NEG], var, true);
@@ -3047,7 +3077,7 @@ static int vif_get_ll(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM arg,
     if (enif_is_true(env, arg))
 	*lpp = LL_TRUE(vp);
     else if (enif_is_false(env, arg))
-	*lpp = LL_FALSE(vp);    
+	*lpp = LL_FALSE(vp);
     else if (enif_get_int(env, arg, &x)) {
 	if (x == 0)
 	    return 0;
@@ -3475,66 +3505,85 @@ static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
 }
 
 // create a new symbol
-static symbol_t* symbol_create(varp_t* vp, variable_t* var, ErlNifBinary* bp,
-			       uint32_t hvalue, bool_t is_term)
+static symbol_t* symbol_create(varp_t* vp, lit_t* lit, size_t n,
+			       ErlNifBinary* bp,
+			       uint32_t hvalue,
+			       bool_t is_term,
+			       bool_t is_scalar)
 {
     symbol_t* sp;
 
     if ((sp = obj_alloc(&vp->sym_allocator)) == NULL)
 	return NULL;
     sp->is_term = is_term;
+    sp->is_scalar = is_scalar;
     sp->hvalue = hvalue;
-    sp->var  = var;
+    if (dynvar_init(sp->lit, n) < 0)
+	return NULL;
+    if (dynvar_resize(sp->lit, n) < 0)
+	return NULL;
+    memcpy(sp->lit, lit, sizeof(lit_t*)*n);
     // copy term or binary (add +1 for nil termination)
     sp->data = VARP_ALLOC(bp->size+1);
     memcpy(sp->data, bp->data, bp->size);
     sp->data[bp->size] = '\0';
     sp->size = bp->size;
-    if (!is_term && (var->strname == NULL))
-	var->strname = (char*) sp->data;
-    if (var->strname) {
-	DBG("create symbol '%s'\r\n", var->strname);
-    }
+    DBG("create symbol '%s'\r\n", symbol_strname(sp));
     return sp;
 }
 
-static int symbol_insert(varp_t* vp,variable_t* var, symbol_t* sp)
-{
-    int i;
-
-    if (vp->snum+1 >= dynvar_size(vp->symtab)) // rehash
-	symtab_grow(vp);
-
-    i = sp->hvalue & (dynvar_size(vp->symtab)-1);
-    sp->anext = var->names;  // link alias list
-    var->names = sp;
-    // link hash bucket list
-    sp->link.next = (cdlink_t*) vp->symtab[i];
-    vp->symtab[i] = sp;
-    vp->snum++;
-    if (var->strname != NULL) {
-	DBG("insert symbol '%s' slot = %d\r\n", var->strname, i);
-    }
-    return 0;
-}
-
-static symbol_t* symbol_copy(varp_t* vp, variable_t* var, symbol_t* sp0)
+// copy symbol from other context into vp
+static symbol_t* symbol_copy(varp_t* vp, symbol_t* sp0)
 {
     symbol_t* sp;
-
+    size_t n;
+    int i;
     if ((sp = obj_alloc(&vp->sym_allocator)) == NULL)
 	return NULL;
     sp->is_term = sp0->is_term;
     sp->hvalue = sp0->hvalue;
-    sp->var  = var;
+    n = dynvar_size(sp0->lit);
+    if (dynvar_init(sp->lit, n) < 0)
+	return NULL;
+    // copy literals into new context
+    for (i = 0; i < (int)n; i++) {
+	int x = export_l(sp0->lit[i]);
+	sp->lit[i] = vindex_l(vp, x);
+    }
     // copy term or binary
     sp->data = VARP_ALLOC(sp0->size+1);
     memcpy(sp->data, sp0->data, sp0->size);
     sp->data[sp0->size] = '\0';
     sp->size = sp0->size;
-    if (!sp->is_term && (var->strname == NULL))
-	var->strname = (char*) sp->data;
     return sp;
+}
+
+// insert the symbol into the symbol table
+static int symbol_insert(varp_t* vp,symbol_t* sp)
+{
+    int i;
+
+    if (vp->snum+1 >= dynvar_size(vp->symtab)) // rehash
+	symtab_grow(vp);
+    i = sp->hvalue & (dynvar_size(vp->symtab)-1);
+    sp->link.next = (cdlink_t*) vp->symtab[i];
+    vp->symtab[i] = sp;
+    vp->snum++;
+    DBG("insert symbol '%s' slot = %d\r\n", symbol_strname(sp), i);
+    return 0;
+}
+
+static int sref_add(varp_t* vp, lit_t l, symbol_t* sp, int pos)
+{
+    literal_t* lp = l2ll(vp, l);
+    sref_t* sr;
+
+    if (lp->sref == NULL)
+	lp->sref = dynarray_empty(vp, "sref", sizeof(sref_t));
+    sr = dynarray_add(lp->sref);
+    sr->sp = sp;
+    sr->pos = pos;
+    return 0;
 }
 
 // setup data-structure used by vp
@@ -3764,25 +3813,52 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     return enif_make_int(env, i);
 }
 
-// varc:add_symbol(Vp:varc(),integer(),term()) -> ok
-static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
-				    const ERL_NIF_TERM argv[])
+// varc:add_variable(Vp:varc(),Num:integer()[,Atom:boolean()]) ->
+//  {First:integer(),Last:integer()}
+static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
+				       const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
-    variable_t* var;
-    ErlNifBinary bin;
-    uint32_t hvalue;
-    bool_t is_term = false;
-    symbol_t* sp;
+    int i;
+    unsigned n;
+    int is_atom = false;
+    int j;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!vif_get_v(env, vp, argv[1], &var))
+    if (!enif_get_uint(env, argv[1], &n) || (n < 1))
 	return enif_make_badarg(env);
+    if (argc == 3) {
+	if (!enif_get_boolean(env, argv[1], &is_atom))
+	    return enif_make_badarg(env);
+    }
+    if (dynvar_size(vp->var_map)+(n-1) >= VLIMIT)
+	enif_raise_exception(env, ATOM(system_limit));
 
-    if (!enif_inspect_iolist_as_binary(env, argv[2], &bin)) {
-	if (!enif_term_to_binary(env, argv[2], &bin))
+    if ((i = add_variables(vp, n)) < 0)
+	return enif_make_badarg(env);
+    j = i;
+    while(n--) {
+	vp->var_map[j++]->is_atom = is_atom;
+    }
+    return enif_make_tuple2(env,
+			    enif_make_int(env, i),
+			    enif_make_int(env, j-1));
+}
+
+// note is_scalar => n=1
+static ERL_NIF_TERM add_symbol(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM sym,
+			       lit_t* lit, size_t n, bool_t is_scalar)
+{
+    ErlNifBinary bin;
+    uint32_t hvalue;
+    bool_t is_term = false;
+    symbol_t* sp;    
+    int i;
+    
+    if (!enif_inspect_iolist_as_binary(env, sym, &bin)) {
+	if (!enif_term_to_binary(env, sym, &bin))
 	    return enif_make_badarg(env);
 	is_term = true;
     }
@@ -3791,21 +3867,61 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 
     if ((sp = symbol_lookup(vp, &bin, hvalue, is_term)) != NULL) {
 	if (is_term) enif_release_binary(&bin);
-	if (sp->var->ix == var->ix)
-	    return enif_make_ok(env);
-	return enif_make_badarg(env);
+	if (n != dynvar_size(sp->lit))
+	    return enif_make_badarg(env);
+	for (i = 0; i < (int)n; i++) {
+	    if (sp->lit[i] != lit[i])
+		return enif_make_badarg(env);
+	}
+	return enif_make_ok(env);  // ok they are the same
     }
 
-    if ((sp = symbol_create(vp, var, &bin, hvalue, is_term)) == NULL)
+    if ((sp = symbol_create(vp, lit, n, &bin, hvalue,
+			    is_term, is_scalar)) == NULL)
 	return enif_make_badarg(env);
 
-    if (symbol_insert(vp, var, sp) < 0)
+    if (symbol_insert(vp, sp) < 0)
 	return enif_make_badarg(env);
 
-    return enif_make_ok(env);
+    for (i = 0; i < (int)n; i++) {
+	if (sref_add(vp, lit[i], sp, i) < 0)
+	    return enif_make_badarg(env);
+    }
+    return enif_make_ok(env);    
 }
 
-// varc:find_variable(Vp:varc(),term()) -> false | integer().
+// varc:add_symbol(Vp:varc(),x0()|[x1..xn],Symbol::term()) -> ok
+static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    lit_t l;
+    int len;
+    ERL_NIF_TERM r = enif_make_ok(env);
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if (vif_get_lit_list(env, vp, argv[1], &len, NULL)) {
+	STK_BEGIN(lit_t, lit, len) {
+	    if (!vif_get_lit_list(env, vp, argv[1], &len, lit)) {
+		r = enif_make_badarg(env);
+		STK_LEAVE(literals);
+	    }
+	    r = add_symbol(env, vp, argv[2], lit, len, false);
+	} STK_END(literals);
+    }
+    else if (vif_get_lit(env, vp, argv[1], &l)) {
+	r = add_symbol(env, vp, argv[2], &l, 1, true);
+    }
+    else {
+	r = enif_make_badarg(env);
+    }
+    return r;
+}
+
+// varc:find_symbol(Vp:varc(),term()) -> false | lit() | [lit()]
 static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
@@ -3829,8 +3945,21 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 
     sp = symbol_lookup(vp, &bin, hash, is_term);
     if (is_term) enif_release_binary(&bin);
-    if (sp != NULL)
-	return enif_make_int(env, sp->var->ix);
+    if (sp != NULL) {
+	ERL_NIF_TERM r = ATOM(undefined);
+	if (sp->lit) {
+	    size_t n = dynvar_size(sp->lit);
+	    if ((n == 1) && sp->is_scalar)
+		return enif_make_int(env, export_l(sp->lit[0]));
+	    STK_BEGIN(ERL_NIF_TERM, element, n) {
+		int i;
+		for (i = 0; i < (int)n; i++)
+		    element[i] = enif_make_int(env, export_l(sp->lit[i]));
+		r = enif_make_list_from_array(env, element, n);
+	    } STK_END0(element);
+	}
+	return r;
+    }
     return enif_make_boolean(env, false);
 }
 
@@ -3871,18 +4000,23 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
 			      dynarray_size(var->lit[1].xref));
     }
     if (EQUAL_KEY(env, symbol, argv[2])) {
-	symbol_t* sp = var->names;
+	literal_t* lp = &var->lit[LIT_POS];
+	size_t n = dynarray_size(lp->sref);
 	ERL_NIF_TERM list = enif_make_list(env, 0);
-	while(sp != NULL) {
-	    ERL_NIF_TERM term;
+	int i;
+	
+	for (i = 0; i < (int)n; i++) {
+	    sref_t* sr = dynarray_element(lp->sref, i);
+	    symbol_t* sp = sr->sp;
+	    ERL_NIF_TERM term;   
 	    if (sp->is_term)
 		enif_binary_to_term(env,sp->data,sp->size,&term,0);
 	    else {
 		uint8_t* data = enif_make_new_binary(env, sp->size, &term);
 		memcpy(data, sp->data, sp->size);
 	    }
+	    term = enif_make_tuple2(env, term, enif_make_int(env, sr->pos));
 	    list = enif_make_list_cell(env, term, list);
-	    sp = sp->anext;
 	}
 	return list;
     }
@@ -3920,24 +4054,22 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	return list;
     }
     if (EQUAL_KEY(env, symbol, argv[2])) {
-	symbol_t* sp = lp->var->names;
 	ERL_NIF_TERM list = enif_make_list(env, 0);
-	while(sp != NULL) {
-	    ERL_NIF_TERM term;
-	    if (sp->is_term) {
+	size_t n = dynarray_size(lp->sref);
+	int i;
+	
+	for (i = 0; i < (int)n; i++) {
+	    sref_t* sr = dynarray_element(lp->sref, i);
+	    symbol_t* sp = sr->sp;
+	    ERL_NIF_TERM term;   
+	    if (sp->is_term)
 		enif_binary_to_term(env,sp->data,sp->size,&term,0);
-		if (lp->neg)
-		    term = enif_make_tuple2(env, ATOM(exclamation_mark), term);
-	    }
 	    else {
-		size_t size = sp->size + lp->neg;
-		uint8_t* data = enif_make_new_binary(env, size, &term);
-		if (lp->neg)
-		    *data++ = '!';
+		uint8_t* data = enif_make_new_binary(env, sp->size, &term);
 		memcpy(data, sp->data, sp->size);
 	    }
+	    term = enif_make_tuple2(env, term, enif_make_int(env, sr->pos));
 	    list = enif_make_list_cell(env, term, list);
-	    sp = sp->anext;
 	}
 	return list;
     }
@@ -5230,7 +5362,6 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     for (i = 1; i < (int)vsize; i++) {
 	variable_t* var0 = vp0->var_map[i];
 	variable_t* var  = vp->var_map[i];
-	symbol_t* sp0;
 	ival_t v = get_vv(vp0, var0);
 	int j;
 
@@ -5249,16 +5380,16 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	default:
 	    break;
 	}
-
-	// copy symbols (maybe use ref count?)
-	sp0 = var0->names;
-	while(sp0 != NULL) {
-	    symbol_t* sp = symbol_copy(vp, var, sp0);
-	    if (sp != NULL)
-		symbol_insert(vp, var, sp);
-	    sp0 = sp0->anext;
-	}
     }
+
+    if (vp->symtab) {
+	size_t size = dynvar_size(vp0->symtab);
+	for (i = 0; i < (int)size; i++) {
+	    symbol_t* sp = symbol_copy(vp, vp0->symtab[i]);
+	    if (sp != NULL)
+		symbol_insert(vp, sp);
+	}
+    }    
 
     if (opt.level >= (int)dynvar_size(vp->undo))
 	undo_set_size(vp, dynvar_size(vp0->undo));

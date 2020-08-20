@@ -1057,7 +1057,7 @@ output_model_header(Bs,Partial,_I) ->
     end.
 
 %% fixme analyze the path to see if there are 
-%% archive tar/tar.gz/tgz/zip compoinents in the path
+%% archive tar/tar.gz/tgz/zip components in the path
 %% in such case open the archive and extract the file
 %% as binary
 

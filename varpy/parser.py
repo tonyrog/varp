@@ -14,4 +14,3 @@ def file(name):
     print(text)
     f.close()
     return varp_parser.parse(text)
-

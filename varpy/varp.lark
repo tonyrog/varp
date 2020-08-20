@@ -8,8 +8,8 @@
 | "input" IDENTIFIER ";" -> input
 | "output" IDENTIFIER ";" -> output
 
-?primary_expr: IDENTIFIER
-| constant
+?primary_expr: IDENTIFIER -> id
+| constant -> number
 | "(" expr ")"
 | "{" exprs "}" -> vec
 
@@ -248,9 +248,9 @@
 | "int"
 | IDENTIFIER
 
-?pexpr: SYMBOL
-| SYMBOL "(" ")"
-| SYMBOL "(" exprs ")" -> symbol
+?pexpr: SYMBOL -> var
+| SYMBOL "(" ")" -> var
+| SYMBOL "(" exprs ")" -> var
 
 ?pcexpr: pexpr | integer | IDENTIFIER
 

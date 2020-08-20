@@ -1,5 +1,6 @@
 # build clauses from parse tree constructed with varp.lark grammar
 
+import lark
 import varpy
 import varpy.circuit
 
@@ -23,14 +24,74 @@ def unary(vp, gate, tree):
     n = build(vp, tree.children[0])
     return gate(vp, n)
 
-def varp_var(vp, tree):
+# convert a number token into a decimal value
+def number_value(n):
+    if n.type == 'DECNUM':
+        return int(n.value)
+    elif n.type == 'HEXNUM':
+        return int(n.value,16)
+    elif n.type == 'OCTNUM':
+        return int(n.value,8)
+    elif n.type == 'BINNUM':
+        return int(n.value,2)
+
+# convert Tree var node into a string
+def var_str(tree):
     if len(tree.children) == 1:
-        varname = tree.children[0].value
-        x = varpy.find_symbol(vp, varname)
-        if x == False:
-            x = varpy.add_variable(vp, True)
-            varpy.add_symbol(vp, x, varname)
-            print("added variable "+varname+" "+str(x))
+        return tree.children[0].value;
+    elif len(tree.children) == 2:
+        return tree.children[0].value + var_args(tree.children[1])
+    else:
+        raise ValueError("malformed variable")
+
+def var_args(args):
+    # assert args.data = list
+    astr = "(" + var_arg(args.children[0])
+    for a in args.children[1:]:
+        astr += (","+var_arg(a))
+    return astr+")"
+
+def var_arg(arg):
+    if isinstance(arg, lark.lexer.Token):
+        return arg.value
+    elif isinstance(arg, lark.tree.Tree):
+        if arg.data == 'number':
+            return str(number_value(arg.children[0]))
+        elif arg.data == 'id':
+            return arg.children[0].value;
+        else: return arg.data + var_args(arg)
+
+# convert Tree var node into a term that can be stored as symbol in varp
+def var_term(tree):
+    if len(tree.children) == 1:
+        return tree.children[0].value;
+    elif len(tree.children) == 2:
+        return (tree.children[0].value,var_term_args(tree.children[1]))
+    else:
+        raise ValueError("malformed variable")
+
+def var_term_args(args):
+    return [var_term_arg(a) for a in args.children]
+    
+def var_term_arg(arg):
+    if isinstance(arg, lark.lexer.Token):
+        return arg.value
+    elif isinstance(arg, lark.tree.Tree):
+        if arg.data == 'number':
+            return number_value(arg.children[0])
+        elif arg.data == 'id':
+            return arg.children[0].value
+        else:
+            return (arg.data,var_term_args(arg))
+
+# lookup or install variable, first version only handle string!
+def varp_var(vp, tree):
+    varname = var_str(tree)
+    x = varpy.find_symbol(vp, varname)
+    if x == False:
+        x = varpy.add_variable(vp, True)
+        varpy.add_symbol(vp, x, varname)
+        print("added variable "+varname+" "+str(x))
         return x
     else:
         raise ValueError("malformed/not supported variable")

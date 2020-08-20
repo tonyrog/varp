@@ -17,6 +17,8 @@
 -export([config/3]).
 -export([add_variable/1]).
 -export([add_variable/2]).
+-export([add_variables/2]).
+-export([add_variables/3]).
 -export([del_variable/2]).
 -export([add_symbol/3]).
 -export([get_symbol/2]).
@@ -214,10 +216,23 @@ info(_Vp, Key) when is_atom(Key); is_list(Key) ->
 config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
 
+-spec add_variable(Vp::varc()) -> integer().
 add_variable(_Vp) ->
     ?nif_stub().
 
+-spec add_variable(Vp::varc(), IsAtom::boolean()) -> integer().
 add_variable(_Vp, IsAtom) when is_boolean(IsAtom) ->
+    ?nif_stub().
+
+-spec add_variables(Vp::varc(), Num::integer()) -> 
+	  {First::integer(), Last::integer()}.
+add_variables(_Vp, Num) when is_integer(Num), Num>0 ->
+    ?nif_stub().
+
+-spec add_variables(Vp::varc(), Num::integer(), IsAtom::boolean()) -> 
+	  {First::integer(), Last::integer()}.
+add_variables(_Vp, Num, IsAtom) when
+      is_integer(Num), Num>0, is_boolean(IsAtom) ->
     ?nif_stub().
 
 del_variable(_Vp, _Index) when is_integer(_Index) ->
