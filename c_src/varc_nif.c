@@ -59,7 +59,7 @@
 #define LIT_VALUE
 #define PACKED_VALUE 1
 // #define ASSERTIONS
-#define DEBUG
+// #define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
@@ -3249,6 +3249,7 @@ static void symbol_clear(symbol_t* sp)
 {
     while(sp) {
 	VARP_FREE(sp->data);
+	dynvar_clear(sp->lit);
 	sp = (symbol_t*) sp->link.next;
     }
 }
@@ -3268,6 +3269,8 @@ static void cleanup(varp_t* vp)
     for (i = 1; i < (int)dynvar_size(vp->var_map); i++) {
 	dynarray_destroy(vp, vp->var_map[i]->lit[0].xref);
 	dynarray_destroy(vp, vp->var_map[i]->lit[1].xref);
+	dynarray_destroy(vp, vp->var_map[i]->lit[0].sref);
+	dynarray_destroy(vp, vp->var_map[i]->lit[1].sref);	
     }
 
     dynvar_clear(vp->var_map);
@@ -3541,10 +3544,13 @@ static symbol_t* symbol_copy(varp_t* vp, symbol_t* sp0)
     if ((sp = obj_alloc(&vp->sym_allocator)) == NULL)
 	return NULL;
     sp->is_term = sp0->is_term;
+    sp->is_scalar = sp0->is_scalar;
     sp->hvalue = sp0->hvalue;
     n = dynvar_size(sp0->lit);
     if (dynvar_init(sp->lit, n) < 0)
 	return NULL;
+    if (dynvar_resize(sp->lit, n) < 0)
+	return NULL;    
     // copy literals into new context
     for (i = 0; i < (int)n; i++) {
 	int x = export_l(sp0->lit[i]);
@@ -3748,6 +3754,18 @@ error:
     if (vp)
 	enif_release_resource(vp);
     return enif_make_badarg(env);
+}
+
+static ERL_NIF_TERM symbol_term(ErlNifEnv* env, symbol_t* sp)
+{
+    ERL_NIF_TERM term;
+    if (sp->is_term)
+	enif_binary_to_term(env,sp->data,sp->size,&term,0);
+    else {
+	uint8_t* data = enif_make_new_binary(env, sp->size, &term);
+	memcpy(data, sp->data, sp->size);
+    }
+    return term;
 }
 
 // add n variables return index to the first added
@@ -4008,13 +4026,18 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
 	for (i = 0; i < (int)n; i++) {
 	    sref_t* sr = dynarray_element(lp->sref, i);
 	    symbol_t* sp = sr->sp;
-	    ERL_NIF_TERM term;   
-	    if (sp->is_term)
-		enif_binary_to_term(env,sp->data,sp->size,&term,0);
-	    else {
-		uint8_t* data = enif_make_new_binary(env, sp->size, &term);
-		memcpy(data, sp->data, sp->size);
-	    }
+	    ERL_NIF_TERM term = symbol_term(env, sp);
+	    term = enif_make_tuple2(env, term, enif_make_int(env, sr->pos));
+	    list = enif_make_list_cell(env, term, list);
+	}
+	
+	lp = &var->lit[LIT_NEG];
+	n = dynarray_size(lp->sref);
+	
+	for (i = 0; i < (int)n; i++) {
+	    sref_t* sr = dynarray_element(lp->sref, i);
+	    symbol_t* sp = sr->sp;
+	    ERL_NIF_TERM term = symbol_term(env, sp);
 	    term = enif_make_tuple2(env, term, enif_make_int(env, sr->pos));
 	    list = enif_make_list_cell(env, term, list);
 	}
@@ -4061,13 +4084,7 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	for (i = 0; i < (int)n; i++) {
 	    sref_t* sr = dynarray_element(lp->sref, i);
 	    symbol_t* sp = sr->sp;
-	    ERL_NIF_TERM term;   
-	    if (sp->is_term)
-		enif_binary_to_term(env,sp->data,sp->size,&term,0);
-	    else {
-		uint8_t* data = enif_make_new_binary(env, sp->size, &term);
-		memcpy(data, sp->data, sp->size);
-	    }
+	    ERL_NIF_TERM term = symbol_term(env, sp);
 	    term = enif_make_tuple2(env, term, enif_make_int(env, sr->pos));
 	    list = enif_make_list_cell(env, term, list);
 	}
@@ -5386,10 +5403,17 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	size_t size = dynvar_size(vp0->symtab);
 	for (i = 0; i < (int)size; i++) {
 	    symbol_t* sp = symbol_copy(vp, vp0->symtab[i]);
-	    if (sp != NULL)
+	    if (sp != NULL) {
+		size_t n = dynvar_size(sp->lit);
+		int i;
 		symbol_insert(vp, sp);
+		for (i = 0; i < (int)n; i++) {
+		    if (sref_add(vp, sp->lit[i], sp, i) < 0)
+			return enif_make_badarg(env);
+		}
+	    }
 	}
-    }    
+    }
 
     if (opt.level >= (int)dynvar_size(vp->undo))
 	undo_set_size(vp, dynvar_size(vp0->undo));

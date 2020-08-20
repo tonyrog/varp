@@ -14,6 +14,7 @@
 -export([add_variable/1, add_variable/2]).
 -export([variable/2, alias/3]).
 -export([value/2]).
+-export([var_term/1, var_str/1]).
 -export([info/1, info/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
 -export([fmt_var_list/2]).
@@ -171,6 +172,57 @@ add_variable(Bs, IsAtom) ->
 		       ok.
 add_symbol(Bs, L, Sym) ->
     varc:add_symbol(Bs#bs.vp, L, Sym).
+
+var_term({p,V,[]}) ->
+    atom_to_list(V);
+var_term({p,V,Args}) ->
+    {atom_to_list(V), [var_term_(A) || A <- Args]}.
+
+
+const_int(16,"0x"++Value) ->
+    list_to_integer(Value, 16);
+const_int(2,"0b"++Value) ->
+    list_to_integer(Value, 2);
+const_int(8,"0"++Value) ->
+    list_to_integer(Value, 8);
+const_int(Base,Value) ->
+    list_to_integer(Value, Base).
+
+var_term_(#cconst{base=Base,value=Value}) ->
+    const_int(Base, Value);
+var_term_(#cid{name=Name}) ->
+    Name;
+var_term_(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
+    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
+	     '/' => "div", '%' => "rem" },
+    { maps:get(Op, Tab), [var_term_(Arg1), var_term_(Arg2)]};
+var_term_(#cunary{op=Op,arg=Arg}) ->
+    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
+    { maps:get(Op, Tab), [var_term_(Arg)]};
+var_term_(#ccall{func=#cid{name=Func},args=Args}) ->
+    { Func, [ var_term_(A) || A <- Args]}.
+
+var_str({p,V,[]}) ->
+    atom_to_list(V);
+var_str({p,V,Args}) ->
+    atom_to_list(V)++"("++
+	string:join([var_str_(A) || A <- Args], ",") ++ ")".
+
+var_str_(#cconst{base=Base,value=Value}) ->
+    integer_to_list(const_int(Base, Value));
+var_str_(#cid{name=Name}) ->
+    Name;
+var_str_(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
+    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
+	     '/' => "div", '%' => "rem" },
+    maps:get(Op, Tab)++"("++
+	var_str_(Arg1)++","++var_str_(Arg2)++")";
+var_str_(#cunary{op=Op,arg=Arg}) ->
+    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
+    maps:get(Op, Tab)++"("++var_str_(Arg)++")";
+var_str_(#ccall{func=#cid{name=Func},args=Args}) ->
+    Func++"("++string:join([ var_str_(A) || A <- Args], ",")++")".
+
 
 %% build an OR gate with Y as output and Xs as input
 %% Y = X1 or X2 .. or Xn
