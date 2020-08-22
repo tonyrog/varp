@@ -21,6 +21,7 @@
 -export([add_variables/3]).
 -export([del_variable/2]).
 -export([add_symbol/3]).
+-export([del_symbol/2]).
 -export([get_symbol/2]).
 -export([is_atom/2]).
 -export([find_symbol/2]).
@@ -238,11 +239,16 @@ add_variables(_Vp, Num, IsAtom) when
 del_variable(_Vp, _Index) when is_integer(_Index) ->
     ?nif_stub().
 
--spec add_symbol(Vp::varc(), Lit::literal(), Name::term()) -> ok.
-add_symbol(_Vp, Lit, _Name)  when is_integer(Lit) ->
+-spec add_symbol(Vp::varc(),Lit::literal()|[Lit::literal()], Name::term())-> ok.
+add_symbol(_Vp, Lit, _Name)  when is_integer(Lit); is_list(Lit) ->
     ?nif_stub().
 
--spec get_symbol(Vp::varc(), Lit::literal()) -> [term()]. %% aliases
+-spec del_symbol(Vp::varc(), Name::term()) -> ok.
+del_symbol(_Vp, _Name)  ->
+    ?nif_stub().
+
+%% aliases
+-spec get_symbol(Vp::varc(), Lit::literal()) -> [{term(),Pos::integer()}].
 get_symbol(Vp, Lit) when is_integer(Lit) ->
     variable_info(Vp, Lit, symbol).
 

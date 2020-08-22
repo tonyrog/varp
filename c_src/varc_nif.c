@@ -26,6 +26,7 @@
 #include "cdlist.h"
 #include "slist.h"
 #include "dlist.h"
+#include "dllist.h"  // "simple" doubly linked list
 
 #include "xnif_funcs.h"
 
@@ -255,6 +256,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "queue_clear",         1,  varp_queue_clear ) \
     NIF( "add_symbol",          3,  varp_add_symbol) \
     NIF( "find_symbol",         2,  varp_find_symbol ) \
+    NIF( "del_symbol",          2,  varp_del_symbol) \
     NIF( "use_clause",          2,  varp_use_clause ) \
     NIF( "bump",                3,  varp_bump )     \
     NIF( "subscribe",           2,  varp_subscribe ) \
@@ -703,7 +705,7 @@ typedef struct _varp_t {
     variable_t*  marked_head;   // mlist marked variables
     variable_t** marked_tailp;  // pointer to tail pointer
     size_t       snum;          // number of symbols in symbol hash table
-    dynvar(symbol_t**,symtab);  // symbol hash table
+    dynvar(dllist_t*,symtab);   // symbol hash table (of dllist)
     size_t       hnum;          // number of clauses in clause hashtab
     dynvar(hlink_t**,hashtab);  // clause hash table
     dynvec(clause_t**,clauseset,NUM_CSET); // array of clausesets, entries may be null
@@ -924,11 +926,11 @@ static size_t mem_allocated = 0;
 static dlist_t memlist;
 
 #ifdef FENCE_MEM
-#define MEM_FENCE1_SIZE  16
+#define MEM_FENCE1_SIZE  8
 #define MEM_PATTERN1     0xA5
-#define MEM_FENCE2_SIZE  16
+#define MEM_FENCE2_SIZE  8
 #define MEM_PATTERN2     0xCC
-#define MEM_FENCE3_SIZE  16
+#define MEM_FENCE3_SIZE  8
 #define MEM_PATTERN3     0x7E
 #endif
 
@@ -973,56 +975,65 @@ static void init_memblock(memblock_t* block, size_t n)
 {
     block->allocated = n;
 #ifdef FENCE_MEM
-    {
-	int i;
-	for (i = 0; i < MEM_FENCE1_SIZE; i++)
-	    block->fence1[i] = MEM_PATTERN1;
-	for (i = 0; i < MEM_FENCE2_SIZE; i++)
-	    block->fence2[i] = MEM_PATTERN2;
-	for (i = 0; i < MEM_FENCE3_SIZE; i++)
-	    block->data[n+i] = MEM_PATTERN3;
-    }
+    memset(block->fence1, MEM_PATTERN1, MEM_FENCE1_SIZE);
+    memset(block->fence2, MEM_PATTERN2, MEM_FENCE2_SIZE);
+    memset(block->data+n, MEM_PATTERN3, MEM_FENCE3_SIZE);
 #endif
 }
 
-static void validate_memblock(memblock_t* block, size_t n)
+// After realloc we need reinit fence3 since data area
+// have shrinked.
+static void reinit_memblock(memblock_t* block, size_t n)
 {
+    block->allocated = n;
 #ifdef FENCE_MEM
-    int i;
-    uint8_t f;
-    for (i = 0; i < MEM_FENCE1_SIZE; i++) {
-	if ((f = block->fence1[i]) != MEM_PATTERN1) {
-	    fprintf(stderr,
-		    "validatation failed: fence1 pos=%d [0x%02x]\r\n",
-		    i, f);
-	    exit(1);
-	}
-    }
-    for (i = 0; i < MEM_FENCE2_SIZE; i++) {
-	if ((f = block->fence2[i]) != MEM_PATTERN2) {
-	    fprintf(stderr,
-		    "validatation failed fence2 pos=%d [0x%02x]\r\n",
-		    i, f);
-	    exit(1);
-	}
-    }
-    for (i = 0; i < MEM_FENCE3_SIZE; i++) {
-	if ((f = block->data[n+i]) != MEM_PATTERN3) {
-	    fprintf(stderr,
-		    "validatation failed fence3 pos=%d [0x%02x]\r\n",
-		    i, f);
-	    exit(1);
-	}
-    }
+    memset(block->data+n, MEM_PATTERN3, MEM_FENCE3_SIZE);
 #endif
 }
+
+#ifdef FENCE_MEM
+static int check_fence(uint8_t* fence, size_t n, uint8_t pattern, int* pos)
+{
+    int i;
+    for (i = 0; i < (int)n; i++) {
+	if (fence[i] != pattern) {
+	    *pos = i;
+	    return -1;
+	}
+    }
+    return 0;
+}
+#endif
+
+#ifdef FENCE_MEM
+static void validate_memblock(memblock_t* block, size_t n)
+{
+    int i;
+    if (check_fence(block->fence1, MEM_FENCE1_SIZE, MEM_PATTERN1, &i) < 0) {
+	fprintf(stderr,
+		"validatation failed: fence1 pos=%d [0x%02x]\r\n",
+		i, block->fence1[i]);
+	exit(1);
+    }
+    if (check_fence(block->fence2, MEM_FENCE2_SIZE, MEM_PATTERN2, &i) < 0) {
+	fprintf(stderr,
+		"validatation failed: fence2 pos=%d [0x%02x]\r\n",
+		i, block->fence1[i]);
+	exit(1);
+    }
+    if (check_fence(block->data+n, MEM_FENCE3_SIZE, MEM_PATTERN3, &i) < 0) {
+	fprintf(stderr,
+		"validatation failed: fence3 pos=%d [0x%02x]\r\n",
+		i, block->data[n+i]);
+	exit(1);
+    }
+}
+#endif
 
 void validate_memlist()
 {
 #ifdef FENCE_MEM
-    memblock_t* mptr;
-
-    mptr = dlist_first(&memlist);
+    memblock_t* mptr = dlist_first(&memlist);
     while(!dlist_is_eol(mptr)) {
 	validate_memblock(mptr, mptr->allocated);
 	mptr = dlist_next(mptr);
@@ -1057,7 +1068,7 @@ void* debug_realloc(void* ptr, size_t n)
     if (ptr == NULL)
 	return debug_alloc(n);
     else {
-	memblock_t* pptr = (memblock_t*)(((uint8_t*)ptr) - offsetof(memblock_t, data));
+	memblock_t* pptr = (memblock_t*)(((uint8_t*)ptr)-sizeof(memblock_t));
 	memblock_t* mptr;
 	size_t m = pptr->allocated;
 #ifdef FENCE_MEM
@@ -1068,7 +1079,7 @@ void* debug_realloc(void* ptr, size_t n)
 	validate_memlist();
 	dlist_remove(&memlist, pptr);
 	if ((mptr = enif_realloc(pptr, size)) != NULL) {
-	    init_memblock(mptr, n);
+	    reinit_memblock(mptr, n);
 	    dlist_insert_first(&memlist, mptr);
 	    if (n == m)
 		;
@@ -1088,7 +1099,7 @@ void* debug_realloc(void* ptr, size_t n)
 void debug_free(void* ptr)
 {
     if (ptr != NULL) {
-	memblock_t* pptr = (memblock_t*)(((uint8_t*)ptr) - offsetof(memblock_t, data));
+	memblock_t* pptr = (memblock_t*)(((uint8_t*)ptr)-sizeof(memblock_t));
 	size_t m = pptr->allocated;
 	validate_memlist();
 	dlist_remove(&memlist, pptr);
@@ -3245,12 +3256,14 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
     return enif_make_int(env, export_ll(lp));
 }
 
-static void symbol_clear(symbol_t* sp)
+static void symtab_slot_clear(dllist_t* list)
 {
-    while(sp) {
+    symbol_t* sp = dllist_first(list);
+    while(!dllist_is_eol(sp)) {
+	symbol_t* snext = dllist_next(sp);
 	VARP_FREE(sp->data);
 	dynvar_clear(sp->lit);
-	sp = (symbol_t*) sp->link.next;
+	sp = snext;
     }
 }
 
@@ -3262,7 +3275,7 @@ static void cleanup(varp_t* vp)
     if (vp->symtab) {
 	size_t size = dynvar_size(vp->symtab);
 	for (i = 0; i < (int)size; i++)
-	    symbol_clear(vp->symtab[i]);
+	    symtab_slot_clear(&vp->symtab[i]);
 	dynvar_clear(vp->symtab);
     }
 
@@ -3454,54 +3467,60 @@ static int parse_new_opts(ErlNifEnv* env,ERL_NIF_TERM map,varp_new_opt_t* opt)
     return 1;
 }
 
+// return hash slot for symbol given table size
+static inline int symbol_slot(symbol_t* sp, size_t size)
+{
+    return sp->hvalue & (size-1);
+}
+
 static int symtab_grow(varp_t* vp)
 {
     size_t size0 = dynvar_size(vp->symtab);
     size_t size  = next_pow2(size0);
     int i;
-
+    int slot;
+    
     DBG("symtab_grow\r\n");
 
     if (dynvar_resize(vp->symtab, size) < 0)
 	return -1;
+    for (i = 0; i < (int)(size-size0); i++)
+	dllist_init(&vp->symtab[size0+i]);
 
-    // clear new links
-    memset(vp->symtab+size0, 0, (size-size0)*sizeof(symbol_t*));
     // move elements that rehash the lower part and move elements
     // that rehash to the upper part
-    for (i = 0; i < (int)size0; i++) {
-	symbol_t** spp = &vp->symtab[i];
-	symbol_t* sp;
-	while((sp = *spp) != NULL) {
-	    int j = sp->hvalue & (size-1);  // hash with new size
-	    if (i == j) { // element stay
-		spp = (symbol_t**) &(sp->link.next);
-	    }
-	    else { // element move to new location j=(i+2^r) (top half)
-		*spp = (symbol_t*) sp->link.next;
-		sp->link.next = (cdlink_t*) vp->symtab[j];
-		vp->symtab[j] = sp;
+    for (slot = 0; slot < (int)size0; slot++) {
+	symbol_t* sp = dllist_first(&vp->symtab[slot]);
+	while(!dllist_is_eol(sp)) {
+	    int new_slot = symbol_slot(sp, size);
+	    DBG("move from %d to %d\r\n", slot, new_slot);
+	    if (slot == new_slot) // element stay
+		sp = dllist_next(sp);
+	    else {
+		symbol_t* tmp = dlist_next(sp);
+		dllist_remove(&vp->symtab[slot], sp);
+		dllist_insert_last(&vp->symtab[new_slot], sp);
+		sp = tmp;
 	    }
 	}
     }
     return 0;
 }
 
-
 static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
 			       uint32_t hvalue, bool_t is_term)
 {
     size_t hsize = dynvar_size(vp->symtab);
     if (hsize > 0) {
-	int hix  = hvalue & (hsize - 1);
-	symbol_t* sp = vp->symtab[hix];
-	while(sp != NULL) {
+	int slot = hvalue & (hsize-1);
+	symbol_t* sp = dllist_first(&vp->symtab[slot]);
+	while(!dllist_is_eol(sp)) {
 	    if ((sp->hvalue == hvalue) &&
 		(sp->size == bp->size) &&
 		(sp->is_term == is_term) &&
 		(memcmp(sp->data, bp->data, bp->size) == 0))
 		return sp;
-	    sp = (symbol_t*) sp->link.next;
+	    sp = dllist_next(sp);
 	}
     }
     return NULL;
@@ -3567,15 +3586,13 @@ static symbol_t* symbol_copy(varp_t* vp, symbol_t* sp0)
 // insert the symbol into the symbol table
 static int symbol_insert(varp_t* vp,symbol_t* sp)
 {
-    int i;
-
+    int slot;
     if (vp->snum+1 >= dynvar_size(vp->symtab)) // rehash
 	symtab_grow(vp);
-    i = sp->hvalue & (dynvar_size(vp->symtab)-1);
-    sp->link.next = (cdlink_t*) vp->symtab[i];
-    vp->symtab[i] = sp;
+    slot = symbol_slot(sp, dynvar_size(vp->symtab));
+    dllist_insert_last(&vp->symtab[slot], sp);
     vp->snum++;
-    DBG("insert symbol '%s' slot = %d\r\n", symbol_strname(sp), i);
+    DBG("insert symbol '%s' slot = %d\r\n", symbol_strname(sp), slot);
     return 0;
 }
 
@@ -3590,6 +3607,24 @@ static int sref_add(varp_t* vp, lit_t l, symbol_t* sp, int pos)
     sr->sp = sp;
     sr->pos = pos;
     return 0;
+}
+
+static int sref_del(varp_t* vp, lit_t l, symbol_t* sp, int pos)
+{
+    literal_t* lp = l2ll(vp, l);
+    size_t n = dynarray_size(lp->sref);
+
+    if (n > 0) {
+	int i;
+	for (i = 0; i < (int)n; i++) {
+	    sref_t* sr = dynarray_element(lp->sref, i);
+	    if ((sr->sp == sp) && (sr->pos == pos)) {
+		dynarray_delete(lp->sref, i);
+		return 0;
+	    }
+	}
+    }
+    return -1;  // not found
 }
 
 // setup data-structure used by vp
@@ -3635,13 +3670,17 @@ static int setup(varp_t* vp, varp_config_t* config)
     VALIDATE_MEMLIST();
 #endif
 #endif
-
     if (dynvar_init(vp->symtab, DYN_SYMTAB_INIT) < 0)
 	goto error;
+    dynvar_resize(vp->symtab, DYN_SYMTAB_INIT);
+    for (i=0; i < DYN_SYMTAB_INIT; i++)
+	dllist_init(&vp->symtab[i]);
+    
     vp->snum  = 0;
 
     if (dynvar_init(vp->hashtab, DYN_HASHTAB_INIT) < 0)
 	goto error;
+    
     vp->hnum  = 0;
 
     dynvec_init(vp->clauseset,0,"[DELTA]", csize);
@@ -3872,7 +3911,7 @@ static ERL_NIF_TERM add_symbol(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM sym,
     ErlNifBinary bin;
     uint32_t hvalue;
     bool_t is_term = false;
-    symbol_t* sp;    
+    symbol_t* sp;
     int i;
     
     if (!enif_inspect_iolist_as_binary(env, sym, &bin)) {
@@ -3937,6 +3976,58 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 	r = enif_make_badarg(env);
     }
     return r;
+}
+
+static int symbol_delete(varp_t* vp, symbol_t* sp)
+{
+    int slot = symbol_slot(sp, dynvar_size(vp->symtab));
+    int i;
+    size_t n;
+    
+    dllist_remove(&vp->symtab[slot], sp);
+    VARP_FREE(sp->data);
+
+    n = dynvar_size(sp->lit);
+    for (i = 0; i < (int)n; i++) {
+	if (sref_del(vp, sp->lit[i], sp, i) < 0)
+	    return -1;
+    }
+    dynvar_clear(sp->lit);
+    obj_free(&vp->sym_allocator, sp);
+    vp->snum--;
+    return 0;
+}
+
+// varc:add_symbol(Vp:varc(), Symbol::term()) -> ok
+static ERL_NIF_TERM varp_del_symbol(ErlNifEnv* env, int argc,
+				    const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    ErlNifBinary bin;
+    uint32_t hash;
+    bool_t is_term = false;
+    symbol_t* sp;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if (!enif_inspect_iolist_as_binary(env, argv[1], &bin)) {
+	if (!enif_term_to_binary(env, argv[1], &bin))
+	    return enif_make_badarg(env);
+	is_term = true;
+    }
+
+    hash = djb_hash(bin.data, bin.size);
+
+    sp = symbol_lookup(vp, &bin, hash, is_term);
+    if (is_term) enif_release_binary(&bin);
+    if (sp != NULL) {
+	if (symbol_delete(vp, sp) < 0)
+	    return enif_make_badarg(env);
+	return enif_make_ok(env);
+    }
+    return enif_make_boolean(env, false);
 }
 
 // varc:find_symbol(Vp:varc(),term()) -> false | lit() | [lit()]
@@ -5401,16 +5492,19 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 
     if (vp->symtab) {
 	size_t size = dynvar_size(vp0->symtab);
-	for (i = 0; i < (int)size; i++) {
-	    symbol_t* sp = symbol_copy(vp, vp0->symtab[i]);
-	    if (sp != NULL) {
-		size_t n = dynvar_size(sp->lit);
+	int slot;
+	for (slot = 0; slot < (int)size; slot++) {
+	    symbol_t* sp = dllist_first(&vp0->symtab[slot]);
+	    while(!dlist_is_eol(sp)) {
+		symbol_t* copy = symbol_copy(vp, sp);
+		size_t n = dynvar_size(copy->lit);
 		int i;
-		symbol_insert(vp, sp);
+		symbol_insert(vp, copy);
 		for (i = 0; i < (int)n; i++) {
-		    if (sref_add(vp, sp->lit[i], sp, i) < 0)
+		    if (sref_add(vp, copy->lit[i], copy, i) < 0)
 			return enif_make_badarg(env);
 		}
+		sp = dlist_next(sp);
 	    }
 	}
     }
