@@ -3708,10 +3708,10 @@ static ERL_NIF_TERM varp_add_symbol(ErlNifEnv* env, int argc,
 	STK_BEGIN(lit_t, lit, len) {
 	    if (!vif_get_lit_list(env, vp, argv[1], &len, lit)) {
 		r = enif_make_badarg(env);
-		STK_LEAVE(literals);
+		STK_LEAVE(lit);
 	    }
 	    r = add_symbol(env, vp, argv[2], lit, len, false);
-	} STK_END(literals);
+	} STK_END(lit);
     }
     else if (vif_get_lit(env, vp, argv[1], &l)) {
 	r = add_symbol(env, vp, argv[2], &l, 1, true);
