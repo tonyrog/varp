@@ -28,7 +28,11 @@ typedef struct {
 #endif
 
 #define SLIST_LOCAL static
+#if defined(__WIN32__) || defined(_WIN32)
+#define SLIST_API
+#else
 #define SLIST_API __attribute__ ((unused))
+#endif
 
 SLIST_LOCAL void slist_init(slist_t* list) SLIST_API;
 SLIST_LOCAL slist_t* slist_new(void) SLIST_API;

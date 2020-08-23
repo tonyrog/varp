@@ -51,7 +51,11 @@ typedef struct _cdlist_t {
 #endif
 
 #define CDLIST_LOCAL static
+#if defined(__WIN32__) || defined(_WIN32)
+#define CDLIST_API
+#else
 #define CDLIST_API __attribute__ ((unused))
+#endif
 
 CDLIST_LOCAL void cdlist_init(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL cdlist_t* cdlist_new(void) CDLIST_API;
