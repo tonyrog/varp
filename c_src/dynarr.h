@@ -26,7 +26,11 @@ typedef struct _dynarray_t // :object_t
 } dynarray_t;
 
 #define DYNARR_LOCAL static
+#if defined(__WIN32__) || defined(_WIN32)
+#define DYNARR_API
+#else
 #define DYNARR_API __attribute__ ((unused))
+#endif
 
 DYNARR_LOCAL int dynarray_setelement(dynarray_t* dp,int i,void* data) DYNARR_API;
 DYNARR_LOCAL size_t dynarray_capacity(dynarray_t* dp) DYNARR_API;
