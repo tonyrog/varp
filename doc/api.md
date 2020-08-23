@@ -98,10 +98,19 @@ Set configurable items in varp
 varpy.add_variable(vp [,is_atom])
 ```
 
-Create a new variable. The variables is return as an index to the
+Create a new variable. The variable is return as an index to the
 next available variable in the variable table. Mark the new variable
 as atom if is_atom is __True__. The atom status may later be queried with
 variable info. is\_atom defaults to __True__.
+
+``` python
+varpy.add_variables(vp, num, [,is_atom])
+```
+
+Create __num__ new variables. The variables are return as a tuple
+(__firstindex__, __lastindex__). If is_atom is __True__ then the variables
+are marked as atom.
+
 
 ``` python
 varpy.value(vp, x)
@@ -523,6 +532,12 @@ varpy.add_symbol(vp, x, string|term)
 Associate a term or string to to a variable __x__, for example the 
 name of the variable. The term or string must not be assoicated with
 other variables or exception will occur.
+
+``` python
+varpy.del_symbol(vp, string|term)
+```
+
+Remove the symbol from the symbol table.
 
 ``` python
 varpy.find_symbol(vp, string|term)

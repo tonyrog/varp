@@ -44,10 +44,45 @@ typedef struct _cdlist_t {
     size_t  length;    // list length
 } cdlist_t;
 
-// #define LOCAL static
-#define LOCAL
+#ifndef CDLIST_ALLOC
+#define CDLIST_ALLOC(n) malloc((n))
+#define CDLIST_RELLOC(ptr,n) realloc((ptr),(n))
+#define CDLIST_FREE(ptr) free((ptr))
+#endif
 
-LOCAL void cdlist_init(cdlist_t* list)
+#define CDLIST_LOCAL static
+#define CDLIST_API __attribute__ ((unused))
+
+CDLIST_LOCAL void cdlist_init(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL cdlist_t* cdlist_new(void) CDLIST_API;
+CDLIST_LOCAL void cdlist_free(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL size_t cdlist_length(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_empty(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL void* cdlist_first(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL void* cdlist_last(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_last(cdlist_t* list, void* elem) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_first(cdlist_t* list, void* elem) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_eol(void* elem) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_bol(void* elem) CDLIST_API;
+CDLIST_LOCAL void* cdlist_next(void* elem) CDLIST_API;
+CDLIST_LOCAL void* cdlist_prev(void* elem) CDLIST_API;
+    CDLIST_LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr, order_t order, order_t step) CDLIST_API;
+CDLIST_LOCAL void cdlist_renumber(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL void cdlist_set_order(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_after(void* aptr, void* bptr) CDLIST_API;
+CDLIST_LOCAL int cdlist_is_before(void* aptr, void* bptr) CDLIST_API;
+CDLIST_LOCAL void cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr) CDLIST_API;
+CDLIST_LOCAL void cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr) CDLIST_API;
+CDLIST_LOCAL void cdlist_insert_first(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void cdlist_insert_last(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_remove(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_take_first(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL void* cdlist_take_last(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void cdlist_merge(cdlist_t* from, cdlist_t* to) CDLIST_API;
+    
+    
+CDLIST_LOCAL void cdlist_init(cdlist_t* list)
 {
     list->length  = 0;
     list->head.prev  = NULL;
@@ -59,9 +94,9 @@ LOCAL void cdlist_init(cdlist_t* list)
     list->tail.order = ORDER_1;
 }
 
-LOCAL cdlist_t* cdlist_new(void)
+CDLIST_LOCAL cdlist_t* cdlist_new(void)
 {
-    cdlist_t* list = malloc(sizeof(cdlist_t));
+    cdlist_t* list = CDLIST_ALLOC(sizeof(cdlist_t));
     if (list != NULL)
 	cdlist_init(list);
     return list;
@@ -69,37 +104,37 @@ LOCAL cdlist_t* cdlist_new(void)
 
 // cdlist_free does not fre the list elements! only the allocated!
 // list structure
-LOCAL void cdlist_free(cdlist_t* list)
+CDLIST_LOCAL void cdlist_free(cdlist_t* list)
 {
-    free(list);
+    CDLIST_FREE(list);
 }
 
-LOCAL size_t cdlist_length(cdlist_t* list)
+CDLIST_LOCAL size_t cdlist_length(cdlist_t* list)
 {
     return list->length;
 }
 
-LOCAL int cdlist_is_empty(cdlist_t* list)
+CDLIST_LOCAL int cdlist_is_empty(cdlist_t* list)
 {
     return (list->length == 0);
 }
  
-LOCAL void* cdlist_first(cdlist_t* list)
+CDLIST_LOCAL void* cdlist_first(cdlist_t* list)
 {
     return list->head.next;
 }
  
-LOCAL void* cdlist_last(cdlist_t* list)
+CDLIST_LOCAL void* cdlist_last(cdlist_t* list)
 {
     return list->tail.prev;
 }
 
-LOCAL int cdlist_is_last(cdlist_t* list, void* elem)
+CDLIST_LOCAL int cdlist_is_last(cdlist_t* list, void* elem)
 {
     return (((cdlink_t*)elem)->next == &list->tail);
 }
 
-LOCAL int cdlist_is_first(cdlist_t* list, void* elem)
+CDLIST_LOCAL int cdlist_is_first(cdlist_t* list, void* elem)
 {
     return (((cdlink_t*)elem)->prev == &list->head);
 }
@@ -110,28 +145,28 @@ LOCAL int cdlist_is_first(cdlist_t* list, void* elem)
 //    ...
 //    ptr = cdlist_next(ptr)
 // }
-LOCAL int cdlist_is_eol(void* elem)
+CDLIST_LOCAL int cdlist_is_eol(void* elem)
 {
     return (((cdlink_t*)elem)->next == NULL);
 }
 
-LOCAL int cdlist_is_bol(void* elem)
+CDLIST_LOCAL int cdlist_is_bol(void* elem)
 {
     return (((cdlink_t*)elem)->prev == NULL);
 }
 
-LOCAL void* cdlist_next(void* elem)
+CDLIST_LOCAL void* cdlist_next(void* elem)
 {
     return (void*)(((cdlink_t*)elem)->next);
 }
 
-LOCAL void* cdlist_prev(void* elem)
+CDLIST_LOCAL void* cdlist_prev(void* elem)
 {
     return (void*)(((cdlink_t*)elem)->prev);
 }
 
-LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr,
-				order_t order, order_t step)
+CDLIST_LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr,
+				       order_t order, order_t step)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
     while(!cdlist_is_eol(elem)) {
@@ -142,7 +177,7 @@ LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr,
     list->tail.order = ORDER_1;
 }
 
-LOCAL void cdlist_renumber(cdlist_t* list)
+CDLIST_LOCAL void cdlist_renumber(cdlist_t* list)
 {
     cdlink_t* elem = cdlist_first(list);
     order_t step = ORDER_1/((order_t)(list->length+1));
@@ -151,7 +186,7 @@ LOCAL void cdlist_renumber(cdlist_t* list)
 }
 
 // Should normally not be necessary to call from user code
-LOCAL void cdlist_set_order(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void cdlist_set_order(cdlist_t* list, void* ptr)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
     order_t order = (elem->prev->order + elem->next->order) / 2;
@@ -162,18 +197,18 @@ LOCAL void cdlist_set_order(cdlist_t* list, void* ptr)
 }
 
 // check if element A is (somewhere) after element B in list
-LOCAL int cdlist_is_after(void* aptr, void* bptr)
+CDLIST_LOCAL int cdlist_is_after(void* aptr, void* bptr)
 {
     return ((cdlink_t*)aptr)->order > ((cdlink_t*)bptr)->order;
 }
 
 // check if element A is (somewhere) before element B in list
-LOCAL int cdlist_is_before(void* aptr, void* bptr)
+CDLIST_LOCAL int cdlist_is_before(void* aptr, void* bptr)
 {
     return ((cdlink_t*)aptr)->order < ((cdlink_t*)bptr)->order;
 }
 
-LOCAL void cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr)
+CDLIST_LOCAL void cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
     cdlink_t* anchor = (cdlink_t*) aptr;
@@ -185,7 +220,7 @@ LOCAL void cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr)
     cdlist_set_order(list, elem);
 }
 
-LOCAL void cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr)
+CDLIST_LOCAL void cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
     cdlink_t* anchor = (cdlink_t*) aptr;    
@@ -197,17 +232,17 @@ LOCAL void cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr)
     cdlist_set_order(list, elem);
 }
 
-LOCAL void cdlist_insert_first(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void cdlist_insert_first(cdlist_t* list, void* ptr)
 {
     cdlist_insert_after(list, &list->head, ptr);
 }
 
-LOCAL void cdlist_insert_last(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void cdlist_insert_last(cdlist_t* list, void* ptr)
 {
     cdlist_insert_before(list, &list->tail, ptr);
 }
 
-LOCAL void* cdlist_remove(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void* cdlist_remove(cdlist_t* list, void* ptr)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
     elem->prev->next = elem->next;
@@ -217,18 +252,18 @@ LOCAL void* cdlist_remove(cdlist_t* list, void* ptr)
 }
 
 // "pop" return and remove from head of list
-LOCAL void* cdlist_take_first(cdlist_t* list)
+CDLIST_LOCAL void* cdlist_take_first(cdlist_t* list)
 {
     return cdlist_remove(list, list->head.next);
 }
 
 // "deq" return and remove from tail of list
-LOCAL void* cdlist_take_last(cdlist_t* list)
+CDLIST_LOCAL void* cdlist_take_last(cdlist_t* list)
 {
     return cdlist_remove(list, list->tail.prev);
 }
  
-LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr)
+CDLIST_LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
     elem->prev->next = elem;
@@ -240,7 +275,7 @@ LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr)
 // merge (append) element from list from last in list to
 // and clear original from list to and from must be diffrent lists
 //
-LOCAL void cdlist_merge(cdlist_t* from, cdlist_t* to)
+CDLIST_LOCAL void cdlist_merge(cdlist_t* from, cdlist_t* to)
 {
     if (from->length == 0)
 	return;

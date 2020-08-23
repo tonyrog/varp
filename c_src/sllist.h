@@ -1,9 +1,16 @@
-#ifndef __SLIST_H__
-#define __SLIST_H__
+#ifndef __SLLIST_H__
+#define __SLLIST_H__
 
 #include <stdlib.h>
 #include <memory.h>
 
+#ifndef SLIST_ALLOC
+#define SLIST_ALLOC(n) malloc((n))
+#define SLIST_RELLOC(ptr,n) realloc((ptr),(n))
+#define SLIST_FREE(ptr) free((ptr))
+#endif
+
+#define SLIST_LOCAL static
 
 typedef struct _slink_t {
     struct _slink_t *next;
@@ -15,47 +22,13 @@ typedef struct _slist_t {
     size_t  length;
 } slist_t;
 
-typedef struct {
+typedef struct _slist_iter_t {
     slist_t* list;    // current list
     slink_t* prev;    // previous pos
     slink_t* cur;     // current pos
 } slist_iter_t;
     
-#ifndef SLIST_ALLOC
-#define SLIST_ALLOC(n) malloc((n))
-#define SLIST_RELLOC(ptr,n) realloc((ptr),(n))
-#define SLIST_FREE(ptr) free((ptr))
-#endif
-
 #define SLIST_LOCAL static
-#define SLIST_API __attribute__ ((unused))
-
-SLIST_LOCAL void slist_init(slist_t* list) SLIST_API;
-SLIST_LOCAL slist_t* slist_new(void) SLIST_API;
-SLIST_LOCAL void slist_free(slist_t* list) SLIST_API;
-SLIST_LOCAL size_t slist_length(slist_t* list) SLIST_API;
-SLIST_LOCAL int slist_is_empty(slist_t* list) SLIST_API;
-SLIST_LOCAL void* slist_first(slist_t* list) SLIST_API;
-SLIST_LOCAL void* slist_last(slist_t* list) SLIST_API;
-SLIST_LOCAL int slist_is_last(slist_t* list, void* elem) SLIST_API;
-SLIST_LOCAL int slist_is_first(slist_t* list, void* elem) SLIST_API;
-SLIST_LOCAL int slist_is_eol(void* elem) SLIST_API;
-SLIST_LOCAL void* slist_next(void* elem) SLIST_API;
-SLIST_LOCAL void* slist_insert_first(slist_t* list, void* ptr) SLIST_API;
-SLIST_LOCAL void* slist_insert_last(slist_t* list, void* ptr) SLIST_API;
-SLIST_LOCAL int slist_is_member(slist_t* list, void* ptr) SLIST_API;
-SLIST_LOCAL void* slist_remove(slist_t* list, void* ptr) SLIST_API;
-SLIST_LOCAL void* slist_take_first(slist_t* list) SLIST_API;
-SLIST_LOCAL void slist_merge(slist_t* from, slist_t* to) SLIST_API;
-    
-SLIST_LOCAL void slist_iter_init(slist_iter_t* iter, slist_t* list) SLIST_API;
-SLIST_LOCAL void* slist_iter_current(slist_iter_t* iter) SLIST_API;
-SLIST_LOCAL int slist_iter_eol(slist_iter_t* iter) SLIST_API;
-SLIST_LOCAL void* slist_iter_next(slist_iter_t* iter) SLIST_API;
-SLIST_LOCAL int slist_iter_eol(slist_iter_t* iter) SLIST_API;
-SLIST_LOCAL void* slist_iter_next(slist_iter_t* iter) SLIST_API;
-SLIST_LOCAL void slist_iter_remove(slist_iter_t* iter) SLIST_API;
-
 
 SLIST_LOCAL void slist_init(slist_t* list)
 {
@@ -238,13 +211,11 @@ SLIST_LOCAL void* slist_iter_next(slist_iter_t* iter)
     slink_t* p;
     if ((p = iter->cur) != NULL) {
 	iter->prev = p;
-	p = p->next;
-	iter->cur = p;
+	iter->cur  = p->next;
     }
     return p;
 }
 
-// remove current element, cur is moved to next element
 SLIST_LOCAL void slist_iter_remove(slist_iter_t* iter)
 {
     slink_t* cur;

@@ -304,7 +304,7 @@ move_to_gamma(Bs, 1, Clause=[L])  ->
     varp_formula:proof_output(Bs,$a,Clause),
     counters:add(Bs#bs.clen, 1, 1);
 move_to_gamma(Bs, Len, Clause=[_,_|_]) ->
-    %% io:format("Move CLAUSE ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
+    %%io:format("Move CLAUSE ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
     Gix = varp_formula:add_clause(Bs, Clause, ?GAMMA),
     varp_formula:proof_output(Bs,$a,Gix),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
@@ -400,7 +400,7 @@ next(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    end;
 	Xj ->
 	    NextLevel = Level+1,
-	    io:format("next=~w\n", [Xj]),
+	    %% io:format("next=~w\n", [Xj]),
 	    varc:set_level(Bs#bs.vp,NextLevel),
 	    true = varc:decide(Bs#bs.vp,Xj),
 	    timeout_or_cancel(Bs,Param,NextLevel,MaxLearned,MR,

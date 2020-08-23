@@ -26,7 +26,9 @@
 #include "cdlist.h"
 #include "slist.h"
 #include "dlist.h"
-#include "dllist.h"  // "simple" doubly linked list
+#include "dynarr.h"
+#include "dynvar.h"
+#include "dynvec.h"
 
 #include "xnif_funcs.h"
 
@@ -37,6 +39,10 @@
 #ifndef VARP_VSN
 #define VARP_VSN "0.0.0-unknown"
 #endif
+
+#define DYN_SYMTAB_INIT  8
+#define DYN_HASHTAB_INIT 8
+#define DYN_UNDO_INIT    8 // 1024 at least 1 level 0 exit from start!
 
 //
 // configurations
@@ -319,29 +325,10 @@ typedef struct _heap_t
     uint8_t base[0];
 } heap_t;
 
-#ifdef DEBUG_MEM
-struct _object_t;
-
-typedef struct _object_link_t
-{
-    dlink_t link;
-    struct _object_t* obj;
-} object_link_t;
-
-#define OBJECT_LINK \
-    cdlink_t link; \
-    object_link_t* olink
-#else
-
-#define OBJECT_LINK \
-    cdlink_t link
-#endif
-
 // objects may be slist/dlist or cdlist
 typedef struct _object_t
 {
-    OBJECT_LINK;
-    uint8_t data[];
+    uint8_t data[sizeof(cdlink_t)];
 } object_t;
 
 typedef struct _allocator_t
@@ -349,86 +336,7 @@ typedef struct _allocator_t
     size_t size;         // object size
     slist_t heap_list;   // heaps of data
     slist_t free_list;   // list of free objects
-#ifdef DEBUG_MEM
-    dlist_t obj_list;    // list of object links
-#endif
 } allocator_t;
-
-#define DYN_SYMTAB_INIT  8
-#define DYN_HASHTAB_INIT 8
-#define DYN_UNDO_INIT    8 // 1024 at least 1 level 0 exit from start!
-
-// Grow factor
-#define DYN_GROW0 2.0000f
-#define DYN_GROW1 1.6180f
-#define DYN_GROW2 1.2500f
-
-// switch limit
-#define DYN_GROW0_LIMIT 1024
-#define DYN_GROW1_LIMIT (1024*1024)
-
-#define DYN_ADDR(dp,i) ((void*)((intptr_t)((dp)->base) + ((i)*(dp)->width)))
-
-typedef struct _dyntype_t
-{
-    const char* name;
-    size_t width;
-} dyntype_t;
-
-typedef struct _dynarray_t // :object_t
-{
-    OBJECT_LINK;
-    const char* name;  // debugging name of array
-    size_t capacity;   // max number of elements
-    size_t size;       // assigned size <= capacity
-    size_t width;      // element size
-    void*  base;       // array base address
-} dynarray_t;
-
-// Simple variable fiels
-
-#define dynvar(type, name)			\
-    dynarray_t name ## _dyn_;			\
-    type name
-
-#define dynvar_size(name) name ## _dyn_.size
-#define dynvar_capacity(name) name ## _dyn_.capacity
-#define dynvar_init(name, capacity)			\
-    ((dynarray_init(&name ## _dyn_, #name, (capacity), sizeof(name[0])) < 0) ? -1 : \
-     (name = name ## _dyn_.base, 0))
-#define dynvar_resize(name, size)				\
-    ((dynarray_resize(&name ## _dyn_, (size)) < 0) ? -1 :	\
-     (name = name ## _dyn_.base, 0))
-#define dynvar_set_capacity(name, size)				\
-    ((dynarray_set_capacity(&name ## _dyn_, (size)) < 0) ? -1 :	\
-     (name = name ## _dyn_.base, 0))
-#define dynvar_add(name)			\
-    (dynarray_add(&name ## _dyn_), name = name ## _dyn_.base,		\
-     (TYPEOF(name[0])*) DYN_ADDR(&name ## _dyn_, name ## _dyn_.size -1))
-#define dynvar_clear(name)			\
-    (dynarray_clear(&name ## _dyn_), name = NULL)
-
-// Array variable fiels
-
-#define dynvec(type,name,n)			\
-    dynarray_t name ## _dyn_[n];		\
-    type name[n]
-
-#define dynvec_size(name,i) name ## _dyn_[(i)].size
-#define dynvec_capacity(name,i) name ## _dyn_[(i)].capacity
-#define dynvec_init(name,i,vtag,capacity)				\
-    ((dynarray_init(&name ## _dyn_[(i)], #name vtag,(capacity),sizeof(name[(i)][0])) < 0) ? -1 : \
-     (name[(i)] = name ## _dyn_[(i)].base, 0))
-#define dynvec_resize(name,i,size)				\
-    ((dynarray_resize(&name ## _dyn_[(i)], (size)) < 0) ? -1 :	\
-     (name[(i)] = name ## _dyn_[(i)].base, 0))
-#define dynvec_set_capacity(name,i,size)			\
-    ((dynarray_set_capacity(&name ## _dyn_[(i)], (size)) < 0) ? -1 :	\
-     (name[(i)] = name ## _dyn_[(i)].base, 0))
-#define dynvec_add(name,i)				\
-    (TYPEOF(name[(i)][0])*) dynarray_add(&name ## _dyn_[(i)])
-#define dynvec_clear(name,i)				\
-    (dynarray_clear(&name ## _dyn_[(i)]), name[(i)] = NULL)
 
 
 #if defined(__WIN32__) || defined(_WIN32)
@@ -444,13 +352,6 @@ typedef struct _dynarray_t // :object_t
 #define STK_END0(name) } while(0); FREE_STACK((name)); } while(0)
 #define STK_END(name)  } while(0); L##name: FREE_STACK((name)); } while(0)
 
-/*
-#define stk_alloc(rtype,type,name,n)				\
-    type* name = ALLOC_STACK(sizeof(type)*(n)); rtype R##name; int Q##name=0
-#define stk_return(name,value) do { R##name = (value); Q##name=1; goto L##name; } while(0)
-#define stk_dealloc(name) L##name: FREE_STACK((name))
-#define stk_leave(name) if (Q##name) return R##name
-*/
 
 #ifdef LIT_INTEGER
 #if LIT_INTEGER == 8
@@ -490,7 +391,7 @@ typedef struct _literal_t // :slink_t
 #endif
     struct _variable_t* var;   // "parent"
     struct _wlink_t* wlist;    // list of watch positions
-    struct _edge_t* elist;     // list of 2-clause triggers
+    slist_t elist;             // list of 2-clause triggers
     dynarray_t* xref;          // cross references when enabled
     dynarray_t* sref;          // list of symbol/pos references
 } literal_t;
@@ -516,9 +417,9 @@ typedef struct _xref_t
     pos_t p;
 } xref_t;
 
-typedef struct _edge_t // :object_t
+typedef struct _edge_t // :slink_t in slist_t
 {
-    OBJECT_LINK;
+    slink_t link;
     cix_t    cix;            // real 2-clause
     lit_t l;
 } edge_t;
@@ -532,9 +433,9 @@ typedef struct _edge_t // :object_t
 #define LIT_POS 0
 #define LIT_NEG 1
 
-typedef struct _variable_t     // :object_t
+typedef struct _variable_t     // :cdlink_t in cdlist_t
 {
-    OBJECT_LINK;               // used as cdlink (ordered link)
+    cdlink_t link;
     struct _variable_t* bound_next;
     struct _variable_t* mark_next; // mark next
     bool_t  is_atom;          // variable marked as input/atom
@@ -552,9 +453,9 @@ typedef struct _variable_t     // :object_t
     literal_t lit[2];          // literal containers LIT_POS=0 LIT_NEG=1
 } variable_t;
 
-typedef struct _symbol_t // :object_t
+typedef struct _symbol_t // :dlink - dlist
 {
-    OBJECT_LINK;
+    dlink_t link;
     uint32_t hvalue;          // symbol hash
     bool_t is_term;           // either name is a term or name is binary string
     bool_t is_scalar;         // if simple variable
@@ -596,9 +497,9 @@ typedef struct _clause_t
 } clause_t;
 
 // hash structure
-typedef struct _hlink_t // :object_t
+typedef struct _hlink_t // :slink_t in slist_t
 {
-    OBJECT_LINK;
+    slink_t link;
     uint32_t hvalue;
     cix_t cix;
 } hlink_t;
@@ -636,8 +537,8 @@ typedef struct arc4_stream_t {
 #define SUB_FLAG_NUM_SUBST   0x0400    // report number of susbstitutions
 #define SUB_FLAG_MIN_LEVEL   0x0100    // report min level (at conflict)
 
-typedef struct _subscription_t {   // :object_t
-    OBJECT_LINK;
+typedef struct _subscription_t {   // :dlink_t in dlist_t
+    dlink_t link;
     ErlNifPid pid;                 // the subscriber pid
     ErlNifMonitor mon;             // monitor the pid
     uint32_t      flags;           // subscription flags
@@ -705,9 +606,9 @@ typedef struct _varp_t {
     variable_t*  marked_head;   // mlist marked variables
     variable_t** marked_tailp;  // pointer to tail pointer
     size_t       snum;          // number of symbols in symbol hash table
-    dynvar(dllist_t*,symtab);   // symbol hash table (of dllist)
+    dynvar(dlist_t*,symtab);    // symbol hash table (of symbol_t*)
     size_t       hnum;          // number of clauses in clause hashtab
-    dynvar(hlink_t**,hashtab);  // clause hash table
+    dynvar(slist_t*,hashtab);   // clause hash table (of hlink_t*)
     dynvec(clause_t**,clauseset,NUM_CSET); // array of clausesets, entries may be null
     cdlist_t     order_list;    // doubly linked order list
     variable_t* order_next;     // next variable to search from
@@ -731,7 +632,7 @@ typedef struct _varp_t {
 
     arc4_stream_t as;              // random stream
 
-    subscription_t* subs;          // list of subscriptions
+    dlist_t subs;                  // list of subscriptions
 
     ErlNifEnv*      msg_env;       // message environment
     ErlNifEnv*      caller_env;    // message environment
@@ -1240,69 +1141,24 @@ static size_t next_pow2(size_t size)
     return next_size;
 }
 
-static size_t dynarray_next_size(size_t cur, size_t capacity)
+static dynarray_t* dynarray_create(varp_t* vp, size_t capacity, size_t width)
 {
-    while((cur < DYN_GROW0_LIMIT) && (cur < capacity))
-	cur *= DYN_GROW0;
-    while((cur < DYN_GROW1_LIMIT) && (cur < capacity))
-	cur *= DYN_GROW1;
-    while((cur < capacity))
-	cur *= DYN_GROW2;
-    return cur;
-}
+    dynarray_t* dp;
 
-static size_t dynarray_first_size(size_t capacity)
-{
-    return dynarray_next_size(1, capacity);
-}
-
-#if 0
-static void dyntype_init(dyntype_t* dt, const char* name, size_t width)
-{
-    dt->name = name;
-    dt->width = width;
-}
-#endif
-
-static int dynarray_init(dynarray_t* dp, const char* name,
-			 size_t initial_capacity,
-			 size_t width)
-{
-    void* base;
-    size_t capacity;
-
-    if (initial_capacity == 0) {
-	capacity = 0;
-	base = NULL;
+    if ((dp = obj_alloc(&vp->dyn_allocator)) == NULL)
+	return NULL;
+    if (dp != NULL) {
+	if (dynarray_init(dp, capacity, width) < 0) {
+	    obj_free(&vp->dyn_allocator, dp);
+	    return NULL;
+	}
     }
-    else {
-	capacity = dynarray_first_size(initial_capacity);
-	if ((base = VARP_ALLOC(capacity*width)) == NULL)
-	    return -1;
-    }
-#ifdef DEBUG_MEM
-    enif_fprintf(stdout, "dynarray_init[%s]: base=%p,capacity=%d,width=%d\r\n",
-		 name, base, capacity, width);
-#endif
-    dp->name     = name;
-    dp->capacity = capacity;
-    dp->size     = 0;
-    dp->width    = width;
-    dp->base     = base;
-    return 0;
+    return dp;
 }
 
-static void dynarray_clear(dynarray_t* dp)
+static dynarray_t* dynarray_empty(varp_t* vp, size_t width)
 {
-#ifdef DEBUG_MEM
-    enif_fprintf(stdout,
-		 "dynarray_clear[%s]: base=%p,size=%d,capacity=%d,width=%d\r\n",
-		 dp->name, dp->base, dp->size, dp->capacity, dp->width);
-#endif
-    VARP_FREE(dp->base);
-    dp->base = NULL;
-    dp->size = 0;
-    dp->capacity = 0;
+    return dynarray_create(vp, 0, width);
 }
 
 static void dynarray_destroy(varp_t* vp, dynarray_t* dp)
@@ -1311,120 +1167,6 @@ static void dynarray_destroy(varp_t* vp, dynarray_t* dp)
 	dynarray_clear(dp);
 	obj_free(&vp->dyn_allocator, dp);
     }
-}
-
-static inline size_t dynarray_capacity(dynarray_t* dp)
-{
-    return (dp == NULL) ? 0 : dp->capacity;
-}
-
-static inline size_t dynarray_size(dynarray_t* dp)
-{
-    return (dp == NULL) ? 0 : dp->size;
-}
-
-static int dynarray_set_capacity(dynarray_t* dp, size_t capacity)
-{
-    void* base;
-
-#ifdef DEBUG_MEM
-    enif_fprintf(stdout, "dynarray_set_capacity[%s] base=%p from=%d to %d\r\n",
-		 dp->name, dp->base, dp->capacity, capacity);
-#endif
-    if ((base = VARP_REALLOC(dp->base, capacity*dp->width)) == NULL)
-	return -1;
-    dp->base = base;
-#ifdef DEBUG_MEM
-    enif_fprintf(stdout, "dynarray_set_capacity[%s]: base=%p [%s] %d => %d\r\n",
-		 dp->name, dp->base, dp->name, dp->capacity, capacity);
-#endif
-    dp->capacity = capacity;
-    dp->size = MIN(dp->size, capacity);
-    return 0;
-}
-
-static inline int dynarray_resize(dynarray_t* dp, size_t size)
-{
-#ifdef DEBUG_MEM
-    enif_fprintf(stderr, "dynarray_resize[%s] %d (from %d) (capacity=%d)\r\n",
-		 dp->name, size, dp->size, dp->capacity);
-#endif
-    if (size > dp->capacity) {
-	size_t capacity = dynarray_next_size(MAX(1,dp->capacity), size);
-	if (dynarray_set_capacity(dp, capacity) < 0)
-	    return -1;
-    }
-    dp->size = size;
-    return 0;
-}
-
-static dynarray_t* dynarray_create(varp_t* vp, const char* name,
-				   size_t capacity, size_t width)
-{
-    dynarray_t* dp;
-
-    if ((dp = obj_alloc(&vp->dyn_allocator)) == NULL)
-	return NULL;
-    if (dp != NULL) {
-	if (dynarray_init(dp, name, capacity, width) < 0) {
-	    obj_free(&vp->dyn_allocator, dp);
-	    return NULL;
-	}
-    }
-    return dp;
-}
-
-static inline dynarray_t* dynarray_empty(varp_t* vp, const char* name,
-					 size_t width)
-{
-    return dynarray_create(vp, name, 0, width);
-}
-
-static inline void* dynarray_element(dynarray_t* dp, int i)
-{
-    if (dp == NULL) return NULL;
-    if (i == 0) return dp->base;
-    if ((i < 0) || (i >= (int)dp->size)) return NULL;
-    return DYN_ADDR(dp, i);
-}
-
-
-// copy data into dynarray resize if needed
-static inline int dynarray_setelement(dynarray_t* dp,int i,void* data)
-{
-    if (dp == NULL || (i < 0)) return -1;
-    if (i >= (int)dp->size) {
-	if (dynarray_resize(dp, i+1) < 0)
-	    return -1;
-    }
-    memcpy(DYN_ADDR(dp, i), data, dp->width);
-    return 0;
-}
-
-static inline void* dynarray_add(dynarray_t* dp)
-{
-    size_t n;
-    if (dp == NULL) return NULL;
-    n = dp->size;
-    if (dynarray_resize(dp, n+1) < 0)
-	return NULL;
-    return DYN_ADDR(dp, n);
-}
-
-static inline void* dynarray_delete(dynarray_t* dp, int i)
-{
-    uint8_t* src;
-    uint8_t* dst;
-    size_t len;
-
-    if ((i<0) || (dp == NULL) || (i >= (int)dp->size))
-	return NULL;
-    dst = DYN_ADDR(dp, i);
-    src = dst + dp->width;
-    if ((len = (dp->size - i -1)) > 0)
-	memmove(dst, src, len*dp->width);
-    dp->size--;
-    return dst;
 }
 
 //
@@ -2458,9 +2200,9 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 static void log_permanent_(varp_t* vp, literal_t* x, literal_t* y)
 {
     ErlNifEnv* env = vp->msg_env;
-    subscription_t* sp = vp->subs;
+    subscription_t* sp = dlist_first(&vp->subs);
 
-    while(sp != NULL) {
+    while(!dlist_is_eol(sp)) {
 	if ((sp->flags & SUB_FLAG_VAR) ||
 	    ((sp->flags & SUB_FLAG_ATOM) &&
 	     (x->var->is_atom))) {
@@ -2494,7 +2236,7 @@ static void log_permanent_(varp_t* vp, literal_t* x, literal_t* y)
 		}
 	    }
 	}
-	sp = (subscription_t*)sp->link.next;
+	sp = dlist_next(sp);
     }
 }
 
@@ -2502,7 +2244,7 @@ static inline void log_permanent(varp_t* vp, literal_t* x,
 				 literal_t* y, int level)
 {
     if (level != 0) return;
-    if (vp->subs == NULL) return;
+    if (dlist_length(&vp->subs) == 0) return;
     log_permanent_(vp, x, y);
 }
 
@@ -2579,25 +2321,26 @@ static void edge_insert(varp_t* vp, lit_t a, lit_t b, cix_t cix)
     ep = obj_alloc(&vp->edge_allocator);
     ep->l = b;
     ep->cix = cix;
-    ep->link.next = (cdlink_t*)ap->elist;
-    ap->elist = ep;
+    slist_insert_last(&ap->elist, ep);
     vp->nedge++;
 }
 
 static void edge_remove(varp_t* vp, lit_t a, lit_t b, cix_t cix)
 {
-    edge_t* pp;
     literal_t* ap = l2ll(vp, a);
-    edge_t** ppp = &ap->elist;
+    slist_iter_t iter;
 
-    while((pp = *ppp)) {
+    slist_iter_init(&iter, &ap->elist);
+
+    while(!slist_iter_eol(&iter)) {
+	edge_t* pp = slist_iter_current(&iter);
 	if ((pp->l == b) && (pp->cix == cix)) {
-	    *ppp = (edge_t*) pp->link.next;
+	    slist_iter_remove(&iter);
 	    obj_free(&vp->edge_allocator, pp);
 	    vp->nedge--;
 	    return;
 	}
-	ppp = (edge_t**) &(pp->link.next);
+	slist_iter_next(&iter);
     }
 }
 
@@ -2757,7 +2500,7 @@ static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
     lp->l        = MAKE_LIT(var->ix,neg);
     lp->var      = var;
     lp->wlist    = NULL;
-    lp->elist    = NULL;
+    slist_init(&lp->elist);
     lp->xref     = NULL;
     lp->sref     = NULL;
 }
@@ -2797,21 +2540,19 @@ static int hashtab_grow(varp_t* vp)
 
     if (dynvar_resize(vp->hashtab, size) < 0)
 	return -1;
-    // clear new links
-    memset(vp->hashtab+size0, 0, (size-size0)*sizeof(hlink_t*));
     // move elements that rehash to the upper part
     for (i = 0; i < (int)size0; i++) {
-	hlink_t** hpp = &vp->hashtab[i];
-	hlink_t* hp;
-	while((hp = *hpp) != NULL) {
+	slist_iter_t iter;
+	slist_iter_init(&iter, &vp->hashtab[i]);
+
+	while(!slist_iter_eol(&iter)) {
+	    hlink_t* hp = slist_iter_current(&iter);
 	    int j = hp->hvalue & (size-1);  // hash with new size
-	    if (i == j) { // element stay
-		hpp = (hlink_t**) &(hp->link.next);
-	    }
+	    if (i == j) // element stay
+		slist_iter_next(&iter);
 	    else { // element move to new location j=(i+2^r) (top half)
-		*hpp = (hlink_t*) hp->link.next;
-		hp->link.next = (cdlink_t*) vp->hashtab[j];
-		vp->hashtab[j] = hp;
+		slist_iter_remove(&iter);
+		slist_insert_last(&vp->hashtab[j], hp);
 	    }
 	}
     }
@@ -2826,8 +2567,7 @@ static int hlink_insert(varp_t* vp, hlink_t* hp)
 	    return -1;
     }
     i = hp->hvalue & (dynvar_size(vp->hashtab)-1);
-    hp->link.next = (cdlink_t*)vp->hashtab[i];
-    vp->hashtab[i] = hp;
+    slist_insert_last(&vp->hashtab[i], hp);
     vp->hnum++;
     return 0;
 }
@@ -2835,15 +2575,17 @@ static int hlink_insert(varp_t* vp, hlink_t* hp)
 static int hash_unlink(varp_t* vp, clause_t* cp)
 {
     int i = cp->hvalue & (dynvar_size(vp->hashtab)-1);
-    hlink_t** hpp = &vp->hashtab[i];
-    while(*hpp) {
-	hlink_t* hp = *hpp;
+    slist_iter_t iter;
+    slist_iter_init(&iter, &vp->hashtab[i]);
+
+    while(!slist_iter_eol(&iter)) {
+	hlink_t* hp = slist_iter_current(&iter);    
 	if (hp->cix == cp->cix) {
-	    *hpp = (hlink_t*) hp->link.next;
+	    slist_iter_remove(&iter);
 	    obj_free(&vp->hlink_allocator, hp);
 	    return 0;
 	}
-	hpp = (hlink_t**) &(hp->link.next);
+	slist_iter_next(&iter);
     }
     DBG("clause %d not found in hash table\r\n", cp->cix);
     return -1;
@@ -2854,15 +2596,18 @@ static hlink_t* hlink_lookup(varp_t* vp,lit_t* lit,size_t size,uint32_t hvalue)
     size_t hsize = dynvar_size(vp->hashtab);
     if (hsize > 0) {
 	int i = hvalue & (hsize-1);
-	hlink_t* hp = vp->hashtab[i];
-	while(hp) {
+	slist_iter_t iter;
+	slist_iter_init(&iter, &vp->hashtab[i]);
+
+	while(!slist_iter_eol(&iter)) {
+	    hlink_t* hp = slist_iter_current(&iter); 
 	    if (hp->hvalue == hvalue) {
 		clause_t* cp = get_clause(vp, hp->cix);
 		ASSERT(cp != NULL);
 		if ((cp->size == size) && clause_is_equal(lit,cp->lit,size))
 		    return hp;
 	    }
-	    hp = (hlink_t*) hp->link.next;
+	    slist_iter_next(&iter);
 	}
     }
     return NULL;
@@ -3256,11 +3001,11 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
     return enif_make_int(env, export_ll(lp));
 }
 
-static void symtab_slot_clear(dllist_t* list)
+static void symtab_slot_clear(dlist_t* list)
 {
-    symbol_t* sp = dllist_first(list);
-    while(!dllist_is_eol(sp)) {
-	symbol_t* snext = dllist_next(sp);
+    symbol_t* sp = dlist_first(list);
+    while(!dlist_is_eol(sp)) {
+	symbol_t* snext = dlist_next(sp);
 	VARP_FREE(sp->data);
 	dynvar_clear(sp->lit);
 	sp = snext;
@@ -3485,21 +3230,21 @@ static int symtab_grow(varp_t* vp)
     if (dynvar_resize(vp->symtab, size) < 0)
 	return -1;
     for (i = 0; i < (int)(size-size0); i++)
-	dllist_init(&vp->symtab[size0+i]);
+	dlist_init(&vp->symtab[size0+i]);
 
     // move elements that rehash the lower part and move elements
     // that rehash to the upper part
     for (slot = 0; slot < (int)size0; slot++) {
-	symbol_t* sp = dllist_first(&vp->symtab[slot]);
-	while(!dllist_is_eol(sp)) {
+	symbol_t* sp = dlist_first(&vp->symtab[slot]);
+	while(!dlist_is_eol(sp)) {
 	    int new_slot = symbol_slot(sp, size);
 	    DBG("move from %d to %d\r\n", slot, new_slot);
 	    if (slot == new_slot) // element stay
-		sp = dllist_next(sp);
+		sp = dlist_next(sp);
 	    else {
 		symbol_t* tmp = dlist_next(sp);
-		dllist_remove(&vp->symtab[slot], sp);
-		dllist_insert_last(&vp->symtab[new_slot], sp);
+		dlist_remove(&vp->symtab[slot], sp);
+		dlist_insert_last(&vp->symtab[new_slot], sp);
 		sp = tmp;
 	    }
 	}
@@ -3513,14 +3258,14 @@ static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
     size_t hsize = dynvar_size(vp->symtab);
     if (hsize > 0) {
 	int slot = hvalue & (hsize-1);
-	symbol_t* sp = dllist_first(&vp->symtab[slot]);
-	while(!dllist_is_eol(sp)) {
+	symbol_t* sp = dlist_first(&vp->symtab[slot]);
+	while(!dlist_is_eol(sp)) {
 	    if ((sp->hvalue == hvalue) &&
 		(sp->size == bp->size) &&
 		(sp->is_term == is_term) &&
 		(memcmp(sp->data, bp->data, bp->size) == 0))
 		return sp;
-	    sp = dllist_next(sp);
+	    sp = dlist_next(sp);
 	}
     }
     return NULL;
@@ -3590,7 +3335,7 @@ static int symbol_insert(varp_t* vp,symbol_t* sp)
     if (vp->snum+1 >= dynvar_size(vp->symtab)) // rehash
 	symtab_grow(vp);
     slot = symbol_slot(sp, dynvar_size(vp->symtab));
-    dllist_insert_last(&vp->symtab[slot], sp);
+    dlist_insert_last(&vp->symtab[slot], sp);
     vp->snum++;
     DBG("insert symbol '%s' slot = %d\r\n", symbol_strname(sp), slot);
     return 0;
@@ -3602,7 +3347,7 @@ static int sref_add(varp_t* vp, lit_t l, symbol_t* sp, int pos)
     sref_t* sr;
 
     if (lp->sref == NULL)
-	lp->sref = dynarray_empty(vp, "sref", sizeof(sref_t));
+	lp->sref = dynarray_empty(vp, sizeof(sref_t));
     sr = dynarray_add(lp->sref);
     sr->sp = sp;
     sr->pos = pos;
@@ -3674,7 +3419,7 @@ static int setup(varp_t* vp, varp_config_t* config)
 	goto error;
     dynvar_resize(vp->symtab, DYN_SYMTAB_INIT);
     for (i=0; i < DYN_SYMTAB_INIT; i++)
-	dllist_init(&vp->symtab[i]);
+	dlist_init(&vp->symtab[i]);
     
     vp->snum  = 0;
 
@@ -3683,10 +3428,10 @@ static int setup(varp_t* vp, varp_config_t* config)
     
     vp->hnum  = 0;
 
-    dynvec_init(vp->clauseset,0,"[DELTA]", csize);
-    dynvec_init(vp->clauseset,1,"[GAMMA]",0);
-    dynvec_init(vp->clauseset,2,"[BETA]", 0);
-    dynvec_init(vp->clauseset,3,"[ALPHA]", 0);
+    dynvec_init(vp->clauseset,DELTA, csize);
+    dynvec_init(vp->clauseset,GAMMA, 0);
+    dynvec_init(vp->clauseset,BETA,  0);
+    dynvec_init(vp->clauseset,ALPHA, 0);
 
     for (i = 0; i < NUM_CSET; i++) {
 	vp->cnum[i]  = 0;
@@ -3720,7 +3465,7 @@ static int setup(varp_t* vp, varp_config_t* config)
     undo_set_size(vp, DYN_UNDO_INIT);
 
     vp->num_bound = 0;
-    vp->num_subst = 0;
+    dlist_init(&vp->subs);
     vp->level = 0;
 
     // transient statistics
@@ -3744,7 +3489,6 @@ static int setup(varp_t* vp, varp_config_t* config)
 
     arc4_init(&vp->as);
 
-    vp->subs = NULL;
     vp->msg_env = enif_alloc_env();
     vp->caller_env = NULL;
     return 0;
@@ -3984,7 +3728,7 @@ static int symbol_delete(varp_t* vp, symbol_t* sp)
     int i;
     size_t n;
     
-    dllist_remove(&vp->symtab[slot], sp);
+    dlist_remove(&vp->symtab[slot], sp);
     VARP_FREE(sp->data);
 
     n = dynvar_size(sp->lit);
@@ -4158,12 +3902,15 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	return enif_make_uint(env, lp->user);
     if (EQUAL_KEY(env, edge, argv[2])) {
 	ERL_NIF_TERM list = enif_make_list(env, 0);
-	edge_t* ep = lp->elist;
+	slist_iter_t iter;
 
-	while(ep) {
+	slist_iter_init(&iter, &lp->elist);
+	
+	while(!slist_iter_eol(&iter)) {
+	    edge_t* ep = slist_iter_current(&iter);
 	    ERL_NIF_TERM elem = enif_make_int(env, export_l(ep->l));
 	    list = enif_make_list_cell(env, elem, list);
-	    ep = (edge_t*) ep->link.next;
+	    slist_iter_next(&iter);
 	}
 	return list;
     }
@@ -5326,7 +5073,7 @@ static void xref_add(varp_t* vp, clause_t* cp, pos_t p)
     xref_t* xp;
 
     if (lp->xref == NULL)
-	lp->xref = dynarray_empty(vp, "xref", sizeof(xref_t));
+	lp->xref = dynarray_empty(vp, sizeof(xref_t));
     xp = dynarray_add(lp->xref);
     xp->cix  = cp->cix;
     xp->p    = p;
@@ -5494,7 +5241,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	size_t size = dynvar_size(vp0->symtab);
 	int slot;
 	for (slot = 0; slot < (int)size; slot++) {
-	    symbol_t* sp = dllist_first(&vp0->symtab[slot]);
+	    symbol_t* sp = dlist_first(&vp0->symtab[slot]);
 	    while(!dlist_is_eol(sp)) {
 		symbol_t* copy = symbol_copy(vp, sp);
 		size_t n = dynvar_size(copy->lit);
@@ -5594,28 +5341,31 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
     literal_t* yp = l2ll(vp, yl);
     literal_t* nyp = neg_ll(yp);   // !Y
     literal_t* nxp = neg_ll(xp);   // !X
-    edge_t* pl;
+    slist_iter_t piter;
 
-    for (pl = nyp->elist; pl != NULL; pl = (edge_t*) pl->link.next) {
-	literal_t* lp = l2ll(vp, pl->l);  // each L in !Y
-	literal_t* nlp = neg_ll(lp);
-	edge_t* ql;
+    slist_iter_init(&piter, &nyp->elist);
+    while(!slist_iter_eol(&piter)) {
+	// edge_t* pl = slist_iter_current(&piter);
+	// literal_t* lp = l2ll(vp, pl->l);  // each L in !Y
+	// literal_t* nlp = neg_ll(lp);
+	slist_iter_t qiter;
 
-	for (ql = nlp->elist; ql != NULL; ql = (edge_t*) ql->link.next) {
+	slist_iter_init(&piter, &nyp->elist);
+	while(!slist_iter_eol(&qiter)) {
+	    edge_t* ql = slist_iter_current(&qiter);
+
 	    if (ql->l == yl)
 		ql->l = xl;
 	    // detect X, !X ? FIXME! MUST
+	    slist_iter_next(&qiter);
 	}
+	slist_iter_next(&piter);
     }
 
-    pl = nyp->elist;
-    while(pl) {
-	edge_t* pl1 = (edge_t*) pl->link.next;
-
-	pl->link.next = (cdlink_t*)nxp->elist;
-	nxp->elist = pl;
-
-	pl = pl1;
+    slist_iter_init(&piter, &nyp->elist);
+    while(!slist_iter_eol(&piter)) {    
+    	edge_t* pl = slist_iter_current(&piter);
+	slist_iter_remove(&piter);
     }
 }
 
@@ -5664,7 +5414,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     xref_t*    yptr = dynarray_element(yp->xref,0);
     size_t     ylen = dynarray_size(yp->xref);
 
-    dynarray_t* x1 = dynarray_create(vp, "x1", xlen+ylen, sizeof(xref_t));
+    dynarray_t* x1 = dynarray_create(vp, xlen+ylen, sizeof(xref_t));
     xref_t*    x1ptr = dynarray_element(x1,0);
     xref_t*    x1ptr0 = x1ptr;
 
@@ -6110,12 +5860,13 @@ static int bcp1(varp_t* vp, literal_t* lp);
 // bcp edge list lp=1 (implication chain) set all implicants to TRUE
 static int bcp_edge_list(varp_t* vp, literal_t* lp)
 {
-    edge_t** epp = &lp->elist;
-    edge_t* ep;
+    slist_iter_t iter;
 
-    while((ep = *epp) != NULL) {
+    slist_iter_init(&iter, &lp->elist);
+
+    while(!slist_iter_eol(&iter)) {
+	edge_t* ep = slist_iter_current(&iter);
 	literal_t* lp1;
-	int cont = 0;
 
 	COUNT(vp, EDGE_2);
 
@@ -6141,10 +5892,11 @@ static int bcp_edge_list(varp_t* vp, literal_t* lp)
 	    put_nq_ll(vp, lp1, I_TRUE, 1, ep->cix, vp->level);
 	    if (vp->level == 0) {
 		// unlink dead edge!
-		*epp = (edge_t*) ep->link.next;
+		slist_iter_remove(&iter);
 		obj_free(&vp->edge_allocator, ep);
 		vp->edead++;
-		cont = 1;
+		// remove will advance to next item!
+		continue;
 	    }
 	    if (vp->opt.qtype == recursive) {
 		if (bcp1(vp, neg_ll(lp1)) < 0)
@@ -6153,15 +5905,13 @@ static int bcp_edge_list(varp_t* vp, literal_t* lp)
 	    else {
 		lqueue_insert_ll(vp, neg_ll(lp1));
 	    }
-	    if (cont)
-		continue;
 	    break;
 	case I_BOUND:
 	default:
 	    ASSERT(0);
 	    break;
 	}
-	epp = (edge_t**) &(ep->link.next);
+	slist_iter_next(&iter);
     }
     return 0;
 conflict:
@@ -7629,22 +7379,22 @@ static ERL_NIF_TERM varp_clean_edges(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     literal_t* lp;
-    edge_t* ep;
-    edge_t** epp;
-
+    slist_iter_t iter;
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_ll(env, vp, argv[1], &lp))
 	return enif_make_badarg(env);
 
-    epp = &lp->elist;
-    while((ep = *epp) != NULL) {
+    slist_iter_init(&iter, &lp->elist);
+    while(!slist_iter_eol(&iter)) {
+	edge_t* ep = slist_iter_current(&iter);
 	if (get_l(vp, ep->l) != I_UNDEF) {
-	    *epp = (edge_t*) ep->link.next;
+	    slist_iter_remove(&iter);
 	    obj_free(&vp->edge_allocator, ep);
 	}
 	else
-	    epp = (edge_t**) &(ep->link.next);
+	    slist_iter_next(&iter);
     }
     return enif_make_ok(env);
 }
@@ -7693,19 +7443,25 @@ static void xref_remap(literal_t* lp, int si, int* remap, int n)
 
 static void edge_remap(literal_t* lp, int si, int* remap, int n)
 {
-    edge_t* ep = lp->elist;
-    while(ep != NULL) {
+    slist_iter_t iter;
+
+    slist_iter_init(&iter, &lp->elist);
+    while(!slist_iter_eol(&iter)) {
+	edge_t* ep = slist_iter_current(&iter);
 	remap_cix(&ep->cix, "edge", si, remap, n);
-	ep = (edge_t*) ep->link.next;
+	slist_iter_next(&iter);
     }
 }
 
 static void hashtab_remap(varp_t* vp,int i,int si,int* remap,int n)
 {
-    hlink_t* hp = vp->hashtab[i];
-    while (hp != NULL) {
+    slist_iter_t iter;
+
+    slist_iter_init(&iter, &vp->hashtab[i]);
+    while(!slist_iter_eol(&iter)) {
+	hlink_t* hp = slist_iter_current(&iter);
 	remap_cix(&hp->cix, "hash", si, remap, n);
-	hp = (hlink_t*) hp->link.next;
+	slist_iter_next(&iter);
     }
 }
 
@@ -8226,9 +7982,7 @@ static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     }
     sp->flags = flags;
-    // link in first
-    sp->link.next = (cdlink_t*) vp->subs;
-    vp->subs = sp;
+    dlist_insert_first(&vp->subs, sp);
     return enif_make_ok(env);
 }
 
@@ -8236,11 +7990,14 @@ static ERL_NIF_TERM make_edge_list(ErlNifEnv* env, varp_t* vp,
 				  literal_t* lp, ERL_NIF_TERM list)
 {
     UNUSED(vp);
-    edge_t* pl = lp->elist;
-    while(pl) {
+    slist_iter_t iter;
+    
+    slist_iter_init(&iter, &lp->elist);
+    while(!slist_iter_eol(&iter)) {
+	edge_t* pl = slist_iter_current(&iter);
 	ERL_NIF_TERM elem = make_cix(env, pl->cix);
 	list = enif_make_list_cell(env, elem, list);
-	pl = (edge_t*) pl->link.next;
+	slist_iter_next(&iter);
     }
     return list;
 }
@@ -9001,12 +8758,11 @@ static void varp_down(ErlNifEnv* env, void* obj,
     UNUSED(env);
     UNUSED(pid);
     varp_t* vp = (varp_t*) obj;
-    subscription_t** spp = &vp->subs;
+    subscription_t* sp = dlist_first(&vp->subs);
 
     DBG("varp_down called\r\n");
 
-    while(*spp) {
-	subscription_t* sp = *spp;
+    while(!dlist_is_eol(sp)) {
 	if (enif_compare_monitors(mon, &sp->mon) == 0) {
 #ifdef DEBUG
 	    char buf[80];
@@ -9014,11 +8770,11 @@ static void varp_down(ErlNifEnv* env, void* obj,
 			  enif_make_pid(env, &sp->pid));
 	    enif_fprintf(stdout, "%s\r\n", buf);
 #endif
-	    *spp = (subscription_t*) sp->link.next;
+	    dlist_remove(&vp->subs, sp);
 	    obj_free(&vp->sub_allocator, sp);
 	    return;
 	}
-	spp = (subscription_t**) &(sp)->link.next;
+	sp = dlist_next(sp);
     }
 }
 
@@ -9026,6 +8782,8 @@ static void varp_dtor(ErlNifEnv* env, void* obj)
 {
     UNUSED(env);
     varp_t* vp = (varp_t*) obj;
+
+    DBG("dtor\r\n");
 #ifdef DEBUG_MEM
     enif_fprintf(stdout, "allocated memory before dtor = %ld\r\n",
 		 mem_allocated);

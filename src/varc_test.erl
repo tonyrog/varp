@@ -889,38 +889,38 @@ subst6() ->
 intersect1() ->
     V = varc:new(),
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
-    varc:mark_literals(V, [1,3,5,7,9,11,13,15,17,19]),
-    varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
+    varc:mark(V, [1,3,5,7,9,11,13,15,17,19]),
+    varc:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
     {} = varc:get_marked(V, true),
 
-    varc:mark_literals(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
-    varc:mark_intersect(V, [2,4,6,8,10,12,14,16,18,20]),
+    varc:mark(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
+    varc:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
     {10} = varc:get_marked(V, true),
 
-    varc:mark_literals(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
-    varc:mark_intersect(V, [2,4,6,-8,10,-12,14,16,18,20]),
+    varc:mark(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
+    varc:intersect_marks(V, [2,4,6,-8,10,-12,14,16,18,20]),
     {-8,-12} = varc:get_marked(V, true),
 
-    varc:mark_literals(V, []),
+    varc:mark(V, []),
     {} = varc:get_marked(V, true),
     ok.
 
 intersect2() ->
     V = varc:new(),    
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
-    varc:mark_literals(V, {1,3,5,7,9,11,13,15,17,19}),
-    varc:mark_intersect(V, {2,4,6,8,10,12,14,16,18,20}),
+    varc:mark(V, {1,3,5,7,9,11,13,15,17,19}),
+    varc:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
     {} = varc:get_marked(V, true),
 
-    varc:mark_literals(V, {1,3,5,7,-8,9,10,11,-12,13,15,17,19}),
-    varc:mark_intersect(V, {2,4,6,8,10,12,14,16,18,20}),
+    varc:mark(V, {1,3,5,7,-8,9,10,11,-12,13,15,17,19}),
+    varc:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
     {10} = varc:get_marked(V, true),
 
-    varc:mark_literals(V, {1,3,5,7,-8,9,-10,11,-12,13,15,17,19}),
-    varc:mark_intersect(V, {2,4,6,-8,10,-12,14,16,18,20}),
+    varc:mark(V, {1,3,5,7,-8,9,-10,11,-12,13,15,17,19}),
+    varc:intersect_marks(V, {2,4,6,-8,10,-12,14,16,18,20}),
     {-8,-12} = varc:get_marked(V, true),
 
-    varc:mark_literals(V, {}),
+    varc:mark(V, {}),
     {} = varc:get_marked(V, true),
     ok.
 
@@ -941,10 +941,10 @@ intersect_var1() ->
     X5 = var(V),
     X6 = var(V),
     %% X1 -> {-X2,X3,X4,-X5}
-    varc:mark_literals(V, {-X2,X3,X4,-X5}),  
+    varc:mark(V, {-X2,X3,X4,-X5}),  
     %% -X1 -> {-X2,X3,-X4,X5,X6}
     Di = {-X2,X3,{X1,X4},{X1,-X5}},
-    Di = varc:mark_intersect_var(V, X1, {-X2,X3,-X4,X5,X6}, true),
+    Di = varc:intersect_var(V, X1, {-X2,X3,-X4,X5,X6}, true),
     ok.
 
 watch1() ->
@@ -1134,7 +1134,7 @@ cnf_install() ->
     cnf_install(20, 3, 10).
 
 cnf_install(N,M,K) ->
-    V = varc:new([{xref,true},{hash,true}]),
+    V = varc:new(#{xref=>true,hash=>true}),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
@@ -1682,7 +1682,7 @@ dump_variables(V, List, Verb) ->
     lists:foreach(
       fun(X) ->
 	      Keys = varc:variable_info_keys() -- [implication,symbol,level],
-	      Sym  = varc:variable_info(V,X,symbol),
+	      [{Sym,_Pos}] = varc:variable_info(V,X,symbol),
 	      Level = varc:variable_info(V,X,level),
 	      Value = varc:value(V, X),
 	      io:format("~w: ~s = ~w @~w\n", [X, Sym, Value,Level]),
