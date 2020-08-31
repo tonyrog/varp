@@ -93,7 +93,7 @@ def varp_var(vp, tree):
         varpy.add_symbol(vp, x, varname)
         print("added variable "+varname+" "+str(x))
         return x
-    elif isinstance(x, long):
+    elif isinstance(x, int):
         return x
     else: # fixme maybe a list if integer/bitvector
         raise ValueError("malformed/not supported variable")
