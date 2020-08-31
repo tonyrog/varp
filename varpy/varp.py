@@ -48,7 +48,7 @@ def model(vp):
 def symbol(vp, x):
     s = varc.variable_info(vp, x, 'symbol')
     if s == []: return "x("+str(x)+")"
-    else: return str(s[0],'utf-8')
+    else: return str((s[0])[0],'utf-8')
     
 def get_bindings_list(vp, level, clauseinfo=False, trail=False):
     return varc.get_bindings(vp, level, clauseinfo, trail, False)

@@ -65,9 +65,9 @@
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-// #define ASSERTIONS
+//#define ASSERTIONS
 // #define DEBUG
-// #define DEBUG_BCP
+//#define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
 // #define DEBUG_EDGE
@@ -126,14 +126,18 @@ typedef enum {
     I_FALSE = 3   // 011
 } ival_t;
 
+// ival encoding
+#define I_UNPACK(x)      ((x)&0x3)
+#define I_PACK(x)        ((x)&0x3)
+#define I_NEG(x)         ((x)^1)
+#define I_CONST(x)       ((x)&2)
+
+// literal encoding
 #define IMPORT(x)      (((x)<0) ? (((-(x))<<1)|1) : ((x)<<1))
 #define EXPORT(y)      (((y)&1) ? -((int)((y)>>1)) : ((int)((y)>>1)))
 #define INDEX(x)       ((x)>>1)   // variable index
-#define NEGATE(x)      ((x)^1)
+#define NEGATE(x)      ((x)^1)    // negate literals
 #define SIGN(x)        ((x)&1)    // sign=1 if negative, positive otherwise
-#define UNPACK(x)      ((x)&0x3)
-#define PACK(x)        ((x)&0x3)
-#define IS_CONSTANT(x) ((x)>1)   // true=2, false=3
 #define MAKE_LIT(v,neg) (((v)<<1)+(neg))
 
 // How many bytes to pack x values?
@@ -445,7 +449,7 @@ typedef struct _variable_t     // :cdlink_t in cdlist_t
 #if !defined(LIT_VALUE) && !defined(PACKED_VALUE)
     ival_t    ivalue;
 #endif
-    ival_t    phase;           // last set value (or by sort) def=opt.init_pase
+    ival_t    phase;           // last set value (or by sort) def=opt.init_phase
     int ix;                    // variable index
     cix_t implication_clause;  // implication clause index
     pos_t literal_pos;         // position in implication clause
@@ -1060,24 +1064,11 @@ static int allocator_init(allocator_t* ap, size_t size)
     ap->size = ALIGN(size, HEAP_ALIGN);
     slist_init(&ap->heap_list);
     slist_init(&ap->free_list);
-#ifdef DEBUG_MEM
-    dlist_init(&ap->obj_list);
-#endif
     return 0;
 }
 
 static void allocator_cleanup(allocator_t* ap)
 {
-#ifdef DEBUG_MEM
-    object_link_t* olink = dlist_first(&ap->obj_list);
-    while(!dlist_is_eol(olink)) {
-	object_link_t* olink_next = dlist_next(olink);
-	VARP_FREE(olink->obj);
-	VARP_FREE(olink);
-	olink = olink_next;
-    }
-    dlist_init(&ap->obj_list);
-#endif
     heap_cleanup(&ap->heap_list);
     slist_init(&ap->heap_list);
     slist_init(&ap->free_list);
@@ -1085,36 +1076,14 @@ static void allocator_cleanup(allocator_t* ap)
 
 static void* obj_alloc(allocator_t* ap)
 {
-    object_t* obj;
-#ifdef DEBUG_MEM
-    object_link_t* olink;
-    if ((obj = VARP_ALLOC(ap->size)) == NULL)
-	return NULL;
-    olink = VARP_ALLOC(sizeof(object_link_t));
-    olink->obj = obj;
-    obj->olink = olink;
-    dlist_insert_last(&ap->obj_list, olink);
-#else
     if (slist_is_empty(&ap->free_list))
 	return heap_alloc(&ap->heap_list, ap->size);
-    obj = slist_take_first(&ap->free_list);
-#endif
-    return obj;
+    return slist_take_first(&ap->free_list);
 }
 
 static void obj_free(allocator_t* ap, void* ptr)
 {
-#ifdef DEBUG_MEM
-    if (ptr != NULL) {
-	object_t* obj = (object_t*) ptr;
-	object_link_t* olink = obj->olink;
-	dlist_remove(&ap->obj_list, olink);
-	VARP_FREE(olink);
-	VARP_FREE(obj);
-    }
-#else
     slist_insert_last(&ap->free_list, ptr);
-#endif
 }
 
 static int equal_string(ErlNifEnv* env, ERL_NIF_TERM atm, ERL_NIF_TERM arg)
@@ -1145,9 +1114,7 @@ static dynarray_t* dynarray_create(varp_t* vp, size_t capacity, size_t width)
 {
     dynarray_t* dp;
 
-    if ((dp = obj_alloc(&vp->dyn_allocator)) == NULL)
-	return NULL;
-    if (dp != NULL) {
+    if ((dp = obj_alloc(&vp->dyn_allocator)) != NULL) {
 	if (dynarray_init(dp, capacity, width) < 0) {
 	    obj_free(&vp->dyn_allocator, dp);
 	    return NULL;
@@ -1393,7 +1360,7 @@ static inline ival_t get_packed_ival(varp_t* vp, unsigned uix)
 #elif PACKED_VALUE == 4
     int j = (uix & 0x3) << 1;  // shift 0,2,4,6
     uix >>= 2;
-    return (ival_t) UNPACK(vp->var_value[uix] >> j);
+    return (ival_t) I_UNPACK(vp->var_value[uix] >> j);
 #endif
 }
 
@@ -1409,7 +1376,8 @@ static inline void set_packed_ival(varp_t* vp, unsigned uix, ival_t ivalue)
 #elif PACKED_VALUE == 4
     int j = (uix&0x3) << 1;  // shift 0,2,4,6
     uix >>= 2;
-    vp->var_value[uix] = (vp->var_value[uix] & ~(0x3<<j)) | (PACK(ivalue) << j);
+    vp->var_value[uix] =
+	(vp->var_value[uix] & ~(0x3<<j)) | (I_PACK(ivalue) << j);
 #endif
 }
 #endif
@@ -1443,7 +1411,7 @@ static inline void write_vv(varp_t* vp, variable_t* var, ival_t v)
     UNUSED(vp);
 #ifdef LIT_VALUE
     var->lit[LIT_POS].ivalue = v;
-    var->lit[LIT_NEG].ivalue = v;
+    var->lit[LIT_NEG].ivalue = v;  // yes, same value!
 #else
     var->ivalue = v;
 #endif
@@ -1480,7 +1448,7 @@ static inline void set_vv(varp_t* vp, variable_t* var, ival_t ivalue)
     UNUSED(vp);
 #ifdef LIT_VALUE
     var->lit[LIT_POS].ivalue = ivalue;
-    var->lit[LIT_NEG].ivalue = NEGATE(ivalue);
+    var->lit[LIT_NEG].ivalue = I_NEG(ivalue);
 #else
     var->ivalue = ivalue;
 #endif
@@ -1511,8 +1479,8 @@ static inline ival_t get_ll(varp_t* vp, literal_t* lp)
 #endif
 #else
     ival_t v = get_vv(vp,lp->var);
-    if (IS_CONSTANT(v))
-	return lp->neg ^ v;
+    if (I_CONST(v))
+	return lp->neg ? I_NEG(v) : v;
     return v;
 #endif
 }
@@ -1538,8 +1506,8 @@ static inline ival_t get_l(varp_t* vp, lit_t l)
 #else
     ivalue = get_vv(vp, vp->var_map[uix]);
 #endif
-    if (IS_CONSTANT(ivalue))
-	return sign ^ ivalue;
+    if (I_CONST(ivalue))
+	return sign ? I_NEG(ivalue) : ivalue;
     return ivalue;
 #endif
 
@@ -1553,7 +1521,7 @@ static inline ival_t get_l(varp_t* vp, lit_t l)
 static inline void set_ll(varp_t* vp, literal_t* lp, ival_t ivalue)
 {
     if (lp->neg)
-	set_vv(vp,lp->var,NEGATE(ivalue));
+	set_vv(vp,lp->var,I_NEG(ivalue));
     else
 	set_vv(vp,lp->var,ivalue);
 }
@@ -1580,8 +1548,10 @@ static inline int phase_export(variable_t* var)
 static inline ival_t decide_phase(varp_t* vp, lit_t xp)
 {
     literal_t* lp = l2ll(vp, xp);
-    if (vp->opt.use_phase)
+    if (vp->opt.use_phase) {
 	return lp->var->phase;
+	// return lp->neg ? I_NEG(lp->var->phase) : lp->var->phase;
+    }
     return vp->opt.init_phase;
 }
 
@@ -2353,16 +2323,18 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
 	    format_ival(ivalue), level);
     ASSERT(level >= 0);
     ASSERT(var->bound == NULL);
-    ASSERT(!IS_CONSTANT(get_vv(vp, var)));
+    ASSERT(!I_CONST(get_vv(vp, var)));
 
     push_variable(vp, var, level);
 
-    set_vv(vp, var, lp->neg ? NEGATE(ivalue) : ivalue);
+    if (lp->neg) ivalue = I_NEG(ivalue);
+
+    set_vv(vp, var, ivalue);
     var->implication_clause = cix;
     var->literal_pos = li;
     var->level = level;
-    if (cix != CLAUSE_NONE) // not a decision
-	var->phase = ivalue;  // save for use with phase restore
+    // save for use with phase restore, if not a decision
+    if (cix != CLAUSE_NONE) var->phase = ivalue;
     log_permanent(vp, lp, NULL, level);
 }
 
@@ -3001,14 +2973,17 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
     return enif_make_int(env, export_ll(lp));
 }
 
-static void symtab_slot_clear(dlist_t* list)
+// cleanup symbols elements but leave in place
+static void symtab_slot_cleanup(dlist_t* list)
 {
-    symbol_t* sp = dlist_first(list);
-    while(!dlist_is_eol(sp)) {
-	symbol_t* snext = dlist_next(sp);
+    dlist_iter_t iter;
+
+    dlist_iter_init(&iter, list);
+    while(!dlist_iter_eol(&iter)) {
+	symbol_t* sp = dlist_iter_current(&iter);
 	VARP_FREE(sp->data);
 	dynvar_clear(sp->lit);
-	sp = snext;
+	dlist_iter_next(&iter);
     }
 }
 
@@ -3020,7 +2995,7 @@ static void cleanup(varp_t* vp)
     if (vp->symtab) {
 	size_t size = dynvar_size(vp->symtab);
 	for (i = 0; i < (int)size; i++)
-	    symtab_slot_clear(&vp->symtab[i]);
+	    symtab_slot_cleanup(&vp->symtab[i]);
 	dynvar_clear(vp->symtab);
     }
 
@@ -3289,7 +3264,7 @@ static symbol_t* symbol_create(varp_t* vp, lit_t* lit, size_t n,
 	return NULL;
     if (dynvar_resize(sp->lit, n) < 0)
 	return NULL;
-    memcpy(sp->lit, lit, sizeof(lit_t*)*n);
+    memcpy(sp->lit, lit, sizeof(lit_t)*n);
     // copy term or binary (add +1 for nil termination)
     sp->data = VARP_ALLOC(bp->size+1);
     memcpy(sp->data, bp->data, bp->size);
@@ -3337,7 +3312,7 @@ static int symbol_insert(varp_t* vp,symbol_t* sp)
     slot = symbol_slot(sp, dynvar_size(vp->symtab));
     dlist_insert_last(&vp->symtab[slot], sp);
     vp->snum++;
-    DBG("insert symbol '%s' slot = %d\r\n", symbol_strname(sp), slot);
+    DBG("inserted symbol '%s' slot = %d\r\n", symbol_strname(sp), slot);
     return 0;
 }
 
@@ -3688,7 +3663,7 @@ static ERL_NIF_TERM add_symbol(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM sym,
 	if (sref_add(vp, lit[i], sp, i) < 0)
 	    return enif_make_badarg(env);
     }
-    return enif_make_ok(env);    
+    return enif_make_ok(env);
 }
 
 // varc:add_symbol(Vp:varc(),x0()|[x1..xn],Symbol::term()) -> ok
@@ -5579,13 +5554,13 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     // enif_fprintf(stdout,"level=0\r\n");
 
     y = get_l(vp, yp);
-    if (IS_CONSTANT(y)) {
+    if (I_CONST(y)) {
 	// enif_fprintf(stdout,"y=%s\r\n", format_ival(y));
 	return enif_make_badarg(env);
     }
 
     x = get_l(vp, xp);
-    if (IS_CONSTANT(x)) {
+    if (I_CONST(x)) {
 	// enif_fprintf(stdout,"x=%s\r\n", format_ival(x));
 	return enif_make_badarg(env);
     }
@@ -5951,8 +5926,8 @@ static int bcp_turbo(varp_t* vp, lit_t xp)
 	while(n--) {
 	    clause_t* cp = get_clause(vp, xptr->cix);
 	    if (cp != NULL) {
-		enif_fprintf(stdout,"turbo check %s\r\n", format_lit(vp, xp));
-		print_lit_array("trubo check", cp->lit, cp->size);
+		//enif_fprintf(stdout,"turbo check %s\r\n", format_lit(vp, xp));
+		//print_lit_array("trubo check", cp->lit, cp->size);
 		if (!is_turbo_clause(vp,cp,xp,&q[j])) {
 		    r = 0;
 		    STK_LEAVE(q);
@@ -5962,7 +5937,7 @@ static int bcp_turbo(varp_t* vp, lit_t xp)
 	    xptr++;
 	}
 	q[0] = xp;
-	print_lit_array("TURBO clause", q, j);
+	// print_lit_array("TURBO clause", q, j);
     } STK_END(q);
     return r;
 }

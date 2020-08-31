@@ -70,7 +70,7 @@ CDLIST_LOCAL int cdlist_is_eol(void* elem) CDLIST_API;
 CDLIST_LOCAL int cdlist_is_bol(void* elem) CDLIST_API;
 CDLIST_LOCAL void* cdlist_next(void* elem) CDLIST_API;
 CDLIST_LOCAL void* cdlist_prev(void* elem) CDLIST_API;
-    CDLIST_LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr, order_t order, order_t step) CDLIST_API;
+CDLIST_LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr, order_t order, order_t step) CDLIST_API;
 CDLIST_LOCAL void cdlist_renumber(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL void cdlist_set_order(cdlist_t* list, void* ptr) CDLIST_API;
 CDLIST_LOCAL int cdlist_is_after(void* aptr, void* bptr) CDLIST_API;

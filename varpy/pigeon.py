@@ -67,8 +67,11 @@ def p(vp, n):
                     varpy.add_clause(vp, [-ph[p,h], -ph[q,h]])
     vp
 
-def run_p4():
+def run(n):
     vp = varpy.new({ 'xref' : True })
-    p4(vp)
+    p(vp,n)
     varpy.set_level(vp, 1)
-    return varpy.bt(vp)
+    return varpy.bt_one(vp)
+
+def run_p4():
+    run(4)
