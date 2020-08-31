@@ -526,12 +526,16 @@ Remove all literals enqueued on the bcp queue by calls to
 varpy.bind or varpy.decide.
 
 ``` python
-varpy.add_symbol(vp, x, string|term)
+varpy.add_symbol(vp, x|xs, string|term)
 ```
 
-Associate a term or string to to a variable __x__, for example the 
-name of the variable. The term or string must not be assoicated with
-other variables or exception will occur.
+Associate a term or string to to a variable __x__ or variables __xs__,
+for example the name of the variable. 
+The term or string must not be assoicated with
+other variables or an exception will occur.
+If the variable part is a list __xs__ then the symbol refer to a
+list of variables, integer encoding or bit vector.
+Integer encoding should store least significant bit first (at index 0)
 
 ``` python
 varpy.del_symbol(vp, string|term)
