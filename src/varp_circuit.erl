@@ -262,14 +262,14 @@ var(Vp, Name) ->
     X.
 
 clause(Vp, Ls) ->
-    io:format("clause ~p\n", [[literal(Vp,L)||L<-Ls]]),
+    io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
     varc:add_clause(Vp, Ls).
 
 test_gate(Gate) when is_function(Gate, 4) ->
     Vp = varc:new(#{xref => true}),
-    A = var(Vp, "a"),
-    B = var(Vp, "b"),
-    X = var(Vp, "x"),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    X = var(Vp, "X"),
     C = Gate(Vp, X, A, B),
     varc:bind(Vp, C),
     varc:set_level(Vp, 1),
@@ -295,10 +295,10 @@ test_xnor() ->
 
 test_eq1_1() ->
     Vp = varc:new(#{xref => true}),
-    A = var(Vp, "a"),
-    B = var(Vp, "b"),
-    C = var(Vp, "c"),
-    D = var(Vp, "d"),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    C = var(Vp, "C"),
+    D = var(Vp, "D"),
     E = eq1(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
@@ -306,9 +306,9 @@ test_eq1_1() ->
 
 test_eq1_2() ->
     Vp = varc:new(#{xref => true}),
-    A = var(Vp, "a"),
-    B = var(Vp, "b"),
-    C = var(Vp, "c"),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    C = var(Vp, "C"),
     D = false,
     E = eq1(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
@@ -317,20 +317,20 @@ test_eq1_2() ->
 
 test_half_adder1() ->
     Vp = varc:new(#{xref => true}),
-    S = var(Vp, "s"),
-    A = var(Vp, "a"),
-    B = var(Vp, "b"),
-    C = var(Vp, "c"),
+    S = var(Vp, "S"),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    C = var(Vp, "C"),
     half_adder(Vp, S, A, B, C),
     bt_all(Vp).
 
 test_full_adder1() ->
     Vp = varc:new(#{xref => true}),
-    X = var(Vp, "x"),
-    Y = var(Vp, "y"),
-    Z = var(Vp, "z"),
-    Ci = var(Vp, "ci"),
-    Co = var(Vp, "co"),
+    X = var(Vp, "X"),
+    Y = var(Vp, "Y"),
+    Z = var(Vp, "Z"),
+    Ci = var(Vp, "Ci"),
+    Co = var(Vp, "Co"),
     full_adder(Vp, X, Y, Z, Ci, Co),
     bt_all(Vp).
 
@@ -402,7 +402,4 @@ literal(_Vp,false) -> "f";
 literal(Vp,X) when is_integer(X), X > 0 ->
     symbol(Vp,X);
 literal(Vp,X) when is_integer(X), X < 0 ->
-    "!"++symbol(Vp,X).
-
-
-    
+    "!"++symbol(Vp,-X).

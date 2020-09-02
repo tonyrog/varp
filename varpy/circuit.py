@@ -16,7 +16,8 @@ def or_clauses(vp, y, z, x):
 
 # x = y AND z ( x = -(-y OR -z) )
 def and_clauses(vp, y, z, x):
-    return inv(or_clauses(vp, inv(y), inv(z), x))
+    or_clauses(vp, inv(y), inv(z), inv(x))
+    return x
 
 def xor_clauses(vp, y, z, x):
     clause(vp,[x,inv(y),z])
