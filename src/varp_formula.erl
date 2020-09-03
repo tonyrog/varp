@@ -14,7 +14,6 @@
 -export([add_variable/1, add_variable/2]).
 -export([variable/2, alias/3]).
 -export([value/2]).
--export([var_term/1, var_str/1]).
 -export([info/1, info/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
 -export([fmt_var_list/2]).
@@ -95,7 +94,7 @@
 -export([normalize/3]).
 -export([cix/1]).
 
--import(lists, [map/2, reverse/1, foldl/3]).
+-import(lists, [foldl/3]).
 
 -include("varp.hrl").
 
@@ -172,56 +171,6 @@ add_variable(Bs, IsAtom) ->
 		       ok.
 add_symbol(Bs, L, Sym) ->
     varc:add_symbol(Bs#bs.vp, L, Sym).
-
-var_term({p,V,[]}) ->
-    atom_to_list(V);
-var_term({p,V,Args}) ->
-    {atom_to_list(V), [var_term_(A) || A <- Args]}.
-
-
-const_int(16,"0x"++Value) ->
-    list_to_integer(Value, 16);
-const_int(2,"0b"++Value) ->
-    list_to_integer(Value, 2);
-const_int(8,"0"++Value) ->
-    list_to_integer(Value, 8);
-const_int(Base,Value) ->
-    list_to_integer(Value, Base).
-
-var_term_(#cconst{base=Base,value=Value}) ->
-    const_int(Base, Value);
-var_term_(#cid{name=Name}) ->
-    Name;
-var_term_(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
-    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
-	     '/' => "div", '%' => "rem" },
-    { maps:get(Op, Tab), [var_term_(Arg1), var_term_(Arg2)]};
-var_term_(#cunary{op=Op,arg=Arg}) ->
-    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
-    { maps:get(Op, Tab), [var_term_(Arg)]};
-var_term_(#ccall{func=#cid{name=Func},args=Args}) ->
-    { Func, [ var_term_(A) || A <- Args]}.
-
-var_str({p,V,[]}) ->
-    atom_to_list(V);
-var_str({p,V,Args}) ->
-    atom_to_list(V)++"("++
-	string:join([var_str_(A) || A <- Args], ",") ++ ")".
-
-var_str_(#cconst{base=Base,value=Value}) ->
-    integer_to_list(const_int(Base, Value));
-var_str_(#cid{name=Name}) ->
-    Name;
-var_str_(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
-    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
-	     '/' => "div", '%' => "rem" },
-    maps:get(Op, Tab)++"("++
-	var_str_(Arg1)++","++var_str_(Arg2)++")";
-var_str_(#cunary{op=Op,arg=Arg}) ->
-    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
-    maps:get(Op, Tab)++"("++var_str_(Arg)++")";
-var_str_(#ccall{func=#cid{name=Func},args=Args}) ->
-    Func++"("++string:join([ var_str_(A) || A <- Args], ",")++")".
 
 
 %% build an OR gate with Y as output and Xs as input
@@ -1231,7 +1180,7 @@ build_({{'LT',[X1|Qs]},F}, Bs) ->
 	    none(Ys,Bs1);
        is_integer(K),K > 1 ->
 	    N = length(Ys),
-	    gtk(N-K, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
+	    gtk(N-K, N, lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
 build_({{'LTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
@@ -1240,7 +1189,7 @@ build_({{'LTE',[X1|Qs]},F}, Bs) ->
 	    none(Ys,Bs1);
        is_integer(K),K > 0 ->
 	    N = length(Ys),
-	    gtk(N-K-1, N, map(fun(Y) -> negate(Y) end, Ys), Bs1)
+	    gtk(N-K-1, N, lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
 build_({{'SUM',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
@@ -1568,7 +1517,7 @@ eval_meta({vec,Ls}, Bs) -> %% literal vector
 
 
 eval_meta_list(As,Bs) ->
-    map(fun(A) -> eval_meta(A,Bs) end, As).
+    lists:map(fun(A) -> eval_meta(A,Bs) end, As).
 
 %% Generate a set/list of all subsets of a set
 subsets([A|As]) ->
@@ -1597,7 +1546,7 @@ permute_(P, Acc) ->
     permute_(next(P), [P|Acc]).
 
 next(List) ->
-    next(reverse(List), []).
+    next(lists:reverse(List), []).
 
 next([Aj1 | List=[Aj|_]], Acc) when Aj1 =< Aj ->
     next(List, [Aj1|Acc]);
@@ -1738,7 +1687,7 @@ const_vector(Type,Value) when is_integer(Value) ->
     const_vector_(N-1,Type,N,[],Value).
 
 const_vector_(-1,Type,N,Cs,_Value) ->
-    {Type,N,reverse(Cs)};
+    {Type,N,lists:reverse(Cs)};
 const_vector_(I,Type,N,Cs,Value) ->
     if Value band 1 =:= 1 ->
 	    const_vector_(I-1,Type,N,[?T|Cs],Value bsr 1);
@@ -1902,7 +1851,7 @@ lnot(?F) -> ?T;
 lnot(X) -> -X.
      
 vnot(Xs) ->
-    map(fun(X) -> lnot(X) end, Xs).
+    lists:map(fun(X) -> lnot(X) end, Xs).
 
 %% negate "high" bit
 vsnot([X]) -> [lnot(X)];
@@ -2004,7 +1953,7 @@ vsigned(Xs) ->
 %% convert a "vector" with boolean constants to a unsigned number
 %% return false if not all elements are constants
 vunsigned(Xs) ->
-    vunsigned_(reverse(Xs), 0).
+    vunsigned_(lists:reverse(Xs), 0).
 
 vunsigned_([?T|Xs],N)  -> vunsigned_(Xs,(N bsl 1)+1);
 vunsigned_([?F|Xs],N) -> vunsigned_(Xs,(N bsl 1)+0);
@@ -2070,7 +2019,7 @@ build_list_([F|Fs],Acc,Bs) ->
     {X,Bs1} = build__(F,Bs),
     build_list_(Fs,[X|Acc],Bs1);
 build_list_([],Acc,Bs) ->
-    {reverse(Acc),Bs}.
+    {lists:reverse(Acc),Bs}.
 
 
 %%
@@ -2734,7 +2683,7 @@ vadd_plain_([Y|Ys],[Z|Zs],Xs,Cs=[Ci|_],Bs) ->
     {{bool,X},Co,Bs1} = full_adder({bool,Y},{bool,Z},Ci,Bs),
     vadd_plain_(Ys,Zs,[X|Xs],[Co|Cs],Bs1);
 vadd_plain_([],[],Xs,Cs,Bs) -> 
-    {Cs,reverse(Xs),Bs}.
+    {Cs,lists:reverse(Xs),Bs}.
 
 %% 
 %% Generate carry look-ahead
@@ -2766,13 +2715,13 @@ vadd_fast_sum_([Yi|Ys],[Zi|Zs],[Ci|Cs],Sum,Ca,Bs) ->
     {{bool,X2},Bs2} = operation('xor',X1,Ci,Bs1),
     vadd_fast_sum_(Ys,Zs,Cs,[X2|Sum],[Ci|Ca],Bs2);
 vadd_fast_sum_([],[],[Co],Sum,Ca,Bs) ->
-    {[Co|Ca],reverse(Sum),Bs}.
+    {[Co|Ca],lists:reverse(Sum),Bs}.
 
 carry_lookahead(Gs,Ps,C0,Bs) ->
     carry_lookahead_(Gs,Ps,1,length(Gs)+1,[C0],C0,Bs).
 
 carry_lookahead_(_Gs,_Ps,I,I,Cs,_C0,Bs) ->
-    {reverse(Cs),Bs};
+    {lists:reverse(Cs),Bs};
 carry_lookahead_(Gs,Ps,I,N,Cs,C0,Bs) ->
     G = lists:sublist(Gs,I),      %% [G(0),G(1),..G(i)]
     P = lists:sublist(Ps,I),      %% [P(0),P(1),..P(i)]
@@ -2829,7 +2778,7 @@ vite_(I,[Y|Ys],[Z|Zs],Xs,Bs) ->
     {{bool,X}, Bs1} = ite(I,{bool,Y},{bool,Z},Bs),
     vite_(I,Ys,Zs,[X|Xs],Bs1);
 vite_(_I,[],[],Xs,Bs) ->
-    {reverse(Xs),Bs}.
+    {lists:reverse(Xs),Bs}.
 
 %% conditional vector Ys or variable value Z
 -ifdef(__UNUSED__).
@@ -2840,7 +2789,7 @@ vitex_(I,[Y|Ys],Z,Xs,Bs) ->
     {{bool,X}, Bs1} = ite(I,{bool,Y},{bool,Z},Bs),
     vitex_(I,Ys,Z,[X|Xs],Bs1);
 vitex_(_I,[],_Z,Xs,Bs) ->
-    {reverse(Xs),Bs}.
+    {lists:reverse(Xs),Bs}.
 -endif.
 
 %% 
@@ -2913,7 +2862,7 @@ map_op(Op,[Y|Ys],[Z|Zs],Xs,Bs) ->
     {X,Bs1} = operation(Op,{bool,Y},{bool,Z},Bs),
     map_op(Op,Ys,Zs,[X|Xs],Bs1);
 map_op(_Op,[],[],Xs,Bs) ->
-    {reverse(Xs),Bs}.
+    {lists:reverse(Xs),Bs}.
 
 %% Apply same operator on two vectors
 vmap_op(Op,Ys,Zs,Bs) ->
@@ -2923,7 +2872,7 @@ vmap_op(Op,[Y|Ys],[Z|Zs],Xs,Bs) ->
     {{bool,X},Bs1} = operation(Op,{bool,Y},{bool,Z},Bs),
     vmap_op(Op,Ys,Zs,[X|Xs],Bs1);
 vmap_op(_Op,[],[],Xs,Bs) ->
-    {reverse(Xs),Bs}.
+    {lists:reverse(Xs),Bs}.
 
 %% Apply same operator on one vector and one variable
 vmap_opx(Op,Ys,Z,Bs) ->
@@ -2933,7 +2882,7 @@ vmap_opx(Op,[Y|Ys],Z,Xs,Bs) ->
     {{bool,X},Bs1} = operation(Op,{bool,Y},{bool,Z},Bs),
     vmap_opx(Op,Ys,Z,[X|Xs],Bs1);
 vmap_opx(_Op,[],_Z,Xs,Bs) ->
-    {reverse(Xs),Bs}.
+    {lists:reverse(Xs),Bs}.
 
 
 %% circuit for Ys < Zs
@@ -2943,7 +2892,7 @@ sort(Xs,0,Bs) ->
     {Xs,Bs};
 sort(Xs,I,Bs) ->
     {[X|Xs1],Bs1} = minmax(Xs,Bs),
-    {Xs2,Bs2} = sort(reverse(Xs1),I-1,Bs1),
+    {Xs2,Bs2} = sort(lists:reverse(Xs1),I-1,Bs1),
     {Xs2++[X],Bs2}.
 
 %% create a single pass minmax circuit over input

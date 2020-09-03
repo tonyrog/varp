@@ -2040,7 +2040,7 @@ static inline void lqueue_insert_ll(varp_t* vp, literal_t* lp)
 
     // make sure literals are not queued twice!
     if (lp->flags & LIT_FLAG_Q) {
-	enif_fprintf(stdout, "already in queue\r\n");
+	DBG("already in queue\r\n");
 	return;
     }
     ASSERT(!slist_is_member(&vp->q, lp));  // special extra check

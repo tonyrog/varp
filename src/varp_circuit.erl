@@ -28,7 +28,17 @@
 -export([none_assoc/3, none_assoc/4]).
 -export([any_gate/2, any_gate/3]).
 -export([all_gate/2, all_gate/3]).
--export([eq1/2, eq1/3]).
+-export([none_gate/2, none_gate/3]).
+-export([one_gate/2, one_gate/3]).
+
+-export([symbol_value/2]).
+-export([unsigned_value/2]).
+-export([signed_value/2]).
+
+-export([bind_symbol/3]).
+-export([bind_value/3]).
+-export([bind_integer/3]).
+-export([bind_bits/3]).
 
 -compile(export_all).
 
@@ -125,6 +135,46 @@ xnor_gate(Vp, Y, Z) ->
 xnor_gate(Vp, X, Y, Z) ->
     inv(xor_clauses(Vp, X, Y, Z)).
 
+%% x = (y == z)
+equ_gate(Vp, Y, Z) ->
+    equ_gate(Vp, varc:add_variable(Vp), Y, Z).
+
+equ_gate(Vp, X, Y, Z) ->
+    inv(xor_clauses(Vp, X, Y, Z)).
+
+gate(_Vp,'not',Y) -> inv(Y);
+gate(Vp,'all',Ys) -> all_gate(Vp, Ys);
+gate(Vp,'any',Ys) -> any_gate(Vp, Ys);
+gate(Vp,'none',Ys) -> none_gate(Vp, Ys);
+gate(Vp,'one',Ys) -> one_gate(Vp, Ys).
+		     
+%% return gate function from name
+gate(Vp,'or',X,Y,Z) -> or_gate(Vp,X,Y,Z);
+gate(Vp,'nor',X,Y,Z) -> nor_gate(Vp,X,Y,Z);
+gate(Vp,'imp',X,Y,Z) -> imp_gate(Vp,X,Y,Z);
+gate(Vp,'nimp',X,Y,Z) -> nimp_gate(Vp,X,Y,Z);
+gate(Vp,'and',X,Y,Z) -> and_gate(Vp,X,Y,Z);
+gate(Vp,'nand',X,Y,Z) -> nand_gate(Vp,X,Y,Z);
+gate(Vp,'xor',X,Y,Z) -> xor_gate(Vp,X,Y,Z);
+gate(Vp,'xnor',X,Y,Z) -> xnor_gate(Vp,X,Y,Z);
+gate(Vp,'equ',X,Y,Z) -> equ_gate(Vp,X,Y,Z).
+
+gate(Vp,'not',X,Y) -> inv_clauses(Vp, X, Y), X;
+gate(Vp,'or',Y,Z) -> or_gate(Vp,Y,Z);
+gate(Vp,'nor',Y,Z) -> nor_gate(Vp,Y,Z);
+gate(Vp,'imp',Y,Z) -> imp_gate(Vp,Y,Z);
+gate(Vp,'nimp',Y,Z) -> nimp_gate(Vp,Y,Z);
+gate(Vp,'and',Y,Z) -> and_gate(Vp,Y,Z);
+gate(Vp,'nand',Y,Z) -> nand_gate(Vp,Y,Z);
+gate(Vp,'xor',Y,Z) -> xor_gate(Vp,Y,Z);
+gate(Vp,'xnor',Y,Z) -> xnor_gate(Vp,Y,Z);
+gate(Vp,'equ',Y,Z) -> equ_gate(Vp,Y,Z);
+
+gate(Vp,'all',X,Ys) -> all_gate(Vp,X,Ys);
+gate(Vp,'any',X,Ys) -> any_gate(Vp,X,Ys);
+gate(Vp,'none',X,Ys) -> none_gate(Vp,X,Ys);
+gate(Vp,'one',X,Ys) -> one_gate(Vp,X,Ys).
+
 %% x = MIN(y,z) = (y AND z)
 min_gate(Vp, Y, Z) ->
     min_gate(Vp, varc:add_variable(Vp), Y, Z).
@@ -174,28 +224,31 @@ sort_gate(Vp, Y, Z) ->
 sort_gate(Vp, Y, Z, X0, X1) ->
     {min_gate(Vp, X0, Y, Z), max_gate(Vp, X1, Y, Z)}.
 
-any_gate(Vp,Xs) -> none_assoc(Vp,fun or_gate/4,Xs).
-any_gate(Vp,X,Xs) -> none_assoc(Vp,fun or_gate/4,X,Xs).
+any_gate(Vp,Xs) -> none_assoc(Vp,'or',Xs).
+any_gate(Vp,X,Xs) -> none_assoc(Vp,'or',X,Xs).
 
-all_gate(Vp,Xs) -> left_assoc(Vp,fun and_gate/4,Xs).
-all_gate(Vp,X,Xs) -> left_assoc(Vp,fun and_gate/4,X,Xs).
+all_gate(Vp,Xs) -> none_assoc(Vp,'and',Xs).
+all_gate(Vp,X,Xs) -> none_assoc(Vp,'and',X,Xs).
+
+none_gate(Vp,Xs) -> inv(any_gate(Vp,Xs)).
+none_gate(Vp,X,Xs) -> inv(any_gate(Vp,X,Xs)).
     
 %% left balanced circuit 
 left_assoc(Vp,Gate,Xs) ->
     left_assoc(Vp,Gate,varc:add_variable(Vp),Xs).
 
 left_assoc(Vp,Gate,X,[X1,X2]) ->
-    Gate(Vp,X,X1,X2);
+    gate(Vp,Gate,X,X1,X2);
 left_assoc(Vp,Gate,X,[X1,X2|Xs]) ->
     Y1 = varc:add_variable(Vp),
-    Gate(Vp,Y1,X1,X2),
+    gate(Vp,Gate,Y1,X1,X2),
     left_assoc_(Vp,Gate,X,Xs,Y1).
 
 left_assoc_(Vp,Gate,X,[Xn],Yi) ->
-    Gate(Vp,X,Yi,Xn);
+    gate(Vp,Gate,X,Yi,Xn);
 left_assoc_(Vp,Gate,X,[Xi|Xs],Yi) ->
     Yj = varc:add_variable(Vp),
-    Gate(Vp,Yj,Yi,Xi),
+    gate(Vp,Gate,Yj,Yi,Xi),
     left_assoc_(Vp,Gate,X,Xs,Yj).
 
 %% right balanced 
@@ -205,46 +258,52 @@ right_assoc(Vp,Gate,Xs) ->
 right_assoc(Vp,Gate,X,Xs) ->
     left_assoc(Vp,Gate,X,lists:reverse(Xs)).
 
-
 none_assoc(Vp,Gate,Xs) ->
     none_assoc(Vp,Gate,varc:add_variable(Vp),Xs).
 
-none_assoc(Vp,Gate,X,Xs) when is_function(Gate,4), is_list(Xs) ->
-    case Gate =:= fun or_gate/4 of
-	true ->
-	    varc:add_clause(Vp, [inv(X)|Xs]),
+none_assoc(Vp,Gate,X,Xs) when is_list(Xs) ->
+    case Gate of
+	'or' ->
+	    clause(Vp, [inv(X)|Xs]),
 	    lists:foreach(
 	      fun(Xi) ->
-		      varc:add_clause(Vp,[X,inv(Xi)])
+		      clause(Vp,[X,inv(Xi)])
 	      end, Xs),
 	    X;
-	false ->
+	'and' ->
+	    clause(Vp, [X|[inv(Xi)||Xi<-Xs]]),
+	    lists:foreach(
+	      fun(Xi) ->
+		      clause(Vp,[inv(X),Xi])
+	      end, Xs),
+	    X;
+	_ ->
 	    none_assoc_(Vp,Gate,X,Xs)
     end.
 
 none_assoc_(Vp,Gate,X,Xs) ->
     case lists:split(length(Xs) div 2,Xs) of
 	{[U],[V]} ->
-	    Gate(Vp,X,U,V);
+	    gate(Vp,Gate,X,U,V);
 	{[U],[V1,V2]} ->
 	    X1 = varc:add_variable(Vp),
-	    Gate(Vp,X1,V1,V2),
-	    Gate(Vp,X,U,X1);
+	    gate(Vp,Gate,X1,V1,V2),
+	    gate(Vp,Gate,X,U,X1);
 	{Us,Vs} ->
 	    X1 = varc:add_variable(Vp),
 	    _R = none_assoc_(Vp,Gate,X1,Us),
 	    X2 = varc:add_variable(Vp),
 	    _L = none_assoc_(Vp,Gate,X2,Vs),
-	    Gate(Vp,X,X1,X2)
+	    gate(Vp,Gate,X,X1,X2)
     end.
 
 
 %% sort all ys one lap then or over the
 %% fixme len(ys) < 2
-eq1(Vp, Ys) ->
-    eq1(Vp, varc:add_variable(Vp), Ys).
+one_gate(Vp, Ys) ->
+    one_gate(Vp, varc:add_variable(Vp), Ys).
 
-eq1(Vp, X, [Y0,Y1|Ys]) ->
+one_gate(Vp, X, [Y0,Y1|Ys]) ->
     {Z0,Z1} = sort_gate(Vp, Y0, Y1),
     eq1_(Vp, X, Ys, Z1, [Z0]).
 
@@ -252,7 +311,7 @@ eq1_(Vp, X, [Y|Ys], Zi, Zs) ->
     {Z0,Z1} = sort_gate(Vp, Zi, Y),
     eq1_(Vp, X, Ys, Z1, [Z0|Zs]);
 eq1_(Vp, X, [], Zi, Zs) ->
-    and_gate(Vp, X, Zi, inv(any_gate(Vp,Zs))).
+    and_gate(Vp, X, Zi, none_gate(Vp,Zs)).
 
 %% TEST
 
@@ -265,33 +324,67 @@ clause(Vp, Ls) ->
     io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
     varc:add_clause(Vp, Ls).
 
-test_gate(Gate) when is_function(Gate, 4) ->
+test_gate(Gate) ->
     Vp = varc:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     X = var(Vp, "X"),
-    C = Gate(Vp, X, A, B),
+    C = gate(Vp,Gate,X,A,B),
     varc:bind(Vp, C),
     varc:set_level(Vp, 1),
     bt_all(Vp).
 
 test_or() ->
-    test_gate(fun or_gate/4).
+    test_gate('or').
 
 test_nor() ->
-    test_gate(fun nor_gate/4).
+    test_gate('nor').
 
 test_and() ->
-    test_gate(fun and_gate/4).
+    test_gate('and').
 
 test_nand() ->
-    test_gate(fun nand_gate/4).
+    test_gate('nand').
 
 test_xor() ->
-    test_gate(fun xor_gate/4).
+    test_gate('xor').
 
 test_xnor() ->
-    test_gate(fun xnor_gate/4).
+    test_gate('xnor').
+
+test_any() ->
+    Vp = varc:new(#{xref => true}),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    C = var(Vp, "C"),
+    D = var(Vp, "D"),
+    E = any_gate(Vp, [A,B,C,D]),
+    varc:bind(Vp, E),
+    varc:set_level(Vp, 1),
+    bt_all(Vp).
+
+test_all() ->
+    Vp = varc:new(#{xref => true}),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    C = var(Vp, "C"),
+    D = var(Vp, "D"),
+    E = all_gate(Vp, [A,B,C,D]),
+    varc:bind(Vp, E),
+    varc:set_level(Vp, 1),
+    bt_all(Vp).
+
+test_none() ->
+    Vp = varc:new(#{xref => true}),
+    A = var(Vp, "A"),
+    B = var(Vp, "B"),
+    C = var(Vp, "C"),
+    D = var(Vp, "D"),
+    E = none_gate(Vp, [A,B,C,D]),
+    varc:bind(Vp, E),
+    varc:set_level(Vp, 1),
+    bt_all(Vp).
+
 
 test_eq1_1() ->
     Vp = varc:new(#{xref => true}),
@@ -299,7 +392,7 @@ test_eq1_1() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
-    E = eq1(Vp, [A,B,C,D]),
+    E = one_gate(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -310,7 +403,7 @@ test_eq1_2() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = false,
-    E = eq1(Vp, [A,B,C,D]),
+    E = one_gate(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -387,15 +480,88 @@ model(Vp) ->
 	X <- lists:seq(1, N),
 	varc:value(Vp, X), varc:variable_info(Vp, X, 'is_atom')].
 
+symbol_value(Vp, Symbol) ->
+    case varc:find_symbol(Vp, Symbol) of
+	false -> undefined;
+	Xs when is_list(Xs) -> unsigned_value(Vp, Xs);
+	X when is_integer(X) -> varc:value(Vp, X)
+    end.
+
+unsigned_value(Vp, Xs) ->
+    unsigned_value_(Vp, Xs, 1, 0).
+
+unsigned_value_(Vp, [X|Xs], B, Value) ->
+    case varc:value(Vp, X) of
+	undefined -> undefined;
+	true -> unsigned_value_(Vp, Xs, B bsl 1, Value + B);
+	false -> unsigned_value_(Vp, Xs, B bsl 1, Value)
+    end;
+unsigned_value_(_Vp, [], _B, Value) ->
+    Value.
+
+signed_value(Vp, Xs) ->
+    N = length(Xs),
+    U = unsigned_value(Vp, Xs),
+    if U bsr (N-1) =:= 1 ->
+	    U - (1 bsl N);
+       true ->
+	    U
+    end.
+
+bind_symbol(Vp, Symbol, Value) ->
+    case varc:find_symbol(Vp, Symbol) of
+	false -> false;
+	Xs when is_list(Xs) -> 
+	    bind_value(Vp, Xs, Value);
+	X when is_integer(X) ->
+	    case Value of
+		true -> varc:bind(Vp, X);
+		false -> varc:bind(Vp, -X);
+		1 -> varc:bind(Vp, X);
+		0 -> varc:bind(Vp, -X)
+	    end
+    end.
+	
+bind_value(Vp, Xs, Value) when is_integer(Value) ->    
+    bind_integer(Vp, Xs, Value);
+bind_value(Vp, Xs, Value) when is_bitstring(Value) ->
+    bind_bits(Vp, Xs, Value).
+
+%% bind bits in integer
+bind_integer(Vp, [X|Xs], Value) ->
+    case Value band 1 of
+	1 -> varc:bind(Vp, X);
+	0 -> varc:bind(Vp, -X)
+    end,
+    bind_integer(Vp, Xs, Value bsr 1);
+bind_integer(_Vp, [], _Value) ->
+    ok.
+
+%% bind bits (fixme what is the "natural" order?)
+bind_bits(Vp, [X|Xs], <<Value:1,Rest/bits>>) ->
+    case Value of
+	1 -> varc:bind(Vp, X);
+	0 -> varc:bind(Vp, -X)
+    end,
+    bind_bits(Vp, Xs, Rest);
+bind_bits(Vp, [X|Xs], <<>>) ->
+    varc:bind(Vp, -X),
+    bind_bits(Vp, Xs, <<>>);
+bind_bits(_Vp, [], _) ->
+    ok.
+
 symbol(_Vp,true) -> "t";
 symbol(_Vp,false) -> "f";
 symbol(Vp, X) when is_integer(X) ->
     case varc:variable_info(Vp, X, 'symbol') of
 	[] ->
 	    "X("++integer_to_list(X)++")";
-	[{Name,_Pos}|_] ->
-	    binary_to_list(Name)
+	[{Name,_Pos}|_] when is_binary(Name) ->
+	    binary_to_list(Name);
+	[{Term,_Pos}|_] when is_tuple(Term) ->
+	    var_to_list(Term)
     end.
+
 
 literal(_Vp,true) -> "t";
 literal(_Vp,false) -> "f";
@@ -403,3 +569,15 @@ literal(Vp,X) when is_integer(X), X > 0 ->
     symbol(Vp,X);
 literal(Vp,X) when is_integer(X), X < 0 ->
     "!"++symbol(Vp,-X).
+
+var_to_list({P,[]}) when is_list(P) ->
+    P;
+var_to_list({P,Args}) when is_list(P) ->
+    P++"("++ string:join([var_to_list_(A) || A <- Args], ",") ++ ")".
+
+var_to_list_(Value) when is_integer(Value) ->
+    integer_to_list(Value);
+var_to_list_(Name) when is_list(Name) ->  %% unresolved literals
+    Name;
+var_to_list_({Op,Args}) -> %% unresolved function symbols
+    Op++"("++string:join([var_to_list_(A) || A <- Args], ",") ++ ")".
