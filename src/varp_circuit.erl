@@ -31,6 +31,9 @@
 -export([none_gate/2, none_gate/3]).
 -export([one_gate/2, one_gate/3]).
 
+-export([adder/3, adder/4]).
+-export([adder_x/4, adder_x/5, adder_x/6]).
+
 -export([symbol_value/2]).
 -export([unsigned_value/2]).
 -export([signed_value/2]).
@@ -316,34 +319,36 @@ eq1_(Vp, X, [], Zi, Zs) ->
 
 %% adder Xs = Ys + Zs, fixed output 
 adder_x(Vp, Xs, Ys, Zs) ->
-    adder_xs(Vp, Xs, Ys, Zs, varc:add_variable(Vp), [], [false]).
+    adder_xs(Vp, [], Xs, Ys, Zs, [false], varc:add_variable(Vp)).
 
 %% adder Xs = Ys + Zs, fixed output and fixed carry out
-adder_x(Vp, Xs, Ys, Zs, Co) ->
-    adder_xs(Vp, Xs, Ys, Zs, Co, [], [false]).
+adder_x(Vp, Xs, Ys, Zs, Ci) ->
+    adder_xs(Vp, [], Xs, Ys, Zs, [Ci], varc:add_variable(Vp)).
 
-adder_xs(Vp, [X], [Y], [Z], Co, Sum, Cs=[Ci|_]) ->
+adder_x(Vp, Xs, Ys, Zs, Ci, Co) ->
+    adder_xs(Vp, [], Xs, Ys, Zs, [Ci], Co).
+
+adder_xs(Vp, Rs, [X], [Y], [Z], Cs=[Ci|_], Co) ->
     {X,Co} = full_adder(Vp, X, Y, Z, Ci, Co),
-    {[Co|Cs], lists:reverse([X|Sum])};
-adder_xs(Vp, [X|Xs], [Y|Ys], [Z|Zs], Co, Sum, Cs=[Ci|_]) ->
+    {[Co|Cs], lists:reverse([X|Rs])};
+adder_xs(Vp, Rs, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
     {X,Cx} = full_adder(Vp, X, Y, Z, Ci),
-    adder_xs(Vp, Xs, Ys, Zs, Co, [X|Sum], [Cx|Cs]).
+    adder_xs(Vp, [X|Rs], Xs, Ys, Zs, [Cx|Cs], Co).
 
 %% adder Ys + Zs
 adder(Vp, Ys, Zs) ->
-    adder_ys(Vp, Ys, Zs, varc:add_variable(Vp), [], [false]).
+    adder_ys(Vp, [], Ys, Zs, [false], varc:add_variable(Vp)).
 
-%% adder Xs = Ys + Zs, fixed output and fixed carry out
+%% adder Ys + Zs, fixed output and fixed carry out
 adder(Vp, Ys, Zs, Co) ->
-    adder_ys(Vp, Ys, Zs, Co, [], [false]).
+    adder_ys(Vp, [], Ys, Zs, [false], Co).
 
-adder_ys(Vp, [Y], [Z], Co, Sum, Cs=[Ci|_]) ->
+adder_ys(Vp, Xs, [Y], [Z], Cs=[Ci|_], Co) ->
     {X,Co} = full_adder(Vp, varc:add_variable(Vp), Y, Z, Ci, Co),
-    {[Co|Cs], lists:reverse([X|Sum])};
-adder_ys(Vp, [Y|Ys], [Z|Zs], Co, Sum, Cs=[Ci|_]) ->
+    {[Co|Cs], lists:reverse([X|Xs])};
+adder_ys(Vp, Xs, [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
     {X,Cx} = full_adder(Vp, varc:add_variable(Vp), Y, Z, Ci),
-    adder_ys(Vp, Ys, Zs, Co, [X|Sum], [Cx|Cs]).
-
+    adder_ys(Vp, [X|Xs], Ys, Zs, [Cx|Cs], Co).
 
 %% TEST
 
@@ -467,16 +472,19 @@ test_adder(N) ->
     {Y0,Y1} = varc:add_variables(Vp,N),
     {Z0,Z1} = varc:add_variables(Vp,N),
     Ys = lists:seq(Y0,Y1),
-    Zs = lists:seq(Z0,Z1),
     varc:add_symbol(Vp, Ys, "Y"),
+    io:format("Y = ~w\n", [Ys]),
+    Zs = lists:seq(Z0,Z1),
     varc:add_symbol(Vp, Zs, "Z"),
+    io:format("Z = ~w\n", [Zs]),
     {[Co|_], Xs} = adder(Vp, Ys, Zs),
     varc:add_symbol(Vp, Co, "Co"),
+    io:format("X = ~w\n", [Xs]),
     varc:add_symbol(Vp, Xs, "X"),
-    varc:set_level(Vp, 1),
+    varc:bind(Vp, -Co), %% no overflow (fit in N bit)
     varc:bind(Vp, -hd(Xs)), %% only even sums!
+    varc:set_level(Vp, 1),
     bt_all(Vp).
-
 
 
 bt(Vp) ->
@@ -539,12 +547,13 @@ model_(_Vp, false, Model) ->
     Model;
 model_(Vp, Var, Model) ->
     case symbol_value(Vp, Var) of
+	undefined ->
+	    error({not_defined, Var});
 	false -> 
 	    model_(Vp, varc:next_symbol(Vp,Var), Model);
 	Value ->
 	    model_(Vp, varc:next_symbol(Vp,Var), [{Var,Value}|Model])
     end.
-
 
 symbol_value(Vp, Symbol) ->
     case varc:find_symbol(Vp, Symbol) of
@@ -554,15 +563,17 @@ symbol_value(Vp, Symbol) ->
     end.
 
 unsigned_value(Vp, Xs) ->
-    unsigned_value_(Vp, Xs, 1, 0).
+    unsigned_value_(Vp, Xs, 0, 0).
 
-unsigned_value_(Vp, [X|Xs], B, Value) ->
+unsigned_value_(Vp, [X|Xs], I, Value) ->
     case varc:value(Vp, X) of
-	undefined -> undefined;
-	true -> unsigned_value_(Vp, Xs, B bsl 1, Value + B);
-	false -> unsigned_value_(Vp, Xs, B bsl 1, Value)
+	undefined -> 
+	    io:format("~w index=~w undefined\n", [X,I]),
+	    undefined;
+	true -> unsigned_value_(Vp, Xs, I+1, Value + (1 bsl I));
+	false -> unsigned_value_(Vp, Xs, I+1, Value)
     end;
-unsigned_value_(_Vp, [], _B, Value) ->
+unsigned_value_(_Vp, [], _I, Value) ->
     Value.
 
 signed_value(Vp, Xs) ->

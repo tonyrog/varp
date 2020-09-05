@@ -544,12 +544,29 @@ varpy.del_symbol(vp, string|term)
 Remove the symbol from the symbol table.
 
 ``` python
-varpy.find_symbol(vp, string|term)
+varpy.find_symbol(vp, symbol)
 ```
 
-Given a string or term return the variable assoicated.
+Given a symbol return the variable assoicated with it.
 If no assoication is found __False__ is returned.
 
+``` python
+varpy.first_symbol(vp)
+```
+
+Find first symbol in the symbol table. Return __False__ if 
+not found. Try not use __False__ as a symbol.
+
+
+``` python
+varpy.next_symbol(vp, symbol)
+```
+
+Given a symbol in the symbol table (must be present),
+find next symbol in the symbol table. Return __False__ if 
+not found. Try not use __False__ as a symbol.
+If symbol table is updated while calling next\_symbol then
+the behaviour is undefined.
 
 ``` python
 varpy.use_clause(vp, cix)
