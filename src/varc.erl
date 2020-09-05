@@ -25,6 +25,8 @@
 -export([get_symbol/2]).
 -export([is_atom/2]).
 -export([find_symbol/2]).
+-export([first_symbol/1]).
+-export([next_symbol/2]).
 -export([variable_info/2, variable_info/3, variable_info_keys/0]).
 -export([literal_info/2, literal_info/3, literal_info_keys/0]).
 -export([value/2]).
@@ -152,6 +154,7 @@
 -type binding() :: literal() | {literal(),literal()}.
 -type bindings() :: [binding()] | {binding()}.  %% variable size tuple?
 -type level() :: integer().
+-type symbol() :: binary() | string() | term().
 
 -define(nif_stub(),
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
@@ -257,8 +260,17 @@ is_atom(Vp, Lit) when is_integer(Lit) ->
     variable_info(Vp, Lit, is_atom).
 
 %% find variable index from variable name (term or binary)
--spec find_symbol(Vp::varc(), Name::term()) -> false | literal().
+-spec find_symbol(Vp::varc(), Name::term()) -> false | literal() | [literal()].
 find_symbol(_Vp, _Name) ->
+    ?nif_stub().
+
+%% get first symbol
+-spec first_symbol(Vp::varc()) -> false | symbol().
+first_symbol(_Vp) ->
+    ?nif_stub().
+
+-spec next_symbol(Vp::varc(), Symbol::symbol()) -> false | symbol().
+next_symbol(_Vp, _Symbol) ->
     ?nif_stub().
 
 %%

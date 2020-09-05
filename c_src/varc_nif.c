@@ -266,6 +266,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "queue_clear",         1,  varp_queue_clear ) \
     NIF( "add_symbol",          3,  varp_add_symbol) \
     NIF( "find_symbol",         2,  varp_find_symbol ) \
+    NIF( "first_symbol",        1,  varp_first_symbol ) \
+    NIF( "next_symbol",         2,  varp_next_symbol ) \
     NIF( "del_symbol",          2,  varp_del_symbol) \
     NIF( "use_clause",          2,  varp_use_clause ) \
     NIF( "bump",                3,  varp_bump )     \
@@ -3228,18 +3230,22 @@ static int symtab_grow(varp_t* vp)
 }
 
 static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
-			       uint32_t hvalue, bool_t is_term)
+			       uint32_t hvalue, bool_t is_term,
+			       int* slotp)
 {
     size_t hsize = dynvar_size(vp->symtab);
     if (hsize > 0) {
 	int slot = hvalue & (hsize-1);
+	// fixme: use dlist_iter!
 	symbol_t* sp = dlist_first(&vp->symtab[slot]);
 	while(!dlist_is_eol(sp)) {
 	    if ((sp->hvalue == hvalue) &&
 		(sp->size == bp->size) &&
 		(sp->is_term == is_term) &&
-		(memcmp(sp->data, bp->data, bp->size) == 0))
+		(memcmp(sp->data, bp->data, bp->size) == 0)) {
+		if (slotp) *slotp = slot;
 		return sp;
+	    }
 	    sp = dlist_next(sp);
 	}
     }
@@ -3641,7 +3647,7 @@ static ERL_NIF_TERM add_symbol(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM sym,
 
     hvalue = djb_hash(bin.data, bin.size);
 
-    if ((sp = symbol_lookup(vp, &bin, hvalue, is_term)) != NULL) {
+    if ((sp = symbol_lookup(vp, &bin, hvalue, is_term, NULL)) != NULL) {
 	if (is_term) enif_release_binary(&bin);
 	if (n != dynvar_size(sp->lit))
 	    return enif_make_badarg(env);
@@ -3739,7 +3745,7 @@ static ERL_NIF_TERM varp_del_symbol(ErlNifEnv* env, int argc,
 
     hash = djb_hash(bin.data, bin.size);
 
-    sp = symbol_lookup(vp, &bin, hash, is_term);
+    sp = symbol_lookup(vp, &bin, hash, is_term, NULL);
     if (is_term) enif_release_binary(&bin);
     if (sp != NULL) {
 	if (symbol_delete(vp, sp) < 0)
@@ -3749,7 +3755,7 @@ static ERL_NIF_TERM varp_del_symbol(ErlNifEnv* env, int argc,
     return enif_make_boolean(env, false);
 }
 
-// varc:find_symbol(Vp:varc(),term()) -> false | lit() | [lit()]
+// varc:find_symbol(Vp:varc(),symbol()) -> false | lit() | [lit()]
 static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
@@ -3771,7 +3777,7 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 
     hash = djb_hash(bin.data, bin.size);
 
-    sp = symbol_lookup(vp, &bin, hash, is_term);
+    sp = symbol_lookup(vp, &bin, hash, is_term, NULL);
     if (is_term) enif_release_binary(&bin);
     if (sp != NULL) {
 	ERL_NIF_TERM r = ATOM(undefined);
@@ -3790,6 +3796,71 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
     }
     return enif_make_boolean(env, false);
 }
+
+// varc:first_symbol(Vp:varc()) -> symbol()|false
+static ERL_NIF_TERM varp_first_symbol(ErlNifEnv* env, int argc,
+				      const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    int slot;
+    size_t n;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
+	return enif_make_badarg(env);
+    if (vp->snum == 0)
+	return enif_make_boolean(env, false);
+    slot = 0;
+    n = dynvar_size(vp->symtab);
+    while((slot < (int)n) && (dlist_length(&vp->symtab[slot]) == 0))
+	slot++;
+    if (slot >= (int)n)
+	return enif_make_boolean(env, false);
+    return symbol_term(env, dlist_first(&vp->symtab[slot]));
+}
+
+// varc:next_symbol(Vp:varc()|symbol()) -> symbol()|false
+static ERL_NIF_TERM varp_next_symbol(ErlNifEnv* env, int argc,
+				     const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    ErlNifBinary bin;
+    uint32_t hash;
+    bool_t is_term = false;
+    symbol_t* sp;
+    int slot;
+    size_t n;
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if (!enif_inspect_iolist_as_binary(env, argv[1], &bin)) {
+	if (!enif_term_to_binary(env, argv[1], &bin))
+	    return enif_make_badarg(env);
+	is_term = true;
+    }
+
+    hash = djb_hash(bin.data, bin.size);
+
+    sp = symbol_lookup(vp, &bin, hash, is_term, &slot);
+    if (is_term) enif_release_binary(&bin);
+    if (sp != NULL) {
+	if ((sp = dlist_next(sp)) == NULL) {
+	    slot++;
+	    n = dynvar_size(vp->symtab);
+
+	    while((slot < (int)n) && (dlist_length(&vp->symtab[slot]) == 0))
+		slot++;
+	    if (slot >= (int)n)
+		return enif_make_boolean(env, false);
+	    sp = dlist_first(&vp->symtab[slot]);
+	}
+	return symbol_term(env, sp);
+    }
+    return enif_make_boolean(env, false);    
+}
+
 
 // get variable info
 static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,

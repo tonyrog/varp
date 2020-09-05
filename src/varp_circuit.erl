@@ -211,10 +211,10 @@ full_adder(Vp, X, Y, Z, Ci) ->
 
 full_adder(Vp, X, Y, Z, Ci, Co) ->
     S1 = xor_gate(Vp,Y,Z),
-    S2 = xor_gate(Vp,X,S1,Ci),
+    S2 = xor_gate(Vp,X,S1,Ci),  %% S2==X!
     A1 = and_gate(Vp,S1,Ci),
     A2 = and_gate(Vp,Y,Z),
-    Co1 = or_gate(Vp,A1,A2,Co),
+    Co1 = or_gate(Vp,Co,A1,A2),
     {S2, Co1}.
 
 %% (min,max) = SORT(y, z)
@@ -313,6 +313,38 @@ eq1_(Vp, X, [Y|Ys], Zi, Zs) ->
 eq1_(Vp, X, [], Zi, Zs) ->
     and_gate(Vp, X, Zi, none_gate(Vp,Zs)).
 
+
+%% adder Xs = Ys + Zs, fixed output 
+adder_x(Vp, Xs, Ys, Zs) ->
+    adder_xs(Vp, Xs, Ys, Zs, varc:add_variable(Vp), [], [false]).
+
+%% adder Xs = Ys + Zs, fixed output and fixed carry out
+adder_x(Vp, Xs, Ys, Zs, Co) ->
+    adder_xs(Vp, Xs, Ys, Zs, Co, [], [false]).
+
+adder_xs(Vp, [X], [Y], [Z], Co, Sum, Cs=[Ci|_]) ->
+    {X,Co} = full_adder(Vp, X, Y, Z, Ci, Co),
+    {[Co|Cs], lists:reverse([X|Sum])};
+adder_xs(Vp, [X|Xs], [Y|Ys], [Z|Zs], Co, Sum, Cs=[Ci|_]) ->
+    {X,Cx} = full_adder(Vp, X, Y, Z, Ci),
+    adder_xs(Vp, Xs, Ys, Zs, Co, [X|Sum], [Cx|Cs]).
+
+%% adder Ys + Zs
+adder(Vp, Ys, Zs) ->
+    adder_ys(Vp, Ys, Zs, varc:add_variable(Vp), [], [false]).
+
+%% adder Xs = Ys + Zs, fixed output and fixed carry out
+adder(Vp, Ys, Zs, Co) ->
+    adder_ys(Vp, Ys, Zs, Co, [], [false]).
+
+adder_ys(Vp, [Y], [Z], Co, Sum, Cs=[Ci|_]) ->
+    {X,Co} = full_adder(Vp, varc:add_variable(Vp), Y, Z, Ci, Co),
+    {[Co|Cs], lists:reverse([X|Sum])};
+adder_ys(Vp, [Y|Ys], [Z|Zs], Co, Sum, Cs=[Ci|_]) ->
+    {X,Cx} = full_adder(Vp, varc:add_variable(Vp), Y, Z, Ci),
+    adder_ys(Vp, Ys, Zs, Co, [X|Sum], [Cx|Cs]).
+
+
 %% TEST
 
 var(Vp, Name) ->
@@ -386,7 +418,7 @@ test_none() ->
     bt_all(Vp).
 
 
-test_eq1_1() ->
+test_eq1() ->
     Vp = varc:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
@@ -426,6 +458,26 @@ test_full_adder1() ->
     Co = var(Vp, "Co"),
     full_adder(Vp, X, Y, Z, Ci, Co),
     bt_all(Vp).
+
+test_adder3() ->
+    test_adder(3).
+
+test_adder(N) ->
+    Vp = varc:new(#{xref => true}),
+    {Y0,Y1} = varc:add_variables(Vp,N),
+    {Z0,Z1} = varc:add_variables(Vp,N),
+    Ys = lists:seq(Y0,Y1),
+    Zs = lists:seq(Z0,Z1),
+    varc:add_symbol(Vp, Ys, "Y"),
+    varc:add_symbol(Vp, Zs, "Z"),
+    {[Co|_], Xs} = adder(Vp, Ys, Zs),
+    varc:add_symbol(Vp, Co, "Co"),
+    varc:add_symbol(Vp, Xs, "X"),
+    varc:set_level(Vp, 1),
+    varc:bind(Vp, -hd(Xs)), %% only even sums!
+    bt_all(Vp).
+
+
 
 bt(Vp) ->
     case not varc:nbcp(Vp) of
@@ -474,11 +526,25 @@ bt_all_(Vp, Count, Limit) ->
 bt_done(_Count, undefined) -> false;
 bt_done(Count, Limit) -> Count >= Limit.
 
+%% model(Vp) ->
+%%    N = varc:info(Vp, 'number_of_variables'),
+%%    [symbol(Vp, X) ||
+%%	X <- lists:seq(1, N),
+%%	varc:value(Vp, X), varc:variable_info(Vp, X, 'is_atom')].
+
 model(Vp) ->
-    N = varc:info(Vp, 'number_of_variables'),
-    [symbol(Vp, X) ||
-	X <- lists:seq(1, N),
-	varc:value(Vp, X), varc:variable_info(Vp, X, 'is_atom')].
+    model_(Vp, varc:first_symbol(Vp), []).
+
+model_(_Vp, false, Model) ->
+    Model;
+model_(Vp, Var, Model) ->
+    case symbol_value(Vp, Var) of
+	false -> 
+	    model_(Vp, varc:next_symbol(Vp,Var), Model);
+	Value ->
+	    model_(Vp, varc:next_symbol(Vp,Var), [{Var,Value}|Model])
+    end.
+
 
 symbol_value(Vp, Symbol) ->
     case varc:find_symbol(Vp, Symbol) of
@@ -556,10 +622,23 @@ symbol(Vp, X) when is_integer(X) ->
     case varc:variable_info(Vp, X, 'symbol') of
 	[] ->
 	    "X("++integer_to_list(X)++")";
-	[{Name,_Pos}|_] when is_binary(Name) ->
-	    binary_to_list(Name);
-	[{Term,_Pos}|_] when is_tuple(Term) ->
-	    var_to_list(Term)
+	[{Name,0}|_] when is_binary(Name) ->
+	    case varc:find_symbol(Vp,Name) of
+		false -> "X("++integer_to_list(X)++")";
+		X -> binary_to_list(Name);
+		Xs when is_list(Xs) -> binary_to_list(Name)++"[0]"
+	    end;
+	[{Term,0}|_] when is_tuple(Term) ->
+	    case varc:find_symbol(Vp,Term) of
+		false -> "X("++integer_to_list(X)++")";
+		X -> var_to_list(Term);
+		Xs when is_list(Xs) ->
+		    var_to_list(Term)++"[0]"
+	    end;
+	[{Name,I}|_] when is_binary(Name) ->
+	    binary_to_list(Name)++"["++integer_to_list(I)++"]";
+	[{Term,I}|_] when is_tuple(Term) ->
+	    var_to_list(Term)++"["++integer_to_list(I)++"]"
     end.
 
 
