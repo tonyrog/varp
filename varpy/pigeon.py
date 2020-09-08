@@ -13,18 +13,18 @@ def clause(vp, List):
     return i
 
 def p4(vp) :
-    X1 = var(vp, "P(1,1)")
-    X2 = var(vp, "P(1,2)")
-    X3 = var(vp, "P(1,3)")
-    X4 = var(vp, "P(2,1)")
-    X5 = var(vp, "P(2,2)")
-    X6 = var(vp, "P(2,3)")
-    X7 = var(vp, "P(3,1)")
-    X8 = var(vp, "P(3,2)")
-    X9 = var(vp, "P(3,3)")
-    X10 = var(vp, "P(4,1)")
-    X11 = var(vp, "P(4,2)")
-    X12 = var(vp, "P(4,3)")
+    X1 = var(vp, ("P",[1,1]))
+    X2 = var(vp, ("P",[1,2]))
+    X3 = var(vp, ("P",[1,3]))
+    X4 = var(vp, ("P",[2,1]))
+    X5 = var(vp, ("P",[2,2]))
+    X6 = var(vp, ("P",[2,3]))
+    X7 = var(vp, ("P",[3,1]))
+    X8 = var(vp, ("P",[3,2]))
+    X9 = var(vp, ("P",[3,3]))
+    X10 = var(vp, ("P",[4,1]))
+    X11 = var(vp, ("P",[4,2]))
+    X12 = var(vp, ("P",[4,3]))
     clause(vp, [X1,X2,X3])
     clause(vp, [X4,X5,X6])
     clause(vp, [X7,X8,X9])
@@ -56,7 +56,7 @@ def p(vp, n):
     for p in range(n):
         for h in range(n-1):
             ph[p,h] = varpy.add_variable(vp)
-            varpy.add_symbol(vp, ph[p,h], "P("+str(p)+","+str(h)+")")
+            varpy.add_symbol(vp, ph[p,h], ("P",[p,h]))
     # for a pigeons p the exist a hole h
     for p in range(n):
         varpy.add_clause(vp, [ph[p,h] for h in range(n-1)])
