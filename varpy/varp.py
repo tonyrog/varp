@@ -41,13 +41,13 @@ def bt_all(vp, limit=None):
     return count
 
 def model(vp):
-    sym = varc.first_symbol(vp)
+    s = varc.first_symbol(vp)
     m = []
-    while sym != False:
-        l = varc.find_symbol(vp, sym)
+    while s != False:
+        l = varc.find_symbol(vp, s)
         if varc.value(vp, l):
-            m.append(symbol_str(sym))
-        sym = varc.next_symbol(vp, sym)
+            m.append(symbol_str(s))
+        s = varc.next_symbol(vp, s)
     return m
         
 # convert atomic formula tuple into a string

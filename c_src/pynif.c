@@ -2053,10 +2053,12 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	DBG("decode_term: list length=%ld\n", (long)n);
 	STK_BEGIN(PyObject*, seq1, n) {
 	    PyObject* list;
-	    size_t slen;
+	    size_t slen = 0;
 	    int i;
-	    if ((slen = decode_seq(ptr+5, len-5, seq1, n)) == 0)
-		STK_LEAVE(seq1);
+	    if (n > 0) {
+		if ((slen = decode_seq(ptr+5, len-5, seq1, n)) == 0)
+		    STK_LEAVE(seq1);
+	    }
 	    if (len-5-slen < 1)
 		STK_LEAVE(seq1);
 	    if (ptr[5+slen] != NIL_EXT)
@@ -2078,11 +2080,13 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	DBG("decode_term: tuple length=%ld\n", (long)n);
 	STK_BEGIN(PyObject*, seq2, n) {	
 	    PyObject* tuple;
-	    size_t slen;
+	    size_t slen = 0;
 	    int i;
-	    
-	    if ((slen = decode_seq(ptr+2, len-2, seq2, n)) == 0)
-		STK_LEAVE(seq2);
+
+	    if (n > 0) {
+		if ((slen = decode_seq(ptr+2, len-2, seq2, n)) == 0)
+		    STK_LEAVE(seq2);
+	    }
 	    if ((tuple = PyTuple_New(n)) == NULL)
 		STK_LEAVE(seq2);
 	    for (i = 0; i < (int)n; i++)
@@ -2100,11 +2104,13 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	DBG("decode_term: tuple length=%ld\n",(long)n);
 	STK_BEGIN(PyObject*, seq3, n) {
 	    PyObject* tuple;
-	    size_t slen;
+	    size_t slen = 0;
 	    int i;
-	    
-	    if ((slen = decode_seq(ptr+5, len-5, seq3, n)) == 0)
-		STK_LEAVE(seq3);
+
+	    if (n > 0) {
+		if ((slen = decode_seq(ptr+5, len-5, seq3, n)) == 0)
+		    STK_LEAVE(seq3);
+	    }
 	    if ((tuple = PyTuple_New(n)) == NULL)
 		STK_LEAVE(seq3);
 	    for (i = 0; i < (int)n; i++)
@@ -2122,11 +2128,13 @@ static size_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	DBG("decode_term: map length=%ld\n",(long)n);
 	STK_BEGIN(PyObject*, seq4, 2*n) {
 	    PyObject* dict;
-	    size_t slen;
+	    size_t slen = 0;
 	    int i;
-	    
-	    if ((slen = decode_seq(ptr+5, len-5, seq4, 2*n)) == 0)
-		STK_LEAVE(seq4);
+
+	    if (n > 0) {
+		if ((slen = decode_seq(ptr+5, len-5, seq4, 2*n)) == 0)
+		    STK_LEAVE(seq4);
+	    }
 	    if ((dict = PyDict_New()) == NULL)
 		STK_LEAVE(seq4);
 	    for (i = 0; i < (int)n; i += 2)

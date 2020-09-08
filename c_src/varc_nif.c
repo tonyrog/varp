@@ -66,7 +66,7 @@
 #define LIT_VALUE
 #define PACKED_VALUE 1
 //#define ASSERTIONS
-// #define DEBUG
+//#define DEBUG
 //#define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER

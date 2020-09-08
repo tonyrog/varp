@@ -197,7 +197,7 @@ def var(vp, name):
     return x
 
 def clause(vp, ls):
-    print(str(ls))
+#   print(str(ls))
     ci = varpy.add_clause(vp, ls)
     return ci
 
