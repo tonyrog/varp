@@ -245,18 +245,40 @@ comparator(Vp, Y, Z) ->
 comparator(Vp, Y, Z, X0, X1) ->
     {min_gate(Vp, X0, Y, Z), max_gate(Vp, X1, Y, Z)}.
 
-any(Vp,Xs) -> none_assoc(Vp,'or',Xs).
-any(Vp,X,Xs) -> none_assoc(Vp,'or',X,Xs).
+%% "bubbel" sort Xs n times
+sort(_Vp,0,Xs) -> 
+    Xs;
+sort(Vp,I,Xs) ->
+    [X|Xs1] = minmax(Vp,Xs),
+    Xs2 = sort(Vp,I-1,lists:reverse(Xs1)),
+    Xs2++[X].
 
-all(Vp,Xs) -> none_assoc(Vp,'and',Xs).
-all(Vp,X,Xs) -> none_assoc(Vp,'and',X,Xs).
+%% bubbel sort Xs one lap
+minmax(Vp,Xs) ->
+    minmax(Vp,Xs,[]).
 
-none(Vp,Xs) -> inv(any(Vp,Xs)).
-none(Vp,X,Xs) -> inv(any(Vp,X,Xs)).
+minmax(_Vp,[X1],_Ys) ->
+    [X1];
+minmax(Vp,[X1,X2],Ys) ->
+    {Min,Max} = comparator(Vp,X1,X2),
+    [Max,Min|Ys];
+minmax(Vp,[X1,X2|Xs],Ys) ->
+    {Min,Max} = comparator(Vp,X1,X2),
+    minmax(Vp,[Max|Xs],[Min|Ys]).
+
+
+any(Vp,Ys) -> none_assoc(Vp,'or',Ys).
+any(Vp,X,Ys) -> none_assoc(Vp,'or',X,Ys).
+
+all(Vp,Ys) -> none_assoc(Vp,'and',Ys).
+all(Vp,X,Ys) -> none_assoc(Vp,'and',X,Ys).
+
+none(Vp,Ys) -> inv(any(Vp,Ys)).
+none(Vp,X,Ys) -> inv(any(Vp,X,Ys)).
     
 %% left balanced circuit 
-left_assoc(Vp,Gate,Xs) ->
-    left_assoc(Vp,Gate,varc:add_variable(Vp),Xs).
+left_assoc(Vp,Gate,Ys) ->
+    left_assoc(Vp,Gate,varc:add_variable(Vp),Ys).
 
 left_assoc(Vp,Gate,X,[X1,X2]) ->
     gate(Vp,Gate,X,X1,X2);
@@ -320,10 +342,8 @@ none_assoc_(Vp,Gate,X,Xs) ->
 
 eq(Vp,K,Ys) ->
     eq(Vp,K,varc:add_variable(Vp),Ys).
-
 neq(Vp,K,Ys) ->
     neq(Vp,K,varc:add_variable(Vp),Ys).
-
 lt(Vp,K,Ys) ->
     lt(Vp,K,varc:add_variable(Vp),Ys).
 lte(Vp,K,Ys) ->
@@ -333,16 +353,54 @@ gt(Vp,K,Ys) ->
 gte(Vp,K,Ys) ->
     gte(Vp,K,varc:add_variable(Vp),Ys).
 
-eq(Vp,1,X,Ys)  ->
-    one(Vp, X, Ys);
-eq(_Vp,_K,_X,_Ys)  -> error(nyi).
+eq(Vp,1,X,Ys) -> one(Vp, X, Ys);
+eq(Vp,K,X,Ys) -> eqk(Vp,K,length(Ys),X,Ys).
 
-neq(_Vp,_K,_X,_Ys)  -> error(nyi).
-lt(_Vp,_K,_X,_Ys)  -> error(nyi).
-lte(_Vp,_K,_X,_Ys) -> error(nyi).
-gt(_Vp,_K,_X,_Ys) -> error(nyi).
-gte(_Vp,_K,_X,_Ys) -> error(nyi).
+neq(Vp,K,X,Ys) ->
+    inv(eqk(Vp, K, length(Ys), X, Ys)).
+    
+lt(Vp,1,X,Ys) -> none(Vp,X,Ys);
+lt(Vp,K,X,Ys) when is_integer(K), K>1 ->
+    N = length(Ys),
+    gtk(Vp, N-K, N, X, [inv(Yi) || Yi <- Ys]).
+    
+lte(Vp,0,X,Ys) -> none(Vp,X,Ys);
+lte(Vp,K,X,Ys) when is_integer(X), X>0 ->
+    N = length(Ys),
+    gtk(Vp,N-K-1, N, X, [inv(Yi) || Yi <- Ys]).
 
+gte(Vp,0,X,Ys) -> any(Vp,X,Ys);
+gte(Vp,K,X,Ys) when is_integer(K), K>=0 ->
+    gtk(Vp, K-1, length(Ys), X, Ys).
+
+gt(Vp,K,X,Ys) when is_integer(K), K >= 0 ->
+    gtk(Vp, K, length(Ys), X, Ys).
+
+gtk(Vp,0,_N,X,Ys) ->
+    any(Vp,X,Ys);
+gtk(_Vp,K,N,_X,_Ys) when K >= N -> %% no models
+    false;
+gtk(Vp,K,N,X,Ys) ->
+    Ys1 = sort(Vp,K,Ys),
+    {A,B} = lists:split(N-K, Ys1),
+    A1 = any(Vp,A),
+    B1 = all(Vp,B),
+    and_gate(Vp, X, A1, B1).
+
+%% Generate a formula where exact K out of N formulas are true.
+eqk(Vp,0,_N,X,Ys) ->
+    inv(any(Vp,X,Ys));
+eqk(_Vp,K,N,_X,_Ys) when K > N -> %% no models
+    %% bind X = false?
+    false;
+eqk(Vp,K,N,X,Ys) when K =:= N ->
+    all(Vp,X,Ys);
+eqk(Vp,K,N,X,Ys) ->
+    Ys1 = sort(Vp,K,Ys),
+    {A,B} = lists:split(N-K, Ys1),
+    A1 = any(Vp,A),
+    B1 = all(Vp,B),
+    and_gate(Vp, X, inv(A1), B1).
 
 %% sort all ys one lap then or over the
 %% fixme len(ys) < 2
@@ -424,7 +482,7 @@ var(Vp, Name) ->
     X.
 
 clause(Vp, Ls) ->
-    io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
+    %%io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
     varc:add_clause(Vp, Ls).
 
 test_gate(Gate) ->

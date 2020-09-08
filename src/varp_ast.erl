@@ -19,7 +19,7 @@ build(Tree, Vp) ->
     build(Tree, Vp, #{}).
 
 build(Tree, Vp, State) ->
-    io:format("Build: ~p\n", [Tree]),
+    %% io:format("Build: ~p\n", [Tree]),
     case Tree of
 	{'p', Sym, Args}   -> var(Sym, Args, Vp, State);
 	{'not', A}         -> unary('not',A,Vp,State);
