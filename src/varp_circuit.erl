@@ -22,17 +22,19 @@
 	 half_adder/3, half_adder/4, half_adder/5,
 	 full_adder/3, full_adder/4, full_adder/5, full_adder/6]).
 
--export([sort_gate/3, sort_gate/5]).
+-export([comparator/3, comparator/5]).
 -export([left_assoc/3, left_assoc/4]).
 -export([right_assoc/3, right_assoc/4]).
 -export([none_assoc/3, none_assoc/4]).
--export([any_gate/2, any_gate/3]).
--export([all_gate/2, all_gate/3]).
--export([none_gate/2, none_gate/3]).
--export([one_gate/2, one_gate/3]).
+-export([any/2, any/3]).
+-export([all/2, all/3]).
+-export([none/2, none/3]).
+-export([one/2, one/3]).
 
--export([adder/3, adder/4]).
--export([adder_x/4, adder_x/5, adder_x/6]).
+-export([add/3, add/4]).
+-export([add_ci/4, add_ci/5]).
+-export([add_co/4, add_co/5]).
+-export([add_ci_co/5, add_ci_co/6]).
 
 -export([symbol_value/2]).
 -export([unsigned_value/2]).
@@ -146,10 +148,10 @@ equ_gate(Vp, X, Y, Z) ->
     inv(xor_clauses(Vp, X, Y, Z)).
 
 gate(_Vp,'not',Y) -> inv(Y);
-gate(Vp,'all',Ys) -> all_gate(Vp, Ys);
-gate(Vp,'any',Ys) -> any_gate(Vp, Ys);
-gate(Vp,'none',Ys) -> none_gate(Vp, Ys);
-gate(Vp,'one',Ys) -> one_gate(Vp, Ys).
+gate(Vp,'all',Ys) -> all(Vp, Ys);
+gate(Vp,'any',Ys) -> any(Vp, Ys);
+gate(Vp,'none',Ys) -> none(Vp, Ys);
+gate(Vp,'one',Ys) -> one(Vp, Ys).
 		     
 %% return gate function from name
 gate(Vp,'or',X,Y,Z) -> or_gate(Vp,X,Y,Z);
@@ -160,7 +162,15 @@ gate(Vp,'and',X,Y,Z) -> and_gate(Vp,X,Y,Z);
 gate(Vp,'nand',X,Y,Z) -> nand_gate(Vp,X,Y,Z);
 gate(Vp,'xor',X,Y,Z) -> xor_gate(Vp,X,Y,Z);
 gate(Vp,'xnor',X,Y,Z) -> xnor_gate(Vp,X,Y,Z);
-gate(Vp,'equ',X,Y,Z) -> equ_gate(Vp,X,Y,Z).
+gate(Vp,'equ',X,Y,Z) -> equ_gate(Vp,X,Y,Z);
+
+gate(Vp,'eq',K,X,Ys) -> eq(Vp,K,X,Ys);
+gate(Vp,'neq',K,X,Ys) -> neq(Vp,K,X,Ys);
+gate(Vp,'lt',K,X,Ys) -> lt(Vp,K,X,Ys);
+gate(Vp,'lte',K,X,Ys) -> lte(Vp,K,X,Ys);
+gate(Vp,'gt',K,X,Ys) -> gt(Vp,K,X,Ys);
+gate(Vp,'gte',K,X,Ys) -> gte(Vp,K,X,Ys).
+
 
 gate(Vp,'not',X,Y) -> inv_clauses(Vp, X, Y), X;
 gate(Vp,'or',Y,Z) -> or_gate(Vp,Y,Z);
@@ -173,10 +183,18 @@ gate(Vp,'xor',Y,Z) -> xor_gate(Vp,Y,Z);
 gate(Vp,'xnor',Y,Z) -> xnor_gate(Vp,Y,Z);
 gate(Vp,'equ',Y,Z) -> equ_gate(Vp,Y,Z);
 
-gate(Vp,'all',X,Ys) -> all_gate(Vp,X,Ys);
-gate(Vp,'any',X,Ys) -> any_gate(Vp,X,Ys);
-gate(Vp,'none',X,Ys) -> none_gate(Vp,X,Ys);
-gate(Vp,'one',X,Ys) -> one_gate(Vp,X,Ys).
+gate(Vp,'all',X,Ys) -> all(Vp,X,Ys);
+gate(Vp,'any',X,Ys) -> any(Vp,X,Ys);
+gate(Vp,'none',X,Ys) -> none(Vp,X,Ys);
+gate(Vp,'one',X,Ys) -> one(Vp,X,Ys);
+
+gate(Vp,'eq',K,Ys) -> eq(Vp,K,Ys);
+gate(Vp,'neq',K,Ys) -> neq(Vp,K,Ys);
+gate(Vp,'lt',K,Ys) -> lt(Vp,K,Ys);
+gate(Vp,'lte',K,Ys) -> lte(Vp,K,Ys);
+gate(Vp,'gt',K,Ys) -> gt(Vp,K,Ys);
+gate(Vp,'gte',K,Ys) -> gte(Vp,K,Ys).
+
 
 %% x = MIN(y,z) = (y AND z)
 min_gate(Vp, Y, Z) ->
@@ -221,20 +239,20 @@ full_adder(Vp, X, Y, Z, Ci, Co) ->
     {S2, Co1}.
 
 %% (min,max) = SORT(y, z)
-sort_gate(Vp, Y, Z) ->
-    sort_gate(Vp, Y, Z, varc:add_variable(Vp), varc:add_variable(Vp)).
+comparator(Vp, Y, Z) ->
+    comparator(Vp, Y, Z, varc:add_variable(Vp), varc:add_variable(Vp)).
 
-sort_gate(Vp, Y, Z, X0, X1) ->
+comparator(Vp, Y, Z, X0, X1) ->
     {min_gate(Vp, X0, Y, Z), max_gate(Vp, X1, Y, Z)}.
 
-any_gate(Vp,Xs) -> none_assoc(Vp,'or',Xs).
-any_gate(Vp,X,Xs) -> none_assoc(Vp,'or',X,Xs).
+any(Vp,Xs) -> none_assoc(Vp,'or',Xs).
+any(Vp,X,Xs) -> none_assoc(Vp,'or',X,Xs).
 
-all_gate(Vp,Xs) -> none_assoc(Vp,'and',Xs).
-all_gate(Vp,X,Xs) -> none_assoc(Vp,'and',X,Xs).
+all(Vp,Xs) -> none_assoc(Vp,'and',Xs).
+all(Vp,X,Xs) -> none_assoc(Vp,'and',X,Xs).
 
-none_gate(Vp,Xs) -> inv(any_gate(Vp,Xs)).
-none_gate(Vp,X,Xs) -> inv(any_gate(Vp,X,Xs)).
+none(Vp,Xs) -> inv(any(Vp,Xs)).
+none(Vp,X,Xs) -> inv(any(Vp,X,Xs)).
     
 %% left balanced circuit 
 left_assoc(Vp,Gate,Xs) ->
@@ -300,55 +318,103 @@ none_assoc_(Vp,Gate,X,Xs) ->
 	    gate(Vp,Gate,X,X1,X2)
     end.
 
+eq(Vp,K,Ys) ->
+    eq(Vp,K,varc:add_variable(Vp),Ys).
+
+neq(Vp,K,Ys) ->
+    neq(Vp,K,varc:add_variable(Vp),Ys).
+
+lt(Vp,K,Ys) ->
+    lt(Vp,K,varc:add_variable(Vp),Ys).
+lte(Vp,K,Ys) ->
+    lte(Vp,K,varc:add_variable(Vp),Ys).
+gt(Vp,K,Ys) ->
+    gt(Vp,K,varc:add_variable(Vp),Ys).
+gte(Vp,K,Ys) ->
+    gte(Vp,K,varc:add_variable(Vp),Ys).
+
+eq(Vp,1,X,Ys)  ->
+    one(Vp, X, Ys);
+eq(_Vp,_K,_X,_Ys)  -> error(nyi).
+
+neq(_Vp,_K,_X,_Ys)  -> error(nyi).
+lt(_Vp,_K,_X,_Ys)  -> error(nyi).
+lte(_Vp,_K,_X,_Ys) -> error(nyi).
+gt(_Vp,_K,_X,_Ys) -> error(nyi).
+gte(_Vp,_K,_X,_Ys) -> error(nyi).
+
 
 %% sort all ys one lap then or over the
 %% fixme len(ys) < 2
-one_gate(Vp, Ys) ->
-    one_gate(Vp, varc:add_variable(Vp), Ys).
+one(Vp, Ys) ->
+    one(Vp, varc:add_variable(Vp), Ys).
 
-one_gate(Vp, X, [Y0,Y1|Ys]) ->
-    {Z0,Z1} = sort_gate(Vp, Y0, Y1),
+one(Vp, X, [Y0,Y1|Ys]) ->
+    {Z0,Z1} = comparator(Vp, Y0, Y1),
     eq1_(Vp, X, Ys, Z1, [Z0]).
 
 eq1_(Vp, X, [Y|Ys], Zi, Zs) ->
-    {Z0,Z1} = sort_gate(Vp, Zi, Y),
+    {Z0,Z1} = comparator(Vp, Zi, Y),
     eq1_(Vp, X, Ys, Z1, [Z0|Zs]);
 eq1_(Vp, X, [], Zi, Zs) ->
-    and_gate(Vp, X, Zi, none_gate(Vp,Zs)).
+    and_gate(Vp, X, Zi, none(Vp,Zs)).
 
+%% variables
+vars(Vp,N) ->
+    {L,H} = varc:add_variables(Vp,N),
+    lists:seq(L,H).
 
-%% adder Xs = Ys + Zs, fixed output 
-adder_x(Vp, Xs, Ys, Zs) ->
-    adder_xs(Vp, [], Xs, Ys, Zs, [false], varc:add_variable(Vp)).
+'bnot'(_Vp, Ys) ->
+    [inv(Yi) || Yi <- Ys].
 
-%% adder Xs = Ys + Zs, fixed output and fixed carry out
-adder_x(Vp, Xs, Ys, Zs, Ci) ->
-    adder_xs(Vp, [], Xs, Ys, Zs, [Ci], varc:add_variable(Vp)).
+sub(Vp, Ys, Zs) ->
+    add_ci(Vp, Ys, 'bnot'(Vp,Zs), true).
 
-adder_x(Vp, Xs, Ys, Zs, Ci, Co) ->
-    adder_xs(Vp, [], Xs, Ys, Zs, [Ci], Co).
+sub(Vp, Xs, Ys, Zs) ->
+    add_ci(Vp, Xs, Ys, 'bnot'(Vp,Zs), true).
 
-adder_xs(Vp, Rs, [X], [Y], [Z], Cs=[Ci|_], Co) ->
+%% adder
+add(Vp, Ys, Zs) ->
+    add_(Vp, Ys, Zs, false, varc:add_variable(Vp)).
+
+add(Vp, Xs, Ys, Zs) ->
+    add_(Vp, Xs, Ys, Zs, false, varc:add_variable(Vp)).
+
+%% adder with carry in
+add_ci(Vp, Ys, Zs, Ci) ->
+    add_(Vp, Ys, Zs, Ci, varc:add_variable(Vp)).
+
+add_ci(Vp, Xs, Ys, Zs, Ci) ->
+    add_(Vp, Xs, Ys, Zs, Ci, varc:add_variable(Vp)).
+
+%% adder with carry out
+add_co(Vp, Ys, Zs, Co) ->
+    add_(Vp, Ys, Zs, false, Co).
+
+add_co(Vp, Xs, Ys, Zs, Co) ->
+    add_(Vp, Xs, Ys, Zs, false, Co).
+
+%% adder with carry in and carry out
+add_ci_co(Vp, Ys, Zs, Ci, Co) ->
+    add_(Vp, Ys, Zs, Ci, Co).
+
+add_ci_co(Vp, Xs, Ys, Zs, Ci, Co) ->
+    add_(Vp, Xs, Ys, Zs, Ci, Co).
+
+add_(Vp, Ys, Zs, Ci, Co) ->
+    Xs = vars(Vp,length(Ys)),
+    add_(Vp, Xs, Ys, Zs, Ci, Co).
+
+add_(Vp, Xs, Ys, Zs, Ci, Co) ->
+    Cs = add__(Vp, Xs, Ys, Zs, [Ci], Co),
+    {[Co|Cs], Xs}.
+    
+add__(Vp, [X], [Y], [Z], Cs=[Ci|_], Co) ->
     {X,Co} = full_adder(Vp, X, Y, Z, Ci, Co),
-    {[Co|Cs], lists:reverse([X|Rs])};
-adder_xs(Vp, Rs, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
+    [Co|Cs];
+add__(Vp, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
     {X,Cx} = full_adder(Vp, X, Y, Z, Ci),
-    adder_xs(Vp, [X|Rs], Xs, Ys, Zs, [Cx|Cs], Co).
-
-%% adder Ys + Zs
-adder(Vp, Ys, Zs) ->
-    adder_ys(Vp, [], Ys, Zs, [false], varc:add_variable(Vp)).
-
-%% adder Ys + Zs, fixed output and fixed carry out
-adder(Vp, Ys, Zs, Co) ->
-    adder_ys(Vp, [], Ys, Zs, [false], Co).
-
-adder_ys(Vp, Xs, [Y], [Z], Cs=[Ci|_], Co) ->
-    {X,Co} = full_adder(Vp, varc:add_variable(Vp), Y, Z, Ci, Co),
-    {[Co|Cs], lists:reverse([X|Xs])};
-adder_ys(Vp, Xs, [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
-    {X,Cx} = full_adder(Vp, varc:add_variable(Vp), Y, Z, Ci),
-    adder_ys(Vp, [X|Xs], Ys, Zs, [Cx|Cs], Co).
+    add__(Vp, Xs, Ys, Zs, [Cx|Cs], Co).
 
 %% TEST
 
@@ -395,7 +461,7 @@ test_any() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
-    E = any_gate(Vp, [A,B,C,D]),
+    E = any(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -406,7 +472,7 @@ test_all() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
-    E = all_gate(Vp, [A,B,C,D]),
+    E = all(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -417,7 +483,7 @@ test_none() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
-    E = none_gate(Vp, [A,B,C,D]),
+    E = none(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -429,7 +495,7 @@ test_eq1() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
-    E = one_gate(Vp, [A,B,C,D]),
+    E = one(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -440,7 +506,7 @@ test_eq1_2() ->
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = false,
-    E = one_gate(Vp, [A,B,C,D]),
+    E = one(Vp, [A,B,C,D]),
     varc:bind(Vp, E),
     varc:set_level(Vp, 1),
     bt_all(Vp).
@@ -464,10 +530,10 @@ test_full_adder1() ->
     full_adder(Vp, X, Y, Z, Ci, Co),
     bt_all(Vp).
 
-test_adder3() ->
-    test_adder(3).
+test_add() ->
+    test_add(3).
 
-test_adder(N) ->
+test_add(N) ->
     Vp = varc:new(#{xref => true}),
     {Y0,Y1} = varc:add_variables(Vp,N),
     {Z0,Z1} = varc:add_variables(Vp,N),
@@ -477,14 +543,57 @@ test_adder(N) ->
     Zs = lists:seq(Z0,Z1),
     varc:add_symbol(Vp, Zs, "Z"),
     io:format("Z = ~w\n", [Zs]),
-    {[Co|_], Xs} = adder(Vp, Ys, Zs),
-    varc:add_symbol(Vp, Co, "Co"),
+    {[Ci,_Cj|_], Xs} = add(Vp, Ys, Zs),
+    varc:add_symbol(Vp, Ci, "Carry"),
     io:format("X = ~w\n", [Xs]),
     varc:add_symbol(Vp, Xs, "X"),
-    varc:bind(Vp, -Co), %% no overflow (fit in N bit)
-    varc:bind(Vp, -hd(Xs)), %% only even sums!
+    set_status(Vp, Ci, false),
+    %% set_overflow(Vp, uint, Ci, Cj, false),
     varc:set_level(Vp, 1),
     bt_all(Vp).
+
+
+test_sub() ->
+    test_sub(3).
+
+test_sub(N) ->
+    Vp = varc:new(#{xref => true}),
+    {Y0,Y1} = varc:add_variables(Vp,N),
+    {Z0,Z1} = varc:add_variables(Vp,N),
+    Ys = lists:seq(Y0,Y1),
+    varc:add_symbol(Vp, Ys, "Y"),
+    io:format("Y = ~w\n", [Ys]),
+    Zs = lists:seq(Z0,Z1),
+    varc:add_symbol(Vp, Zs, "Z"),
+    io:format("Z = ~w\n", [Zs]),
+    {[Ci,_Cj|_], Xs} = sub(Vp, Ys, Zs),
+    varc:add_symbol(Vp, -Ci, "Br"),
+    io:format("X = ~w\n", [Xs]),
+    varc:add_symbol(Vp, Xs, "X"),
+    set_status(Vp, -Ci, false),
+    %% set_overflow(Vp, uint, Ci, Cj, false),
+    varc:set_level(Vp, 1),
+    bt_all(Vp).
+
+%% Handle carry (Is it wise to backtrack over a Carry variable?)
+set_status(Vp, Ci, false) ->    %% never generate carry
+    xor_gate(Vp,false,Ci,false);
+set_status(Vp, Ci, true) ->     %% always generate carry
+    xor_gate(Vp,false,Ci,true);
+set_status(_Vp,_Ci, ignore) ->  %% allow carry overflow
+    ignore.
+
+
+set_overflow(Vp,int,Ci,Cj, false) -> %% never generate overflow
+    xor_gate(Vp,false,Ci,Cj);
+set_overflow(Vp,int,Ci,Cj, true) -> %% always generate overflow
+    xor_gate(Vp,true,Ci,Cj);
+set_overflow(Vp,_Type,Ci,_Cj,false) -> %% never generate overflow
+    xor_gate(Vp,false,Ci,false);
+set_overflow(Vp,_Type,Ci,_Cj,true) -> %% never generate overflow
+    xor_gate(Vp,false,Ci,true);
+set_overflow(_Vp,_Type,_Ci,_Cj, ignore) ->  %% allow carry overflow
+    ignore.
 
 
 bt(Vp) ->
@@ -636,15 +745,14 @@ symbol(Vp, X) when is_integer(X) ->
 	[{Name,0}|_] when is_binary(Name) ->
 	    case varc:find_symbol(Vp,Name) of
 		false -> "X("++integer_to_list(X)++")";
-		X -> binary_to_list(Name);
-		Xs when is_list(Xs) -> binary_to_list(Name)++"[0]"
+		Y when is_integer(Y), abs(Y) =:= X -> binary_to_list(Name);
+		Ys when is_list(Ys) -> binary_to_list(Name)++"[0]"
 	    end;
 	[{Term,0}|_] when is_tuple(Term) ->
 	    case varc:find_symbol(Vp,Term) of
 		false -> "X("++integer_to_list(X)++")";
-		X -> var_to_list(Term);
-		Xs when is_list(Xs) ->
-		    var_to_list(Term)++"[0]"
+		Y when is_integer(Y), abs(Y) =:= X -> var_to_list(Term);
+		Ys when is_list(Ys) -> var_to_list(Term)++"[0]"
 	    end;
 	[{Name,I}|_] when is_binary(Name) ->
 	    binary_to_list(Name)++"["++integer_to_list(I)++"]";

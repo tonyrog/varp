@@ -41,14 +41,36 @@ def bt_all(vp, limit=None):
     return count
 
 def model(vp):
-    n = varc.info(vp, 'number_of_variables')
-    return [symbol(vp, x) for x in range(1,n+1)
-            if varc.value(vp, x) and varc.variable_info(vp, x, 'is_atom')]
+    sym = varc.first_symbol(vp)
+    m = []
+    while sym != False:
+        l = varc.find_symbol(vp, sym)
+        if varc.value(vp, l):
+            m.append(symbol_str(sym))
+        sym = varc.next_symbol(vp, sym)
+    return m
+        
+# convert atomic formula tuple into a string
+def symbol_str(term):
+    if isinstance(term, tuple):
+        (p,args) = term
+        if len(args) == 0: return p
+        else: return p+"("+str.join(",",[sym_str(t) for t in args]) + ")"
+    elif isinstance(term, bytearray):
+        return str(term,'utf-8')
 
+def sym_str(x):
+    if isinstance(x, int): return str(x)
+    elif isinstance(x, float): return str(x)
+    elif isinstance(x, str): return x
+    elif isinstance(x, tuple):
+        return x[0] + "("+str.join(",",[sym_str(t) for t in x[1]])+")"
+
+# find symbol (string) from literal
 def symbol(vp, x):
     s = varc.variable_info(vp, x, 'symbol')
     if s == []: return "x("+str(x)+")"
-    else: return str((s[0])[0],'utf-8')
+    else: return symbol_str((s[0])[0])
     
 def get_bindings_list(vp, level, clauseinfo=False, trail=False):
     return varc.get_bindings(vp, level, clauseinfo, trail, False)

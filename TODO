@@ -1,3 +1,10 @@
+- add predicate info
+
+  predicate_arity(Vp, symbol() -> arity()
+  predicate_type(Vp, symbol()) -> bool|int|uint|bit
+?  predicate_first(Vp, P) -> symbol()
+?  predicate_next(Vp, Pi) -> Pj | false
+  
 
 - determine a symbol encoding
 

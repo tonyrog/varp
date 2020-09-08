@@ -109,7 +109,7 @@ def full_adder(vp, y, z, ci=False, x=None, co=None):
 # (min,max) = SORT(y, z)
 def sort_gate(vp, y, z, x0=None, x1=None):
     if x0 == None: x0 = varpy.add_variable(vp)
-    if x1 == None: x1 = varpy.add_variable(vp)    
+    if x1 == None: x1 = varpy.add_variable(vp)
     return (min_gate(vp, y, z, x0), max_gate(vp, y, z, x1))
 
 # x = (((y[0] o y[1]) o y[2]) .. y[n-1])
@@ -127,6 +127,58 @@ def right_assoc(vp, gate, ys, x=None):
     for i in range(1,n-1):
         y = gate(vp, y, ys[n-i-1])
     return gate(vp, y, ys[0], x)
+
+def none_assoc(vp,gate,ys,x=None):
+    if x == None: x = varpy.add_variable(vp)
+    if gate == or_gate:
+        clause(vp, [inv(x)] + ys)
+        for xi in ys: clause(vp,[x,inv(xi)])
+        return x
+    elif gate == and_gate:
+        xs1 = [x] + [inv(xi) for xi in ys]
+        xn = inv(x)
+        for xi in ys: clause(vp,[xn,xi])
+        return x
+    else:
+        return none_assoc_(vp,gate,ys,x)
+
+def none_assoc_(vp,gate,ys,x=None):
+    n = len(ys) // 2
+    u = [ys[i] for i in range(n)]
+    v = [ys[i] for i in range(n, len(ys))]
+    if len(u) == 1 and len(v) == 1:
+        return gate(vp,u[0],v[0],x)
+    elif len(u) == 1 and len(v) == 2:
+        x1 = varpy.add_variable(vp)
+        gate(vp,v[0],v[1],x1)
+        return gate(vp,u[0],x1,x)
+    else:
+        x1 = varpy.add_variable(vp)
+        none_assoc_(vp,gate,u,x1)
+        x2 = varpy.add_variable(vp)
+        none_assoc_(vp,gate,v,x2)
+        return gate(vp,x1,x2,x)
+
+def varp_all(vp, ys, x=None):
+    return none_assoc(vp, and_gate, ys, x)
+
+def varp_any(vp, ys, x=None):
+    return none_assoc(vp, or_gate, ys, x)
+
+def varp_parity(vp, ys, x=None):
+    return left_assoc(vp, xor_gate, ys, x)
+
+def varp_odd(vp, ys, x=None):
+    return varp_parity(vp, ys, x)
+
+def varp_even(vp, ys, x=None):
+    return inv(varp_parity(vp, ys, x))
+
+def varp_none(vp, ys, x=None):
+    return inv(varp_any(vp, ys, x))
+
+def varp_one(vp, ys, x=None):
+    return eq1(vp, ys, x)
 
 # sort all ys one lap then or over the
 # fixme len(ys) < 2
@@ -183,7 +235,7 @@ def test():
     c = var(vp, "c")
     d = var(vp, "d")
     e = left_assoc(vp, and_gate, [a,b,c,d])
-    f = right_assoc(vp, or_gate, [a,b,c,d])    
+    f = right_assoc(vp, or_gate, [a,b,c,d])
     g = right_assoc(vp, xor_gate, [a,b,e,f])
     return g
 
@@ -211,4 +263,3 @@ def test_full_adder1():
     r = full_adder(vp, a, b)
     varpy.ic(vp)
     return r
-

@@ -10,6 +10,7 @@
 -include("varp.hrl").
 
 -export([build/1, build/2, build/3]).
+-export([test/1]).
 
 build(Tree) ->
     build(Tree, varc:new(#{})).
@@ -20,23 +21,33 @@ build(Tree, Vp) ->
 build(Tree, Vp, State) ->
     io:format("Build: ~p\n", [Tree]),
     case Tree of
-	{'p', Sym, Args}  -> var(Sym, Args, Vp, State);
-	{'not', A}        -> unary('not',A,Vp,State);
-	{'!', A}          -> unary('not',A,Vp,State);
-	{'and', A1, A2}   -> binary('and',A1,A2,Vp,State);
-	{'&&', A1, A2}    -> binary('and',A1,A2,Vp,State);
-	{'or', A1, A2}    -> binary('or',A1,A2,Vp,State);
-	{'||', A1, A2}    -> binary('or',A1,A2,Vp,State);
-	{'imp', A1, A2}   -> binary('imp',A1,A2,Vp,State);
-	{'->', A1, A2}    -> binary('imp',A1,A2,Vp,State);
-	{'xor', A1, A2}   -> binary('xor',A1,A2,Vp,State);
-	{'equ', A1, A2}   -> binary('equ',A1,A2,Vp,State);
-	{'<->', A1, A2}   -> binary('equ',A1,A2,Vp,State);
-	{'==', A1, A2}    -> binary('equ',A1,A2,Vp,State);
-	{'ALL',As}        -> nary('all',As,Vp,State);
-	{'ANY',As}        -> nary('any',As,Vp,State);
-	{'NONE',As}       -> nary('none',As,Vp,State);
-	{'ONE',As}        -> nary('one',As,Vp,State)
+	{'p', Sym, Args}   -> var(Sym, Args, Vp, State);
+	{'not', A}         -> unary('not',A,Vp,State);
+	{'!', A}           -> unary('not',A,Vp,State);
+	{'and', A1, A2}    -> binary('and',A1,A2,Vp,State);
+	{'&&', A1, A2}     -> binary('and',A1,A2,Vp,State);
+	{'or', A1, A2}     -> binary('or',A1,A2,Vp,State);
+	{'||', A1, A2}     -> binary('or',A1,A2,Vp,State);
+	{'imp', A1, A2}    -> binary('imp',A1,A2,Vp,State);
+	{'->', A1, A2}     -> binary('imp',A1,A2,Vp,State);
+	{'xor', A1, A2}    -> binary('xor',A1,A2,Vp,State);
+	{'equ', A1, A2}    -> binary('equ',A1,A2,Vp,State);
+	{'<->', A1, A2}    -> binary('equ',A1,A2,Vp,State);
+	{'==', A1, A2}     -> binary('equ',A1,A2,Vp,State);
+	{'ALL',As}         -> nary('all',As,Vp,State);
+	{'ANY',As}         -> nary('any',As,Vp,State);
+	{'NONE',As}        -> nary('none',As,Vp,State);
+	{'ONE',As}         -> nary('one',As,Vp,State);
+	{{'ALL',Gs},A}     -> quant('all',Gs,A,Vp,State);
+	{{'ANY',Gs},A}     -> quant('any',Gs,A,Vp,State);
+	{{'NONE',Gs},A}    -> quant('none',Gs,A,Vp,State);
+	{{'ONE',Gs},A}     -> quant('one',Gs,A,Vp,State);
+	{{'EQ',[K|Gs]},A}  -> quant_k('eq',K,Gs,A,Vp,State);
+	{{'NEQ',[K|Gs]},A} -> quant_k('neq',K,Gs,A,Vp,State);
+	{{'LT',[K|Gs]},A}  -> quant_k('lt',K,Gs,A,Vp,State);
+	{{'LTE',[K|Gs]},A} -> quant_k('lte',K,Gs,A,Vp,State);
+	{{'GT',[K|Gs]},A}  -> quant_k('gt',K,Gs,A,Vp,State);
+	{{'GTE',[K|Gs]},A} -> quant_k('gte',K,Gs,A,Vp,State)
     end.
 
 var(Sym, Args, Vp, State) ->
@@ -67,25 +78,60 @@ nary(Gate, As, Vp, State) ->
     Ys = [build(Ai, Vp, State) || Ai <- As],
     varp_circuit:gate(Vp, Gate, Ys).
 
+quant_k(Gate,Gk,Gs,A,Vp,State) ->
+    Kt = to_term(Gk),
+    K = eval_term(Kt,State),
+    L = qbuild(Gs,A,Vp,State),
+    varp_circuit:gate(Vp, Gate, K, lists:flatten(L)).
+
+quant(Gate,Gs,A,Vp,State) ->
+    L = qbuild(Gs,A,Vp,State),
+    varp_circuit:gate(Vp, Gate, lists:flatten(L)).
+
+qbuild([G|Gs],A,Vp,State) ->
+    case G of
+	#cassign{op='=',lhs=#cid{name=X},rhs=R} ->
+	    Rt = to_term(R),
+	    case eval_term(Rt,State) of
+		{range,From,To} ->
+		    [ qbuild(Gs,A,Vp,State#{X=>I}) || I <- lists:seq(From,To)];
+		I ->
+		    qbuild(Gs,A,Vp,State#{X=>I})
+	    end;
+	_ ->
+	    Gt = to_term(G),
+	    case eval_term(Gt,State) of
+		false -> [];
+		true -> qbuild(Gs,A,Vp,State)
+	    end
+    end;
+qbuild([],A,Vp,State) ->
+    [build(A, Vp, State)].
+
+    
 var_term({p,V,[]}) ->
     {atom_to_list(V), []};
 var_term({p,V,Args}) ->
-    {atom_to_list(V), [var_term_(A) || A <- Args]}.
+    {atom_to_list(V), [to_term(A) || A <- Args]}.
 
-var_term_(#cconst{base=Base,value=Value}) ->
+%% convert tree to term form
+
+to_term(#cconst{base=Base,value=Value}) ->
     const_int(Base, Value);
-var_term_(#cid{name=Name}) ->
+to_term(#cid{name=Name}) ->
     Name;
-var_term_(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
+to_term(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
     Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
 	     '/' => "div", '%' => "rem",
 	     '&' => "band", '|' => "bor", "^" => "bxor" },
-    { maps:get(Op, Tab), [var_term_(Arg1), var_term_(Arg2)]};
-var_term_(#cunary{op=Op,arg=Arg}) ->
+    { maps:get(Op, Tab), [to_term(Arg1), to_term(Arg2)]};
+to_term(#cunary{op=Op,arg=Arg}) ->
     Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
-    { maps:get(Op, Tab), [var_term_(Arg)]};
-var_term_(#ccall{func=#cid{name=Func},args=Args}) ->
-    { Func, [ var_term_(A) || A <- Args]}.
+    { maps:get(Op, Tab), [to_term(Arg)]};
+to_term(#crange{from=From,to=To}) ->
+    {range,to_term(From),to_term(To)};
+to_term(#ccall{func=#cid{name=Func},args=Args}) ->
+    { Func, [ to_term(A) || A <- Args]}.
 
 
 const_int(16,"0x"++Value) ->
@@ -99,6 +145,8 @@ const_int(Base,Value) ->
 
 eval_term(Value,_Bs) when is_integer(Value) -> 
     Value;
+eval_term({range,From,To},Bs) ->
+    {range,eval_term(From,Bs),eval_term(To,Bs)};
 eval_term(Var,Bs) when is_list(Var); is_atom(Var) ->
     case maps:get(Var, Bs, undefined) of
 	undefined -> error({undefined_variable,Var});
@@ -142,3 +190,12 @@ eval(Fun, A, Bs) ->
     Av = eval_term(A, Bs),
     Fun(Av).
 
+%% TEST function
+
+test(Text) ->
+    {ok,{_Def,Tree}} = varp:parse(Text),
+    Vp = varc:new(#{xref => true}),
+    F = build(Tree, Vp, #{}),
+    varc:bind(Vp, F),
+    varc:set_level(Vp, 1),
+    varp_circuit:bt_all(Vp).
