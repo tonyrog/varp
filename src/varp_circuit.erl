@@ -30,6 +30,18 @@
 -export([all/2, all/3]).
 -export([none/2, none/3]).
 -export([one/2, one/3]).
+-export([odd/2, odd/3]).
+-export([even/2, even/3]).
+-export([parity/2, parity/3]).
+
+-export([eq/3, eq/4]).
+-export([neq/3, neq/4]).
+-export([lt/3, lt/4]).
+-export([lte/3, lte/4]).
+-export([gt/3, gt/4]).
+-export([gte/3, gte/4]).
+
+-export([eqk/4, gtk/4]).
 
 -export([add/3, add/4]).
 -export([add_ci/4, add_ci/5]).
@@ -151,7 +163,10 @@ gate(_Vp,'not',Y) -> inv(Y);
 gate(Vp,'all',Ys) -> all(Vp, Ys);
 gate(Vp,'any',Ys) -> any(Vp, Ys);
 gate(Vp,'none',Ys) -> none(Vp, Ys);
-gate(Vp,'one',Ys) -> one(Vp, Ys).
+gate(Vp,'one',Ys) -> one(Vp, Ys);
+gate(Vp,'odd',Ys) -> odd(Vp, Ys);
+gate(Vp,'even',Ys) -> even(Vp, Ys);
+gate(Vp,'parity',Ys) -> parity(Vp, Ys).
 		     
 %% return gate function from name
 gate(Vp,'or',X,Y,Z) -> or_gate(Vp,X,Y,Z);
@@ -187,6 +202,9 @@ gate(Vp,'all',X,Ys) -> all(Vp,X,Ys);
 gate(Vp,'any',X,Ys) -> any(Vp,X,Ys);
 gate(Vp,'none',X,Ys) -> none(Vp,X,Ys);
 gate(Vp,'one',X,Ys) -> one(Vp,X,Ys);
+gate(Vp,'odd',X,Ys) -> odd(Vp,X,Ys);
+gate(Vp,'even',X,Ys) -> even(Vp,X,Ys);
+gate(Vp,'parity',X,Ys) -> parity(Vp,X,Ys);
 
 gate(Vp,'eq',K,Ys) -> eq(Vp,K,Ys);
 gate(Vp,'neq',K,Ys) -> neq(Vp,K,Ys);
@@ -275,6 +293,19 @@ all(Vp,X,Ys) -> none_assoc(Vp,'and',X,Ys).
 
 none(Vp,Ys) -> inv(any(Vp,Ys)).
 none(Vp,X,Ys) -> inv(any(Vp,X,Ys)).
+
+odd(Vp,Ys) -> parity(Vp,Ys).
+odd(Vp,X,Ys) -> parity(Vp,X,Ys).
+
+even(Vp,Ys) -> inv(parity(Vp,Ys)).
+even(Vp,X,Ys) -> inv(parity(Vp,X,Ys)).
+
+parity(_Vp,[]) -> false;
+parity(Vp,Ys) -> left_assoc(Vp,'xor',Ys).
+
+parity(Vp,X,[]) -> or_gate(Vp,X,false,false);
+parity(Vp,X,Ys) -> left_assoc(Vp,'xor',X,Ys).
+    
     
 %% left balanced circuit 
 left_assoc(Vp,Gate,Ys) ->
@@ -354,33 +385,36 @@ gte(Vp,K,Ys) ->
     gte(Vp,K,varc:add_variable(Vp),Ys).
 
 eq(Vp,1,X,Ys) -> one(Vp, X, Ys);
-eq(Vp,K,X,Ys) -> eqk(Vp,K,length(Ys),X,Ys).
+eq(Vp,K,X,Ys) -> eqk(Vp,K,X,Ys).
 
 neq(Vp,K,X,Ys) ->
-    inv(eqk(Vp, K, length(Ys), X, Ys)).
+    inv(eqk(Vp,K,X,Ys)).
     
 lt(Vp,1,X,Ys) -> none(Vp,X,Ys);
 lt(Vp,K,X,Ys) when is_integer(K), K>1 ->
     N = length(Ys),
-    gtk(Vp, N-K, N, X, [inv(Yi) || Yi <- Ys]).
+    gtk_(Vp, N-K, N, X, [inv(Yi) || Yi <- Ys]).
     
 lte(Vp,0,X,Ys) -> none(Vp,X,Ys);
 lte(Vp,K,X,Ys) when is_integer(X), X>0 ->
     N = length(Ys),
-    gtk(Vp,N-K-1, N, X, [inv(Yi) || Yi <- Ys]).
+    gtk_(Vp,N-K-1, N, X, [inv(Yi) || Yi <- Ys]).
 
 gte(Vp,0,X,Ys) -> any(Vp,X,Ys);
-gte(Vp,K,X,Ys) when is_integer(K), K>=0 ->
-    gtk(Vp, K-1, length(Ys), X, Ys).
+gte(Vp,K,X,Ys) when is_integer(K), K>0 ->
+    gtk(Vp, K-1, X, Ys).
 
 gt(Vp,K,X,Ys) when is_integer(K), K >= 0 ->
-    gtk(Vp, K, length(Ys), X, Ys).
+    gtk(Vp, K, X, Ys).
 
-gtk(Vp,0,_N,X,Ys) ->
+gtk(Vp, K, X, Ys) ->
+    gtk_(Vp, K, length(Ys), X, Ys).
+
+gtk_(Vp,0,_N,X,Ys) ->
     any(Vp,X,Ys);
-gtk(_Vp,K,N,_X,_Ys) when K >= N -> %% no models
+gtk_(_Vp,K,N,_X,_Ys) when K >= N -> %% no models
     false;
-gtk(Vp,K,N,X,Ys) ->
+gtk_(Vp,K,N,X,Ys) ->
     Ys1 = sort(Vp,K,Ys),
     {A,B} = lists:split(N-K, Ys1),
     A1 = any(Vp,A),
@@ -388,14 +422,17 @@ gtk(Vp,K,N,X,Ys) ->
     and_gate(Vp, X, A1, B1).
 
 %% Generate a formula where exact K out of N formulas are true.
-eqk(Vp,0,_N,X,Ys) ->
+eqk(Vp,K,X,Ys) ->
+    eqk_(Vp,K,length(Ys),X,Ys).
+    
+eqk_(Vp,0,_N,X,Ys) ->
     inv(any(Vp,X,Ys));
-eqk(_Vp,K,N,_X,_Ys) when K > N -> %% no models
+eqk_(_Vp,K,N,_X,_Ys) when K > N -> %% no models
     %% bind X = false?
     false;
-eqk(Vp,K,N,X,Ys) when K =:= N ->
+eqk_(Vp,K,N,X,Ys) when K =:= N ->
     all(Vp,X,Ys);
-eqk(Vp,K,N,X,Ys) ->
+eqk_(Vp,K,N,X,Ys) ->
     Ys1 = sort(Vp,K,Ys),
     {A,B} = lists:split(N-K, Ys1),
     A1 = any(Vp,A),

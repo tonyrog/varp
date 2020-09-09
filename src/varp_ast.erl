@@ -38,10 +38,16 @@ build(Tree, Vp, State) ->
 	{'ANY',As}         -> nary('any',As,Vp,State);
 	{'NONE',As}        -> nary('none',As,Vp,State);
 	{'ONE',As}         -> nary('one',As,Vp,State);
+	{'ODD',As}         -> nary('odd',As,Vp,State);
+	{'EVEN',As}        -> nary('even',As,Vp,State);
+	{'PARITY',As}      -> nary('parity',As,Vp,State);
 	{{'ALL',Gs},A}     -> quant('all',Gs,A,Vp,State);
 	{{'ANY',Gs},A}     -> quant('any',Gs,A,Vp,State);
 	{{'NONE',Gs},A}    -> quant('none',Gs,A,Vp,State);
 	{{'ONE',Gs},A}     -> quant('one',Gs,A,Vp,State);
+	{{'ODD',Gs},A}     -> quant('odd',Gs,A,Vp,State);
+	{{'EVEN',Gs},A}    -> quant('even',Gs,A,Vp,State);
+	{{'PARITY',Gs},A}  -> quant('parity',Gs,A,Vp,State);
 	{{'EQ',[K|Gs]},A}  -> quant_k('eq',K,Gs,A,Vp,State);
 	{{'NEQ',[K|Gs]},A} -> quant_k('neq',K,Gs,A,Vp,State);
 	{{'LT',[K|Gs]},A}  -> quant_k('lt',K,Gs,A,Vp,State);

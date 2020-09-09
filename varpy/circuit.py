@@ -106,8 +106,8 @@ def full_adder(vp, y, z, ci=False, x=None, co=None):
     co = or_gate(vp,a1,a2,co)
     return (x,co)
 
-# (min,max) = SORT(y, z)
-def sort_gate(vp, y, z, x0=None, x1=None):
+# (min,max) circuit
+def comparator(vp, y, z, x0=None, x1=None):
     if x0 == None: x0 = varpy.add_variable(vp)
     if x1 == None: x1 = varpy.add_variable(vp)
     return (min_gate(vp, y, z, x0), max_gate(vp, y, z, x1))
@@ -143,9 +143,7 @@ def none_assoc(vp,gate,ys,x=None):
         return none_assoc_(vp,gate,ys,x)
 
 def none_assoc_(vp,gate,ys,x=None):
-    n = len(ys) // 2
-    u = [ys[i] for i in range(n)]
-    v = [ys[i] for i in range(n, len(ys))]
+    (u,v) = split(len(ys) // 2, ys)
     if len(u) == 1 and len(v) == 1:
         return gate(vp,u[0],v[0],x)
     elif len(u) == 1 and len(v) == 2:
@@ -180,16 +178,91 @@ def varp_none(vp, ys, x=None):
 def varp_one(vp, ys, x=None):
     return eq1(vp, ys, x)
 
+def varp_eq(vp, k, ys, x=None):
+    return eqk(vp, k, ys, x)
+
+def varp_neq(vp, k, ys, x=None):
+    return inv(eqk(vp, k, ys, x))
+
+def varp_gt(vp, k, ys, x=None):
+    if k >= 0: return gtk(vp, k, ys, x)
+ 
+def varp_gte(vp, k, ys, x=None):
+    if k == 0: return varp_any(vp, ys, x)
+    elif k>0: return gtk(vp,k-1,ys,x)
+
+def varp_lt(vp, k, ys, x=None):
+    if k == 0: return False
+    elif k == 1: return varp_none(vp,ys,x)
+    elif k > 1:
+        n = len(ys)
+        ys1 = [inv(yi) for yi in ys]
+        return gtk(vp, n-k, ys1, x)
+ 
+def varp_lte(vp, k, ys, x=None):
+    if k == 0: return varp_none(vp, ys, x)
+    elif k>0:
+        n = len(ys)
+        ys1 = [inv(yi) for yi in ys]
+        return gtk(vp,n-k-1,ys1,x)
+
 # sort all ys one lap then or over the
 # fixme len(ys) < 2
 def eq1(vp, ys, x=None):
     if x == None: x = varpy.add_variable(vp)
-    (z0,z1) = sort_gate(vp, ys[0], ys[1])
+    (z0,z1) = comparator(vp, ys[0], ys[1])
     zs = [z0]
     for y in ys[2:]:
-        (z0,z1) = sort_gate(vp, z1, y)
+        (z0,z1) = comparator(vp, z1, y)
         zs.append(z0)
     return and_gate(vp, z1, inv(left_assoc(vp, or_gate, zs)), x)
+
+def eqk(vp,k,ys,x=None):
+    n = len(ys)
+    if k == 0: return inv(varp_any(vp,ys,x))
+    elif k > n: return False
+    elif k == n: return varp_all(vp,ys,x)
+    else:
+        ys1 = sort(vp,k,ys)
+        (a,b) = split(k, ys1)
+        a1 = varp_all(vp,a)
+        b1 = varp_any(vp,b)
+        return and_gate(vp,a1,inv(b1),x)
+
+def gtk(vp,k,ys,x=None):
+    n = len(ys)
+    if k == 0: return varp_any(vp,ys,x)
+    elif k >= n: return False
+    else:
+        ys1 = sort(vp,k,ys)
+        (a,b) = split(k, ys1)
+        a1 = varp_all(vp, a)
+        b1 = varp_any(vp, b)
+        return and_gate(vp,a1,b1,x)
+
+# split list ys in two lists
+def split(n, ys):
+    u = [ys[i] for i in range(n)]
+    v = [ys[i] for i in range(n, len(ys))]
+    return (u,v)
+
+def sort(vp,n,xs):
+    ys = []
+    for i in range(n):
+        xs = minmax(vp,xs)
+        ys.append(xs.pop())
+    return ys + xs
+    
+# return a one-lap "sorted" list of xs such that
+# ys[n-1] is greater that all other elements
+def minmax(vp,xs):
+    ys = []
+    mx = xs[0]
+    for i in range(1,len(xs)):
+        (mi,mx) = comparator(vp,mx,xs[i])
+        ys.append(mi)
+    ys.append(mx)
+    return ys
 
 def var(vp, name):
     x = varpy.add_variable(vp, True)
@@ -206,9 +279,12 @@ def test_gate(gate):
     a = var(vp, "a")
     b = var(vp, "b")
     c = gate(vp, a, b)
-    varpy.bind(vp, c)
-    varpy.set_level(vp, 1)
-    return varpy.bt_all(vp)
+    if not varpy.bind(vp, c):
+        print("0 models found")
+        return 0
+    else:
+        varpy.set_level(vp, 1)
+        return varpy.bt_all(vp)
 
 def test_or():
     return test_gate(or_gate)

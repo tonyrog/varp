@@ -14,6 +14,7 @@ def build(vp, tree, vs={}):
         'equ' : varp_equ,
         'imp' : varp_imp,
         'not' : varp_not,
+        'list' : varp_list,
         'quant' : varp_quant
     } [tree.data](vp, tree, vs)
 
@@ -175,16 +176,33 @@ def varp_quant(vp, tree, vs):
         'lte' : varp_lte,
     } [q.data](vp, q, expr, vs)
 
+def varp_list(vp, tree, vs):
+    ys = []
+    for t in tree.children:
+        y = build(vp, t, vs)
+        ys.append(y)
+    return ys
+
 # build expr over a list of generators
 def quant(vp, gs, expr, vs):
     out = []
     quant_(vp, 0, len(gs), gs, expr, vs, out)
     return out
 
+def quantk(vp, gs, expr, vs):
+    out = []
+    k0 = var_term_arg(gs[0])
+    k1 = eval_expr(k0, vs)
+    quant_(vp, 1, len(gs), gs, expr, vs, out)
+    return (k1, out)
+
 def quant_(vp, i, n, gs, expr, vs, out):
     if i == n:
         x = build(vp, expr, vs)
-        out.append(x)
+        if isinstance(x, list):
+            out += x
+        else:
+            out.append(x)
     else:
         g = gs[i]
         if g.data == 'assign':
@@ -205,8 +223,10 @@ def quant_(vp, i, n, gs, expr, vs, out):
             else: quant_(vp, i+1, n, gs, expr, vs, out)
 
 def generators(q):
-    g = q.children[0]
-    if g.data == 'list': return g.children
+    if len(q.children) == 0: return []
+    else:
+        g = q.children[0]
+        if g.data == 'list': return g.children
 
 def varp_all(vp, q, expr, vs):
     return varpy.circuit.varp_all(vp, quant(vp, generators(q), expr, vs))
@@ -229,17 +249,37 @@ def varp_even(vp, q, expr, vs):
 def varp_parity(vp, q, expr, vs):
     return varpy.circuit.varp_parity(vp, quant(vp, generators(q), expr, vs))
 
-def varp_eq(vp, q, expr, vs): False
-def varp_neq(vp, q, expr, vs): False
-def varp_gt(vp, q, expr, vs): False
-def varp_gte(vp, q, expr, vs): False
-def varp_lt(vp, q, expr, vs): False
-def varp_lte(vp, q, expr, vs): False
+def varp_eq(vp, q, expr, vs):
+    (k,ys) = quantk(vp, generators(q), expr, vs)
+    return varpy.circuit.varp_eq(vp,k,ys)
+                                 
+def varp_neq(vp, q, expr, vs):
+    (k,ys) = quantk(vp, generators(q), expr, vs)
+    return varpy.circuit.varp_neq(vp,k,ys)
+
+def varp_gt(vp, q, expr, vs):
+    (k,ys) = quantk(vp, generators(q), expr, vs)
+    return varpy.circuit.varp_gt(vp,k,ys)
+    
+def varp_gte(vp, q, expr, vs):
+    (k,ys) = quantk(vp, generators(q), expr, vs)
+    return varpy.circuit.varp_gte(vp,k,ys)
+
+def varp_lt(vp, q, expr, vs):
+    (k,ys) = quantk(vp, generators(q), expr, vs)
+    return varpy.circuit.varp_lt(vp,k,ys)
+
+def varp_lte(vp, q, expr, vs):
+    (k,ys) = quantk(vp, generators(q), expr, vs)
+    return varpy.circuit.varp_lte(vp,k,ys)
 
 def test(text):
     f = varpy.parser.text(text)
     vp = varpy.new({})
     x = build(vp, f)
-    varpy.bind(vp, x)
-    varpy.set_level(vp, 1)
-    return varpy.bt_all(vp)
+    if not varpy.bind(vp, x):
+        print("0 models found")
+        return 0
+    else:
+        varpy.set_level(vp, 1)
+        return varpy.bt_all(vp)
