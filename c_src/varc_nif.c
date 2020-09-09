@@ -5381,6 +5381,7 @@ error:
 //
 
 // FIXME!!!
+#if 0
 static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
 {
     literal_t* xp = l2ll(vp, xl);
@@ -5414,6 +5415,7 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
 	slist_iter_remove(&piter);
     }
 }
+#endif
 
 //
 // Substitute one literal for an other
@@ -5584,9 +5586,11 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
     subst_ll(vp, xl, yl);
     subst_ll(vp, neg_l(xl), neg_l(yl));
 
+#if 0
     if (vp->opt.edge)
 	subst_2_clause(vp, xl, yl);
-
+#endif
+    
     ASSERT(!is_bound(xp->var, y)); // check circular
 
     bnd_vv(vp, y);     // mark Y as bound (to X)
