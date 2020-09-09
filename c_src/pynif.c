@@ -1902,7 +1902,7 @@ static ssize_t decode_seq(unsigned char* ptr, size_t len,
     int i;
     ssize_t blen = 0;
     for (i = 0; i < (int)seqlen; i++) {
-	size_t ilen;
+	ssize_t ilen;
 	if ((ilen = decode_term(ptr, len, &seq[i])) < 0)
 	    return -1;
 	blen += ilen;
