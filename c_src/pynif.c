@@ -66,10 +66,19 @@ static inline const char* py_string_as_string_and_size(PyObject* obj,
 #define String_AsString(x) PyString_AsString((x))
 #define String_AsStringAndSize(x,lenp) py_string_as_string_and_size((x),(lenp))
 #else
+
+static inline Py_ssize_t py_string_size(PyObject* obj)
+{
+    Py_ssize_t size;
+    if (PyUnicode_AsUTF8AndSize(obj, &size) == NULL)
+	return -1;
+    return size;
+}
+
 #define String_Check(x) PyUnicode_Check((x))
 #define String_FromString(s) PyUnicode_FromString((s))
 #define String_FromStringAndSize(s,n) PyUnicode_FromStringAndSize((s),(n))
-#define String_Size(s) PyUnicode_GetLength((s))
+#define String_Size(s) py_string_size((s))
 #define String_Resize(x,len) PyUnicode_Resize(&(x),(len))
 #define String_AsString(x) ((char*)PyUnicode_AsUTF8((x)))
 #define String_AsStringAndSize(x,lenp) PyUnicode_AsUTF8AndSize((x),(lenp))
@@ -2125,12 +2134,13 @@ static ssize_t decode_term(unsigned char* ptr, size_t len, PyObject** term)
 	if (len < 5) return 0;
 	n = get_uint32(ptr+1);
 	DBG("decode_term: map length=%ld\n",(long)n);
-	STK_BEGIN(PyObject*, seq4, 2*n) {
+	n = 2*n;
+	STK_BEGIN(PyObject*, seq4, n) {
 	    PyObject* dict;
 	    ssize_t slen;
 	    int i;
 
-	    if ((slen = decode_seq(ptr+5, len-5, seq4, 2*n)) < 0)
+	    if ((slen = decode_seq(ptr+5, len-5, seq4, n)) < 0)
 		STK_LEAVE(seq4);
 	    if ((dict = PyDict_New()) == NULL)
 		STK_LEAVE(seq4);
