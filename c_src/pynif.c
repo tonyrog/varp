@@ -1704,20 +1704,23 @@ static inline uint8_t get_uint8(unsigned char* ptr)
 
 static inline uint16_t get_uint16(unsigned char* ptr)
 {
-    uint16_t v = ((ptr[0]<<8)|ptr[1]);
+    uint16_t v = ptr[0];
+    v = (v << 8) | ptr[1];
     return v;
 }
 
 static inline uint32_t get_uint32(unsigned char* ptr)
 {
-    uint32_t v = ((ptr[0]<<24)|(ptr[1]<<16)|(ptr[2]<<8)|ptr[3]);
+    uint32_t v = ptr[0];
+    v = (v << 8) | ptr[1];
+    v = (v << 8) | ptr[2];
+    v = (v << 8) | ptr[3];
     return v;
 }
 
 static inline int32_t get_int32(unsigned char* ptr)
 {
-    uint32_t v = ((ptr[0]<<24)|(ptr[1]<<16)|(ptr[2]<<8)|ptr[3]);
-    return (int32_t) v;
+    return (int32_t) get_uint32(ptr);
 }
 
 static inline void put_uint8(unsigned char* ptr, uint8_t v)
