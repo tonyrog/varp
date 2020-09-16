@@ -1,10 +1,24 @@
 - add predicate info
 
-  predicate_arity(Vp, symbol() -> arity()
-  predicate_type(Vp, symbol()) -> bool|int|uint|bit
-?  predicate_first(Vp, P) -> symbol()
-?  predicate_next(Vp, Pi) -> Pj | false
+  add_predicate(Vp, "Name", [{arity,N},{type,bool|int|uint|bits}])
   
+  del_predicate(Vp, "Name")
+
+  predicate_info(Vp, "Name", arity) -> integer()
+  predicate_info(Vp, "Name", type) -> bool|int|uint|bits
+
+  symbol_first(Vp, "Name") -> symbol() | false
+  symbol_next(Vp, "Name", Sym) -> symbol() | false
+
+  add_symbol(Vp, {"Name",[A1,..An]}) ->
+
+  add_symbol(Vp, "Name") ==
+    		 (maybe add_predicate(Vp,"Name",[{airty,0},{type,bool}]) )
+  		 add_symbol(Vp, {"Name",[]})
+  
+  add_predicate(Vp, "Name") == add_predicate(Vp,"Name",[{arity,0},{type,bool}])
+
+
 
 - determine a symbol encoding
 
@@ -23,6 +37,15 @@
   name is stored as structure {"P",[{"add",["a","b"]}]}
   (in python as  ("P",[("add",["a","b"])])
 
+
+  formalize internal atomic formula structure
+  #define ARG_TYPE_INT  0
+  #define ARG_TYPE_ATM  1
+  #define ARG_TYPE_APP  2
+
+  ARG(i) == INT() | APP() | ATM()
+  APP -> [INT(n),ATM(name),ARG(1),...ARG(n)]
+  
 
   a) store bits together as aliases?
 
