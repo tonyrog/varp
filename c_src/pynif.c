@@ -1696,6 +1696,19 @@ char* pynif_format_ext_tag(int tag)
     }
 }
 
+static inline int is_long_uint8(long value)
+{
+    return ((value >= 0) && (value <= 255));
+}
+
+// sizeof(long) = 4 on windows 64
+static inline int is_long_int32(long value)
+{
+    return ((sizeof(long) == 4) ||
+	    ((value >= -2147483648L) && (value <= 2147483647L)));
+}
+
+
 static inline uint8_t get_uint8(unsigned char* ptr)
 {
     uint8_t v = (ptr[0]);
@@ -1736,10 +1749,10 @@ static inline void put_uint16(unsigned char* ptr, uint16_t v)
 
 static inline void put_uint32(unsigned char* ptr, uint32_t v)
 {
-    ptr[0] = (v >> 24);
-    ptr[1] = (v >> 16);
-    ptr[2] = (v >> 8);
-    ptr[3] = v;
+    ptr[3] = v & 0xff; v >>= 8;
+    ptr[2] = v & 0xff; v >>= 8;
+    ptr[1] = v & 0xff; v >>= 8;
+    ptr[0] = v & 0xff;
 }
 
 static inline void put_int32(unsigned char* ptr, int32_t v)
@@ -1764,10 +1777,10 @@ static size_t encode_ulong(unsigned char* ptr, unsigned long v)
 {
     size_t size = 1;
     *ptr++ = v;
-    v >>= 1;
+    v >>= 8;
     while(v) {
 	*ptr++ = v;
-	v >>= 1;
+	v >>= 8;
 	size++;
     }
     return size;
@@ -1795,9 +1808,9 @@ static ssize_t bytesize_of_term(ERL_NIF_TERM term)
 	    }
 	}
 	value = Integer_AsLong(term);
-	if ((value >= 0) && (value <= 0xff))
+	if (is_long_uint8(value))
 	    return 1+1;  // small_integer (uint8)
-	else if ((value >= -2147483648) && (value <= 2147483647))
+	else if (is_long_int32(value))
 	    return 1+4;  // integer (int32)
 	else // encode as bignum
 	    return 1+1+1+4; // size,sign,byte*4
@@ -2218,14 +2231,14 @@ ssize_t encode_term(PyObject* term, unsigned char* ptr, ssize_t size)
 	}
 	value = Integer_AsLong(term);
 	DBG("encode_term: value = %ld\n", (long)value);
-	if ((value >= 0) && (value <= 0xff)) {
+	if (is_long_uint8(value)) {
 	    if (size < 2) return -1;
 	    DBG("encode_term: SMALL_INTEGER %ld\n", (long)value);
 	    ptr[0] = SMALL_INTEGER_EXT;
 	    put_uint8(ptr+1, value);
 	    return 1+1;
 	}
-	else if ((value >= -2147483648) && (value <= 2147483647)) {
+	else if (is_long_int32(value)) {
 	    if (size < 5) return -1;
 	    DBG("encode_term: INTEGER %ld\n", (long)value);
 	    ptr[0] = INTEGER_EXT;
