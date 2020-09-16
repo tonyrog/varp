@@ -135,7 +135,7 @@ def none_assoc(vp,gate,ys,x=None):
         for xi in ys: clause(vp,[x,inv(xi)])
         return x
     elif gate == and_gate:
-        xs1 = [x] + [inv(xi) for xi in ys]
+        clause(vp, [x] + [inv(xi) for xi in ys])
         xn = inv(x)
         for xi in ys: clause(vp,[xn,xi])
         return x
