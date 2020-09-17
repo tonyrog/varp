@@ -35,6 +35,36 @@ def jump(vp, clause):
     list.reverse(l)
     return l[1]
 
+# purge among clauses in 'gamma'
+# NOTE 'delta' may contain clause i=0,
+#  this may in python be mixed up with False!
+# if keep is an integer then it is an absolute number
+# if keep is a float (range 0..1) then is relative to size
+def purge(vp, keep):
+    if isinstance(keep, float):
+        # calculate from keep factor 0.1 = keep 10%
+        if (keep >= 0) and (keep <= 1):
+            size = varpy.clauseset_size(vp, 'gamma')
+            keep = int(size*keep)
+    varpy.clauseset_offset(vp, 'gamma', keep)
+    varpy.clauseset_sort(vp, 'gamma')
+    i = varpy.clauseset_first(vp, 'gamma')
+    while i != False:
+        varpy.del_clause(vp, i)
+        i = varpy.clauseset_next(vp, i)
+    varpy.clauseset_offset(vp, 'gamma', 0)
+
+def test_fill(vp):
+    (a,b) = varpy.add_variables(vp, 8)
+    [x1,x2,x3,x4,x5,x6,x7,x8] = range(a,b+1)
+    varpy.add_clause(vp, [x1,-x2,x3], 'gamma')
+    varpy.add_clause(vp, [x1,x3], 'gamma')
+    varpy.add_clause(vp, [x2,x1], 'gamma')
+    varpy.add_clause(vp, [x4,x1], 'gamma')
+    varpy.add_clause(vp, [x5,x1], 'gamma')
+    varpy.add_clause(vp, [x6,x7,x8], 'gamma')
+    varpy.add_clause(vp, [x6,-x7,x8], 'gamma')
+    
 def test():
     vp = varpy.new({'xref':True})
     pigeon.p(vp, 6)
