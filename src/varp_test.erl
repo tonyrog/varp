@@ -287,3 +287,14 @@ int_model([ M | Ms]) ->
     [M | int_model(Ms)];
 int_model([]) ->
     [].
+
+dump_clauses(F) ->
+    {Var, Bs} = varp_formula:build(F),
+    varc_test:dump(Bs#bs.vp),
+    Var.
+
+
+    
+	
+    
+    

@@ -1748,7 +1748,10 @@ dump_variables(V, List, Verb) ->
     lists:foreach(
       fun(X) ->
 	      Keys = varc:variable_info_keys() -- [implication,symbol,level],
-	      [{Sym,_Pos}] = varc:variable_info(V,X,symbol),
+	      Sym = case varc:variable_info(V,X,symbol) of
+			[] -> no_symbol;
+			[{S,_}|_] -> S
+		    end,
 	      Level = varc:variable_info(V,X,level),
 	      Value = varc:value(V, X),
 	      io:format("~w: ~s = ~w @~w\n", [X, Sym, Value,Level]),
