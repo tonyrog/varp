@@ -383,20 +383,21 @@ typedef struct _literal_t *lit_t;
 #define ULIT_TRUE   0
 #define ULIT_FALSE  1
 
-#define LIT_FLAG_Q  0x01   // literal in Q
+#define LIT_FLAG_NEG  0x00000001   // literal negated (keep = 1!!!)
+#define LIT_FLAG_Q    0x80000000   // literal in Q
 
 typedef struct _literal_t // :slink_t
 {
     slink_t  qlink;            // literal_t is a slink (element in slist)
-    bool_t   neg;              // is_negated
-    uint8_t  flags;            // LIT_FLAG_Q ...
-    uint32_t user;             // user count for sorting
     ulit_t    l;               // integer literal code
+    uint32_t flags;            // LIT_FLAG_NEG | LIT_FLAG_Q
 #if defined(LIT_VALUE) && !defined(PACKED_VALUE)
     ival_t    ivalue;
 #endif
     struct _variable_t* var;   // "parent"
     struct _wlink_t* wlist;    // list of watch positions
+    uint32_t degree;           // number of ocurrences
+    uint32_t user;             // user count for sorting
     slist_t elist;             // list of 2-clause triggers
     dynarray_t* xref;          // cross references when enabled
     dynarray_t* sref;          // list of symbol/pos references
@@ -435,6 +436,14 @@ typedef struct _edge_t // :slink_t in slist_t
 #define MARKS        0x03  // all marks
 #define MARKN        0x04  // negative
 #define MARKL        0x80  // on-list
+
+#define VAR_FLAG_PHASE        0x0003  // first two bits are saved phase
+#define VAR_FLAG_MARK0        0x0100  // first mark
+#define VAR_FLAG_MARK1        0x0200  // second mark
+#define VAR_FLAG_MARKS        0x0300  // all marks
+#define VAR_FLAG_MARKN        0x0400  // negative
+#define VAR_FLAG_MARKL        0x8000  // on-list
+#define VAR_FLAG_ATOM         0x0040  // marked as atom
 
 #define LIT_POS 0
 #define LIT_NEG 1
@@ -1237,10 +1246,15 @@ static size_t get_number_of_clauses(varp_t* vp)
     return cnum;
 }
 
+static inline int is_neg_ll(literal_t* lp)
+{
+    return (lp->flags & LIT_FLAG_NEG);
+}
+
 // primitive negate a literal
 static inline literal_t* neg_ll(literal_t* lp)
 {
-    return &lp->var->lit[!lp->neg];
+    return &lp->var->lit[!is_neg_ll(lp)];
 }
 
 static inline literal_t* vindex_ll(varp_t* vp, int i)
@@ -1262,13 +1276,13 @@ static inline lit_t vindex_l(varp_t* vp, int vix)
 static inline int export_ll(literal_t* lp)
 {
     ASSERT(lp->var != 0);
-    return lp->neg ? -lp->var->ix : lp->var->ix;
+    return is_neg_ll(lp) ? -lp->var->ix : lp->var->ix;
 }
 
 static inline ERL_NIF_TERM external_ll(ErlNifEnv* env,literal_t* lp)
 {
     if (lp->var->ix == 0)
-	return enif_make_boolean(env, !lp->neg);
+	return enif_make_boolean(env, !is_neg_ll(lp));
     else {
 	int x = export_ll(lp);
 	return enif_make_int(env, x);
@@ -1280,7 +1294,7 @@ static inline bool_t is_neg_l(lit_t l)
 #ifdef LIT_INTEGER
     return SIGN(l);
 #else
-    return l->sign;
+    return is_neg_ll(l);
 #endif
 }
 
@@ -1482,7 +1496,7 @@ static inline ival_t get_ll(varp_t* vp, literal_t* lp)
 #else
     ival_t v = get_vv(vp,lp->var);
     if (I_CONST(v))
-	return lp->neg ? I_NEG(v) : v;
+	return is_neg_ll(lp) ? I_NEG(v) : v;
     return v;
 #endif
 }
@@ -1522,7 +1536,7 @@ static inline ival_t get_l(varp_t* vp, lit_t l)
 // primitive set literal value
 static inline void set_ll(varp_t* vp, literal_t* lp, ival_t ivalue)
 {
-    if (lp->neg)
+    if (is_neg_ll(lp))
 	set_vv(vp,lp->var,I_NEG(ivalue));
     else
 	set_vv(vp,lp->var,ivalue);
@@ -1534,7 +1548,7 @@ static inline literal_t* lookup_literal(literal_t* lp)
 {
     literal_t* bp;
     while ((bp = lp->var->bound) != NULL) { // resolve literal
-	if (lp->neg)  // negate literal
+	if (is_neg_ll(lp))  // negate literal
 	    lp = neg_ll(bp);
 	else
 	    lp = bp;
@@ -1550,16 +1564,21 @@ static inline int phase_export(variable_t* var)
 static inline ival_t decide_phase(varp_t* vp, lit_t xp)
 {
     literal_t* lp = l2ll(vp, xp);
-    if (vp->opt.use_phase) {
+    if (vp->opt.use_phase)
 	return lp->var->phase;
-	// return lp->neg ? I_NEG(lp->var->phase) : lp->var->phase;
-    }
     return vp->opt.init_phase;
 }
 
 static inline bool_t variable_is_bound(varp_t* vp, variable_t* var)
 {
     return get_vv(vp, var) != I_UNDEF;
+}
+
+// return true iff variable is free, that is variable does not
+// occure in any clause
+static inline bool_t variable_is_free(variable_t* var)
+{
+    return (var->lit[0].degree==0) && (var->lit[1].degree == 0);
 }
 
 static inline bool_t literal_is_bound(varp_t* vp, literal_t* lp)
@@ -1749,7 +1768,7 @@ char* format_literal(varp_t* vp, literal_t* lp)
 
     // alternate to allow to printf arguments!!
     litname = (litname == ln1) ? ln2 : ln1;
-    n = lp->neg ? "!" : "";
+    n = is_neg_ll(lp) ? "!" : "";
     if (dynarray_element(lp->sref, 0) != NULL)
 	snprintf(litname, sizeof(ln1), "%s%s", n, literal_strname(lp));
     else
@@ -1789,13 +1808,13 @@ void print_ll(literal_t* lp)
 {
     int vix;
     if ((vix=lp->var->ix) == 0) {
-	if (lp->neg)
+	if (is_neg_ll(lp))
 	    enif_fprintf(stdout, "f");
 	else
 	    enif_fprintf(stdout, "t");
     }
     else {
-	if (lp->neg)
+	if (is_neg_ll(lp))
 	    enif_fprintf(stdout, "-%d", vix);
 	else
 	    enif_fprintf(stdout, "%d", vix);
@@ -2226,7 +2245,8 @@ static int next_unbound(varp_t* vp)
     variable_t* var;
 
     if ((var = vp->order_next) != NULL) {
-	while(!cdlist_is_eol(var) && variable_is_bound(vp, var))
+	while(!cdlist_is_eol(var) &&
+	      (variable_is_bound(vp, var)/* || variable_is_free(var) */))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var)) {
 	    vp->order_next = var;
@@ -2241,7 +2261,8 @@ static int next_unbound_after(varp_t* vp, variable_t* var)
 {
     if (!cdlist_is_last(&vp->order_list, var)) {
 	var = cdlist_next(var);
-	while(!cdlist_is_eol(var) && variable_is_bound(vp, var))
+	while(!cdlist_is_eol(var) &&
+	      (variable_is_bound(vp, var)/* || variable_is_free(var)*/))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var))
 	    return var->ix;
@@ -2329,7 +2350,7 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
 
     push_variable(vp, var, level);
 
-    if (lp->neg) ivalue = I_NEG(ivalue);
+    if (is_neg_ll(lp)) ivalue = I_NEG(ivalue);
 
     set_vv(vp, var, ivalue);
     var->implication_clause = cix;
@@ -2469,8 +2490,9 @@ static void keep_level(varp_t* vp, int level)
 
 static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
 {
-    lp->neg      = neg;
-    lp->flags    = 0;
+    lp->degree   = 0;
+    lp->user     = 0;
+    lp->flags    = neg ? LIT_FLAG_NEG : 0;
     lp->l        = MAKE_LIT(var->ix,neg);
     lp->var      = var;
     lp->wlist    = NULL;
@@ -3891,13 +3913,10 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, (var->phase == I_TRUE) ? 1 : -1);
     if (EQUAL_KEY(env, is_atom, argv[2]))
 	return enif_make_boolean(env, var->is_atom);
-    if (EQUAL_KEY(env, degree, argv[2])) {
-	if (!vp->opt.xref)
-	    return enif_make_badarg(env);
+    if (EQUAL_KEY(env, degree, argv[2]))
 	return enif_make_uint(env,
-			      dynarray_size(var->lit[0].xref) +
-			      dynarray_size(var->lit[1].xref));
-    }
+			      var->lit[0].degree +
+			      var->lit[1].degree);
     if (EQUAL_KEY(env, symbol, argv[2])) {
 	literal_t* lp = &var->lit[LIT_POS];
 	size_t n = dynarray_size(lp->sref);
@@ -3939,11 +3958,8 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_literal(env, vp, argv[1], &lp))
 	return enif_make_badarg(env);
-    if (EQUAL_KEY(env, degree, argv[2])) {
-	if (!vp->opt.xref)
-	    return enif_make_badarg(env);
-	return enif_make_uint(env, dynarray_size(lp->xref));
-    }
+    if (EQUAL_KEY(env, degree, argv[2]))
+	return enif_make_uint(env, lp->degree);
     if (EQUAL_KEY(env, user, argv[2]))
 	return enif_make_uint(env, lp->user);
     if (EQUAL_KEY(env, edge, argv[2])) {
@@ -5165,10 +5181,33 @@ static void xref_del_clause(varp_t* vp, clause_t* cp)
     }
 }
 
+static void ref_clause(varp_t* vp, clause_t* cp)
+{
+    size_t size = cp->size;
+    lit_t* lit = cp->lit;
+    while(size--) {
+	lit_t l = *lit++;
+	literal_t* lp = l2ll(vp, l);
+	lp->degree++;
+    }
+}
+
+static void unref_clause(varp_t* vp, clause_t* cp)
+{
+    size_t size = cp->size;
+    lit_t* lit = cp->lit;
+    while(size--) {
+	lit_t l = *lit++;
+	literal_t* lp = l2ll(vp, l);
+	lp->degree--;
+    }
+}
+
 static int clause_link(varp_t* vp, clause_t* cp)
 {
     if (vp->opt.xref)
 	xref_add_clause(vp, cp);
+    ref_clause(vp, cp);
     if (vp->opt.edge && (cp->size == 2)) {
 	lit_t* lit  = cp->lit;
 	edge_insert(vp, neg_l(lit[0]), lit[1], cp->cix);
@@ -5180,6 +5219,19 @@ static int clause_link(varp_t* vp, clause_t* cp)
 	return 1;
     }
     return clause_watch(vp, cp);
+}
+
+static void clause_unlink(varp_t* vp, clause_t* cp)
+{
+    if ((cp->size == 2) && vp->opt.edge) {
+	lit_t* lit  = cp->lit;
+	edge_remove(vp, neg_l(lit[0]), lit[1], cp->cix);
+	edge_remove(vp, neg_l(lit[1]), lit[0], cp->cix);
+    }
+    clause_unwatch(vp, cp);      // remove watched literals
+    if (vp->opt.xref)
+	xref_del_clause(vp, cp);
+    unref_clause(vp, cp);
 }
 
 // link clause and update statistics
@@ -6673,7 +6725,7 @@ static int cmp_abs_lit QSORT_ARGS(const void* ap,const void* bp,void* arg)
 	return INDEX(a) - INDEX(b);
 #else
     if (a->var == b->var) {
-	if (a->sign) return -1;
+	if (is_neg_ll(a)) return -1;
 	else return 1;
     }
     if (a->var->ix == 0)
@@ -6784,7 +6836,7 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
     clause_t* cp;
     cix_t cix;
     uint32_t hvalue;
-
+    
     size = sort_clause_array(vp, lit, size, false);
 
     if (lit[size-1] == L_TRUE(vp))
@@ -6801,6 +6853,7 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 
     if ((cp = clause_alloc(vp, size)) == NULL)
 	return CLAUSE_NONE;
+    
     hvalue = literal_array_hash(vp, lit, size);
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
     if ((cix = clause_insert(vp, si, cp, hvalue)) == CLAUSE_NONE)
@@ -7169,17 +7222,6 @@ make_clause:
     return make_cix(env, cix);
 }
 
-static void clause_unlink(varp_t* vp, clause_t* cp)
-{
-    if ((cp->size == 2) && vp->opt.edge) {
-	lit_t* lit  = cp->lit;
-	edge_remove(vp, neg_l(lit[0]), lit[1], cp->cix);
-	edge_remove(vp, neg_l(lit[1]), lit[0], cp->cix);
-    }
-    clause_unwatch(vp, cp);      // remove watched literals
-    if (vp->opt.xref)
-	xref_del_clause(vp, cp);
-}
 
 static void clause_remove(varp_t* vp, clause_t* cp)
 {
@@ -8328,7 +8370,7 @@ static ERL_NIF_TERM varp_get_number_of_bindings(ErlNifEnv* env, int argc,
 static inline void mark0_literal(varp_t* vp, literal_t* lp)
 {
     if (!is_marked(lp->var,MARK0)) {
-	if (lp->neg)
+	if (is_neg_ll(lp))
 	    mark(vp, lp->var, MARK0|MARKN);
 	else
 	    mark(vp, lp->var, MARK0);
@@ -8340,7 +8382,7 @@ static inline void mark1_literal(varp_t* vp, literal_t* lp)
 {
     if (is_marked(lp->var,MARK0)) {
 	int neg = is_marked(lp->var,MARKN);
-	if (lp->neg == neg)
+	if (is_neg_ll(lp) == neg)
 	    mark(vp, lp->var, MARK1);
     }
 }
@@ -8549,7 +8591,7 @@ static int mark_intersect_var(ErlNifEnv* env, varp_t* vp,
 	    return -1;
 	if (is_marked(xp->var, MARK0)) {
 	    int neg = is_marked(xp->var,MARKN);
-	    if (neg == xp->neg)
+	    if (neg == is_neg_ll(xp))
 		element[j++] = x;
 	    else {
 		ERL_NIF_TERM nx = make_literal(env, neg_ll(xp));
@@ -8594,7 +8636,7 @@ static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
 		literal_t* xp = var_literal(vp, bp);
 		if (is_marked(xp->var, MARK0)) {
 		    int neg = is_marked(xp->var,MARKN);
-		    if (neg == xp->neg)
+		    if (neg == is_neg_ll(xp))
 			element[size++] = make_literal(env, xp);
 		    else {
 			ERL_NIF_TERM nx = make_literal(env, neg_ll(xp));
