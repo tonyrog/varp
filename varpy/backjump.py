@@ -6,20 +6,33 @@ from .pigeon import *
 def bj(vp):
     varpy.config(vp, 'max_conflicting', 1)
     varpy.set_level(vp, 0)
-    while not (r := varpy.nbcp(vp)) and ((l := varpy.info(vp, 'level')) > 0):
-        print("level = " + str(l))
+    r = varpy.nbcp(vp)
+    l = varpy.info(vp, 'level')
+    while not r and (l > 0):
+#        gsize = varpy.clauseset_size(vp, 'gamma')
+#        if ((gsize > 0) and ((gsize % 100) == 0)):
+#            print("|gamma| = "+str(gsize))
         cix = varpy.conflict(vp, l, 3.0, 0)
-        if varpy.minimize(vp, cix) == False:
+        if cix == False:
+            pass
+        elif varpy.minimize(vp, cix) == False:
             pass
         else:
             clause = varpy.get_clause(vp, cix)
-            if len(clause) == 1:
+            if clause == True and isinstance(clause, bool):
+                pass
+            elif len(clause) == 0:
+                undo_until(vp, l, 0)
+                return False
+            elif len(clause) == 1:
                 undo_until(vp, l, 0)
                 varpy.bind(vp, clause[0])
             else:
                 j = jump(vp, clause)
                 undo_until(vp, l, j)
                 varpy.move_clause(vp, cix, 'gamma')
+        r = varpy.nbcp(vp)
+        l = varpy.info(vp, 'level')
     return r
            
 def undo_until(vp, level, new_level):
@@ -29,7 +42,7 @@ def undo_until(vp, level, new_level):
     varpy.set_level(vp, level)
 
 def jump(vp, clause):
-    print("conflict clause = " + str(clause))
+    # print("conflict clause = " + str(clause))
     l = [varpy.implication_level(vp, q) for q in clause]
     list.sort(l)
     list.reverse(l)
@@ -53,6 +66,7 @@ def purge(vp, keep):
         varpy.del_clause(vp, i)
         i = varpy.clauseset_next(vp, i)
     varpy.clauseset_offset(vp, 'gamma', 0)
+
 
 def test_fill(vp):
     (a,b) = varpy.add_variables(vp, 8)

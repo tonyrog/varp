@@ -11,6 +11,5 @@ def text(data):
 def file(name):
     f = open(name)
     text = f.read()
-    print(text)
     f.close()
     return varp_parser.parse(text)
