@@ -19,15 +19,16 @@ def bj(vp):
             pass
         else:
             clause = varpy.get_clause(vp, cix)
-            if clause == True and isinstance(clause, bool):
-                pass
-            elif len(clause) == 0:
-                undo_until(vp, l, 0)
-                return False
+            if isinstance(clause, bool):
+                if clause == True:
+                    pass
+                else:
+                    undo_until(vp, l, 0)
+                    return False
             elif len(clause) == 1:
                 undo_until(vp, l, 0)
                 varpy.bind(vp, clause[0])
-            else:
+            elif len(clause) > 1:
                 j = jump(vp, clause)
                 undo_until(vp, l, j)
                 varpy.move_clause(vp, cix, 'gamma')

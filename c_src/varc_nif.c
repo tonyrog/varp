@@ -7826,9 +7826,8 @@ static ERL_NIF_TERM varp_clauseset_next(ErlNifEnv* env, int argc,
 //  [literal()] | true | false.
 //
 // returns
-//     false      clause does not exist
+//     false      when contradictory
 //     true       when clause is dead (contains true)
-//     []         when contradictory (or L/t if Skip=L and clause = [L])
 //     [L1...Ln]  a clause, without the Skip literal, if set.
 //
 static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
@@ -7839,6 +7838,7 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
     ERL_NIF_TERM r;
     int raw = false;
     int skip = false;
+    int skipped = false;
     ERL_NIF_TERM skip_lit = ATOM(undefined);
     literal_t* lp;
     cix_t  cix;
@@ -7867,7 +7867,7 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
     }
 
     if ((cp = get_clause(vp, cix)) == NULL)
-	return enif_make_boolean(env, false);
+	return enif_make_badarg(env);
 
     lit = cp->lit;
     csize = cp->size;
@@ -7877,33 +7877,46 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 	int i, size = 0;
 	for (i = 0; i < (int)csize; i++) {
 	    ERL_NIF_TERM elem = external_l(env, lit[i]);
-
-	    if (skip && (elem == skip_lit))
-		;  // skip
-	    else {
-		if (raw) // all elemenent
+	    if (raw) { // all elemenents (but not skip)
+		if (skip && (elem == skip_lit))
+		    skipped = true;  // found skip_lit and skipped it
+		else
 		    element[size++] = elem;
-		else {  // filter constant values
-		    lp = l2ll(vp, lit[i]);
-		    if (lp->var->level > 0)
+	    }
+	    else {  // filter constant values
+		lp = l2ll(vp, lit[i]);
+		if (lp->var->level > 0) {
+		    if (skip && (elem == skip_lit))
+			skipped = true;  // found skip_lit and skipped it
+		    else
 			element[size++] = elem;
-		    else {
-			switch(get_ll(vp,lp)) {
-			case I_TRUE:
-			    STK_LEAVE(element);
-			case I_FALSE:  // skip FALSE constants
-			    break;
-			case I_UNDEF:
-			case I_BOUND:
-			default:
+		}
+		else {
+		    switch(get_ll(vp,lp)) {
+		    case I_TRUE:
+			STK_LEAVE(element);
+		    case I_FALSE:  // skip FALSE constants
+			break;
+		    case I_UNDEF:
+		    case I_BOUND:
+		    default:
+			if (skip && (elem == skip_lit))
+			    skipped = true;
+			else
 			    element[size++] = elem;
-			    break;
-			}
+			break;
 		    }
 		}
 	    }
 	}
-	r = enif_make_list_from_array(env, element, size);
+	if (raw || (size > 0))
+	    r = enif_make_list_from_array(env, element, size);
+	else { // size=0 && raw == false
+	    if (skipped)
+		r = enif_make_list(env, 0);
+	    else
+		r = enif_make_boolean(env, false);  // contradictory
+	}
     } STK_END(element);
     return r;
 }

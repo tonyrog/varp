@@ -269,11 +269,13 @@ __[EXPERIMENTAL]__
 varpy.nbcp(vp)
 ```
 
-decide and bind next unbound variables until either
-no more variables to bind, return True,
-or a contradicion is reached, then return False.
-nbcp can be use with undo to implement a tight loop
-for simple backtracking.
+Repeatedly decide/bind next unbound variable, on a new level and
+run bcp until there are no more variables to bind or a contradiction 
+is found. If a contraduction is readed them return __False__
+otherwise there is a model, and __True__ is returned.
+__nbcp__ can be use together with undo to implement
+simple backtracking using a tight loop:
+
 
 ``` python
     def bt(vp):
@@ -299,17 +301,18 @@ However the conflict clause(s) created by varpy.conflict are created in
 
 
 ``` python
-varpy.get_clause(vp, cix [, skip | varpy.undefined [, raw]] )
+varpy.get_clause(vp, cix [, x | None [, raw]] )
 ```
 
 Retrieve a clause as list given the clause index __cix__.
 If literal __x__ is given then literal __x__ is removed 
 from the clause list returned. if __raw__ is __True__ then literals 
-bound on level=0 are also return as normal, otherwise they are
-removed. 
+bound on level 0 are also return as normal, otherwise they are
+filtered away.
 If all literals in the clause are __False__, that is the clause is
-contrdictory empty list [] is returned. If any literal is __True__
-then __True__ is returned.
+contrdictory __False__ is returned. If any literal is __True__
+then __True__ is returned. Otherwise a clause in list 
+is returned.
 
 ``` python
 varpy.find_clause(vp, [x1,...,xn])

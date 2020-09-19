@@ -89,9 +89,7 @@ cnf_(Fd,Type,Raw,I,VarMap,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
 	true ->
 	    cnf_(Fd,Type,Raw,varc:clauseset_next(Bs#bs.vp,I),VarMap,Bs);
-	[] -> %% this is contradictory
-	    cnf_(Fd,Type,Raw,varc:clauseset_next(Bs#bs.vp,I),VarMap,Bs);
-	CL ->
+	CL when is_list(CL) ->
 	    Fmt = case Type of
 		      cnf -> format_cnf_clause(Bs,CL,Raw,VarMap); 
 		      snf -> format_snf_clause(Bs,CL,Raw,VarMap)
@@ -177,9 +175,7 @@ renumerate_clauses(Bs, I, Raw, VarMap, NumClauses) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw) of
 	true ->
 	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses);
-	[] ->
-	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses);
-	CL ->
+	CL when is_list(CL) ->
 	    VarMap1 = renumerate_clause(CL,VarMap),
 	    renumerate_clauses(Bs,I1,Raw,VarMap1,NumClauses+1)
     end.
@@ -220,9 +216,7 @@ count_number_of_clauses_(Bs, I, N) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, false) of
 	true -> 
 	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
-	[] ->
-	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
-	_CL ->    
+	_CL when is_list(_CL) ->    
 	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N+1)
     end.
 -endif.
