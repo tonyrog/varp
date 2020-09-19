@@ -608,8 +608,6 @@ install_(Bs,_Level,[]) ->
 %% compact version of fmt_var
 fmt_v(_,?T)  -> "1";
 fmt_v(_,?F) -> "0";
-fmt_v(_,true)   -> "1";
-fmt_v(_,false)  -> "0";
 fmt_v(Bs,X) ->
     if X < 0 -> fmt_var_(Bs,-X, "!", "");
        true ->  fmt_var_(Bs,X, "", "")
@@ -1717,6 +1715,7 @@ var_vector_(Size,Size,Type,Xs,_V,Bs) ->
     {{Type,Size,lists:reverse(Xs)},Bs};
 var_vector_(I,Size,Type,Xs,V,Bs) ->
     {{bool,Xi},Bs1} = variable({Type,V,Size,I},Bs),
+    varc:is_used(Bs1#bs.vp, Xi, true),  %% mark as in use!
     var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector

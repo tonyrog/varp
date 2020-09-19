@@ -196,6 +196,23 @@ same variable or are bound to the same constant.
 
 
 ``` python
+varpy.is_used(vp, x [,value])
+```
+
+Check if literal __x__ is used in any clause or is forced to be
+in use by a previous setting of value. This makes "free" variables
+be included in fist and next\_unbound calls.
+
+``` python
+varpy.is_atom(vp, x [,value])
+```
+
+Check if literal __x__ is an __atom__, that is
+marked as atomic formula when adding new variables
+or set using is\_atom(vp, x, True)
+
+
+``` python
 varpy.set_level(vp, l)
 ```
 
@@ -289,9 +306,10 @@ Retrieve a clause as list given the clause index __cix__.
 If literal __x__ is given then literal __x__ is removed 
 from the clause list returned. if __raw__ is __True__ then literals 
 bound on level=0 are also return as normal, otherwise they are
-removed. If __False__ or the clause is dead and empty list is
-returned (fixme). 
-
+removed. 
+If all literals in the clause are __False__, that is the clause is
+contrdictory empty list [] is returned. If any literal is __True__
+then __True__ is returned.
 
 ``` python
 varpy.find_clause(vp, [x1,...,xn])
@@ -354,6 +372,7 @@ Get information about variable x
 * 'level'
 * 'phase'
 * 'is\_atom'
+* 'is\_used'
 * 'degree'
 * 'symbol'
 	

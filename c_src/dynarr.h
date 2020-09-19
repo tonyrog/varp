@@ -141,6 +141,11 @@ DYNARR_LOCAL int dynarray_setelement(dynarray_t* dp,int i,void* data)
     return 0;
 }
 
+DYNARR_LOCAL int dynarray_append(dynarray_t* dp,void* data)
+{
+    return dynarray_setelement(dp,dp->size,data);
+}
+
 DYNARR_LOCAL void* dynarray_add(dynarray_t* dp)
 {
     size_t n;

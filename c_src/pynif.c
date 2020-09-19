@@ -116,6 +116,15 @@ static PyObject* Integer_FromUnsignedLong(unsigned long u)
 #endif
 }
 
+static PyObject* Integer_FromUnsignedLongLong(unsigned long long u)
+{
+#ifdef Py_INTOBJECT_H
+    return PyInt_FromSize_t((size_t)u);
+#else
+    return PyLong_FromUnsignedLongLong(u);
+#endif
+}
+
 // Put and object on the to autodispose list
 static void autodispose(ErlNifEnv* env, PyObject* obj)
 {
@@ -206,18 +215,28 @@ ERL_NIF_TERM enif_make_uint(ErlNifEnv* env, unsigned i)
 
 int enif_get_uint64(ErlNifEnv* env, ERL_NIF_TERM term, uint64_t* ip)
 {
-    unsigned long value;
-    if (!enif_get_ulong(env, term, &value))
-	return 0;
-    // range check!
-    *ip = value;
-    return 1;
+    if (sizeof(unsigned long long) == 64) {
+	if (PyLong_Check(term)) {
+	    *ip = (uint64_t) PyLong_AsUnsignedLongLong(term);
+	    return 1;
+	}
+    }
+    else {
+	if (PyLong_Check(term)) { // either sizeof(long) == 64 or no 64 bit
+	    *ip = PyLong_AsUnsignedLong(term);
+	    return 1;
+	}
+    }
+    return 0;
 }
 
 ERL_NIF_TERM enif_make_uint64(ErlNifEnv* env, uint64_t i)
 {
     UNUSED(env);
-    return Integer_FromUnsignedLong((unsigned long) i);
+    if (sizeof(unsigned long long) == 64)
+	return Integer_FromUnsignedLongLong((unsigned long long) i);
+    else
+	return Integer_FromUnsignedLong((unsigned long) i);
 }
 
 //

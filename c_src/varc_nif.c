@@ -225,6 +225,10 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "is_variable",         2,  varp_is_variable ) \
     NIF( "is_bound",            2,  varp_is_bound ) \
     NIF( "is_equal",            3,  varp_is_equal ) \
+    NIF( "is_used",             2,  varp_is_used ) \
+    NIF( "is_used",             3,  varp_is_used )   \
+    NIF( "is_atom",             2,  varp_is_atom ) \
+    NIF( "is_atom",             3,  varp_is_atom )   \
     NIF( "set_level",           2,  varp_set_level ) \
     NIF( "keep_level",          2,  varp_keep_level ) \
     NIF( "move_level",          3,  varp_move_level ) \
@@ -408,9 +412,9 @@ typedef int32_t  pos_t;             // literal position type (-1 = invalid)
 #define CLAUSE_NONE  ((cix_t) -1)
 #define CLAUSE_TRUE  ((cix_t) -2)   // never stored, just returned
 #define CLAUSE_FALSE ((cix_t) -3)   // never stored, just returned
-#define MAKE_CIX(si,ix)  (((si)<<30)|(ix))
+#define MAKE_CIX(si,ix)  ((((cix_t)(si))<<30)|(ix))
 #define GET_SI(cix)      ((int)(((cix)>>30) & 3))
-#define GET_IX(cix)      ((cix)&0x3FFFFFFF)
+#define GET_IX(cix)      ((cix)&0x3FFFFFFFL)
 
 typedef struct _sref_t
 {
@@ -431,36 +435,28 @@ typedef struct _edge_t // :slink_t in slist_t
     lit_t l;
 } edge_t;
 
-#define MARK0        0x01  // first mark
-#define MARK1        0x02  // second mark
-#define MARKS        0x03  // all marks
-#define MARKN        0x04  // negative
-#define MARKL        0x80  // on-list
-
-#define VAR_FLAG_PHASE        0x0003  // first two bits are saved phase
-#define VAR_FLAG_MARK0        0x0100  // first mark
-#define VAR_FLAG_MARK1        0x0200  // second mark
-#define VAR_FLAG_MARKS        0x0300  // all marks
-#define VAR_FLAG_MARKN        0x0400  // negative
-#define VAR_FLAG_MARKL        0x8000  // on-list
-#define VAR_FLAG_ATOM         0x0040  // marked as atom
-
 #define LIT_POS 0
 #define LIT_NEG 1
 
 typedef struct _variable_t     // :cdlink_t in cdlist_t
 {
     cdlink_t link;
-    struct _variable_t* bound_next;
-    struct _variable_t* mark_next; // mark next
-    bool_t  is_atom;          // variable marked as input/atom
-    uint8_t mark;             // mark0/mark1/markn...
-    uint8_t flags;
+    struct _variable_t* bound_next;  // bindings
+    struct _variable_t* mark_next;   // mark list
+    struct {
+	unsigned is_atom:1;      // variable marked as input/atom
+	unsigned is_used:1;      // variable marked as used (maybe free)
+	unsigned mark0:1;        // mark 0
+	unsigned mark1:1;        // mark 1
+	unsigned markn:1;        // negative mark
+	unsigned markl:1;        // on mark list
+	unsigned phase:2;        // ival_t I_TRUE/I_FALSE
+	unsigned flags:8;
+    };
     literal_t* bound;          // if bound/subst this is the bound literal
 #if !defined(LIT_VALUE) && !defined(PACKED_VALUE)
     ival_t    ivalue;
 #endif
-    ival_t    phase;           // last set value (or by sort) def=opt.init_phase
     int ix;                    // variable index
     cix_t implication_clause;  // implication clause index
     pos_t literal_pos;         // position in implication clause
@@ -620,6 +616,7 @@ typedef struct _varp_t {
     size_t       nmarked;       // number of elements in marked
     variable_t*  marked_head;   // mlist marked variables
     variable_t** marked_tailp;  // pointer to tail pointer
+    
     size_t       snum;          // number of symbols in symbol hash table
     dynvar(dlist_t*,symtab);    // symbol hash table (of symbol_t*)
     size_t       hnum;          // number of clauses in clause hashtab
@@ -747,6 +744,7 @@ DECL_ATOM(implication_clause);
 DECL_ATOM(implication_pos);
 DECL_ATOM(inqueue);
 DECL_ATOM(is_atom);
+DECL_ATOM(is_used);
 DECL_ATOM(jump);
 DECL_ATOM(length);
 DECL_ATOM(level);
@@ -1569,19 +1567,21 @@ static inline ival_t decide_phase(varp_t* vp, lit_t xp)
     return vp->opt.init_phase;
 }
 
-static inline bool_t variable_is_bound(varp_t* vp, variable_t* var)
+static inline int variable_is_bound(varp_t* vp, variable_t* var)
 {
     return get_vv(vp, var) != I_UNDEF;
 }
 
 // return true iff variable is free, that is variable does not
 // occure in any clause
-static inline bool_t variable_is_free(variable_t* var)
+static inline int variable_is_unused(variable_t* var)
 {
+    if (var->is_used)
+	return 0;
     return (var->lit[0].degree==0) && (var->lit[1].degree == 0);
 }
 
-static inline bool_t literal_is_bound(varp_t* vp, literal_t* lp)
+static inline int literal_is_bound(varp_t* vp, literal_t* lp)
 {
     return get_vv(vp, lp->var) != I_UNDEF;
 }
@@ -1614,39 +1614,42 @@ static inline literal_t* literal_vv(varp_t* vp, variable_t* var)
     return vindex_ll(vp, i);
 }
 
-static inline void mark(varp_t* vp, variable_t* var, uint8_t marks)
+static inline void add_marked(varp_t* vp, variable_t* var)
 {
-    if (!(var->mark & MARKL)) { // not on mark list
+    if (!var->markl) {              // not on mark list
 	*(vp->marked_tailp) = var;  // put last
 	var->mark_next = NULL;
 	vp->marked_tailp = &(var->mark_next);
 	vp->nmarked++;
-	marks |= MARKL;  // on list
+	var->markl = 1;
     }
-    var->mark |= marks;
 }
 
-static inline void unmark(variable_t* var, uint8_t marks)
+// mark var as mark0
+static inline void mark0(varp_t* vp, variable_t* var)
 {
-    var->mark &= ~marks;
+    add_marked(vp, var); // if needed
+    var->mark0 = 1;
 }
 
-// any/all just an other name for clarity
-static inline bool_t is_marked(variable_t* var, uint8_t mark)
+static inline void mark1(varp_t* vp, variable_t* var)
 {
-    return (var->mark & mark) == mark;
+    add_marked(vp, var); // if needed
+    var->mark1 = 1;
 }
 
-// check that any flags in flag are set
-static inline int any_marked(variable_t* var, uint8_t marks)
+static inline void markn(varp_t* vp, variable_t* var)
 {
-    return ((var->mark & marks) != 0);
+    add_marked(vp, var); // if needed
+    var->markn = 1;
 }
 
-// check that all flags in flag are set
-static inline int all_marked(variable_t* var, uint8_t marks)
+static inline void unmark_var(variable_t* var)
 {
-    return ((var->mark & marks) == marks);
+    var->mark0 = 0;
+    var->mark1 = 0;
+    var->markn = 0;
+    var->markl = 0;
 }
 
 // clear before use!  clear all marks and clear mark list
@@ -1654,7 +1657,7 @@ static void unmark_all(varp_t* vp)
 {
     variable_t* var = vp->marked_head;
     while(var) {
-	var->mark = 0;
+	unmark_var(var);
 	var = var->mark_next;
     }
     vp->nmarked = 0;
@@ -2108,7 +2111,7 @@ static ERL_NIF_TERM make_cix(ErlNifEnv* env,cix_t cix)
     if (cix == CLAUSE_NONE)
 	return enif_make_int(env, -1);
     else
-	return enif_make_uint(env, cix);
+	return enif_make_ulong(env, cix);
 }
 
 static ERL_NIF_TERM make_binding(ErlNifEnv* env, varp_t*vp, variable_t* var)
@@ -2246,7 +2249,7 @@ static int next_unbound(varp_t* vp)
 
     if ((var = vp->order_next) != NULL) {
 	while(!cdlist_is_eol(var) &&
-	      (variable_is_bound(vp, var)/* || variable_is_free(var) */))
+	      (variable_is_bound(vp, var) || variable_is_unused(var)))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var)) {
 	    vp->order_next = var;
@@ -2262,7 +2265,7 @@ static int next_unbound_after(varp_t* vp, variable_t* var)
     if (!cdlist_is_last(&vp->order_list, var)) {
 	var = cdlist_next(var);
 	while(!cdlist_is_eol(var) &&
-	      (variable_is_bound(vp, var)/* || variable_is_free(var)*/))
+	      (variable_is_bound(vp, var) || variable_is_unused(var)))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var))
 	    return var->ix;
@@ -2505,8 +2508,9 @@ static void var_init(varp_t* vp, variable_t* var, int ix)
 {
     var->ix         = ix;
     var->phase      = vp->opt.init_phase;
-    var->is_atom    = false;
-    var->mark       = 0;
+    var->is_atom    = 0;
+    var->is_used    = 0;
+    unmark_var(var);
     var->flags      = 0;
     var->bound_next = NULL;
     var->bound      = NULL;
@@ -3598,7 +3602,7 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int i;
-    int is_atom = false;
+    int is_atom = 0;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -3626,7 +3630,7 @@ static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
     varp_t* vp;
     int i;
     unsigned n;
-    int is_atom = false;
+    int is_atom = 0;
     int j;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -3913,6 +3917,11 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, (var->phase == I_TRUE) ? 1 : -1);
     if (EQUAL_KEY(env, is_atom, argv[2]))
 	return enif_make_boolean(env, var->is_atom);
+    if (EQUAL_KEY(env, is_used, argv[2]))
+	return enif_make_boolean(env,
+				 var->is_used ||
+				 var->lit[0].degree ||
+				 var->lit[1].degree);
     if (EQUAL_KEY(env, degree, argv[2]))
 	return enif_make_uint(env,
 			      var->lit[0].degree +
@@ -4472,6 +4481,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     int arg = 0;
     int i, m, n;
     int order[2];
+    int r = 0;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
@@ -4532,7 +4542,8 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 		order_user(vp, pkey[k-1], nkey[k-1], n);
 		break;
 	    default:
-		return enif_make_badarg(env);
+		r = -1;
+		STK_LEAVE(sort_map);
 	    }
 	    if (order[i-1] & ORDER_DESCEND)
 		k = -k;
@@ -4580,12 +4591,14 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    dump_order("order_sort", vp);
 #endif
 	}
-    } STK_END0(sort_map);
+    } STK_END(sort_map);
     } STK_END0(pkey2);
     } STK_END0(pkey1);
     } STK_END0(nkey2);
     } STK_END0(nkey1);
 
+    if (r < 0)
+	return enif_make_badarg(env);
     ASSERT(valid_order(vp));
     return enif_make_ok(env);
 }
@@ -4779,6 +4792,52 @@ static ERL_NIF_TERM varp_is_equal(ErlNifEnv* env, int argc,
     return enif_make_boolean(env, (xp == yp));
 }
 
+static ERL_NIF_TERM varp_is_used(ErlNifEnv* env, int argc,
+				 const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    variable_t* var;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_variable(env, vp, argv[1], &var))
+	return enif_make_badarg(env);
+    if (argc == 2)
+	return enif_make_boolean(env, var->is_used);
+    else {
+	int prev, val;
+	if (!enif_get_boolean(env, argv[2], &val))
+	    return enif_make_badarg(env);
+	prev = var->is_used;
+	var->is_used = val;
+	return enif_make_boolean(env, prev);
+    }
+}
+
+static ERL_NIF_TERM varp_is_atom(ErlNifEnv* env, int argc,
+				 const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    variable_t* var;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_variable(env, vp, argv[1], &var))
+	return enif_make_badarg(env);
+    if (argc == 2)
+	return enif_make_boolean(env, var->is_atom);
+    else {
+	int prev, val;
+	if (!enif_get_boolean(env, argv[2], &val))
+	    return enif_make_badarg(env);
+	prev = var->is_atom;
+	var->is_atom = val;
+	return enif_make_boolean(env, prev);
+    }
+}
+
 static int set_lit(ErlNifEnv* env, varp_t* vp, lit_t xp, ival_t val, int level)
 {
     ival_t v;
@@ -4943,17 +5002,13 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	lit_t li = cp->lit[i];
 	variable_t* var = var_l(vp, li);
 	if ((cix = var->implication_clause) == CLAUSE_NONE) {
-	    // *dynvar_add(vp->tlit) = li;
-	    dynvar_resize(vp->tlit, i+1);
-	    vp->tlit[i] = li;
+	    dynvar_append(vp->tlit, &li);
 	}
 	else {
 	    clause_t* dp = get_clause(vp, cix);
 	    bool_t is_sub = is_subclause(dp, neg_l(li), cp);
 	    if (!is_sub) {
-		// *dynvar_add(vp->tlit) = li;
-		dynvar_resize(vp->tlit, i+1);
-		vp->tlit[i] = li;
+		dynvar_append(vp->tlit, &li);
 	    }
 	}
     }
@@ -7163,36 +7218,31 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 		literal_t* qp = l2ll(vp, q);
 		int qlevel = qp->var->level;
 
-		if (!is_marked(qp->var,MARK0) && (qlevel > 0)) {
+		if (!qp->var->mark0 && (qlevel > 0)) {
 		    variable_bump(vp, qp->var, bump);
-		    mark(vp, qp->var, MARK0);
+		    mark0(vp, qp->var);
 		    if (qlevel >= level)
 			step++;
 		    else {
-			// *dynvar_add(vp->tlit) = q;
-			int j = dynvar_size(vp->tlit);
-			dynvar_resize(vp->tlit, j+1);
-			vp->tlit[j] = q;
+			dynvar_append(vp->tlit, &q);
 		    }
 		}
 	    }
 	}
 
-	while(trail && !is_marked(trail,MARK0))
+	while(trail && !trail->mark0)
 	    trail = trail->bound_next;
 	ASSERT(trail != NULL);
 	lp = literal_vv(vp, trail);
 	u = ll2l(vp, lp);
 	if (step <= 1) {
-	    // *dynvar_add(vp->tlit) = neg_l(u);
-	    int j = dynvar_size(vp->tlit);
-	    dynvar_resize(vp->tlit, j+1);
-	    vp->tlit[j] = neg_l(u);
+	    u = neg_l(u);
+	    dynvar_append(vp->tlit, &u);
 	    goto make_clause;
 	}
 	else {
 	    cix = trail->implication_clause;
-	    unmark(lp->var, MARK0);
+	    lp->var->mark0 = 0;
 	    trail = trail->bound_next;
 	    step--;
 	}
@@ -7786,8 +7836,7 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    ERL_NIF_TERM list;
-    int i;
+    ERL_NIF_TERM r;
     int raw = false;
     int skip = false;
     ERL_NIF_TERM skip_lit = ATOM(undefined);
@@ -7804,13 +7853,11 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     if (argc >= 3) {
-	if (argv[2] == ATOM(undefined))
-	    skip = ATOM(undefined);
-	else if (vif_get_literal(env, vp, argv[2], &lp)) {
+	if (vif_get_literal(env, vp, argv[2], &lp)) {
 	    skip = true;
 	    skip_lit = external_ll(env,lp);
 	}
-	else
+	else if (!enif_is_undefined(env, argv[2]))
 	    return enif_make_badarg(env);
 
 	if (argc >= 4) {
@@ -7824,36 +7871,41 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 
     lit = cp->lit;
     csize = cp->size;
-    list = enif_make_list(env, 0);
+    r = enif_make_boolean(env, true);
 
-    for (i = csize-1; i >= 0; i--) {
-	ERL_NIF_TERM elem = external_l(env, lit[i]);
-	if (!skip || (elem != skip_lit)) {
-	    if (raw) {  // debug
-		list = enif_make_list_cell(env, elem, list);
-	    }
+    STK_BEGIN(ERL_NIF_TERM, element, csize) {
+	int i, size = 0;
+	for (i = 0; i < (int)csize; i++) {
+	    ERL_NIF_TERM elem = external_l(env, lit[i]);
+
+	    if (skip && (elem == skip_lit))
+		;  // skip
 	    else {
-		lp = l2ll(vp, lit[i]);
-		if (lp->var->level <= 0) {  // constant level
-		    switch(get_ll(vp,lp)) {
-		    case I_TRUE: // FIXME: should not be empty list!!!
-			return enif_make_list(env, 0);
-		    case I_FALSE:  // skip FALSE constants
-			break;
-		    case I_UNDEF:
-		    case I_BOUND:
-		    default:
-			list = enif_make_list_cell(env, elem, list);
-			break;
+		if (raw) // all elemenent
+		    element[size++] = elem;
+		else {  // filter constant values
+		    lp = l2ll(vp, lit[i]);
+		    if (lp->var->level > 0)
+			element[size++] = elem;
+		    else {
+			switch(get_ll(vp,lp)) {
+			case I_TRUE:
+			    STK_LEAVE(element);
+			case I_FALSE:  // skip FALSE constants
+			    break;
+			case I_UNDEF:
+			case I_BOUND:
+			default:
+			    element[size++] = elem;
+			    break;
+			}
 		    }
-		}
-		else {
-		    list = enif_make_list_cell(env, elem, list);
 		}
 	    }
 	}
-    }
-    return list;
+	r = enif_make_list_from_array(env, element, size);
+    } STK_END(element);
+    return r;
 }
 
 // sort descending variable level
@@ -8369,21 +8421,19 @@ static ERL_NIF_TERM varp_get_number_of_bindings(ErlNifEnv* env, int argc,
 
 static inline void mark0_literal(varp_t* vp, literal_t* lp)
 {
-    if (!is_marked(lp->var,MARK0)) {
+    if (!lp->var->mark0) {
+	mark0(vp, lp->var);
 	if (is_neg_ll(lp))
-	    mark(vp, lp->var, MARK0|MARKN);
-	else
-	    mark(vp, lp->var, MARK0);
+	    markn(vp, lp->var);
     }
 }
 
-
 static inline void mark1_literal(varp_t* vp, literal_t* lp)
 {
-    if (is_marked(lp->var,MARK0)) {
-	int neg = is_marked(lp->var,MARKN);
+    if (lp->var->mark0) {
+	int neg = lp->var->markn;
 	if (is_neg_ll(lp) == neg)
-	    mark(vp, lp->var, MARK1);
+	    mark1(vp, lp->var);
     }
 }
 
@@ -8398,7 +8448,7 @@ static ERL_NIF_TERM varp_unmark(ErlNifEnv* env, int argc,
     return enif_make_ok(env);
 }
 
-// Mark, with MARK0 list of literals, tuple of literals or bindings
+// Mark, with mark0 list of literals, tuple of literals or bindings
 // on a level optionally concat, do not clear marks before assigning new
 static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
@@ -8460,30 +8510,30 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 }
 
 
-// remove elements not marked with both MARK0 and MARK1 and
-// remove MARK1 in case an element as both MARK0 and MARK1
+// remove elements not marked with both mark0 and mark1 and
+// remove mark1 in case an element as both mark0 and mark1
 static void intersect_marked(varp_t* vp)
 {
     variable_t** vpp = &vp->marked_head;
     variable_t*  var;
 
     while((var=*vpp) != NULL) {
-	if (all_marked(var, MARK0|MARK1)) { // both marked
-	    unmark(var, MARK1);             // keep MARK0 and MARKN
+	if (var->mark0 && var->mark1) { // both marked
+	    var->mark1 = 0;
 	    vpp = &var->mark_next;
 	}
 	else {
 	    if ((*vpp = var->mark_next) == NULL) // remove if not both marked
 		vp->marked_tailp = vpp;
 	    vp->nmarked--;          // remove one element
-	    var->mark = 0;          // not on list any more!
+	    unmark_var(var);        // not on list any more!
 	}
     }
 }
 
-// Mark all literals that are marked as MARK0 with MARK1 (MARKN is checked)
-// Then marked variables with both MARK0 and MARK1 are kept and
-// marked as MARK0 together with MARKN flags, other marks are removed
+// Mark all literals that are marked as mark0 with mark1 (markn is checked)
+// Then marked variables with both mark0 and mark1 are kept and
+// marked as mark0 together with markn flags, other marks are removed
 //
 static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
 					 const ERL_NIF_TERM argv[])
@@ -8537,7 +8587,7 @@ static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
     return enif_make_ok(env);
 }
 
-// return a list/tuple of literals that are marked with MARK0 (|MARKN)
+// return a list/tuple of literals that are marked with mark0 (|markn)
 static ERL_NIF_TERM varp_get_marked(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
@@ -8557,9 +8607,9 @@ static ERL_NIF_TERM varp_get_marked(ErlNifEnv* env, int argc,
 	    int i = 0;
 	    var = vp->marked_head;
 	    while(var) {
-		if (is_marked(var,MARK0)) {
+		if (var->mark0) {
 		    int x = var->ix;
-		    if (is_marked(var,MARKN))
+		    if (var->markn)
 			x = -x;
 		    elements[i++] = enif_make_int(env, x);
 		}
@@ -8589,8 +8639,8 @@ static int mark_intersect_var(ErlNifEnv* env, varp_t* vp,
 	literal_t* xp;
 	if (!vif_get_literal(env, vp, x, &xp))
 	    return -1;
-	if (is_marked(xp->var, MARK0)) {
-	    int neg = is_marked(xp->var,MARKN);
+	if (xp->var->mark0) {
+	    int neg = xp->var->markn;
 	    if (neg == is_neg_ll(xp))
 		element[j++] = x;
 	    else {
@@ -8634,8 +8684,8 @@ static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
 	STK_BEGIN(ERL_NIF_TERM, element, n) {
 	    while(bp != NULL) {
 		literal_t* xp = var_literal(vp, bp);
-		if (is_marked(xp->var, MARK0)) {
-		    int neg = is_marked(xp->var,MARKN);
+		if (xp->var->mark0) {
+		    int neg = xp->var->markn;
 		    if (neg == is_neg_ll(xp))
 			element[size++] = make_literal(env, xp);
 		    else {
@@ -8767,6 +8817,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(implication_pos);
     LOAD_ATOM(inqueue);
     LOAD_ATOM(is_atom);
+    LOAD_ATOM(is_used);
     LOAD_ATOM(jump);
     LOAD_ATOM(length);
     LOAD_ATOM(level);

@@ -89,7 +89,7 @@ cnf_(Fd,Type,Raw,I,VarMap,Bs) ->
     case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
 	true ->
 	    cnf_(Fd,Type,Raw,varc:clauseset_next(Bs#bs.vp,I),VarMap,Bs);
-	[] ->
+	[] -> %% this is contradictory
 	    cnf_(Fd,Type,Raw,varc:clauseset_next(Bs#bs.vp,I),VarMap,Bs);
 	CL ->
 	    Fmt = case Type of

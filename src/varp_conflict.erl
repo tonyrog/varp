@@ -63,7 +63,7 @@ analyze_clause_(V,Trail, I, Level, Bump) ->
     analyze_conflict_(V,Trail,varc:conflicting_clause(V,I),Level,Bump).
 
 analyze_conflict_(V,Trail,Cix,Level,Bump) ->
-    Conflicting = get_clause(V,Cix,undefined),
+    Conflicting = varc:get_clause(V,Cix,undefined),
     ?dbg("trail: decision=~w,clause=~w,trail=~w\n", 
 	  [varc:get_decision(V, Level),Conflicting,Trail]),
     analyze_reason(V,Conflicting,Trail,Level,Bump,#{},0,[]).
@@ -109,14 +109,11 @@ drop_not_seen(Trail=[P|Trail1], Seen) ->
 	    drop_not_seen(Trail1, Seen)
     end.
 		    
-get_clause(V, ClauseIndex, SkipLiteral) ->
-    varc:get_clause(V, ClauseIndex, SkipLiteral).
-
 reason(V,L) ->
     case varc:implication_clause(V,L) of
 	-1 -> [];
 	Cix ->
-	    Reason = get_clause(V,Cix,L),
+	    Reason = varc:get_clause(V,Cix,L),
 	    ?dbg("~w: implication ~w = ~w\n", 
 		  [L,varp_formula:cix(Cix),Reason]),
 	    varc:use_clause(V, Cix),

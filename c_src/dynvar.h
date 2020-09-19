@@ -16,9 +16,9 @@
 #define dynvar_set_capacity(name, size)				\
     ((dynarray_set_capacity(&name ## _dyn_, (size)) < 0) ? -1 :	\
      (name = name ## _dyn_.base, 0))
-#define dynvar_add(name)			\
-    (dynarray_add(&name ## _dyn_), name = name ## _dyn_.base,		\
-     (TYPEOF(name[0])*) DYN_ADDR(&name ## _dyn_, name ## _dyn_.size -1))
+#define dynvar_append(name, data) \
+    ((dynarray_append(&name ## _dyn_, (data))<0) ? -1 : \
+     (name = name ## _dyn_.base, 0))
 #define dynvar_clear(name)			\
     (dynarray_clear(&name ## _dyn_), name = NULL)
 

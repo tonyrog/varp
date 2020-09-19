@@ -23,7 +23,6 @@
 -export([add_symbol/3]).
 -export([del_symbol/2]).
 -export([get_symbol/2]).
--export([is_atom/2]).
 -export([find_symbol/2]).
 -export([first_symbol/1]).
 -export([next_symbol/2]).
@@ -43,6 +42,8 @@
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
+-export([is_used/2, is_used/3]).
+-export([is_atom/2, is_atom/3]).
 -export([set_level/2]).
 -export([undo_level/2]).
 -export([keep_level/2]).
@@ -255,10 +256,6 @@ del_symbol(_Vp, _Name)  ->
 get_symbol(Vp, Lit) when is_integer(Lit) ->
     variable_info(Vp, Lit, symbol).
 
--spec is_atom(Vp::varc(), Lit::literal()) -> [term()]. %% aliases
-is_atom(Vp, Lit) when is_integer(Lit) ->
-    variable_info(Vp, Lit, is_atom).
-
 %% find variable index from variable name (term or binary)
 -spec find_symbol(Vp::varc(), Name::term()) -> false | literal() | [literal()].
 find_symbol(_Vp, _Name) ->
@@ -389,6 +386,22 @@ is_bound(_Vp, Lit) when is_integer(Lit) ->
 -spec is_equal(Vp::varc(), LitA::literal(), LitB::literal()) -> boolean().
 is_equal(_Vp, LitA, LitB) when is_integer(LitA),
 			       is_integer(LitB) ->
+    ?nif_stub().
+
+-spec is_used(Vp::varc(), Var::literal()) -> boolean().
+is_used(_Vp, Var) when is_integer(Var) ->
+    ?nif_stub().
+
+-spec is_used(Vp::varc(), Var::literal(), Status::boolean()) -> boolean().
+is_used(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
+    ?nif_stub().
+
+-spec is_atom(Vp::varc(), Var::literal()) -> boolean().
+is_atom(_Vp, Var) when is_integer(Var) ->
+    ?nif_stub().
+
+-spec is_atom(Vp::varc(), Var::literal(), Status::boolean()) -> boolean().
+is_atom(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
     ?nif_stub().
 
 -spec set_level(Vp::varc(), Level::level()) -> ok.
