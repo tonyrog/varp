@@ -4913,7 +4913,8 @@ static ERL_NIF_TERM varp_is_used(ErlNifEnv* env, int argc,
 	if (!enif_get_boolean(env, argv[2], &val))
 	    return enif_make_badarg(env);
 	prev = var->is_used;
-	var->is_used = val;
+	if ((var->is_used = val) != 0)
+	    order_move_top(vp, var);
 	return enif_make_boolean(env, prev);
     }
 }
