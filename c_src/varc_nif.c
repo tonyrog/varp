@@ -65,9 +65,9 @@
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-//#define ASSERTIONS
-//#define DEBUG
-//#define DEBUG_BCP
+// #define ASSERTIONS
+// #define DEBUG
+// #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
 // #define DEBUG_EDGE
@@ -213,6 +213,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "add_variables",       2,  varp_add_variables ) \
     NIF( "add_variables",       3,  varp_add_variables ) \
     NIF( "value",               2,  varp_value )	\
+    NIF( "bound",               2,  varp_bound )	\
     NIF( "bind",                2,  varp_bind )		\
     NIF( "bind",                3,  varp_bind )		\
     NIF( "decide",              2,  varp_decide )	\
@@ -315,7 +316,7 @@ NIF_LIST
 #define MAX_MAP_SIZE       (1024*1024)   // max inital size
 #define MAX_MAP_EXPAND     (256*1024)    // max expand
 
-#define HEAP_BLOCK_SIZE      4096
+#define HEAP_BLOCK_SIZE      (64*1024)   // 4096
 #define MAX_HEAP_ALLOC_SIZE  (HEAP_BLOCK_SIZE - sizeof(heap_t))
 #define HEAP_ALIGN           sizeof(void*)
 
@@ -464,6 +465,13 @@ typedef struct _variable_t     // :cdlink_t in cdlist_t
     literal_t lit[2];          // literal containers LIT_POS=0 LIT_NEG=1
 } variable_t;
 
+// FIXME: use list of vlink for bound list and mark list
+typedef struct _vlink_t  // :slink_t in slist_t
+{
+    slink_t link;
+    variable_t* var;
+} vlink_t;
+
 typedef struct _symbol_t // :dlink - dlist
 {
     dlink_t link;
@@ -498,12 +506,12 @@ typedef struct _clause_t
     wlink_t    wl[2];        // ALIGNED watch point 1&2+links (DO NOT MOVE!)
     cix_t      cix;          // clause id (index) 0..n-1  (<< 1)
     uint32_t   size;         // number of literals in lit
+    uint32_t hvalue;         // clause hash value
     uint8_t    flags;        // INQUEUE ...
     uint8_t    select;       // case select: 0=unit-clause, 1=2-clause,
 			     // 2=3-clause, 3=n_clause
     struct _clause_t* uwatch;// clauses to unwatch
     uint64_t stamp;          // last used time (bcp_counter clock)
-    uint32_t hvalue;         // clause hash value
     lit_t lit[];             // literal array
 } clause_t;
 
@@ -623,7 +631,7 @@ typedef struct _varp_t {
     dynvar(slist_t*,hashtab);   // clause hash table (of hlink_t*)
     dynvec(clause_t**,clauseset,NUM_CSET); // array of clausesets, entries may be null
     cdlist_t     order_list;    // doubly linked order list
-    variable_t* order_next;     // next variable to search from
+    variable_t*  top;           // first unbound variable
 
     clause_t*    unwatch;      // clauses to unwatch (check after bcp)
     dynvar(undo_t*,undo);       // array of undo block, one for each level
@@ -726,7 +734,6 @@ DECL_ATOM(conflict);
 DECL_ATOM(conflict_counter);
 DECL_ATOM(dead);
 DECL_ATOM(default);
-// DECL_ATOM(degree);
 DECL_ATOM(delta);
 DECL_ATOM(done);
 DECL_ATOM(edge);
@@ -820,6 +827,12 @@ DECL_ATOM(user);
 DECL_ATOM(p_user);
 DECL_ATOM(n_user);
 DECL_ATOM(e_user);
+// memory stats
+DECL_ATOM(memory_literal_size);
+DECL_ATOM(memory_clause_size);
+DECL_ATOM(memory_variable_size);
+DECL_ATOM(memory_symbol_size);
+DECL_ATOM(memory_size);
 
 #ifdef DEBUG_MEM
 #define VARP_ALLOC(n)       debug_alloc((n))
@@ -1029,32 +1042,33 @@ void debug_free(void* ptr)
 
 #endif
 
-static heap_t* new_heap_block()
+static heap_t* new_heap_block(size_t size)
 {
     heap_t* hp;
-    if ((hp = VARP_ALLOC(HEAP_BLOCK_SIZE + HEAP_ALIGN - 1)) == NULL)
+    if ((hp = VARP_ALLOC(size + HEAP_ALIGN - 1)) == NULL)
 	return NULL;
     hp->current = hp->base + PAD(hp->base,HEAP_ALIGN);
-    hp->end     = hp->current + MAX_HEAP_ALLOC_SIZE;
+    hp->end     = hp->current + (size - sizeof(heap_t));
+    // printf("new_heap_block: %lu\r\n", size);
     return hp;
 }
 
-static void* heap_alloc(slist_t* list, size_t size)
+static void* heap_alloc(slist_t* list, size_t obj_size)
 {
     heap_t* hp;
     void* ptr;
 
-    if (size > MAX_HEAP_ALLOC_SIZE)
+    if (obj_size > (HEAP_BLOCK_SIZE - sizeof(heap_t)))
 	return NULL;
     if (slist_is_empty(list))
-	hp = slist_insert_first(list, new_heap_block());
+	hp = slist_insert_first(list, new_heap_block(HEAP_BLOCK_SIZE));
     else {
 	hp = slist_first(list);
-	if (hp->current + size >= hp->end)
-	    hp = slist_insert_first(list, new_heap_block());
+	if (hp->current + obj_size >= hp->end)
+	    hp = slist_insert_first(list, new_heap_block(HEAP_BLOCK_SIZE));
     }
     ptr = hp->current;
-    hp->current += size;
+    hp->current += obj_size;
     return ptr;
 }
 
@@ -1094,6 +1108,41 @@ static void obj_free(allocator_t* ap, void* ptr)
 {
     slist_insert_last(&ap->free_list, ptr);
 }
+
+// make sure there are at least n "free" objects to
+// allocate from
+static int obj_pre_alloc(allocator_t* ap, size_t n)
+{
+    heap_t* hp;    
+    size_t m;
+    size_t size;
+    int i;
+    
+    // check number of elements are on free list
+    m = slist_length(&ap->free_list);
+    if (m >= n) return 0;
+    n -= m;
+
+    // check number of elements that can be allocated from current heap
+    if ((hp = slist_first(&ap->heap_list)) != NULL) {
+	size_t r = (hp->end - hp->current) / ap->size;
+	for (i = 0; i < (int)r; i++) {
+	    void* obj = heap_alloc(&ap->heap_list, ap->size);
+	    obj_free(ap, obj);
+	}
+	n -= r;
+    }
+
+    // now create big segement for rest of the objects
+    size = n * ap->size;
+    if (size < HEAP_BLOCK_SIZE)
+	size = HEAP_BLOCK_SIZE;
+    if ((hp = new_heap_block(size)) == NULL)
+	return -1;
+    slist_insert_first(&ap->heap_list, hp);
+    return (int) n;
+}
+
 
 static int equal_string(ErlNifEnv* env, ERL_NIF_TERM atm, ERL_NIF_TERM arg)
 {
@@ -2242,20 +2291,90 @@ static inline void log_permanent(varp_t* vp, literal_t* x,
     log_permanent_(vp, x, y);
 }
 
+static inline void order_set_top(varp_t* vp, variable_t* var)
+{
+    if ((vp->top == NULL) || cdlist_is_before(var, vp->top))
+	vp->top = var;
+}
+
+// move order_next if needed
+static inline void order_move_top(varp_t* vp, variable_t* var)
+{
+    if (!variable_is_bound(vp, var))
+	order_set_top(vp, var);
+}
+
+// remove var from order list, update order_next if needed
+static void order_remove(varp_t* vp, variable_t* var)
+{
+    cdlist_t* list = &vp->order_list;
+    size_t n = cdlist_length(list);
+
+    ASSERT(n > 0);
+
+    if (n == 1) { // remove last element
+	cdlist_remove(list, var);
+	vp->top = NULL;
+    }
+    else if (n > 1) {
+	if (var == vp->top) {
+	    if (cdlist_is_last(list, var))
+		vp->top = cdlist_prev(var);
+	    else
+		vp->top = cdlist_next(var);
+	}
+	cdlist_remove(list, var);
+    }
+}
+
+static void order_insert_first(varp_t* vp, variable_t* var)
+{
+    cdlist_insert_first(&vp->order_list, var);
+    order_move_top(vp, var);
+}
+
+static void order_insert_last(varp_t* vp, variable_t* var)
+{
+    cdlist_insert_last(&vp->order_list, var);
+}
+
+static void order_insert_before(varp_t* vp,variable_t* anchor,variable_t* var)
+{
+    cdlist_insert_before(&vp->order_list, anchor, var);
+    order_move_top(vp, var);
+}
+
+// insert var before top and move top if var is unbound
+static inline void order_insert_before_top(varp_t* vp, variable_t* var)
+{
+    if (vp->top == NULL) {
+	order_remove(vp, var);
+	order_insert_first(vp, var);
+	if (!variable_is_bound(vp, var))
+	    vp->top = var;
+    }
+    else if (var != vp->top) {
+	order_remove(vp, var);
+	order_insert_before(vp, vp->top, var);
+	if (!variable_is_bound(vp, var))
+	    vp->top = var;
+    }
+}
+
 // get next unbound literal
 static int next_unbound(varp_t* vp)
 {
     variable_t* var;
 
-    if ((var = vp->order_next) != NULL) {
+    if ((var = vp->top) != NULL) {
 	while(!cdlist_is_eol(var) &&
 	      (variable_is_bound(vp, var) || variable_is_unused(var)))
 	    var = cdlist_next(var);
 	if (!cdlist_is_eol(var)) {
-	    vp->order_next = var;
+	    vp->top = var;  // first unbound found save in top
 	    return var->ix;
 	}
-	vp->order_next = NULL;
+	vp->top = NULL;
     }
     return 0;
 }
@@ -2446,8 +2565,7 @@ static void unbind_level(varp_t* vp, int level)
 	bp->implication_clause = CLAUSE_NONE;
 	bp->literal_pos = -1;
 	bp->level = -1;
-	if ((vp->order_next == NULL) || cdlist_is_before(bp, vp->order_next))
-	    vp->order_next = bp;
+	order_set_top(vp, bp);
 	bp = bp->bound_next;
     }
     vp->num_bound -= vp->undo[level].size;
@@ -3007,7 +3125,7 @@ static void symtab_slot_cleanup(dlist_t* list)
     dlist_iter_t iter;
 
     dlist_iter_init(&iter, list);
-    while(!dlist_iter_eol(&iter)) {
+    while(!dlist_iter_end(&iter)) {
 	symbol_t* sp = dlist_iter_current(&iter);
 	VARP_FREE(sp->data);
 	dynvar_clear(sp->lit);
@@ -3406,7 +3524,7 @@ static int setup(varp_t* vp, varp_config_t* config)
     VALIDATE_MEMLIST();
 
     cdlist_init(&vp->order_list);
-    vp->order_next = NULL;
+    vp->top = NULL;
 
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
@@ -3582,16 +3700,22 @@ static int add_variables(varp_t* vp, size_t n)
 #endif
 #endif
     }
+
+    obj_pre_alloc(&vp->var_allocator, n);
+    
     for (j = (int)k; j < (int)m; j++) {
 	variable_t* var;
 	if ((var = obj_alloc(&vp->var_allocator)) == NULL)
 	    return -1;
-	cdlist_insert_last(&vp->order_list, var);
+	// insert using dlist to get speed
+	dlist_insert_last(&vp->order_list, var);
 	var_init(vp, var, j);
 	vp->var_map[j] = var;
-	if (vp->order_next == NULL)
-	    vp->order_next = var;
+	if (vp->top == NULL)
+	    vp->top = dlist_first(&vp->order_list);
+	// if ((j % 10000) == 0) printf("create %d variables\r\n", j);
     }
+    cdlist_renumber(&vp->order_list);
     return (int)k;
 }
 
@@ -3611,7 +3735,7 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
     }
     if (dynvar_size(vp->var_map) >= VLIMIT)
-	enif_raise_exception(env, ATOM(system_limit));
+	return enif_raise_exception(env, ATOM(system_limit));
 
     if ((i = add_variables(vp, 1)) < 0)
 	return enif_make_badarg(env);
@@ -3642,7 +3766,7 @@ static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
     }
     if (dynvar_size(vp->var_map)+(n-1) >= VLIMIT)
-	enif_raise_exception(env, ATOM(system_limit));
+	return enif_raise_exception(env, ATOM(system_limit));
 
     if ((i = add_variables(vp, n)) < 0)
 	return enif_make_badarg(env);
@@ -3899,7 +4023,7 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(variable));
 
     if (EQUAL_KEY(env, implication, argv[2])) {
 	return enif_make_tuple3(env,
@@ -4013,7 +4137,7 @@ void dump_order(char* label, varp_t* vp)
 		 (vn-1) - vp->num_bound);
     var = cdlist_first(&vp->order_list);
     while(var && !cdlist_is_eol(var)) {
-	char* nmark = (var == vp->order_next) ? "*" : "";
+	char* nmark = (var == vp->top) ? "*" : "";
 	enif_fprintf(stdout, "[o=%e]%s%s=%s ",
 		     var->link.order,
 		     nmark,
@@ -4044,10 +4168,10 @@ static bool_t valid_order(varp_t* vp)
 	}
 	if (!first_unbound && !variable_is_bound(vp, var)) {
 	    first_unbound = true;
-	    if ((vp->order_next != NULL) &&
-		(var != vp->order_next) &&
-		!cdlist_is_after(var, vp->order_next)) {
-		enif_fprintf(stdout, "order_next is set incorrect!\r\n");
+	    if ((vp->top != NULL) &&
+		(var != vp->top) &&
+		!cdlist_is_after(var, vp->top)) {
+		enif_fprintf(stdout, "top is set incorrect!\r\n");
 		dump_order("valid", vp);
 		result = false;
 	    }
@@ -4103,7 +4227,7 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
     else if (argc == 2) {
 	variable_t* var;
 	if (!vif_get_variable(env, vp, argv[1], &var))
-	    return enif_make_badarg(env);
+	    return enif_raise_exception(env, ATOM(variable));
 	if ((i = next_unbound_after(vp, var)) != 0) {
 #if defined(DEBUG_ORDER)
 	    enif_fprintf(stdout, "next_unbound=%s\r\n",
@@ -4323,55 +4447,7 @@ static int cmp_keys QSORT_ARGS(const void* a, const void* b,void* arg)
     return r;
 }
 
-// move order_next if needed
-static inline void order_move_next(varp_t* vp, variable_t* var)
-{
-    if (!variable_is_bound(vp, var)) {
-	if ((vp->order_next == NULL) ||
-	    cdlist_is_before(var, vp->order_next))
-	    vp->order_next = var;
-    }
-}
 
-// remove var from order list, update order_next if needed
-static void order_remove(varp_t* vp, variable_t* var)
-{
-    cdlist_t* list = &vp->order_list;
-    size_t n = cdlist_length(list);
-
-    ASSERT(n > 0);
-
-    if (n == 1) { // remove last element
-	cdlist_remove(list, var);
-	vp->order_next = NULL;
-    }
-    else if (n > 1) {
-	if (var == vp->order_next) {
-	    if (cdlist_is_last(list, var))
-		vp->order_next = cdlist_prev(var);
-	    else
-		vp->order_next = cdlist_next(var);
-	}
-	cdlist_remove(list, var);
-    }
-}
-
-static void order_insert_first(varp_t* vp, variable_t* var)
-{
-    cdlist_insert_first(&vp->order_list, var);
-    order_move_next(vp, var);
-}
-
-static void order_insert_last(varp_t* vp, variable_t* var)
-{
-    cdlist_insert_last(&vp->order_list, var);
-}
-
-static void order_insert_before(varp_t* vp,variable_t* anchor,variable_t* var)
-{
-    cdlist_insert_before(&vp->order_list, anchor, var);
-    order_move_next(vp, var);
-}
 
 static int vif_get_order(ErlNifEnv* env, ERL_NIF_TERM arg, int* orderp)
 {
@@ -4493,7 +4569,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     if (!enif_get_int(env, argv[3], &arg))
 	return enif_make_badarg(env);
     if (vp->level != 0)
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(level));
 
     if (((order[0] & 0x0f) == ORDER_RANDOM) ||
 	((order[1] & 0x0f) == ORDER_RANDOM)) {
@@ -4558,7 +4634,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	}
 
 	cdlist_init(&vp->order_list);
-	vp->order_next = NULL;   // make sure we do not point on moved variables
+	vp->top = NULL;   // make sure we do not point on moved variables
 
 	// sort unbound variables according to sort_keys
 	if (m > 0) {
@@ -4586,7 +4662,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 		var->phase = (r >= 0.0) ? I_TRUE : I_FALSE;
 		cdlist_insert_last(&vp->order_list, var);
 	    }
-	    vp->order_next = vp->var_map[sort_map[0]];
+	    vp->top = vp->var_map[sort_map[0]];
 #if defined(DEBUG_ORDER)
 	    dump_order("order_sort", vp);
 #endif
@@ -4612,6 +4688,9 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
+    if (vp->level != 0)
+	return enif_raise_exception(env, ATOM(level));
+    
     if (vif_get_literal_list(env, vp, argv[1], &len, NULL)) {
 	ERL_NIF_TERM r = enif_make_ok(env);
 	STK_BEGIN(literal_t*, literals, len) {
@@ -4624,7 +4703,6 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 	    for (i = len-1; i >= 0; i--) {
 		if (!cdlist_is_first(&vp->order_list, literals[i]->var)) {
 		    cdlist_remove(&vp->order_list, literals[i]->var);
-		    // FIXME insert before order_next!?
 		    order_insert_first(vp, literals[i]->var);
 		}
 	    }
@@ -4645,7 +4723,7 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (vp->level != 0)
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(level));
 
     if (vif_get_literal_list(env, vp, argv[1], &len, NULL)) {
 	ERL_NIF_TERM r = enif_make_ok(env);
@@ -4681,7 +4759,7 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &x))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));
     switch(get_l(vp, x)) {
     case I_TRUE:  return enif_make_boolean(env, true);
     case I_FALSE: return enif_make_boolean(env, false);
@@ -4690,6 +4768,31 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     default: return enif_make_badarg(env);
     }
 }
+
+//
+// bound(Vct,X) -> true|false|Y|undefined.
+// like value(Vct,X) but also return bound variable
+//
+static ERL_NIF_TERM varp_bound(ErlNifEnv* env, int argc,
+			     const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    literal_t* lp;
+    varp_t* vp;
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_ll(env, vp, argv[1], &lp))
+	return enif_raise_exception(env, ATOM(literal));
+    switch(get_ll(vp, lp)) {
+    case I_TRUE:  return enif_make_boolean(env, true);
+    case I_FALSE: return enif_make_boolean(env, false);
+    case I_UNDEF: return enif_make_undefined(env);
+    case I_BOUND: return make_literal(env, lookup_literal(lp));
+    default: return enif_make_badarg(env);
+    }
+}
+
 
 static ERL_NIF_TERM varp_implication_clause(ErlNifEnv* env, int argc,
 					    const ERL_NIF_TERM argv[])
@@ -4700,8 +4803,8 @@ static ERL_NIF_TERM varp_implication_clause(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!vif_get_v(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+    if (!vif_get_variable(env, vp, argv[1], &var))	
+	return enif_raise_exception(env, ATOM(variable));
     return make_cix(env, var->implication_clause);
 }
 
@@ -4714,8 +4817,8 @@ static ERL_NIF_TERM varp_implication_level(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!vif_get_v(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+    if (!vif_get_variable(env, vp, argv[1], &var))
+	return enif_raise_exception(env, ATOM(variable));
     return enif_make_int(env, var->level);
 }
 
@@ -4728,8 +4831,8 @@ static ERL_NIF_TERM varp_implication_pos(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!vif_get_v(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+    if (!vif_get_variable(env, vp, argv[1], &var))
+	return enif_raise_exception(env, ATOM(variable));
     return enif_make_int(env, var->literal_pos);
 }
 
@@ -4743,7 +4846,7 @@ static ERL_NIF_TERM varp_is_variable(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &xp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(variable));
     return enif_make_boolean(env, !is_constant_l(vp, xp));
 }
 
@@ -4772,7 +4875,7 @@ static ERL_NIF_TERM varp_is_bound(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(variable));
     return enif_make_boolean(env, variable_is_bound(vp, var));
 }
 
@@ -4786,9 +4889,9 @@ static ERL_NIF_TERM varp_is_equal(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &xp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));
     if (!vif_get_lit(env, vp, argv[2], &yp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));
     return enif_make_boolean(env, (xp == yp));
 }
 
@@ -4802,7 +4905,7 @@ static ERL_NIF_TERM varp_is_used(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(variable));
     if (argc == 2)
 	return enif_make_boolean(env, var->is_used);
     else {
@@ -4825,7 +4928,7 @@ static ERL_NIF_TERM varp_is_atom(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(variable));
     if (argc == 2)
 	return enif_make_boolean(env, var->is_atom);
     else {
@@ -4864,9 +4967,9 @@ static ERL_NIF_TERM varp_decide(ErlNifEnv* env, int argc,
     int level = -1;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
+	return enif_make_badarg(env);    
     if (!vif_get_lit(env, vp, argv[1], &xp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));
     // fixme assert xp is positive decide_phase does the work
     if (argc == 3) {
 	if (!enif_get_int(env, argv[2], &level) || (level < 0) ||
@@ -4890,7 +4993,7 @@ static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &xp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));	
     if (argc == 3) {
 	if (!enif_get_int(env, argv[2], &level) || (level < 0) ||
 	    (level >= (int)dynvar_size(vp->undo)))
@@ -5720,11 +5823,11 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &xp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));
     // enif_fprintf(stdout,"xp=%d value=%s\r\n",
     //   export_l(xp),format_ival(get_l(vp,xp)));
     if (!vif_get_lit(env, vp, argv[2], &yp))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(literal));
     // enif_fprintf(stdout,"yp=%d value=%s\r\n",
     //   export_l(yp),format_ival(get_l(vp,yp)));
 
@@ -5732,7 +5835,7 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     // enif_fprintf(stdout,"xref=ok\r\n");
     if (vp->level != 0) // only on level 0!
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(level));
     // enif_fprintf(stdout,"level=0\r\n");
 
     y = get_l(vp, yp);
@@ -6328,8 +6431,7 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
     bcp(vp);
     vp->caller_env = NULL;
 
-    if (vp->unwatch)
-	bcp_unwatch(vp);
+    if (vp->unwatch) bcp_unwatch(vp);
 
     if (vp->level > vp->max_level)     vp->max_level = vp->level;
     if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;
@@ -6360,7 +6462,7 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 	while (enif_get_list_cell(env, list, &head, &tail)) {
 	    lit_t xp;
 	    if (!vif_get_lit(env, vp, head, &xp))
-		return enif_make_badarg(env);
+		return enif_raise_exception(env, ATOM(literal));
 	    if (bcp_turbo(vp, xp)) {
 		if (!turbo_all)
 		    return ATOM(turbo);
@@ -6397,7 +6499,7 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 	    enif_fprintf(stdout, "undo_bound=%s@%d\r\n",
 			 format_literal(vp, lp), level);
 #endif
-	    vp->order_next = lp->var;  // FIXME keep track on level!!!?
+	    order_set_top(vp, lp->var);
 	}
 	switch(vp->undo[level].t) {
 	case uSET:
@@ -6517,6 +6619,46 @@ bcp:
     return enif_make_boolean(env, false);
 }
 
+// Count total size of memory used by literals used by clauseset
+static size_t clauseset_memory_size(varp_t* vp, int si)
+{
+    size_t size = dynvec_size(vp->clauseset,si)*sizeof(clause_t);
+    int n = (int)dynvec_size(vp->clauseset, si);
+    int i;
+    for (i = 0; i < n; i++) {
+	clause_t* cp = get_clause(vp, MAKE_CIX(si,i));
+	size += cp->size*sizeof(lit_t);
+    }
+    return size;
+}
+
+static size_t xref_memory_size(varp_t* vp)
+{
+    size_t size = 0;
+    if (vp->opt.xref) {
+	int vn = (int)dynvar_size(vp->var_map);
+	int i;
+	for (i = 1; i < vn; i++) {
+	    size += dynarray_size(vp->var_map[i]->lit[0].xref)*sizeof(xref_t);
+	    size += dynarray_size(vp->var_map[i]->lit[1].xref)*sizeof(xref_t);
+	}
+    }
+    return size;
+}
+
+static size_t sref_memory_size(varp_t* vp)
+{
+    size_t size = 0;
+    int vn = dynvar_size(vp->var_map);
+    int i;
+    for (i = 1; i < vn; i++) {
+	size += dynarray_size(vp->var_map[i]->lit[0].sref)*sizeof(sref_t);
+	size += dynarray_size(vp->var_map[i]->lit[1].sref)*sizeof(sref_t);
+    }
+    return size;
+}
+
+    
 // get information
 static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
@@ -6647,6 +6789,47 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     }
     if (EQUAL_KEY(env, version, argv[1])) {
 	return enif_make_string(env, VARP_VSN, ERL_NIF_LATIN1);
+    }
+
+    // MEMORY stats
+    if (EQUAL_KEY(env, memory_literal_size, argv[1])) {
+	return enif_make_uint(env, sizeof(literal_t));
+    }
+    // both pos and neg litterals are included in the variable structure!
+    if (EQUAL_KEY(env, memory_variable_size, argv[1])) {
+	return enif_make_uint(env, sizeof(variable_t));
+    }
+    // clause structure overhead size
+    if (EQUAL_KEY(env, memory_clause_size, argv[1])) {
+	return enif_make_uint(env, sizeof(clause_t));
+    }    
+    if (EQUAL_KEY(env, memory_symbol_size, argv[1])) {
+	return enif_make_uint(env, sizeof(symbol_t));
+    }    
+    // memory size of variables / clauses - fixme add everything!
+    if (EQUAL_KEY(env, memory_size, argv[1])) {
+	unsigned int size =
+	    sizeof(varp_t) + 
+	    dynvar_size(vp->var_map)*sizeof(variable_t) +
+	    clauseset_memory_size(vp, DELTA) +
+	    clauseset_memory_size(vp, GAMMA) +
+	    clauseset_memory_size(vp, ALPHA) +
+	    clauseset_memory_size(vp, BETA) +
+	    dynvar_size(vp->symtab)*sizeof(dlist_t) +
+	    sizeof(symbol_t)*vp->snum +
+	    xref_memory_size(vp) +
+	    sref_memory_size(vp)
+	    ;
+#if defined(LIT_VALUE)
+#if defined(PACKED_VALUE)
+	size += dynvar_size(vp->lit_value);
+#endif
+#else
+#if defined(PACKED_VALUE)
+	size += dynvar_size(vp->var_value);
+#endif
+#endif
+	return enif_make_uint(env, size);	
     }
     return enif_make_badarg(env);
 }
@@ -7123,13 +7306,9 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 	    bump = log2(n);
 	    break;
 	}
-	case BUMP_NEXT: {
-	    if ((vp->order_next != NULL) && (var != vp->order_next)) {
-		order_remove(vp, var);
-		order_insert_before(vp, vp->order_next, var);
-	    }
+	case BUMP_NEXT:
+	    order_insert_before_top(vp, var);
 	    return;
-	}
 	default:
 	    return;
 	}
@@ -7422,7 +7601,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 		list = argv[1];
 		while(enif_get_list_cell(env, list, &head, &tail)) {
 		    if (!vif_get_lit(env, vp, head, lpp)) {
-			r = enif_make_badarg(env);
+			r = enif_raise_exception(env, ATOM(literal));
 			STK_LEAVE(literals);
 		    }
 		    lpp++;
@@ -7440,7 +7619,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     }
 
     if (vp->level != 0)
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(level));
 
     si = GET_SI(cix);
     ix = GET_IX(cix);
@@ -7484,7 +7663,7 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
     if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
     if (vp->level != 0)
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(level));
     if ((cp = get_clause(vp,cix)) == NULL)
 	return enif_make_ok(env);
 
@@ -7525,8 +7704,8 @@ static ERL_NIF_TERM varp_clean_edges(ErlNifEnv* env, int argc,
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!vif_get_ll(env, vp, argv[1], &lp))
-	return enif_make_badarg(env);
+    if (!vif_get_literal(env, vp, argv[1], &lp))
+	return enif_raise_exception(env, ATOM(literal));
 
     slist_iter_init(&iter, &lp->elist);
     while(!slist_iter_eol(&iter)) {
@@ -7667,7 +7846,7 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
     if (!vif_get_si(env, argv[1], &si))
 	return enif_make_badarg(env);
     if (vp->level != 0)
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(level));
 
     if ((n=(int)dynvec_size(vp->clauseset, si)) == 0)
 	return enif_make_ok(env);
@@ -8034,7 +8213,7 @@ static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(variable));
     if (enif_get_double(env, argv[2], &bumpf))
 	bump = dynvar_size(vp->var_map)*bumpf;
     else if (!enif_get_int(env, argv[2], &bump)) {
@@ -8499,8 +8678,8 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 	int i;
 	for (i = 0; i < arity; i++) {
 	    literal_t* lp;
-	    if (!vif_get_ll(env, vp, elem[i], &lp))
-		return enif_make_badarg(env);
+	    if (!vif_get_literal(env, vp, elem[i], &lp))
+		return enif_raise_exception(env, ATOM(literal));
 	    mark0_literal(vp, lp);
 	}
     }
@@ -8511,8 +8690,8 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 
 	while(enif_get_list_cell(env, list, &head, &tail)) {
 	    literal_t* lp;
-	    if (!vif_get_ll(env, vp, head, &lp))
-		return enif_make_badarg(env);
+	    if (!vif_get_literal(env, vp, head, &lp))
+		return enif_raise_exception(env, ATOM(literal));
 	    mark0_literal(vp, lp);
 	    list = tail;
 	}
@@ -8576,8 +8755,8 @@ static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
 	int i;
 	for (i = 0; i < arity; i++) {
 	    literal_t* lp;
-	    if (!vif_get_ll(env, vp, elem[i], &lp))
-		return enif_make_badarg(env);
+	    if (!vif_get_literal(env, vp, elem[i], &lp))
+		return enif_raise_exception(env, ATOM(literal));
 	    mark1_literal(vp, lp);
 	}
     }
@@ -8588,8 +8767,8 @@ static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
 	// FIXME: transactional	(validate all arguments before loop)
 	while(enif_get_list_cell(env, list, &head, &tail)) {
 	    literal_t* lp;
-	    if (!vif_get_ll(env, vp, head, &lp))
-		return enif_make_badarg(env);
+	    if (!vif_get_literal(env, vp, head, &lp))
+		return enif_raise_exception(env, ATOM(literal));
 	    mark1_literal(vp, lp);
 	    list = tail;
 	}
@@ -8682,7 +8861,7 @@ static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     var = argv[1];
     if (!vif_get_lit(env, vp, argv[1], &x))
-	return enif_make_badarg(env);
+	enif_raise_exception(env, ATOM(literal));
     if (!enif_get_boolean(env, argv[3], &as_tuple))
 	return enif_make_badarg(env);
 
@@ -8695,23 +8874,27 @@ static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
 	ERL_NIF_TERM r;
 
 	STK_BEGIN(ERL_NIF_TERM, element, n) {
+	    int j = n;
 	    while(bp != NULL) {
 		literal_t* xp = var_literal(vp, bp);
 		if (xp->var->mark0) {
 		    int neg = xp->var->markn;
-		    if (neg == is_neg_ll(xp))
-			element[size++] = make_literal(env, xp);
+		    if (neg == is_neg_ll(xp)) {
+			element[--j] = make_literal(env, xp);
+			size++;
+		    }
 		    else {
 			ERL_NIF_TERM nx = make_literal(env, neg_ll(xp));
-			element[size++] = enif_make_tuple2(env, var, nx);
+			element[--j] = enif_make_tuple2(env, var, nx);
+			size++;
 		    }
 		}
 		bp = bp->bound_next;
 	    }
 	    if (as_tuple)
-		r = enif_make_tuple_from_array(env,element,size);
+		r = enif_make_tuple_from_array(env,&element[j],size);
 	    else
-		r = enif_make_list_from_array(env, element,size);
+		r = enif_make_list_from_array(env,&element[j],size);
 	} STK_END0(element);
 	return r;
     }
@@ -8813,7 +8996,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(conflict_counter);
     LOAD_ATOM(dead);
     LOAD_ATOM(default);
-    // LOAD_ATOM(degree);
     LOAD_ATOM(delta);
     LOAD_ATOM(done);
     LOAD_ATOM(edge);
@@ -8887,25 +9069,31 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(version);
     LOAD_ATOM_STRING(exclamation_mark, "!");
     LOAD_ATOM(identity);
-    LOAD_ATOM_STRING(p_identity, "identity");
-    LOAD_ATOM_STRING(n_identity, "identity");
-    LOAD_ATOM_STRING(e_identity, "identity");
+    LOAD_ATOM_STRING(p_identity, "+identity");
+    LOAD_ATOM_STRING(n_identity, "-identity");
+    LOAD_ATOM_STRING(e_identity, "=identity");
     LOAD_ATOM(random);
-    LOAD_ATOM_STRING(p_random, "random");
-    LOAD_ATOM_STRING(n_random, "random");
-    LOAD_ATOM_STRING(e_random, "random");
+    LOAD_ATOM_STRING(p_random, "+random");
+    LOAD_ATOM_STRING(n_random, "-random");
+    LOAD_ATOM_STRING(e_random, "=random");
     LOAD_ATOM(degree);
-    LOAD_ATOM_STRING(p_degree, "degree");
-    LOAD_ATOM_STRING(n_degree, "degree");
-    LOAD_ATOM_STRING(e_degree, "degree");
+    LOAD_ATOM_STRING(p_degree, "+degree");
+    LOAD_ATOM_STRING(n_degree, "-degree");
+    LOAD_ATOM_STRING(e_degree, "=degree");
     LOAD_ATOM(rank);
-    LOAD_ATOM_STRING(p_rank, "rank");
-    LOAD_ATOM_STRING(n_rank, "rank");
-    LOAD_ATOM_STRING(e_rank, "rank");
+    LOAD_ATOM_STRING(p_rank, "+rank");
+    LOAD_ATOM_STRING(n_rank, "-rank");
+    LOAD_ATOM_STRING(e_rank, "=rank");
     LOAD_ATOM(user);
-    LOAD_ATOM_STRING(p_user, "user");
-    LOAD_ATOM_STRING(n_user, "user");
-    LOAD_ATOM_STRING(e_user, "user");
+    LOAD_ATOM_STRING(p_user, "+user");
+    LOAD_ATOM_STRING(n_user, "-user");
+    LOAD_ATOM_STRING(e_user, "=user");
+
+    LOAD_ATOM(memory_literal_size);
+    LOAD_ATOM(memory_clause_size);
+    LOAD_ATOM(memory_variable_size);
+    LOAD_ATOM(memory_symbol_size);
+    LOAD_ATOM(memory_size);    
 }
 
 static void varp_down(ErlNifEnv* env, void* obj,

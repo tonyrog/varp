@@ -42,6 +42,7 @@ all() ->
 	    intersect2,
 	    intersect_var0,
 	    intersect_var1,
+	    intersect_var2,
 
 	    %% order checks
 	    order_identity,
@@ -990,6 +991,24 @@ intersect_var1() ->
     Di = {-X2,X3,{X1,X4},{X1,-X5}},
     Di = varc:intersect_var(V, X1, {-X2,X3,-X4,X5,X6}, true),
     ok.
+
+intersect_var2() ->
+    V = varc:new(),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
+    X5 = var(V),
+    X6 = var(V),
+    %% X1 -> {-X2,X3,X4,-X5}
+    varc:mark(V, {-X2,X3,X4,-X5}),
+    varc:set_level(V, 1),
+    %% -X1 -> {-X2,X3,-X4,X5,X6}
+    _ = [begin true = varc:bind(V,Xi) end || Xi <- [-X2,X3,-X4,X5,X6]],
+    Di = {-X2,X3,{X1,X4},{X1,-X5}},
+    Di = varc:intersect_var(V, X1, 1, true),
+    ok.
+    
 
 watch1() ->
     V = varc:new(),

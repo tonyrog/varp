@@ -6,6 +6,8 @@
 #include <memory.h>
 #include <float.h>
 
+#include "dlist.h"
+
 #if defined(UINT32_ORDER)
 typedef uint32_t order_t;
 #define ORDER_T_EPSILON 2
@@ -33,22 +35,12 @@ typedef float order_t;
 // may be compared.
 
 typedef struct _cdlink_t {
-    struct _cdlink_t *next;
-    struct _cdlink_t *prev;
+    dlink_t link;
     order_t order;
 } cdlink_t;
 
-typedef struct _cdlist_t {
-    cdlink_t head;      // head link
-    cdlink_t tail;      // tail link
-    size_t  length;    // list length
-} cdlist_t;
-
-#ifndef CDLIST_ALLOC
-#define CDLIST_ALLOC(n) malloc((n))
-#define CDLIST_RELLOC(ptr,n) realloc((ptr),(n))
-#define CDLIST_FREE(ptr) free((ptr))
-#endif
+typedef dlist_t cdlist_t;
+typedef dlist_iter_t cdlist_iter_t;
 
 #define CDLIST_LOCAL static
 #if defined(__WIN32__) || defined(_WIN32)
@@ -58,8 +50,7 @@ typedef struct _cdlist_t {
 #endif
 
 CDLIST_LOCAL void cdlist_init(cdlist_t* list) CDLIST_API;
-CDLIST_LOCAL cdlist_t* cdlist_new(void) CDLIST_API;
-CDLIST_LOCAL void cdlist_free(cdlist_t* list) CDLIST_API;
+CDLIST_LOCAL void cdlist_clear(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL size_t cdlist_length(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL int cdlist_is_empty(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL void* cdlist_first(cdlist_t* list) CDLIST_API;
@@ -75,72 +66,61 @@ CDLIST_LOCAL void cdlist_renumber(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL void cdlist_set_order(cdlist_t* list, void* ptr) CDLIST_API;
 CDLIST_LOCAL int cdlist_is_after(void* aptr, void* bptr) CDLIST_API;
 CDLIST_LOCAL int cdlist_is_before(void* aptr, void* bptr) CDLIST_API;
-CDLIST_LOCAL void cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr) CDLIST_API;
-CDLIST_LOCAL void cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr) CDLIST_API;
-CDLIST_LOCAL void cdlist_insert_first(cdlist_t* list, void* ptr) CDLIST_API;
-CDLIST_LOCAL void cdlist_insert_last(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_insert_first(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_insert_last(cdlist_t* list, void* ptr) CDLIST_API;
 CDLIST_LOCAL void* cdlist_remove(cdlist_t* list, void* ptr) CDLIST_API;
 CDLIST_LOCAL void* cdlist_take_first(cdlist_t* list) CDLIST_API;
 CDLIST_LOCAL void* cdlist_take_last(cdlist_t* list) CDLIST_API;
-CDLIST_LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr) CDLIST_API;
+CDLIST_LOCAL void* cdlist_restore(cdlist_t* list, void* ptr) CDLIST_API;
 CDLIST_LOCAL void cdlist_merge(cdlist_t* from, cdlist_t* to) CDLIST_API;
-    
+
+CDLIST_LOCAL void cdlist_iter_init(cdlist_iter_t* iter, cdlist_t* list) DLIST_API;
+CDLIST_LOCAL void* cdlist_iter_current(cdlist_iter_t* iter) DLIST_API;
+CDLIST_LOCAL int cdlist_iter_end(cdlist_iter_t* iter) DLIST_API;
+CDLIST_LOCAL void* cdlist_iter_next(cdlist_iter_t* iter) DLIST_API;
+CDLIST_LOCAL void cdlist_iter_remove(cdlist_iter_t* iter) DLIST_API;
+
     
 CDLIST_LOCAL void cdlist_init(cdlist_t* list)
 {
-    list->length  = 0;
-    list->head.prev  = NULL;
-    list->head.next  = &list->tail;
-    list->head.order = ORDER_0;
-
-    list->tail.next  = NULL;
-    list->tail.prev  = &list->head;
-    list->tail.order = ORDER_1;
+    dlist_init(list);
 }
 
-CDLIST_LOCAL cdlist_t* cdlist_new(void)
+CDLIST_LOCAL void cdlist_clear(cdlist_t* list)
 {
-    cdlist_t* list = CDLIST_ALLOC(sizeof(cdlist_t));
-    if (list != NULL)
-	cdlist_init(list);
-    return list;
-}
-
-// cdlist_free does not fre the list elements! only the allocated!
-// list structure
-CDLIST_LOCAL void cdlist_free(cdlist_t* list)
-{
-    CDLIST_FREE(list);
+    dlist_init(list);
 }
 
 CDLIST_LOCAL size_t cdlist_length(cdlist_t* list)
 {
-    return list->length;
+    return dlist_length(list);
 }
 
 CDLIST_LOCAL int cdlist_is_empty(cdlist_t* list)
 {
-    return (list->length == 0);
+    return dlist_is_empty(list);
 }
  
 CDLIST_LOCAL void* cdlist_first(cdlist_t* list)
 {
-    return list->head.next;
+    return dlist_first(list);    
 }
  
 CDLIST_LOCAL void* cdlist_last(cdlist_t* list)
 {
-    return list->tail.prev;
+    return dlist_last(list);        
 }
 
 CDLIST_LOCAL int cdlist_is_last(cdlist_t* list, void* elem)
 {
-    return (((cdlink_t*)elem)->next == &list->tail);
+    return dlist_is_last(list, elem);
 }
 
 CDLIST_LOCAL int cdlist_is_first(cdlist_t* list, void* elem)
 {
-    return (((cdlink_t*)elem)->prev == &list->head);
+    return dlist_is_first(list, elem);
 }
 
 // use is_eol when loop over list!
@@ -151,50 +131,56 @@ CDLIST_LOCAL int cdlist_is_first(cdlist_t* list, void* elem)
 // }
 CDLIST_LOCAL int cdlist_is_eol(void* elem)
 {
-    return (((cdlink_t*)elem)->next == NULL);
+    return dlist_is_eol(elem);
 }
 
 CDLIST_LOCAL int cdlist_is_bol(void* elem)
 {
-    return (((cdlink_t*)elem)->prev == NULL);
+    return dlist_is_bol(elem);
 }
 
 CDLIST_LOCAL void* cdlist_next(void* elem)
 {
-    return (void*)(((cdlink_t*)elem)->next);
+    return dlist_next(elem);
 }
 
 CDLIST_LOCAL void* cdlist_prev(void* elem)
 {
-    return (void*)(((cdlink_t*)elem)->prev);
+    return dlist_prev(elem);    
 }
 
 CDLIST_LOCAL void cdlist_renumber_from(cdlist_t* list, void* ptr,
 				       order_t order, order_t step)
 {
+    (void) list;
     cdlink_t* elem = (cdlink_t*) ptr;
-    while(!cdlist_is_eol(elem)) {
+    while(elem != NULL) {
 	elem->order = order;
 	order = order + step;
-	elem = elem->next;
+	elem = cdlist_next(elem);
     }
-    list->tail.order = ORDER_1;
 }
 
 CDLIST_LOCAL void cdlist_renumber(cdlist_t* list)
 {
     cdlink_t* elem = cdlist_first(list);
     order_t step = ORDER_1/((order_t)(list->length+1));
-    list->head.order = ORDER_0;
     cdlist_renumber_from(list, elem, step, step);
+}
+
+CDLIST_LOCAL order_t cdlist_order(void* elem, order_t def)
+{
+    return (elem == NULL) ? def : ((cdlink_t*)elem)->order;
 }
 
 // Should normally not be necessary to call from user code
 CDLIST_LOCAL void cdlist_set_order(cdlist_t* list, void* ptr)
 {
     cdlink_t* elem = (cdlink_t*) ptr;
-    order_t order = (elem->prev->order + elem->next->order) / 2;
-    if ((order - elem->prev->order) <= ORDER_T_EPSILON)
+    order_t p_order = cdlist_order(elem->link.prev, ORDER_0);
+    order_t n_order = cdlist_order(elem->link.next, ORDER_1);
+    order_t order = (p_order + n_order) / 2;
+    if ((order - p_order) <= ORDER_T_EPSILON)
 	cdlist_renumber(list);
     else
 	elem->order = order;
@@ -212,67 +198,56 @@ CDLIST_LOCAL int cdlist_is_before(void* aptr, void* bptr)
     return ((cdlink_t*)aptr)->order < ((cdlink_t*)bptr)->order;
 }
 
-CDLIST_LOCAL void cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr)
+CDLIST_LOCAL void* cdlist_insert_after(cdlist_t* list, void* aptr, void* ptr)
 {
-    cdlink_t* elem = (cdlink_t*) ptr;
-    cdlink_t* anchor = (cdlink_t*) aptr;
-    elem->prev = anchor;
-    elem->next = anchor->next;
-    elem->next->prev = elem;
-    anchor->next = elem;
-    list->length++;
+    cdlink_t* elem = dlist_insert_after(list, aptr, ptr);
     cdlist_set_order(list, elem);
+    return elem;
 }
 
-CDLIST_LOCAL void cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr)
+CDLIST_LOCAL void* cdlist_insert_before(cdlist_t* list, void* aptr, void* ptr)
 {
-    cdlink_t* elem = (cdlink_t*) ptr;
-    cdlink_t* anchor = (cdlink_t*) aptr;    
-    elem->next = anchor;    
-    elem->prev = anchor->prev;
-    elem->prev->next = elem;
-    anchor->prev = elem;
-    list->length++;
+    cdlink_t* elem = dlist_insert_before(list, aptr, ptr);
     cdlist_set_order(list, elem);
+    return elem;
 }
 
-CDLIST_LOCAL void cdlist_insert_first(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void* cdlist_insert_first(cdlist_t* list, void* ptr)
 {
-    cdlist_insert_after(list, &list->head, ptr);
+    cdlink_t* elem = dlist_insert_first(list, ptr);
+    cdlist_set_order(list, elem);
+    return elem;
 }
 
-CDLIST_LOCAL void cdlist_insert_last(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void* cdlist_insert_last(cdlist_t* list, void* ptr)
 {
-    cdlist_insert_before(list, &list->tail, ptr);
+    cdlink_t* elem = dlist_insert_last(list, ptr);
+    cdlist_set_order(list, elem);
+    return elem;    
 }
 
 CDLIST_LOCAL void* cdlist_remove(cdlist_t* list, void* ptr)
 {
-    cdlink_t* elem = (cdlink_t*) ptr;
-    elem->prev->next = elem->next;
-    elem->next->prev = elem->prev;
-    list->length--;
-    return ptr;
+    cdlink_t* elem = dlist_remove(list, ptr);
+    return elem;
 }
 
 // "pop" return and remove from head of list
 CDLIST_LOCAL void* cdlist_take_first(cdlist_t* list)
 {
-    return cdlist_remove(list, list->head.next);
+    return dlist_take_first(list);
 }
 
 // "deq" return and remove from tail of list
 CDLIST_LOCAL void* cdlist_take_last(cdlist_t* list)
 {
-    return cdlist_remove(list, list->tail.prev);
+    return dlist_take_last(list);
 }
  
-CDLIST_LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr)
+CDLIST_LOCAL void* cdlist_restore(cdlist_t* list, void* ptr)
 {
-    cdlink_t* elem = (cdlink_t*) ptr;
-    elem->prev->next = elem;
-    elem->next->prev = elem;
-    list->length++;
+    cdlink_t* elem = dlist_restore(list, ptr);
+    cdlist_set_order(list, elem);
     return elem;
 }
 
@@ -281,24 +256,36 @@ CDLIST_LOCAL cdlink_t* cdlist_restore(cdlist_t* list, void* ptr)
 //
 CDLIST_LOCAL void cdlist_merge(cdlist_t* from, cdlist_t* to)
 {
-    if (from->length == 0)
-	return;
-    else if (to->length == 0) {
-	to->head = from->head;
-	to->head.prev = &to->head;
-	to->tail = from->tail;
-	to->tail.next = &to->tail;
-	to->length = from->length;
-    }
-    else {
-	to->tail.prev->next = from->head.next;
-	from->head.next->prev = to->tail.prev;
-	from->tail.prev->next = &to->tail;
-	to->tail.prev = from->tail.prev; 
-	to->length += from->length;
-	cdlist_renumber(to);
-    }
+    dlist_merge(from, to);
+    cdlist_renumber(to);
     cdlist_init(from);
 }
+
+
+CDLIST_LOCAL void cdlist_iter_init(cdlist_iter_t* iter, cdlist_t* list)
+{
+    dlist_iter_init(iter, list);
+}
+
+CDLIST_LOCAL void* cdlist_iter_current(cdlist_iter_t* iter)
+{
+    return dlist_iter_current(iter);
+}
+
+CDLIST_LOCAL int cdlist_iter_end(cdlist_iter_t* iter)
+{
+    return dlist_iter_end(iter);
+}
+
+CDLIST_LOCAL void* cdlist_iter_next(cdlist_iter_t* iter)
+{
+    return dlist_iter_next(iter);
+}
+
+CDLIST_LOCAL void cdlist_iter_remove(cdlist_iter_t* iter)
+{
+    dlist_iter_remove(iter);
+}
+
 
 #endif

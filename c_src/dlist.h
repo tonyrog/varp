@@ -54,13 +54,13 @@ DLIST_LOCAL void* dlist_insert_last(dlist_t* list, void* ptr) DLIST_API;
 DLIST_LOCAL void* dlist_remove(dlist_t* list, void* ptr) DLIST_API;
 DLIST_LOCAL void* dlist_take_first(dlist_t* list) DLIST_API;
 DLIST_LOCAL void* dlist_take_last(dlist_t* list) DLIST_API;
-DLIST_LOCAL dlink_t* dlist_restore(dlist_t* list, void* ptr) DLIST_API;
+DLIST_LOCAL void* dlist_restore(dlist_t* list, void* ptr) DLIST_API;
 DLIST_LOCAL void dlist_merge(dlist_t* from, dlist_t* to) DLIST_API;
     
 
 DLIST_LOCAL void dlist_iter_init(dlist_iter_t* iter, dlist_t* list) DLIST_API;
 DLIST_LOCAL void* dlist_iter_current(dlist_iter_t* iter) DLIST_API;
-DLIST_LOCAL int dlist_iter_eol(dlist_iter_t* iter) DLIST_API;
+DLIST_LOCAL int dlist_iter_end(dlist_iter_t* iter) DLIST_API;
 DLIST_LOCAL void* dlist_iter_next(dlist_iter_t* iter) DLIST_API;
 DLIST_LOCAL void dlist_iter_remove(dlist_iter_t* iter) DLIST_API;
 
@@ -146,8 +146,8 @@ DLIST_LOCAL void* dlist_insert_after(dlist_t* list, void* aptr, void* ptr)
     dlink_t* elem = (dlink_t*) ptr;
     dlink_t* anchor = (dlink_t*) aptr;
     elem->prev = anchor;
-    elem->next = anchor->next;
-    elem->next->prev = elem;
+    if ((elem->next = anchor->next) != NULL)
+	elem->next->prev = elem;
     anchor->next = elem;
     if (list->last == anchor)
 	list->last = elem;
@@ -160,8 +160,8 @@ DLIST_LOCAL void* dlist_insert_before(dlist_t* list, void* aptr, void* ptr)
     dlink_t* elem = (dlink_t*) ptr;
     dlink_t* anchor = (dlink_t*) aptr;    
     elem->next = anchor;    
-    elem->prev = anchor->prev;
-    elem->prev->next = elem;
+    if ((elem->prev = anchor->prev) != NULL)
+	elem->prev->next = elem;
     anchor->prev = elem;
     if (list->first == anchor)
 	list->first = elem;
@@ -224,7 +224,7 @@ DLIST_LOCAL void* dlist_take_last(dlist_t* list)
     return dlist_remove(list, list->last);
 }
  
-DLIST_LOCAL dlink_t* dlist_restore(dlist_t* list, void* ptr)
+DLIST_LOCAL void* dlist_restore(dlist_t* list, void* ptr)
 {
     dlink_t* elem = (dlink_t*) ptr;
     elem->prev->next = elem;
@@ -265,7 +265,7 @@ DLIST_LOCAL void* dlist_iter_current(dlist_iter_t* iter)
     return iter->cur;
 }
 
-DLIST_LOCAL int dlist_iter_eol(dlist_iter_t* iter)
+DLIST_LOCAL int dlist_iter_end(dlist_iter_t* iter)
 {
     return (iter->cur == NULL);
 }

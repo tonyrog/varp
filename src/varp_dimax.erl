@@ -63,6 +63,7 @@ load_stream_header(Vp, Line, LineFun) ->
 		    io:format("loading: ~w variables, ~w clauses\n",
 			      [NVars, NClauses]),
 		    {1,NVars} = varc:add_variables(Vp, NVars),
+		    io:format("loading clauses\n"),
 		    load_stream_clauses(Vp, Line+1, NClauses, LineFun);
 		_ ->
 		    {error, bad_problem_line}
@@ -82,6 +83,11 @@ load_stream_clauses(Vp, Line, Count, LineFun) ->
 	{ok, <<$c,_/binary>>} ->
 	    load_stream_clauses(Vp, Line+1, Count, LineFun);
 	{ok,Data} ->
+	    if Line rem 10000 =:= 0 ->
+		    io:format("~w lines loaded\n", [Line]);
+	       true ->
+		    ok
+	    end,
 	    Clause = dimacs_line(Data),
 	    varc:add_clause(Vp, Clause),
 	    load_stream_clauses(Vp, Line+1, Count-1, LineFun)

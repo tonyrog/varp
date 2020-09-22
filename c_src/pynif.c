@@ -400,7 +400,7 @@ int enif_get_atom(ErlNifEnv* env, ERL_NIF_TERM atom, char* buf, unsigned len,
 	if (atom == Py_False) {
 	    if (len >= 6) {
 		strcpy(buf, "false");
-		return 6;
+		return 5;
 	    }
 	}
 	else if (atom == Py_True) {
@@ -417,7 +417,7 @@ int enif_get_atom(ErlNifEnv* env, ERL_NIF_TERM atom, char* buf, unsigned len,
 	else if (i == 0) {
 	    if (len >= 6) {
 		strcpy(buf, "false");
-		return 6;
+		return 5;
 	    }
 	}
 	else if (i == 1) {
@@ -533,7 +533,7 @@ ERL_NIF_TERM enif_make_badarg(ErlNifEnv* env)
 {
     UNUSED(env);
     PyErr_SetString(PyExc_TypeError, "badarg");
-    return NULL; // fixme?
+    return NULL;
 }
 
 //
@@ -974,9 +974,20 @@ int enif_monitor_process(ErlNifEnv* env, void* obj, const ErlNifPid* pid,
 ERL_NIF_TERM enif_raise_exception(ErlNifEnv *env, ERL_NIF_TERM reason)
 {
     UNUSED(env);
-    UNUSED(reason);
-    PyErr_SetString(PyExc_TypeError, "exception");
-    return NULL;    // fixme?
+    if (String_Check(reason)) {
+	char buf[256];
+	int n;
+	n = enif_get_atom(env, reason, buf, sizeof(buf), ERL_NIF_LATIN1);
+	if (n == 0)
+	    PyErr_SetString(PyExc_TypeError, "exception");
+	else {
+	    buf[n] = '\0';
+	    PyErr_SetString(PyExc_TypeError, buf);
+	}
+    }
+    else
+	PyErr_SetString(PyExc_TypeError, "exception");
+    return NULL;
 }
 
 // FIXME: put msg into a message box under the module object (key on thread?)

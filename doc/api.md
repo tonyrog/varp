@@ -103,6 +103,9 @@ next available variable in the variable table. Mark the new variable
 as atom if is_atom is __True__. The atom status may later be queried with
 variable info. is\_atom defaults to __True__.
 
+exceptions: system_limit (too many variables)
+
+
 ``` python
 varpy.add_variables(vp, num, [,is_atom])
 ```
@@ -111,6 +114,7 @@ Create __num__ new variables. The variables are return as a tuple
 (__firstindex__, __lastindex__). If is_atom is __True__ then the variables
 are marked as atom.
 
+exceptions: system_limit (too many variables)
 
 ``` python
 varpy.value(vp, x)
@@ -119,6 +123,18 @@ varpy.value(vp, x)
 Return __True__ | __False__ | __None__,
 Value, None is return if variables undefined.
 
+exceptions: literal (x is not a literal)
+
+``` python
+varpy.bound(vp, x)
+```
+
+Return __True__ | __False__ | __None__ | literal
+
+None is return if variable x is unbound,
+if x is bound to literal y then y is returned.
+
+exceptions: literal (x is not a literal)
 
 ``` python
 varpy.bind(vp, x, [,l])
@@ -155,17 +171,23 @@ varpy.implication_clause(vp, x)
 
 Return the clause index for the clause where literal __x__ became a unit.
 
+exceptions: variable (x is not a variable)
+
 ``` python
 varpy.implication_level(vp, x)
 ```
 
 Return the bind level for variable __x__, where it was assigned during bcp.
 
+exceptions: variable (x is not a variable)
+
 ``` python
 varpy.implication_pos(vp, x)
 ```
 
 Return the position where literal __x__ is found in the implication clause.
+
+exceptions: variable (x is not a variable)
 
 ``` python
 varpy.conflicting_clause(vp, i)
@@ -180,12 +202,16 @@ varpy.is_variable(vp, x)
 
 Return __True__ if literal __x__ is unbound. Return __False__ otherwise
 
+exceptions: variable (x is not a variable)
+
 ``` python
 varpy.is_bound(vp, x)
 ```
 
 Return __True__ if literal __x__ is bound, through substition, 
 to an other variable. Return __False__ otherwise.
+
+exceptions: variable (x is not a variable)
 
 ``` python
 varpy.is_equal(vp, x, y)
@@ -194,6 +220,7 @@ varpy.is_equal(vp, x, y)
 Check if literal __x__ and literal __y__ are the equal, that is bound to the
 same variable or are bound to the same constant.
 
+exceptions: literal (x or y are not literals)
 
 ``` python
 varpy.is_used(vp, x [,value])
@@ -203,6 +230,8 @@ Check if literal __x__ is used in any clause or is forced to be
 in use by a previous setting of value. This makes "free" variables
 be included in fist and next\_unbound calls.
 
+exceptions: variable (x is not a variable)
+
 ``` python
 varpy.is_atom(vp, x [,value])
 ```
@@ -211,6 +240,7 @@ Check if literal __x__ is an __atom__, that is
 marked as atomic formula when adding new variables
 or set using is\_atom(vp, x, True)
 
+exceptions: variable (x is not a variable)
 
 ``` python
 varpy.set_level(vp, l)
@@ -263,6 +293,7 @@ rule to hold. If turbo rule is successful then
 varpy.__turbo__ is returned.
 
 __[EXPERIMENTAL]__
+
 
 
 ``` python
@@ -378,7 +409,9 @@ Get information about variable x
 * 'is\_used'
 * 'degree'
 * 'symbol'
-	
+
+exception: variable (x is not a variable)
+
 ``` python
 varpy.literal_info(vp, x, item)
 ```
@@ -399,6 +432,8 @@ __NOTE__: When deleting clauses by giving it as a list,
 then hashing may be enable (varpy.config(vp, 'hash', True) ) 
 to gain reasonable speed.
 
+exception: level (level != 0)
+
 ``` python
 varpy.clean_clause(vp, cix)
 ```
@@ -406,6 +441,7 @@ varpy.clean_clause(vp, cix)
 Cleanup clause by removing all false literals on level 0.
 if clause is contradictory then exception is raised
 
+exception: level (level != 0)
 
 ``` python
 varpy.clean_edges(vp, x)
@@ -414,6 +450,7 @@ varpy.clean_edges(vp, x)
 Remove __x__ edges, that is clauses on form [-x,y] where y
 is constant.
 
+exception: literal (x is not a literal)
 
 ``` python
 varpy.get_clauses(vp, cix, skip, raw)
@@ -504,6 +541,8 @@ If the sort key is prefixed with a '+' then sorting is
 ascending. If prefix is '-' then the sort is descending, wich
 is also the default.
 
+possible exceptions: level (when level != 0)
+
 ``` python
 varpy.order_first(vp, [x1,..,xn])
 ```
@@ -511,6 +550,7 @@ varpy.order_first(vp, [x1,..,xn])
 Update current sort order so that literals __x1__..__xn__
 are placed first.
 
+exceptions: level (when level != 0)
 
 ``` python
 varpy.order_last(vp, [x1,..,xn])
@@ -519,6 +559,8 @@ varpy.order_last(vp, [x1,..,xn])
 Update current sort order so that literals __x1__..__xn__
 are placed last.
 
+exceptions: level (when level != 0)
+
 ``` python
 varpy.next_unbound(varp [, previous])
 ```
@@ -526,6 +568,8 @@ varpy.next_unbound(varp [, previous])
 Return the next unbound literal in the current variable order.
 If __previous__ is given then start looking for unbound literals
 from that point.
+
+exception: variable (previous is not a variable)
 
 ``` python
 varpy.queue_first(varp)
