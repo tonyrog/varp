@@ -226,10 +226,10 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "is_variable",         2,  varp_is_variable ) \
     NIF( "is_bound",            2,  varp_is_bound ) \
     NIF( "is_equal",            3,  varp_is_equal ) \
-    NIF( "is_used",             2,  varp_is_used ) \
-    NIF( "is_used",             3,  varp_is_used )   \
-    NIF( "is_atom",             2,  varp_is_atom ) \
-    NIF( "is_atom",             3,  varp_is_atom )   \
+    NIF( "isused",              2,  varp_is_used ) \
+    NIF( "isused",              3,  varp_is_used )   \
+    NIF( "isatom",              2,  varp_is_atom ) \
+    NIF( "isatom",              3,  varp_is_atom )   \
     NIF( "set_level",           2,  varp_set_level ) \
     NIF( "keep_level",          2,  varp_keep_level ) \
     NIF( "move_level",          3,  varp_move_level ) \

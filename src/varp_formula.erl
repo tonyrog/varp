@@ -1715,7 +1715,7 @@ var_vector_(Size,Size,Type,Xs,_V,Bs) ->
     {{Type,Size,lists:reverse(Xs)},Bs};
 var_vector_(I,Size,Type,Xs,V,Bs) ->
     {{bool,Xi},Bs1} = variable({Type,V,Size,I},Bs),
-    varc:is_used(Bs1#bs.vp, Xi, true),  %% mark as in use!
+    varc:isused(Bs1#bs.vp, Xi, true),  %% mark as in use!
     var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector

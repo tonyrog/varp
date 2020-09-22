@@ -223,7 +223,7 @@ same variable or are bound to the same constant.
 exceptions: literal (x or y are not literals)
 
 ``` python
-varpy.is_used(vp, x [,value])
+varpy.isused(vp, x [,value])
 ```
 
 Check if literal __x__ is used in any clause or is forced to be
@@ -233,7 +233,7 @@ be included in fist and next\_unbound calls.
 exceptions: variable (x is not a variable)
 
 ``` python
-varpy.is_atom(vp, x [,value])
+varpy.isatom(vp, x [,value])
 ```
 
 Check if literal __x__ is an __atom__, that is

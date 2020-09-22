@@ -14,6 +14,7 @@
 -export([clone/1]).
 -export([clone/2]).
 -export([info/2]).
+-export([memory/1]).
 -export([config/3]).
 -export([add_variable/1]).
 -export([add_variable/2]).
@@ -29,6 +30,7 @@
 -export([variable_info/2, variable_info/3, variable_info_keys/0]).
 -export([literal_info/2, literal_info/3, literal_info_keys/0]).
 -export([value/2]).
+-export([bound/2]).
 -export([bind/2, bind/3]).
 -export([decide/2, decide/3]).
 -export([subst/3]).
@@ -42,8 +44,8 @@
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
--export([is_used/2, is_used/3]).
--export([is_atom/2, is_atom/3]).
+-export([isused/2, isused/3]).
+-export([isatom/2, isatom/3]).
 -export([set_level/2]).
 -export([undo_level/2]).
 -export([keep_level/2]).
@@ -284,7 +286,7 @@ variable_info(Vp, Index) ->
 
 variable_info_keys() ->
     [implication, implication_clause, implication_pos,
-     level, phase, degree, is_atom, symbol].
+     level, phase, degree, is_atom, is_used, symbol].
 
 literal_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
@@ -302,6 +304,13 @@ literal_info_keys() ->
 -spec value(Vp::varc(), Lit::literal()) -> true | false | undefined.
 
 value(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
+%% Get literal binding
+-spec bound(Vp::varc(), Lit::literal()) -> 
+	  true | false | literal() | undefined.
+
+bound(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 %% bind literal
@@ -388,20 +397,20 @@ is_equal(_Vp, LitA, LitB) when is_integer(LitA),
 			       is_integer(LitB) ->
     ?nif_stub().
 
--spec is_used(Vp::varc(), Var::literal()) -> boolean().
-is_used(_Vp, Var) when is_integer(Var) ->
+-spec isused(Vp::varc(), Var::literal()) -> boolean().
+isused(_Vp, Var) when is_integer(Var) ->
     ?nif_stub().
 
--spec is_used(Vp::varc(), Var::literal(), Status::boolean()) -> boolean().
-is_used(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
+-spec isused(Vp::varc(), Var::literal(), Status::boolean()) -> boolean().
+isused(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
     ?nif_stub().
 
--spec is_atom(Vp::varc(), Var::literal()) -> boolean().
-is_atom(_Vp, Var) when is_integer(Var) ->
+-spec isatom(Vp::varc(), Var::literal()) -> boolean().
+isatom(_Vp, Var) when is_integer(Var) ->
     ?nif_stub().
 
--spec is_atom(Vp::varc(), Var::literal(), Status::boolean()) -> boolean().
-is_atom(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
+-spec isatom(Vp::varc(), Var::literal(), Status::boolean()) -> boolean().
+isatom(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
     ?nif_stub().
 
 -spec set_level(Vp::varc(), Level::level()) -> ok.
@@ -774,8 +783,24 @@ info_keys() ->
      xref,             %% xref is used (need for saturate with substitution)
      hash,             %% hash is used
      init_phase,       %% initial phase value
-     use_phase         %% used saved phase value
+     use_phase,        %% used saved phase value
+     memory_literal_size,
+     memory_variable_size,
+     memory_clause_size,
+     memory_symbol_size,
+     memory_size
     ].
+
+memory(Vp) ->
+    Keys = [number_of_variables,
+	    number_of_clauses,
+	    memory_literal_size,
+	    memory_variable_size,
+	    memory_clause_size,
+	    memory_symbol_size,
+	    memory_size],
+    [ {Key,info(Vp, Key)} || Key <- Keys].
+    
 
 get_number_of_variables(Vp) ->
     info(Vp, number_of_variables).

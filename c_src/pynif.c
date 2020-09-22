@@ -974,16 +974,12 @@ int enif_monitor_process(ErlNifEnv* env, void* obj, const ErlNifPid* pid,
 ERL_NIF_TERM enif_raise_exception(ErlNifEnv *env, ERL_NIF_TERM reason)
 {
     UNUSED(env);
-    if (String_Check(reason)) {
-	char buf[256];
-	int n;
-	n = enif_get_atom(env, reason, buf, sizeof(buf), ERL_NIF_LATIN1);
-	if (n == 0)
-	    PyErr_SetString(PyExc_TypeError, "exception");
-	else {
-	    buf[n] = '\0';
-	    PyErr_SetString(PyExc_TypeError, buf);
-	}
+    char buf[256];
+    int n;
+
+    if ((n = enif_get_atom(env,reason,buf,sizeof(buf),ERL_NIF_LATIN1))>0) {
+	buf[n] = '\0';
+	PyErr_SetString(PyExc_TypeError, buf);
     }
     else
 	PyErr_SetString(PyExc_TypeError, "exception");
