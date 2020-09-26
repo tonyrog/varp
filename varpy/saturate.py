@@ -3,10 +3,10 @@ import varpy
 
 # saturate variable x return bindings or False
 def saturate_var(vp, x):
-    if eval(vp, -x):
+    if eval(vp, x):
         varpy.mark(vp, 2)
         undo(vp)
-        if eval(vp, x):
+        if eval(vp, -x):
             bs = varpy.intersect_var(vp, x, 2, True)
             varpy.unmark(vp)
             undo(vp)
@@ -18,7 +18,7 @@ def saturate_var(vp, x):
             return bs
     else:
         undo(vp)
-        if eval(vp, x):
+        if eval(vp, -x):
             bs = varpy.get_bindings(vp, 2)
             undo(vp)
             return bs

@@ -296,7 +296,7 @@ literal_info(Vp,Index) ->
     [{What,literal_info(Vp,Index,What)} || What <- literal_info_keys()].
 
 literal_info_keys() ->
-    [degree, user, edge, symbol].
+    [degree, user, edge, xref, symbol].
 
 %%
 %% Get literal value 

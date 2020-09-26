@@ -11,24 +11,52 @@
 -include("varp.hrl").
 
 all() ->
-    lists:foreach(
-      fun(Test) ->
-	      io:format("< ~w: ", [Test]),
-	      apply(?MODULE, Test, []),
-	      io:format("> ok\n")
-      end, [
-	    constants,
-	    inc,
-	    add,
-	    sub,
-	    mul,
-	    'div',
-	    cmp_1, cmp_2, cmp_3, cmp_4,
-	    shift,
-	    rotate,
-	    equation1,
-	    equation2
-	   ]).
+    Failed = 
+	lists:foldl(
+	  fun(Test,Failed) ->
+		  io:format("< ~w: ", [Test]),
+		  case sync_apply(?MODULE, Test, []) of
+		      ok -> 
+			  io:format("> OK\n"),
+			  Failed;
+		      error ->
+			  io:format("> ERROR\n"),
+			  Failed+1
+		  end
+	  end, 0, 
+	  [
+	   constants,
+	   inc,
+	   add,
+	   sub,
+	   mul,
+	   'div',
+	   cmp_1, cmp_2, cmp_3, cmp_4,
+	   shift,
+	   rotate,
+	   equation1,
+	   equation2
+	  ]),
+        if Failed > 0 ->
+	    io:format("~w FAILED CASES\n", [Failed]);
+       true ->
+	    io:format("ALL OK\n")
+    end.
+
+sync_apply(Mod, Fun, Args) ->
+    PARENT = self(),
+    Pid = spawn(fun() ->
+			try apply(Mod, Fun, Args) of
+			    _Res -> PARENT ! {self(),ok}
+			catch 
+			    error:_ ->
+				PARENT ! {self(),error}
+			end
+		end),
+    receive
+	{Pid, Result} ->
+	    Result
+    end.
 
 constants() ->
     {{uint,1,[?F]},_} = varp_formula:build({uint,1,0}),

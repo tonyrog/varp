@@ -65,7 +65,7 @@
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-// #define ASSERTIONS
+#define ASSERTIONS
 // #define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
@@ -74,7 +74,6 @@
 // #define DEBUG_MEM
 // #define FENCE_MEM
 // #define VALIDATE_TWL
-// #define VALIDATE_ORDER
 // #define VALIDATE_MODEL
 
 // #define COUNT(vp, cnt)
@@ -573,8 +572,9 @@ typedef struct _subscription_t {   // :dlink_t in dlist_t
 typedef struct _varp_config_t
 {
     qtype_t  qtype;      // literal queue is fifo/lifo/recursive
-    bool_t   xref;       // xref used or not
+    bool_t   xref;       // xref used or not    
     bool_t   hash;       // clause has or not
+    bool_t   vsids;      // variable state independent decaying sum
     bool_t   edge;       // keep edge list for 2-clauses
     bool_t   use_phase;  // use saved phase
     ival_t   init_phase; // initial phase selection
@@ -800,6 +800,7 @@ DECL_ATOM(watch);
 DECL_ATOM(watch0);
 DECL_ATOM(watch1);
 DECL_ATOM(xref);
+DECL_ATOM(vsids);
 DECL_ATOM(none);
 DECL_ATOM(log2);
 DECL_ATOM(log10);
@@ -961,7 +962,7 @@ void validate_memlist()
 {
 #ifdef FENCE_MEM
     memblock_t* mptr = dlist_first(&memlist);
-    while(!dlist_is_eol(mptr)) {
+    while(mptr != NULL) {
 	validate_memblock(mptr, mptr->allocated);
 	mptr = dlist_next(mptr);
     }
@@ -1075,7 +1076,7 @@ static void* heap_alloc(slist_t* list, size_t obj_size)
 static void heap_cleanup(slist_t* list)
 {
     heap_t* hp = slist_first(list);
-    while(!slist_is_eol(hp)) {
+    while (hp != NULL) {
 	heap_t* hp_next = slist_next(hp);
 	VARP_FREE(hp);
 	hp = hp_next;
@@ -1621,14 +1622,23 @@ static inline int variable_is_bound(varp_t* vp, variable_t* var)
     return get_vv(vp, var) != I_UNDEF;
 }
 
-// return true iff variable is free, that is variable does not
-// occure in any clause
+static inline int variable_is_unbound(varp_t* vp, variable_t* var)
+{
+    return get_vv(vp, var) == I_UNDEF;
+}
+
+// return true iff variable is marked as used or
+// variable does occure in some clause
+static inline int variable_is_used(variable_t* var)
+{
+    return var->is_used || (var->lit[0].degree>0) || (var->lit[1].degree>0);
+}
+
 static inline int variable_is_unused(variable_t* var)
 {
-    if (var->is_used)
-	return 0;
-    return (var->lit[0].degree==0) && (var->lit[1].degree == 0);
+    return !variable_is_used(var);
 }
+
 
 static inline int literal_is_bound(varp_t* vp, literal_t* lp)
 {
@@ -1818,7 +1828,7 @@ char* format_literal(varp_t* vp, literal_t* lp)
     if (lp == NULL)
 	return "NULL";
 
-    // alternate to allow to printf arguments!!
+    // alternate to allow two printf arguments!!
     litname = (litname == ln1) ? ln2 : ln1;
     n = is_neg_ll(lp) ? "!" : "";
     if (dynarray_element(lp->sref, 0) != NULL)
@@ -2139,7 +2149,7 @@ static inline literal_t* lqueue_deq(varp_t* vp)
 static void lqueue_clear(varp_t* vp)
 {
     literal_t* lp = slist_first(&vp->q);
-    while(!slist_is_eol(lp)) {
+    while(lp != NULL) {
 	lp->flags &= ~LIT_FLAG_Q;
 	lp = slist_next(lp);
     }
@@ -2245,7 +2255,7 @@ static void log_permanent_(varp_t* vp, literal_t* x, literal_t* y)
     ErlNifEnv* env = vp->msg_env;
     subscription_t* sp = dlist_first(&vp->subs);
 
-    while(!dlist_is_eol(sp)) {
+    while (sp != NULL) {
 	if ((sp->flags & SUB_FLAG_VAR) ||
 	    ((sp->flags & SUB_FLAG_ATOM) &&
 	     (x->var->is_atom))) {
@@ -2291,51 +2301,60 @@ static inline void log_permanent(varp_t* vp, literal_t* x,
     log_permanent_(vp, x, y);
 }
 
-static inline void order_set_top(varp_t* vp, variable_t* var)
+static inline void print_top(varp_t* vp, char* where)
 {
-    if ((vp->top == NULL) || cdlist_is_before(var, vp->top))
-	vp->top = var;
+    if (vp->top == NULL)
+	enif_fprintf(stdout, "%s: top = NULL\r\n", where);
+    else 
+	enif_fprintf(stdout, "%s: top = %d\r\n", vp->top->ix);
 }
 
-// move order_next if needed
+// this is called when undo'ing a variable
+static inline void order_unbind(varp_t* vp, variable_t* var)
+{
+    clr_vv(vp, var);
+    if (vp->top == NULL)
+	vp->top = var;
+    else if (cdlist_is_before(var, vp->top))
+	vp->top = var;
+    // print_top(vp, "order_unbind");
+}
+
+static inline void order_set_top(varp_t* vp, variable_t* var)
+{
+    if ((vp->top == NULL) || cdlist_is_before(var, vp->top)) {
+	vp->top = var;
+	// print_top(vp, "order_set_top");
+    }
+}
+
+// move top if variable is unbound and used then check if variable
 static inline void order_move_top(varp_t* vp, variable_t* var)
 {
-    if (!variable_is_bound(vp, var))
+    if (variable_is_unbound(vp, var) && variable_is_used(var))
 	order_set_top(vp, var);
 }
 
-// remove var from order list, update order_next if needed
+// remove var from order list, update top if needed
 static void order_remove(varp_t* vp, variable_t* var)
 {
-    cdlist_t* list = &vp->order_list;
-    size_t n = cdlist_length(list);
-
-    ASSERT(n > 0);
-
-    if (n == 1) { // remove last element
-	cdlist_remove(list, var);
-	vp->top = NULL;
-    }
-    else if (n > 1) {
-	if (var == vp->top) {
-	    if (cdlist_is_last(list, var))
-		vp->top = cdlist_prev(var);
-	    else
-		vp->top = cdlist_next(var);
+    if (var == vp->top) { // move top if var == top
+	if (cdlist_is_last(&vp->order_list, var)) {
+	    vp->top = cdlist_prev(var);
+	    enif_fprintf(stdout, "set top = %d\r\n", vp->top->ix);
 	}
-	cdlist_remove(list, var);
+	else {
+	    vp->top = cdlist_next(var); // maybe NULL!
+	    // print_top(vp, "order_remove");
+	}
     }
+    cdlist_remove(&vp->order_list, var);
 }
 
 static void order_insert_first(varp_t* vp, variable_t* var)
 {
     cdlist_insert_first(&vp->order_list, var);
     order_move_top(vp, var);
-}
-
-static void order_insert_last(varp_t* vp, variable_t* var)
-{
-    cdlist_insert_last(&vp->order_list, var);
 }
 
 static void order_insert_before(varp_t* vp,variable_t* anchor,variable_t* var)
@@ -2345,50 +2364,57 @@ static void order_insert_before(varp_t* vp,variable_t* anchor,variable_t* var)
 }
 
 // insert var before top and move top if var is unbound
-static inline void order_insert_before_top(varp_t* vp, variable_t* var)
+static inline void order_move_before_top(varp_t* vp, variable_t* var)
 {
     if (vp->top == NULL) {
 	order_remove(vp, var);
 	order_insert_first(vp, var);
-	if (!variable_is_bound(vp, var))
-	    vp->top = var;
     }
     else if (var != vp->top) {
 	order_remove(vp, var);
 	order_insert_before(vp, vp->top, var);
-	if (!variable_is_bound(vp, var))
-	    vp->top = var;
     }
 }
 
-// get next unbound literal
+// set top when we lost track of it
+static int setup_top(varp_t* vp)
+{
+    variable_t* var = cdlist_first(&vp->order_list);
+    while((var != NULL) &&
+	  (variable_is_bound(vp, var) || variable_is_unused(var)))
+	var = cdlist_next(var);
+    vp->top = var;
+    // print_top(vp, "setup_top");
+    if (var != NULL)
+	return var->ix;
+    return 0;
+}
+
+// get next unbound literal from top
 static int next_unbound(varp_t* vp)
 {
     variable_t* var;
-
     if ((var = vp->top) != NULL) {
-	while(!cdlist_is_eol(var) &&
+	while((var != NULL) &&
 	      (variable_is_bound(vp, var) || variable_is_unused(var)))
 	    var = cdlist_next(var);
-	if (!cdlist_is_eol(var)) {
-	    vp->top = var;  // first unbound found save in top
+	vp->top = var;
+	if (var != NULL)
 	    return var->ix;
-	}
-	vp->top = NULL;
     }
     return 0;
 }
 
 static int next_unbound_after(varp_t* vp, variable_t* var)
 {
-    if (!cdlist_is_last(&vp->order_list, var)) {
+    if (cdlist_is_last(&vp->order_list, var))
+	return 0;
+    var = cdlist_next(var);
+    while((var != NULL) &&
+	  (variable_is_bound(vp, var) || variable_is_unused(var)))
 	var = cdlist_next(var);
-	while(!cdlist_is_eol(var) &&
-	      (variable_is_bound(vp, var) || variable_is_unused(var)))
-	    var = cdlist_next(var);
-	if (!cdlist_is_eol(var))
-	    return var->ix;
-    }
+    if (var != NULL)
+	return var->ix;
     return 0;
 }
 
@@ -2561,11 +2587,10 @@ static void unbind_level(varp_t* vp, int level)
     while(bp != NULL) {
 	ASSERT(bp->bound == NULL);
 	DBG_BCP("%sUnbind %s\r\n",indent(level),format_variable(bp));
-	clr_vv(vp, bp);
+	order_unbind(vp, bp);
 	bp->implication_clause = CLAUSE_NONE;
 	bp->literal_pos = -1;
 	bp->level = -1;
-	order_set_top(vp, bp);
 	bp = bp->bound_next;
     }
     vp->num_bound -= vp->undo[level].size;
@@ -3198,6 +3223,7 @@ static void default_config(varp_config_t* conf)
     conf->xref  = false;
     conf->hash  = false;
     conf->edge  = false;
+    conf->vsids = false;
     conf->init_phase = I_TRUE;
     conf->use_phase  = false;
     conf->vsize  = DEFAULT_MAP_SIZE;
@@ -3231,6 +3257,12 @@ static int vif_config(ErlNifEnv* env,
     }
     else if (EQUAL_KEY(env, xref, key) && enif_is_false(env, value)) {
 	opt->xref = false;
+    }
+    else if (EQUAL_KEY(env, vsids, key) && enif_is_true(env, value)) {
+	opt->vsids = true;
+    }
+    else if (EQUAL_KEY(env, vsids, key) && enif_is_false(env, value)) {
+	opt->vsids = false;
     }
     else if (EQUAL_KEY(env, hash, key) && enif_is_true(env, value)) {
 	opt->hash = true;
@@ -3357,7 +3389,7 @@ static int symtab_grow(varp_t* vp)
     // that rehash to the upper part
     for (slot = 0; slot < (int)size0; slot++) {
 	symbol_t* sp = dlist_first(&vp->symtab[slot]);
-	while(!dlist_is_eol(sp)) {
+	while (sp != NULL) {
 	    int new_slot = symbol_slot(sp, size);
 	    DBG("move from %d to %d\r\n", slot, new_slot);
 	    if (slot == new_slot) // element stay
@@ -3382,7 +3414,7 @@ static symbol_t* symbol_lookup(varp_t* vp, ErlNifBinary* bp,
 	int slot = hvalue & (hsize-1);
 	// fixme: use dlist_iter!
 	symbol_t* sp = dlist_first(&vp->symtab[slot]);
-	while(!dlist_is_eol(sp)) {
+	while (sp != NULL) {
 	    if ((sp->hvalue == hvalue) &&
 		(sp->size == bp->size) &&
 		(sp->is_term == is_term) &&
@@ -3700,20 +3732,16 @@ static int add_variables(varp_t* vp, size_t n)
 #endif
 #endif
     }
-
     obj_pre_alloc(&vp->var_allocator, n);
-    
     for (j = (int)k; j < (int)m; j++) {
 	variable_t* var;
 	if ((var = obj_alloc(&vp->var_allocator)) == NULL)
 	    return -1;
-	// insert using dlist to get speed
 	dlist_insert_last(&vp->order_list, var);
 	var_init(vp, var, j);
 	vp->var_map[j] = var;
 	if (vp->top == NULL)
-	    vp->top = dlist_first(&vp->order_list);
-	// if ((j % 10000) == 0) printf("create %d variables\r\n", j);
+	    vp->top = var;
     }
     cdlist_renumber(&vp->order_list);
     return (int)k;
@@ -4109,6 +4137,27 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	}
 	return list;
     }
+    if (EQUAL_KEY(env, xref, argv[2])) {
+	if (!vp->opt.xref)
+	    return ATOM(undefined);
+	else {
+	    ERL_NIF_TERM r;
+	    size_t n = dynarray_size(lp->xref);
+	    xref_t* xptr = dynarray_element(lp->xref, 0);
+	    int i;
+	    STK_BEGIN(ERL_NIF_TERM, element, n) {
+		for (i = 0; i < (int)n; i++) {
+		    ERL_NIF_TERM e;
+		    e = enif_make_tuple2(env,
+					 enif_make_uint(env,xptr[i].cix),
+					 enif_make_int(env,xptr[i].p));
+		    element[i] = e;
+		}
+		r = enif_make_list_from_array(env, element, n);
+	    } STK_END0(element);
+	    return r;
+	}
+    }
     if (EQUAL_KEY(env, symbol, argv[2])) {
 	ERL_NIF_TERM list = enif_make_list(env, 0);
 	size_t n = dynarray_size(lp->sref);
@@ -4136,7 +4185,7 @@ void dump_order(char* label, varp_t* vp)
 		 vn-1, vp->num_bound, vp->num_subst,
 		 (vn-1) - vp->num_bound);
     var = cdlist_first(&vp->order_list);
-    while(var && !cdlist_is_eol(var)) {
+    while(var != NULL) {
 	char* nmark = (var == vp->top) ? "*" : "";
 	enif_fprintf(stdout, "[o=%e]%s%s=%s ",
 		     var->link.order,
@@ -4157,9 +4206,14 @@ static bool_t valid_order(varp_t* vp)
     bool_t first_unbound = false;
     bool_t result = true;
 
+    if (vp->top != NULL) {
+	if (variable_is_bound(vp, vp->top)) {
+	    enif_fprintf(stdout, "TOP is BOUND\r\n");
+	}
+    }
     prev = NULL;
     var = cdlist_first(&vp->order_list);
-    while(!cdlist_is_eol(var)) {
+    while(var != NULL) {
 	if ((prev != NULL) && !cdlist_is_after(var, prev)) {
 	    enif_fprintf(stdout, "variable %s @%d is not ordered correct!\r\n",
 			 format_variable(var), var->level);
@@ -4189,7 +4243,7 @@ static bool_t valid_model(varp_t* vp)
     variable_t* var;
 
     var = cdlist_first(&vp->order_list);
-    while(!cdlist_is_eol(var)) {
+    while(var != NULL) {
 	if (!variable_is_bound(vp, var)) {
 	    enif_fprintf(stdout, "variable %s @%d not bound!\r\n",
 			 format_variable(var), var->level);
@@ -4226,7 +4280,14 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
     }
     else if (argc == 2) {
 	variable_t* var;
-	if (!vif_get_variable(env, vp, argv[1], &var))
+	int xi;
+	if (enif_get_int(env, argv[1], &xi) && (xi == 0)) {
+	    if (vp->top == NULL)
+		return enif_make_boolean(env, false);
+	    else
+		return enif_make_int(env, vp->top->ix);
+	}
+	else if (!vif_get_variable(env, vp, argv[1], &var))
 	    return enif_raise_exception(env, ATOM(variable));
 	if ((i = next_unbound_after(vp, var)) != 0) {
 #if defined(DEBUG_ORDER)
@@ -4660,9 +4721,8 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 		if (fabs(r) < EPSILON)
 		    r = (pkey[k2][j] - nkey[k2][j]);
 		var->phase = (r >= 0.0) ? I_TRUE : I_FALSE;
-		cdlist_insert_last(&vp->order_list, var);
+		dlist_insert_last(&vp->order_list, var);
 	    }
-	    vp->top = vp->var_map[sort_map[0]];
 #if defined(DEBUG_ORDER)
 	    dump_order("order_sort", vp);
 #endif
@@ -4672,9 +4732,10 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     } STK_END0(pkey1);
     } STK_END0(nkey2);
     } STK_END0(nkey1);
-
     if (r < 0)
 	return enif_make_badarg(env);
+    cdlist_renumber(&vp->order_list);
+    setup_top(vp);
     ASSERT(valid_order(vp));
     return enif_make_ok(env);
 }
@@ -4701,13 +4762,16 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 	    }
 	    // insert all (reversed) first, will produce the correct order!
 	    for (i = len-1; i >= 0; i--) {
-		if (!cdlist_is_first(&vp->order_list, literals[i]->var)) {
-		    cdlist_remove(&vp->order_list, literals[i]->var);
-		    order_insert_first(vp, literals[i]->var);
+		variable_t* var = literals[i]->var;
+		if (!cdlist_is_first(&vp->order_list, var)) {
+		    dlist_remove(&vp->order_list, var);
+		    dlist_insert_first(&vp->order_list, var);
 		}
 	    }
-	    ASSERT(valid_order(vp));
 	} STK_END(literals);
+	cdlist_renumber(&vp->order_list);
+	setup_top(vp);
+	ASSERT(valid_order(vp));
 	return r;
     }
     return enif_make_badarg(env);
@@ -4734,12 +4798,15 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 		STK_LEAVE(literals);
 	    }
 	    for (i = 0; i < (int)len; i++) {
-		if (!cdlist_is_last(&vp->order_list, literals[i]->var)) {
-		    order_remove(vp, literals[i]->var);
-		    order_insert_last(vp, literals[i]->var);
+		variable_t* var = literals[i]->var;
+		if (!cdlist_is_last(&vp->order_list, var)) {
+		    dlist_remove(&vp->order_list, var);
+		    dlist_insert_last(&vp->order_list, var);
 		}
 	    }
 	} STK_END(literals);
+	cdlist_renumber(&vp->order_list);
+	setup_top(vp);
 	ASSERT(valid_order(vp));
 	return r;
     }
@@ -5499,7 +5566,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	int slot;
 	for (slot = 0; slot < (int)size; slot++) {
 	    symbol_t* sp = dlist_first(&vp0->symtab[slot]);
-	    while(!dlist_is_eol(sp)) {
+	    while(sp != NULL) {
 		symbol_t* copy = symbol_copy(vp, sp);
 		size_t n = dynvar_size(copy->lit);
 		int i;
@@ -5540,7 +5607,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	literal_t* src;
 
 	src = slist_first(&vp0->q);
-	while(!slist_is_eol(src)) {
+	while(src != NULL) {
 	    int l = export_ll(src);
 	    literal_t* dst = vindex_ll(vp, l);
 	    slist_insert_last(&vp->q, dst);
@@ -5628,6 +5695,20 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
 }
 #endif
 
+
+int valid_xref(literal_t* xp)
+{
+    xref_t* xptr = dynarray_element(xp->xref, 0);
+    size_t  xsize = dynarray_size(xp->xref);
+
+    while(xsize > 1) {
+	if (!(xptr[0].cix < xptr[1].cix)) return 0;
+	xptr++;
+	xsize--;
+    }
+    return 1;
+}
+
 //
 // Substitute one literal for an other
 // subst(Vp, X, Y)   apply [X/Y]
@@ -5644,20 +5725,6 @@ static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
 //  [!X/!Y]  (A X Y B)  =>  (A X X B)    => (A X f B)
 //
 //
-int valid_xref(literal_t* xp)
-{
-    xref_t* xptr = dynarray_element(xp->xref, 0);
-    size_t  xsize = dynarray_size(xp->xref);
-
-    while(xsize > 1) {
-	if (!(xptr[0].cix < xptr[1].cix)) return 0;
-	xptr++;
-	xsize--;
-    }
-    return 1;
-}
-
-// substitute one literal
 static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 {
     literal_t* yp   = l2ll(vp, yl);
@@ -5676,10 +5743,14 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     dynarray_t* x1 = dynarray_create(vp, xlen+ylen, sizeof(xref_t));
     xref_t*    x1ptr = dynarray_element(x1,0);
     xref_t*    x1ptr0 = x1ptr;
-
+	
     ASSERT (yp != xp);
     ASSERT(valid_xref(yp));
 
+    DBG("replace %s with %s\r\n",format_literal(vp, yp),format_literal(vp, xp));
+    // must set size on x1 otherwise it will zero when shrinking
+    dynarray_resize(x1, xlen+ylen);
+		 
     // scan and rewrite all y's into x's
     while(ylen--) {
 	cix_t   cix = yptr->cix;
@@ -5705,6 +5776,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 
 	if ( ((xlen==0) || (xptr->cix > cix)) &&
 	     ((nxlen==0) || (nxptr->cix > cix)) )  { // Y only
+	    DBG("clause %d replace Y pos=%d\r\n", cp->cix, yptr->p);
 	    cp->lit[yptr->p] = xl;
 	    cp->hvalue = literal_hash_del(cp->hvalue, yl);
 	    cp->hvalue = literal_hash_add(cp->hvalue, xl);
@@ -5716,6 +5788,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    *x1ptr++ = *yptr;
 	}
 	else if ((xlen > 0) && (xptr->cix == cix)) { // X, Y
+	    DBG("clause %d replace X,Y FALSE, pos=%d\r\n", cp->cix, yptr->p);
 	    cp->lit[yptr->p] = L_FALSE(vp);
 	    cp->hvalue = literal_hash_del(cp->hvalue, yl);
 	    if (rewatch) {
@@ -5735,6 +5808,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    xlen--;
 	}
 	else if ((nxlen > 0) && (nxptr->cix == cix)) { // !X, Y
+	    DBG("clause %d replace !X,Y TRUE, pos=%d\r\n", cp->cix, yptr->p);
 	    cp->lit[yptr->p] = L_TRUE(vp);
 	    cp->hvalue = literal_hash_del(cp->hvalue, yl);
 	    // FIXME: swap away TRUE? (may not be a problem since dead)
@@ -5748,6 +5822,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 
     while(xlen--)
 	*x1ptr++ = *xptr++;
+    
     dynarray_resize(x1, x1ptr - x1ptr0);
 
     dynarray_destroy(vp, xp->xref);
@@ -5756,9 +5831,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
     dynarray_destroy(vp, yp->xref);
     yp->xref = NULL;
 
-    // enif_fprintf(stdout, "x-check: %s\r\n", format_literal(vp, xp));
     ASSERT(valid_xref(xp));
-    // enif_fprintf(stdout, "x-check: %s\r\n", format_literal(vp, nxp));
     ASSERT(valid_xref(nxp));
 }
 
@@ -5816,10 +5889,7 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     lit_t xp, yp;
-    ival_t x, y;
     varp_t* vp;
-    variable_t* xv;
-    variable_t* yv;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -5833,31 +5903,32 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     //   export_l(yp),format_ival(get_l(vp,yp)));
 
     if (!vp->opt.xref) // must enable cross reference!
-	return enif_make_badarg(env);
-    // enif_fprintf(stdout,"xref=ok\r\n");
+	return enif_raise_exception(env, ATOM(xref));	
     if (vp->level != 0) // only on level 0!
 	return enif_raise_exception(env, ATOM(level));
-    // enif_fprintf(stdout,"level=0\r\n");
 
-    y = get_l(vp, yp);
-    if (I_CONST(y)) {
-	// enif_fprintf(stdout,"y=%s\r\n", format_ival(y));
-	return enif_make_badarg(env);
+    if (xp == yp)
+	return enif_make_boolean(env, true);
+    else if (xp == neg_l(yp))
+	return enif_make_boolean(env, false);
+    else {
+	ival_t x, y;
+
+	y = get_l(vp, yp);
+	if (I_CONST(y)) {  // we may allow binding later...
+	    // enif_fprintf(stdout,"y=%s\r\n", format_ival(y));
+	    return enif_make_badarg(env);
+	}
+	x = get_l(vp, xp);
+	if (I_CONST(x)) {
+	    // enif_fprintf(stdout,"x=%s\r\n", format_ival(x));
+	    return enif_make_badarg(env);
+	}
+	vp->caller_env = env;
+	subst(vp, xp, yp);
+	vp->caller_env = NULL;
+	return enif_make_boolean(env, true);
     }
-
-    x = get_l(vp, xp);
-    if (I_CONST(x)) {
-	// enif_fprintf(stdout,"x=%s\r\n", format_ival(x));
-	return enif_make_badarg(env);
-    }
-
-    xv = var_l(vp, xp);
-    yv = var_l(vp, yp);
-
-    vp->caller_env = env;
-    if (xv != yv) subst(vp, xp, yp);
-    vp->caller_env = NULL;
-    return enif_make_boolean(env, true);
 }
 
 static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
@@ -6779,6 +6850,9 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, xref, argv[1])) {
 	return enif_make_boolean(env, vp->opt.xref);
     }
+    if (EQUAL_KEY(env, vsids, argv[1])) {
+	return enif_make_boolean(env, vp->opt.vsids);
+    }    
     if (EQUAL_KEY(env, hash, argv[1])) {
 	return enif_make_boolean(env, vp->opt.hash);
     }
@@ -6886,6 +6960,19 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
+    if (EQUAL_KEY(env, vsids, key)) {
+	int enable;
+	if (!enif_get_boolean(env, value, &enable))
+	    return enif_make_badarg(env);
+	if (enable && !vp->opt.vsids) {
+	    cdlist_renumber(&vp->order_list);
+	    vp->opt.vsids = true;
+	}
+	else if (!enable && vp->opt.vsids) {
+	    vp->opt.xref = false;
+	}
+	return enif_make_ok(env);
+    }
     if (EQUAL_KEY(env, hash, key)) {
 	int enable;
 	if (!enif_get_boolean(env, value, &enable))
@@ -6938,7 +7025,6 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	return enif_make_ok(env);	
     }
     return enif_make_badarg(env);
-
 }
 
 //
@@ -7276,6 +7362,8 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 {
     variable_t* anchor;
 
+    if (!vp->opt.vsids)
+	return;
     if (bump == BUMP_NONE)
 	return;
     switch(get_vv(vp, var)) {
@@ -7308,7 +7396,7 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 	    break;
 	}
 	case BUMP_NEXT:
-	    order_insert_before_top(vp, var);
+	    order_move_before_top(vp, var);
 	    return;
 	default:
 	    return;
@@ -8215,7 +8303,7 @@ static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_variable(env, vp, argv[1], &var))
 	return enif_raise_exception(env, ATOM(variable));
-    if (enif_get_double(env, argv[2], &bumpf))
+    if (enif_get_double(env, argv[2], &bumpf) && (bumpf >= 0.0))
 	bump = dynvar_size(vp->var_map)*bumpf;
     else if (!enif_get_int(env, argv[2], &bump)) {
 	if (EQUAL_KEY(env, next, argv[2]))
@@ -8228,7 +8316,8 @@ static ERL_NIF_TERM varp_bump(ErlNifEnv* env, int argc,
 	    bump = BUMP_RANK;
 	else if (EQUAL_KEY(env, none, argv[2]))
 	    bump = BUMP_NONE;
-	return enif_make_badarg(env);
+	else
+	    return enif_make_badarg(env);
     }
     variable_bump(vp, var, bump);
     return enif_make_ok(env);
@@ -9062,6 +9151,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(watch0);
     LOAD_ATOM(watch1);
     LOAD_ATOM(xref);
+    LOAD_ATOM(vsids);
     LOAD_ATOM(none);
     LOAD_ATOM(log2);
     LOAD_ATOM(log10);
@@ -9107,7 +9197,7 @@ static void varp_down(ErlNifEnv* env, void* obj,
 
     DBG("varp_down called\r\n");
 
-    while(!dlist_is_eol(sp)) {
+    while(sp != NULL) {
 	if (enif_compare_monitors(mon, &sp->mon) == 0) {
 #ifdef DEBUG
 	    char buf[80];

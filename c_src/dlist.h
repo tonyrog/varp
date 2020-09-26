@@ -43,8 +43,6 @@ DLIST_LOCAL void* dlist_first(dlist_t* list) DLIST_API;
 DLIST_LOCAL void* dlist_last(dlist_t* list) DLIST_API;
 DLIST_LOCAL int dlist_is_last(dlist_t* list, void* elem) DLIST_API;
 DLIST_LOCAL int dlist_is_first(dlist_t* list, void* elem) DLIST_API;
-DLIST_LOCAL int dlist_is_eol(void* elem) DLIST_API;
-DLIST_LOCAL int dlist_is_bol(void* elem) DLIST_API;
 DLIST_LOCAL void* dlist_next(void* elem) DLIST_API;
 DLIST_LOCAL void* dlist_prev(void* elem) DLIST_API;
 DLIST_LOCAL void* dlist_insert_after(dlist_t* list, void* aptr, void* ptr) DLIST_API;
@@ -54,7 +52,6 @@ DLIST_LOCAL void* dlist_insert_last(dlist_t* list, void* ptr) DLIST_API;
 DLIST_LOCAL void* dlist_remove(dlist_t* list, void* ptr) DLIST_API;
 DLIST_LOCAL void* dlist_take_first(dlist_t* list) DLIST_API;
 DLIST_LOCAL void* dlist_take_last(dlist_t* list) DLIST_API;
-DLIST_LOCAL void* dlist_restore(dlist_t* list, void* ptr) DLIST_API;
 DLIST_LOCAL void dlist_merge(dlist_t* from, dlist_t* to) DLIST_API;
     
 
@@ -113,22 +110,6 @@ DLIST_LOCAL int dlist_is_last(dlist_t* list, void* elem)
 DLIST_LOCAL int dlist_is_first(dlist_t* list, void* elem)
 {
     return (list->first == (dlink_t*)elem);
-}
-
-// use is_eol when loop over list!
-// ptr = dlist_fiest(list);
-// while(!dlist_is_eol(ptr)) {
-//    ...
-//    ptr = dlist_next(ptr)
-// }
-DLIST_LOCAL int dlist_is_eol(void* elem)
-{
-    return ((dlink_t*)elem == NULL);
-}
-
-DLIST_LOCAL int dlist_is_bol(void* elem)
-{
-    return ((dlink_t*)elem == NULL); // FIXME?
 }
 
 DLIST_LOCAL void* dlist_next(void* elem)
@@ -224,15 +205,6 @@ DLIST_LOCAL void* dlist_take_last(dlist_t* list)
     return dlist_remove(list, list->last);
 }
  
-DLIST_LOCAL void* dlist_restore(dlist_t* list, void* ptr)
-{
-    dlink_t* elem = (dlink_t*) ptr;
-    elem->prev->next = elem;
-    elem->next->prev = elem;
-    list->length++;
-    return elem;
-}
-
 // merge (append) element from list from last in list to
 // and clear original from list to and from must be diffrent lists
 //

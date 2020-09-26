@@ -13,11 +13,17 @@ Create a new varp instance from a dict of options
 * {'qtype': 'lifo'|'fifo'|'recursive'}
   use lifo/fifo strategy in bcp
 * {'xref': x}
-  use cross references if x is True
+  use cross references if x is __True__
+* {'vsids': x}
+  use variable decaying sum variable selection ifg x is __True__
+* {'init_phase': x}
+  The initial phase to start with, x is boolean.
+* {'use_phase': x}
+  use saved phase in decide iff x is __True__
 * {'hash': x}
-  use hash table for clauses if x is True
+  use hash table for clauses iff x is __True__
 * {'edge': x}
-  use edge tables for 2-clauses if x is True
+  use edge tables for 2-clauses iff x is __True__
 
 ``` python
 varpy.clone(vp, options)
@@ -85,9 +91,12 @@ Set configurable items in varp
 * 'max\_conflicting'
  set max number of conflicts during bcp (<= MAX_CONFLICTING=1024)
 *  'xref'
- turn on (True) or off (False) cross reference handling
+ turn on (__True__) or off (__False__) cross reference handling
+* 'vsids'
+ enable (__True__) or disable (__False__) the use of VSIDS,
+ variable decaying sum variable selection.
 * 'hash'
- turn on (True) or off (False) hash table handling		
+ turn on (__True__) or off (__False__) hash table handling		
 * 'qtype'
  set style of literal queueing in bcp
  where value is one of 
@@ -103,7 +112,7 @@ next available variable in the variable table. Mark the new variable
 as atom if is_atom is __True__. The atom status may later be queried with
 variable info. is\_atom defaults to __True__.
 
-exceptions: system_limit (too many variables)
+exception: system_limit (too many variables)
 
 
 ``` python
@@ -114,7 +123,7 @@ Create __num__ new variables. The variables are return as a tuple
 (__firstindex__, __lastindex__). If is_atom is __True__ then the variables
 are marked as atom.
 
-exceptions: system_limit (too many variables)
+exception: system_limit (too many variables)
 
 ``` python
 varpy.value(vp, x)
@@ -123,7 +132,7 @@ varpy.value(vp, x)
 Return __True__ | __False__ | __None__,
 Value, None is return if variables undefined.
 
-exceptions: literal (x is not a literal)
+exception: literal (x is not a literal)
 
 ``` python
 varpy.bound(vp, x)
@@ -134,7 +143,7 @@ Return __True__ | __False__ | __None__ | literal
 None is return if variable x is unbound,
 if x is bound to literal y then y is returned.
 
-exceptions: literal (x is not a literal)
+exception: literal (x is not a literal)
 
 ``` python
 varpy.bind(vp, x, [,l])
@@ -165,13 +174,17 @@ __NOTE__ that cross references must be enabled before varpy.subst can be
 used, that is a call to varpy.config(vp, 'xref', True) must have been made
 prior a call to varpy.subst.
 
+exception: literal (if x or y are not literals)
+exception: level (when level != 0)
+exception: xref  (when xref is not turned on)
+
 ``` python
 varpy.implication_clause(vp, x)
 ```
 
 Return the clause index for the clause where literal __x__ became a unit.
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.implication_level(vp, x)
@@ -179,7 +192,7 @@ varpy.implication_level(vp, x)
 
 Return the bind level for variable __x__, where it was assigned during bcp.
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.implication_pos(vp, x)
@@ -187,7 +200,7 @@ varpy.implication_pos(vp, x)
 
 Return the position where literal __x__ is found in the implication clause.
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.conflicting_clause(vp, i)
@@ -202,7 +215,7 @@ varpy.is_variable(vp, x)
 
 Return __True__ if literal __x__ is unbound. Return __False__ otherwise
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.is_bound(vp, x)
@@ -211,7 +224,7 @@ varpy.is_bound(vp, x)
 Return __True__ if literal __x__ is bound, through substition, 
 to an other variable. Return __False__ otherwise.
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.is_equal(vp, x, y)
@@ -220,7 +233,7 @@ varpy.is_equal(vp, x, y)
 Check if literal __x__ and literal __y__ are the equal, that is bound to the
 same variable or are bound to the same constant.
 
-exceptions: literal (x or y are not literals)
+exception: literal (x or y are not literals)
 
 ``` python
 varpy.isused(vp, x [,value])
@@ -230,7 +243,7 @@ Check if literal __x__ is used in any clause or is forced to be
 in use by a previous setting of value. This makes "free" variables
 be included in fist and next\_unbound calls.
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.isatom(vp, x [,value])
@@ -240,7 +253,7 @@ Check if literal __x__ is an __atom__, that is
 marked as atomic formula when adding new variables
 or set using is\_atom(vp, x, True)
 
-exceptions: variable (x is not a variable)
+exception: variable (x is not a variable)
 
 ``` python
 varpy.set_level(vp, l)
@@ -541,7 +554,7 @@ If the sort key is prefixed with a '+' then sorting is
 ascending. If prefix is '-' then the sort is descending, wich
 is also the default.
 
-possible exceptions: level (when level != 0)
+exception: level (when level != 0)
 
 ``` python
 varpy.order_first(vp, [x1,..,xn])
@@ -550,7 +563,7 @@ varpy.order_first(vp, [x1,..,xn])
 Update current sort order so that literals __x1__..__xn__
 are placed first.
 
-exceptions: level (when level != 0)
+exception: level (when level != 0)
 
 ``` python
 varpy.order_last(vp, [x1,..,xn])
@@ -559,7 +572,7 @@ varpy.order_last(vp, [x1,..,xn])
 Update current sort order so that literals __x1__..__xn__
 are placed last.
 
-exceptions: level (when level != 0)
+exception: level (when level != 0)
 
 ``` python
 varpy.next_unbound(varp [, previous])

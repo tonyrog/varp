@@ -114,7 +114,7 @@ DYNARR_LOCAL int dynarray_resize(dynarray_t* dp, size_t size)
 	    return -1;
     }
     if ((size0 = dp->size) < size) {
-	void* ptr = (uint8_t*)dp->base + dp->size*dp->width;
+	void* ptr = (uint8_t*)dp->base + size0*dp->width;
 	memset(ptr, 0, (size-size0)*dp->width);
     }
     dp->size = size;

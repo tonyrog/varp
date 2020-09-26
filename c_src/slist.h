@@ -43,7 +43,6 @@ SLIST_LOCAL void* slist_first(slist_t* list) SLIST_API;
 SLIST_LOCAL void* slist_last(slist_t* list) SLIST_API;
 SLIST_LOCAL int slist_is_last(slist_t* list, void* elem) SLIST_API;
 SLIST_LOCAL int slist_is_first(slist_t* list, void* elem) SLIST_API;
-SLIST_LOCAL int slist_is_eol(void* elem) SLIST_API;
 SLIST_LOCAL void* slist_next(void* elem) SLIST_API;
 SLIST_LOCAL void* slist_insert_first(slist_t* list, void* ptr) SLIST_API;
 SLIST_LOCAL void* slist_insert_last(slist_t* list, void* ptr) SLIST_API;
@@ -111,17 +110,6 @@ SLIST_LOCAL int slist_is_last(slist_t* list, void* elem)
 SLIST_LOCAL int slist_is_first(slist_t* list, void* elem)
 {
     return (list->first == (slink_t*)elem);
-}
-
-// use is_eol when loop over list!
-// ptr = slist_first(list);
-// while(!slist_is_eol(ptr)) {
-//    ...
-//    ptr = slist_next(ptr)
-// }
-SLIST_LOCAL int slist_is_eol(void* elem)
-{
-    return (((slink_t*)elem) == NULL);
 }
 
 SLIST_LOCAL void* slist_next(void* elem)
