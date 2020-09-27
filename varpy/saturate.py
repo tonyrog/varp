@@ -3,30 +3,31 @@ import varpy
 
 # saturate variable x return bindings or False
 def saturate_var(vp, x):
-    if eval(vp, x):
+    if l_eval(vp, x):
         varpy.mark(vp, 2)
-        undo(vp)
-        if eval(vp, -x):
+        l_undo(vp)
+        if l_eval(vp, -x):
             bs = varpy.intersect_var(vp, x, 2, True)
             varpy.unmark(vp)
-            undo(vp)
+            l_undo(vp)
             return bs
         else:
             varpy.mark(vp, 1)
             bs = varpy.get_marked(vp, True)
             varpy.unmark(vp)
+            l_undo(vp)
             return bs
     else:
-        undo(vp)
-        if eval(vp, -x):
+        l_undo(vp)
+        if l_eval(vp, -x):
             bs = varpy.get_bindings(vp, 2)
-            undo(vp)
+            l_undo(vp)
             return bs
         else:
-            undo(vp)            
+            l_undo(vp)            
             return False
 
-def eval(vp, x):
+def l_eval(vp, x):
     varpy.set_level(vp, 1)
     if varpy.bind(vp, x):
         varpy.set_level(vp, 2)
@@ -34,7 +35,7 @@ def eval(vp, x):
     else:
         return False
 
-def undo(vp):
+def l_undo(vp):
     varpy.undo_level(vp, 2)
     varpy.undo_level(vp, 1)
 

@@ -65,7 +65,7 @@
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-#define ASSERTIONS
+// #define ASSERTIONS
 // #define DEBUG
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
@@ -2563,15 +2563,17 @@ static int set_level(varp_t* vp, int level)
     DBG("%sSet_level: @%d, t=%d, decision=%s\r\n",
 	indent(level), level, vp->undo[level].t,
 	format_lit(vp, vp->undo[level].decision));
-#ifdef ASSERTIONS
+#ifdef DEBUG
+    // check that levels above level are clean    
     {
-	// check that levels above level are clean
 	int n = (int)dynvar_size(vp->undo);
 	int i;
 	for (i = level+1; i < n; i++) {
-	    ASSERT(vp->undo[i].bs == NULL);
-	    ASSERT(vp->undo[i].size == 0);
-	    ASSERT(vp->undo[i].t == uUNDEF);
+	    if ((vp->undo[i].bs != NULL) ||
+		(vp->undo[i].size != 0))
+		enif_fprintf(stderr, "set_level: level %d not empty\r\n", i);
+	    if (vp->undo[i].t != uUNDEF)
+		enif_fprintf(stderr, "set_level: level %d not undef\r\n", i);
 	}
     }
 #endif

@@ -49,6 +49,7 @@ all() ->
 	   %% uorder
 	   uorder_basic,
 	   uorder_bump,
+	   uorder_bt,
 	   
 	   edge_list0, edge_list1, edge_list2, edge_list3,
 	   subst0a, subst0b, subst0c, subst0d, 
@@ -367,16 +368,108 @@ bcp_add() ->
     %% dump(V).
     ok.
 
+%% saturate test where first bcp is missing
+sat_no_bcp() ->
+    Vp = varc:new(),
+    X1 = {p,'X1',[]},
+    X2 = {p,'X2',[]},
+    X3 = {p,'X3',[]},
+    X4 = {p,'X4',[]},
+    X5 = {p,'X5',[]},
+    X6 = {p,'X6',[]},
+    X7 = {p,'X7',[]},
+    F = varp_ast:build(
+	  {'ALL',[{'->', X1, X2},
+		  {'->', {'not',X1}, X2},
+		  {'->', X1, {'not',X3}},
+		  {'->', {'not',X1}, {'not',X3}},
+		  {'->', X1, X4},
+		  {'->', {'not',X1}, {'not',X4}},
+		  {'->', X1, {'not',X5}},
+		  {'->', {'not',X1}, X5},
+		  {'->', X1, X6},
+		  {'->', X6, X7}]}, Vp),
+    varc:bind(Vp, F),
+    Bs = saturate_var(Vp,  varc:find_symbol(Vp,{"X1",[]})),
+    install_bindings(Vp, Bs),
+    saturate_lap(Vp).
 
-eval_bindings(V, Xs) ->
-    varc:set_level(V, 1),
-    _ = [(true = varc:bind(V, X)) || X <- Xs ],
-    varc:set_level(V, 2),
-    true = varc:bcp(V),
-    R = varc:get_bindings_list(V, 2),
-    varc:undo_level(V, 2),
-    varc:undo_level(V, 1),
-    R.
+saturate_lap(Vp) ->
+    saturate_lap(Vp, varc:next_unbound(Vp)).
+
+saturate_lap(_Vp, false) ->
+    true;
+saturate_lap(Vp, X) ->
+    io:format("saturate var ~w\n", [X]),
+    case saturate_var(Vp, X) of
+	false -> 
+	    false;
+	Bs ->
+	    install_bindings(Vp, Bs),
+	    saturate_lap(Vp, varc:next_unbound(Vp, X))
+    end.
+
+install_bindings(_Vp, {}) ->
+    ok;
+install_bindings(Vp, Bs) ->
+    varc:set_level(Vp, 0),
+    lists:foreach(
+      fun(A) when is_integer(A) ->
+	      io:format("bind ~w\n", [A]),
+	      varc:bind(Vp, A);
+	 ({A,B}) ->
+	      io:format("subst ~w / ~w\n", [A, B]),
+	      varc:subst(Vp, A, B)
+      end, tuple_to_list(Bs)).
+
+
+%% saturate variable x return bindings or False
+saturate_var(Vp, X) ->
+    case l_eval(Vp, X) of
+	true ->
+	    varc:mark(Vp, 2),
+	    l_undo(Vp),
+	    case l_eval(Vp, -X) of
+		true ->
+		    Bs = varc:intersect_var(Vp, X, 2, true),
+		    varc:unmark(Vp),
+		    l_undo(Vp),
+		    Bs;
+		false ->
+		    varc:mark(Vp, 1),
+		    Bs = varc:get_marked(Vp, true),
+		    varc:unmark(Vp),
+		    l_undo(Vp),
+		    Bs
+	    end;
+	false ->
+	    l_undo(Vp),
+	    case l_eval(Vp, -X) of
+		true ->
+		    Bs = varc:get_bindings(Vp, 2),
+		    l_undo(Vp),
+		    Bs;
+		false ->
+		    l_undo(Vp),
+		    false
+	    end
+    end.
+
+l_eval(Vp, X) ->
+    varc:set_level(Vp, 1),
+    case varc:bind(Vp, X) of
+	true ->
+	    varc:set_level(Vp, 2),
+	    varc:bcp(Vp);
+	false ->
+	    false
+    end.
+
+l_undo(Vp) ->
+    varc:undo_level(Vp, 2),
+    varc:undo_level(Vp, 1).
+	      
+	      
 
 %% Test eval
 clause_bcp() ->
@@ -1625,6 +1718,17 @@ undo_until(V, _From, To) ->
     varc:set_level(V, To),
     To.
 
+%% multi bind and eval
+eval_bindings(V, Xs) ->
+    varc:set_level(V, 1),
+    _ = [(true = varc:bind(V, X)) || X <- Xs ],
+    varc:set_level(V, 2),
+    true = varc:bcp(V),
+    R = varc:get_bindings_list(V, 2),
+    varc:undo_level(V, 2),
+    varc:undo_level(V, 1),
+    R.
+
 %% will have the effect that clause 1 have stamp T1 and clause N have stamp Tn
 use_clauses(V, Set) ->
     use_clauses(V, Set, varc:clauseset_first(V, Set)).
@@ -1694,12 +1798,12 @@ install_cnf(V, CNF, Set) ->
 	      case clause(V, Clause, Set) of
 		  false ->
 		      %% the clause is contradictory 
-		      assert_eval(V, Clause, false),
+		      assert_val(V, Clause, false),
 		      [false|Acc];
 		  true ->
 		      %% the clause is true 
 		      %% either evaluate to true or has X -X in the clause
-		      assert_eval(V, Clause, true),
+		      assert_val(V, Clause, true),
 		      [true|Acc];
 		  Ci ->
 		      %% check the clause
@@ -1709,8 +1813,8 @@ install_cnf(V, CNF, Set) ->
 	      end
       end, [], CNF).
 
-assert_eval(V, Clause, Value) ->
-    case eval(V, Clause) of
+assert_val(V, Clause, Value) ->
+    case val(V, Clause) of
 	Value -> ok;
 	_Other -> 
 	    ?verbose("assertion failed: eval(~w) ~w =/= ~w\n",
@@ -1726,24 +1830,24 @@ assert_equal(Value1, Value2) ->
 	    throw(badmatch)
     end.
 	    
-eval(_V, true) ->
+val(_V, true) ->
     true;
-eval(V, [Li]) ->
+val(V, [Li]) ->
     case varc:value(V, Li) of
 	?T -> true;
 	?F -> false;
 	undefined -> true
     end;
-eval(V, Ls) ->
-    eval(V, Ls, false).
+val(V, Ls) ->
+    val(V, Ls, false).
 
-eval(V, [Li|Ls], Sum) ->
+val(V, [Li|Ls], Val) ->
     case varc:value(V, Li) of
 	?T -> true;
-	?F -> eval(V, Ls, Sum);
-	undefined -> eval(V,Ls,undefined)
+	?F -> val(V, Ls, Val);
+	undefined -> val(V,Ls,undefined)
     end;
-eval(_V, [], Sum) -> Sum.
+val(_V, [], Val) -> Val.
 
 %% Verify that we can reach all clauses via xref
 verify_xref(V, CNF) ->
@@ -1779,7 +1883,7 @@ verify_hash(V, CNF) ->
 %% Utils
 
 get_watched(V) ->
-    get_watched(V, lists:seq(2, varc:info(V, number_of_variables)+1)).
+    get_watched(V, lists:seq(1, varc:info(V, number_of_variables))).
 
 get_watched(V, [Xi|Xs]) ->
     Wi0 = varc:get_clauses(V, Xi, watch),
@@ -1848,7 +1952,7 @@ dump_variables(V, List, Verb) ->
 	      Keys = varc:variable_info_keys() -- [implication,symbol,level],
 	      Sym = case varc:variable_info(V,X,symbol) of
 			[] -> no_symbol;
-			[{S,_}|_] -> S
+			[{S,_}|_] -> var_str(S)
 		    end,
 	      Level = varc:variable_info(V,X,level),
 	      Value = varc:value(V, X),
@@ -1867,6 +1971,21 @@ dump_variables(V, List, Verb) ->
 		      ok
 	      end
       end, List).
+
+var_str({p,P,As}) -> var_str(P,As);
+var_str({P,As}) when is_list(As) -> var_str(P,As);
+var_str(P) when is_list(P) -> P;
+var_str(P) when is_atom(P) -> atom_to_list(P).
+
+var_str(P,As) ->
+    P ++ "(" ++ string:join([var_arg(Ai) || Ai <- As], ",") ++ ")".
+
+var_arg({F,As}) ->
+    F ++ "(" ++ string:join([var_arg(Ai) || Ai <- As], ",") ++ ")";
+var_arg(A) when is_integer(A) -> integer_to_list(A);
+var_arg(A) when is_atom(A) -> atom_to_list(A);
+var_arg(A) when is_list(A) -> A.
+    
 
 get_cix_list(V, X, How) ->
     [split_cix(I) || I <- varc:get_clauses(V, X, How)].
