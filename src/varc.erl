@@ -375,11 +375,11 @@ conflicting_clause(_Vp, _Index) ->
     ?nif_stub().
 
 -spec conflict(Vp::varc(), Level::level(), Bump::number(),
-	       ConflictNum::integer()) -> ClauseIndex::integer().
+	       ConflictNum::integer()) -> ClauseIndex::integer() | undefined.
 conflict(_Vp, _Level, _Bump, _Index) ->
     ?nif_stub().    
 
--spec minimize(Vp::varc(), ClauseIndex::integer()) -> integer().
+-spec minimize(Vp::varc(), ClauseIndex::integer()) -> integer() | undefined.
 %% minimize the clause and return number of literals removed
 minimize(_Vp, _CluseIndex) ->
     ?nif_stub().    

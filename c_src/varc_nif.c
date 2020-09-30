@@ -5209,7 +5209,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	    cix = cp->cix;
 	    clause_free(vp, cp);
 	    clauseset_plug_hole(vp, ALPHA, GET_IX(cix));
-	    return enif_make_boolean(env, false); // It is a copy
+	    return enif_make_undefined(env);  // It is a copy
 	}
 	memcpy(cp->lit, vp->tlit, size*sizeof(lit_t));
 	cp->hvalue = hvalue;

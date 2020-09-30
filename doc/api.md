@@ -744,7 +744,7 @@ Do conflict analysis, called with level where the conflict i was found
 and the __bump__ factor that is applied to variables involved in the conflict.
 Returned value is a clause index in clauseset 'alpha'. This
 clause may then be minimized and later moved to 'gamma'.
-if None is returned then the conflict clause was a copy of an
+if __None__ is returned then the conflict clause was a copy of an
 existing clause.
 
 
@@ -754,6 +754,8 @@ varpy.minimize(vp, cix)
 
 Minimize clause, may be called after varpy.conflict and requires
 that literals and levels are set like after the conflict.
+Return updated length of clause if successful, or __None__
+if clause, after minimization, already exists.
 
 
 ``` python

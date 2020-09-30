@@ -13,9 +13,9 @@ def bj(vp):
 #        if ((gsize > 0) and ((gsize % 100) == 0)):
 #            print("|gamma| = "+str(gsize))
         cix = varpy.conflict(vp, l, 3.0, 0)
-        if cix == False:
+        if cix == None:
             pass
-        elif varpy.minimize(vp, cix) == False:
+        elif varpy.minimize(vp, cix) == None:
             pass
         else:
             clause = varpy.get_clause(vp, cix)
