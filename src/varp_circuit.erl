@@ -709,12 +709,17 @@ bt_all(Vp) ->
 bt_all(Vp, Limit) ->
     T0 = erlang:monotonic_time(),
     Count = 
-	case bt(Vp) of
-	    true ->
-		io:format("~p\n", [model(Vp)]),
-		bt_all_(Vp, 1, Limit);
+	case varc:next_unbound(Vp) of
 	    false ->
-		0
+		0;
+	    _ ->
+		case bt(Vp) of
+		    true ->
+			io:format("~p\n", [model(Vp)]),
+			bt_all_(Vp, 1, Limit);
+		    false ->
+			0
+		end
 	end,
     T1 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T1-T0,native,microsecond),

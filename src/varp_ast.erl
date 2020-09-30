@@ -63,6 +63,7 @@ var(Sym, Args, Vp, State) ->
     case varc:find_symbol(Vp, Term1) of
 	false ->
 	    Var = varc:add_variable(Vp, true),
+	    varc:isused(Vp, Var, true),  %% mark as in use!
 	    varc:add_symbol(Vp, Var, Term1),
 	    Var;
 	Var when is_integer(Var) ->
@@ -202,6 +203,11 @@ test(Text) ->
     {ok,{_Def,Tree}} = varp:parse(Text),
     Vp = varc:new(#{xref => true}),
     F = build(Tree, Vp, #{}),
-    varc:bind(Vp, F),
-    varc:set_level(Vp, 1),
-    varp_circuit:bt_all(Vp).
+    case varc:bind(Vp, F) of
+	false ->
+	    io:format("0 models found\n", []),
+	    0;
+	true ->
+	    varc:set_level(Vp, 1),
+	    varp_circuit:bt_all(Vp)
+    end.

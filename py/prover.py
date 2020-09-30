@@ -37,15 +37,12 @@ def one_lap_dilemma(vp):
         x = varpy.next_unbound(vp,x)
     return (True, m)
 
-def num_unbound(vp):
-     return varpy.info(vp,'number_of_unbound_variables')
-
 def one_saturate(vp):
     m = 1  # start the loop, number of changes
     varpy.config(vp,'xref',True)
     varpy.set_level(vp, 0)
     n=0 # n no. of laps
-    while (num_unbound(vp) > 0) and (m > 0):
+    while (varpy.num_unbound(vp) > 0) and (m > 0):
         (p, m) = one_lap_dilemma(vp)
         if not p: # contradiction
             print('unsatisfiable')

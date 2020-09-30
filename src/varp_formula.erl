@@ -163,8 +163,15 @@ new(OptMap) when is_map(OptMap) ->
 add_variable(Bs) ->
     varc:add_variable(Bs#bs.vp, false).
 
+%% Create a variable and mark all atoms as used
 add_variable(Bs, IsAtom) ->
-    varc:add_variable(Bs#bs.vp, IsAtom).
+    Var = varc:add_variable(Bs#bs.vp, IsAtom),
+    if IsAtom ->
+	    varc:isused(Bs#bs.vp, Var, true);
+       true ->
+	    ok
+    end,
+    Var.
 
 %% add symbol name to literal 
 -spec add_symbol(Bs::#bs{}, L::integer(), Sym::term()|iolist()) ->
@@ -430,17 +437,16 @@ variable_list_(Bs, [V|Vs], Acc) ->
 variable_list_(Bs, [], Acc) ->
     {Acc,Bs}.
 
-get_variable_info(Bs, [X|Xs]) ->
-    U  = varc:literal_info(Bs#bs.vp, X, user),
-    Un = varc:literal_info(Bs#bs.vp, -X, user),
-    if U >= Un ->
-	    [{X,U}|get_variable_info(Bs, Xs)];
-       true ->
-	    [{-X,Un}|get_variable_info(Bs, Xs)]
-    end;
-get_variable_info(_Bs, []) ->
-    [].
-
+%% get_variable_info(Bs, [X|Xs]) ->
+%%     U  = varc:literal_info(Bs#bs.vp, X, user),
+%%     Un = varc:literal_info(Bs#bs.vp, -X, user),
+%%     if U >= Un ->
+%% 	    [{X,U}|get_variable_info(Bs, Xs)];
+%%        true ->
+%% 	    [{-X,Un}|get_variable_info(Bs, Xs)]
+%%     end;
+%% get_variable_info(_Bs, []) ->
+%%     [].
 
 cat([X|Xs], Ys) -> cat(Xs, [X|Ys]);
 cat([], Ys) -> Ys.
@@ -621,8 +627,6 @@ fmt_var(Bs,X) ->
 
 fmt_var(_Bs,?T,_Q)  -> "1";
 fmt_var(_Bs,?F,_Q) -> "0";
-fmt_var(_Bs,true,_Q)   -> "true";
-fmt_var(_Bs,false,_Q)  -> "false";
 fmt_var(Bs,X,Q) ->
     if X < 0 ->
 	    fmt_var_(Bs,-X, "!", Q);
@@ -1037,10 +1041,7 @@ build_({cnf,{Vars,_Clauses,_Sections,Cs}},Bs)
   when is_list(Cs) ->
     %% CNF only works as first formula! variables
     %% must be numerated 1..Vars
-    lists:foreach(fun(I) ->
-			  I = varc:add_variable(Bs#bs.vp)
-		  end,
-		  lists:seq(1,Vars)),
+    {1,Vars} = varc:add_variables(Bs#bs.vp, Vars),
     %% fixme bind all literals in Ls = TRUE
     lists:foreach(fun(CL) ->
 			  try varc:add_clause(Bs#bs.vp, CL) of
@@ -1715,7 +1716,6 @@ var_vector_(Size,Size,Type,Xs,_V,Bs) ->
     {{Type,Size,lists:reverse(Xs)},Bs};
 var_vector_(I,Size,Type,Xs,V,Bs) ->
     {{bool,Xi},Bs1} = variable({Type,V,Size,I},Bs),
-    varc:isused(Bs1#bs.vp, Xi, true),  %% mark as in use!
     var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
 
 %% Fold operator Op over a variable vector
@@ -2036,9 +2036,9 @@ operation_(Op, A,B, Bs) ->
 %% Unary operator
 %%
 operation('not',{bool,Y},Bs) ->
-    {{bool,-Y},Bs};
+    {{bool,lnot(Y)},Bs};
 operation('!',{bool,Y},Bs) ->
-    {{bool,-Y},Bs};
+    {{bool,lnot(Y)},Bs};
 operation('~',Y={bool,_Y},Bs) ->
     operation('not',Y,Bs);
 operation('~', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
@@ -2144,7 +2144,7 @@ operation('imp',{bool,?T},{bool,?T}, Bs) ->   {{bool,?T},Bs};
 operation('imp',{bool,?T},{bool,?F}, Bs) ->  {{bool,?F},Bs};
 operation('imp',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
-    {{bool,X},or_gate(Bs,X,[-Y,Z])};
+    {{bool,X},or_gate(Bs,X,[lnot(Y),Z])};
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation_('~',A,Bs),
     operation_('|',An,B,Bs1);
@@ -2162,7 +2162,7 @@ operation('equ',{bool,?F},{bool,Z},Bs) -> {{bool,lnot(Z)},Bs};
 operation('equ',{bool,Y},{bool,?F},Bs) -> {{bool,lnot(Y)},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     X = add_variable(Bs),
-    {{bool,X},xor_gate(Bs,X,[-Y,Z])};
+    {{bool,X},xor_gate(Bs,X,[lnot(Y),Z])};
 
 
 operation('equ',A,B,Bs) ->
@@ -2807,8 +2807,9 @@ vshift_left(K,N,Xs) when K >= 0 ->
 %% unsigned shift right (ignoring sign bit) 
 %% shift_right 2 [X0,X1,X2,X3,X4,X5,X6,X7]  ==
 %%               [X2,X3,X4,X5,X6,X7,FALSE,FALSE]
-vushift_right(K,Xs) when K >= 0 ->
-    vushift_right(K,length(Xs),Xs).
+
+%% vushift_right(K,Xs) when K >= 0 ->
+%%     vushift_right(K,length(Xs),Xs).
 
 vushift_right(K,N,Xs) when K >= 0 ->
     K1 = erlang:min(K,N),
@@ -2818,8 +2819,8 @@ vushift_right(K,N,Xs) when K >= 0 ->
 %% shift_right 2 [X0,X1,X2,X3,X4,X5,X6,X7]  ==
 %%               [X2,X3,X4,X5,X6,X7,X7,X7]
 
-vshift_right(K,Xs) when K >= 0 ->
-    vshift_right(K,length(Xs),Xs).
+%% vshift_right(K,Xs) when K >= 0 ->
+%%     vshift_right(K,length(Xs),Xs).
 
 vshift_right(K,N,Xs) when K >= 0 ->
     K1 = erlang:min(K,N),
@@ -3292,8 +3293,6 @@ format_bnd(Bs, X, Var, level) ->
 	    end,
     format_symbol(Var) ++ Value.
 
-format_symbol(true) -> "true";
-format_symbol(false) -> "false";
 format_symbol(?T) -> "t";
 format_symbol(?F) -> "f";
 format_symbol(V) when is_atom(V) -> atom_to_list(V);

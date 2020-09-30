@@ -23,6 +23,7 @@
 #include <float.h>
 #include "erl_nif.h"
 
+#define DOUBLE_ORDER
 #include "cdlist.h"
 #include "slist.h"
 #include "dlist.h"
@@ -577,7 +578,8 @@ typedef struct _varp_config_t
     bool_t   vsids;      // variable state independent decaying sum
     bool_t   edge;       // keep edge list for 2-clauses
     bool_t   use_phase;  // use saved phase
-    ival_t   init_phase; // initial phase selection
+    bool_t   all_used;   // all variables are used
+    ival_t   init_phase; // initial phase selection    
     size_t   vsize;
     size_t   csize;
 } varp_config_t;
@@ -792,6 +794,7 @@ DECL_ATOM(undefined);
 DECL_ATOM(unit);
 DECL_ATOM(use);
 DECL_ATOM(use_phase);
+DECL_ATOM(all_used);
 // DECL_ATOM(user);
 DECL_ATOM(value_packing);
 DECL_ATOM(variable);
@@ -1629,14 +1632,15 @@ static inline int variable_is_unbound(varp_t* vp, variable_t* var)
 
 // return true iff variable is marked as used or
 // variable does occure in some clause
-static inline int variable_is_used(variable_t* var)
+static inline int variable_is_used(varp_t* vp, variable_t* var)
 {
-    return var->is_used || (var->lit[0].degree>0) || (var->lit[1].degree>0);
+    return vp->opt.all_used || var->is_used ||
+	(var->lit[0].degree>0) || (var->lit[1].degree>0);
 }
 
-static inline int variable_is_unused(variable_t* var)
+static inline int variable_is_unused(varp_t* vp, variable_t* var)
 {
-    return !variable_is_used(var);
+    return !variable_is_used(vp, var);
 }
 
 
@@ -2331,7 +2335,7 @@ static inline void order_set_top(varp_t* vp, variable_t* var)
 // move top if variable is unbound and used then check if variable
 static inline void order_move_top(varp_t* vp, variable_t* var)
 {
-    if (variable_is_unbound(vp, var) && variable_is_used(var))
+    if (variable_is_unbound(vp, var) && variable_is_used(vp, var))
 	order_set_top(vp, var);
 }
 
@@ -2381,7 +2385,7 @@ static int setup_top(varp_t* vp)
 {
     variable_t* var = cdlist_first(&vp->order_list);
     while((var != NULL) &&
-	  (variable_is_bound(vp, var) || variable_is_unused(var)))
+	  (variable_is_bound(vp, var) || variable_is_unused(vp, var)))
 	var = cdlist_next(var);
     vp->top = var;
     // print_top(vp, "setup_top");
@@ -2396,7 +2400,7 @@ static int next_unbound(varp_t* vp)
     variable_t* var;
     if ((var = vp->top) != NULL) {
 	while((var != NULL) &&
-	      (variable_is_bound(vp, var) || variable_is_unused(var)))
+	      (variable_is_bound(vp, var) || variable_is_unused(vp, var)))
 	    var = cdlist_next(var);
 	vp->top = var;
 	if (var != NULL)
@@ -2411,7 +2415,7 @@ static int next_unbound_after(varp_t* vp, variable_t* var)
 	return 0;
     var = cdlist_next(var);
     while((var != NULL) &&
-	  (variable_is_bound(vp, var) || variable_is_unused(var)))
+	  (variable_is_bound(vp, var) || variable_is_unused(vp, var)))
 	var = cdlist_next(var);
     if (var != NULL)
 	return var->ix;
@@ -3225,9 +3229,10 @@ static void default_config(varp_config_t* conf)
     conf->xref  = false;
     conf->hash  = false;
     conf->edge  = false;
-    conf->vsids = false;
+    conf->vsids = true;
     conf->init_phase = I_TRUE;
-    conf->use_phase  = false;
+    conf->use_phase = false;
+    conf->all_used  = false;
     conf->vsize  = DEFAULT_MAP_SIZE;
     conf->csize  = DEFAULT_MAP_SIZE;
 }
@@ -3277,6 +3282,12 @@ static int vif_config(ErlNifEnv* env,
     }
     else if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
 	opt->use_phase = false;
+    }
+    else if (EQUAL_KEY(env, all_used, key) && enif_is_true(env, value)) {
+	opt->all_used = true;
+    }
+    else if (EQUAL_KEY(env, all_used, key) && enif_is_false(env, value)) {
+	opt->all_used = false;
     }
     else if (EQUAL_KEY(env, init_phase, key) && enif_is_true(env, value)) {
 	opt->init_phase = I_TRUE;
@@ -6864,6 +6875,9 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, use_phase, argv[1])) {
 	return enif_make_boolean(env, vp->opt.use_phase);
     }
+    if (EQUAL_KEY(env, all_used, argv[1])) {
+	return enif_make_boolean(env, vp->opt.all_used);
+    }
     if (EQUAL_KEY(env, version, argv[1])) {
 	return enif_make_string(env, VARP_VSN, ERL_NIF_LATIN1);
     }
@@ -7016,6 +7030,14 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
     }
     if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
 	vp->opt.use_phase = false;
+	return enif_make_ok(env);	
+    }
+    if (EQUAL_KEY(env, all_used, key) && enif_is_true(env, value)) {
+	vp->opt.all_used = true;
+	return enif_make_ok(env);
+    }
+    if (EQUAL_KEY(env, all_used, key) && enif_is_false(env, value)) {
+	vp->opt.all_used = false;
 	return enif_make_ok(env);	
     }
     if (EQUAL_KEY(env, init_phase, key) && enif_is_true(env, value)) {
@@ -7533,7 +7555,7 @@ make_clause:
     hvalue = literal_array_hash(vp, vp->tlit, size);
     // check if this clause alread exist in alpha
     if ((cix=clauseset_find(vp,vp->tlit,size,ALPHA,hvalue)) != CLAUSE_NONE)
-	return enif_make_boolean(env, false);  // It is a copy
+	return enif_make_undefined(env);  // It is a copy
     if ((cp = clause_alloc(vp, size)) == NULL)
 	return enif_make_badarg(env);
     memcpy(cp->lit, vp->tlit, sizeof(lit_t)*size);
@@ -9145,6 +9167,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(unit);
     LOAD_ATOM(use);
     LOAD_ATOM(use_phase);
+    LOAD_ATOM(all_used);
     // LOAD_ATOM(user);
     LOAD_ATOM(value_packing);
     LOAD_ATOM(variable);

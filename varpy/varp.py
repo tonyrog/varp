@@ -27,15 +27,19 @@ def bt_done(count, limit):
 def bt_all(vp, limit=None):
     t0 = time.time_ns()  # >= 3.7
     count = 0
-    b = bt(vp)
-    if b:
+    if varc.next_unbound(vp) == False:
         print(model(vp))
         count += 1
-        while b and varc.undo(vp) and not bt_done(count, limit):
-            b = bt(vp)
-            if b:
-                print(model(vp))
-                count += 1
+    else:
+        b = bt(vp)
+        if b:
+            print(model(vp))
+            count += 1
+            while b and varc.undo(vp) and not bt_done(count, limit):
+                b = bt(vp)
+                if b:
+                    print(model(vp))
+                    count += 1
     t1 = time.time_ns()
     print(str(count) + " models found in " + str((t1-t0) // 1000) + "us")
     return count
@@ -74,6 +78,9 @@ def symbol(vp, x):
     
 def get_bindings_list(vp, level, clauseinfo=False, trail=False):
     return varc.get_bindings(vp, level, clauseinfo, trail, False)
+
+def num_unbound(vp):
+     return varc.info(vp,'number_of_unbound_variables')
 
 def i(vp=False):
     if vp == False:

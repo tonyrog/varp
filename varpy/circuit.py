@@ -157,41 +157,41 @@ def none_assoc_(vp,gate,ys,x=None):
         none_assoc_(vp,gate,v,x2)
         return gate(vp,x1,x2,x)
 
-def varp_all(vp, ys, x=None):
+def varp_ALL(vp, ys, x=None):
     return none_assoc(vp, and_gate, ys, x)
 
-def varp_any(vp, ys, x=None):
+def varp_ANY(vp, ys, x=None):
     return none_assoc(vp, or_gate, ys, x)
 
-def varp_parity(vp, ys, x=None):
+def varp_PARITY(vp, ys, x=None):
     return left_assoc(vp, xor_gate, ys, x)
 
-def varp_odd(vp, ys, x=None):
-    return varp_parity(vp, ys, x)
+def varp_ODD(vp, ys, x=None):
+    return varp_PARITY(vp, ys, x)
 
-def varp_even(vp, ys, x=None):
-    return inv(varp_parity(vp, ys, x))
+def varp_EVEN(vp, ys, x=None):
+    return inv(varp_PARITY(vp, ys, x))
 
-def varp_none(vp, ys, x=None):
-    return inv(varp_any(vp, ys, x))
+def varp_NONE(vp, ys, x=None):
+    return inv(varp_ANY(vp, ys, x))
 
 def varp_one(vp, ys, x=None):
     return eq1(vp, ys, x)
 
-def varp_eq(vp, k, ys, x=None):
+def varp_EQ(vp, k, ys, x=None):
     return eqk(vp, k, ys, x)
 
-def varp_neq(vp, k, ys, x=None):
+def varp_NEQ(vp, k, ys, x=None):
     return inv(eqk(vp, k, ys, x))
 
-def varp_gt(vp, k, ys, x=None):
+def varp_GT(vp, k, ys, x=None):
     if k >= 0: return gtk(vp, k, ys, x)
  
-def varp_gte(vp, k, ys, x=None):
-    if k == 0: return varp_any(vp, ys, x)
+def varp_GTE(vp, k, ys, x=None):
+    if k == 0: return varp_ANY(vp, ys, x)
     elif k>0: return gtk(vp,k-1,ys,x)
 
-def varp_lt(vp, k, ys, x=None):
+def varp_LT(vp, k, ys, x=None):
     if k == 0: return False
     elif k == 1: return varp_none(vp,ys,x)
     elif k > 1:
@@ -199,7 +199,7 @@ def varp_lt(vp, k, ys, x=None):
         ys1 = [inv(yi) for yi in ys]
         return gtk(vp, n-k, ys1, x)
  
-def varp_lte(vp, k, ys, x=None):
+def varp_LTE(vp, k, ys, x=None):
     if k == 0: return varp_none(vp, ys, x)
     elif k>0:
         n = len(ys)
@@ -219,25 +219,25 @@ def eq1(vp, ys, x=None):
 
 def eqk(vp,k,ys,x=None):
     n = len(ys)
-    if k == 0: return inv(varp_any(vp,ys,x))
+    if k == 0: return inv(varp_ANY(vp,ys,x))
     elif k > n: return False
-    elif k == n: return varp_all(vp,ys,x)
+    elif k == n: return varp_ALL(vp,ys,x)
     else:
         ys1 = sort(vp,k,ys)
         (a,b) = split(k, ys1)
-        a1 = varp_all(vp,a)
-        b1 = varp_any(vp,b)
+        a1 = varp_ALL(vp,a)
+        b1 = varp_ANY(vp,b)
         return and_gate(vp,a1,inv(b1),x)
 
 def gtk(vp,k,ys,x=None):
     n = len(ys)
-    if k == 0: return varp_any(vp,ys,x)
+    if k == 0: return varp_ANY(vp,ys,x)
     elif k >= n: return False
     else:
         ys1 = sort(vp,k,ys)
         (a,b) = split(k, ys1)
-        a1 = varp_all(vp, a)
-        b1 = varp_any(vp, b)
+        a1 = varp_ALL(vp, a)
+        b1 = varp_ANY(vp, b)
         return and_gate(vp,a1,b1,x)
 
 # split list ys in two lists

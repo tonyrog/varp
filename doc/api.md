@@ -11,15 +11,20 @@ Create a new varp instance from a dict of options
 * {'size': size}
   Initial variable table size 
 * {'qtype': 'lifo'|'fifo'|'recursive'}
-  use lifo/fifo strategy in bcp
+  Use lifo/fifo strategy in bcp
 * {'xref': x}
-  use cross references if x is __True__
+  Use cross references if x is __True__
 * {'vsids': x}
-  use variable decaying sum variable selection ifg x is __True__
-* {'init_phase': x}
+  Use variable decaying sum variable selection ifg x is __True__
+* {'init\_phase': x}
   The initial phase to start with, x is boolean.
-* {'use_phase': x}
-  use saved phase in decide iff x is __True__
+* {'use\_phase': x}
+  Use saved phase in decide iff x is __True__
+* {'all\_used': x}
+  All variables are "used" if 'all\_used' is __True__,
+  that is all variables created are backtracked
+  and turn up in calls to next_unbound. If all_\used is __False__ then
+  varpy.isused and literal degree controls when variabels are used.
 * {'hash': x}
   use hash table for clauses iff x is __True__
 * {'edge': x}
@@ -737,8 +742,10 @@ varpy.conflict(vp, level, bump, i)
 
 Do conflict analysis, called with level where the conflict i was found
 and the __bump__ factor that is applied to variables involved in the conflict.
-Return value is a clause index in clauseset 'alpha'. This
+Returned value is a clause index in clauseset 'alpha'. This
 clause may then be minimized and later moved to 'gamma'.
+if None is returned then the conflict clause was a copy of an
+existing clause.
 
 
 ``` python
