@@ -25,7 +25,7 @@ analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
 	undefined ->  %% duplicate
 	    %% io:format("clause duplicate\n"),
 	    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
-	Cix ->
+	Cix when is_integer(Cix) ->
 	    case Minimize of
 		true ->
 		    case varc:minimize(Bs#bs.vp, Cix) of
