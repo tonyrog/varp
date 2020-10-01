@@ -21,6 +21,8 @@ build(Tree, Vp) ->
 build(Tree, Vp, State) ->
     %% io:format("Build: ~p\n", [Tree]),
     case Tree of
+	true -> true;
+	false -> false;
 	{'p', Sym, Args}   -> var(Sym, Args, Vp, State);
 	{'not', A}         -> unary('not',A,Vp,State);
 	{'!', A}           -> unary('not',A,Vp,State);
@@ -33,7 +35,6 @@ build(Tree, Vp, State) ->
 	{'xor', A1, A2}    -> binary('xor',A1,A2,Vp,State);
 	{'equ', A1, A2}    -> binary('equ',A1,A2,Vp,State);
 	{'<->', A1, A2}    -> binary('equ',A1,A2,Vp,State);
-	{'==', A1, A2}     -> binary('equ',A1,A2,Vp,State);
 	{'ALL',As}         -> nary('all',As,Vp,State);
 	{'ANY',As}         -> nary('any',As,Vp,State);
 	{'NONE',As}        -> nary('none',As,Vp,State);
@@ -53,7 +54,14 @@ build(Tree, Vp, State) ->
 	{{'LT',[K|Gs]},A}  -> quant_k('lt',K,Gs,A,Vp,State);
 	{{'LTE',[K|Gs]},A} -> quant_k('lte',K,Gs,A,Vp,State);
 	{{'GT',[K|Gs]},A}  -> quant_k('gt',K,Gs,A,Vp,State);
-	{{'GTE',[K|Gs]},A} -> quant_k('gte',K,Gs,A,Vp,State)
+	{{'GTE',[K|Gs]},A} -> quant_k('gte',K,Gs,A,Vp,State);
+	%% allowed conditionals in logic part (must expand to contant!)
+	{'>',  A1, A2}     -> cond_bin("gt",A1,A2,Vp,State);
+	{'>=', A1, A2}     -> cond_bin("gte",A1,A2,Vp,State);
+	{'<', A1, A2}      -> cond_bin("lt",A1,A2,Vp,State);
+	{'<=', A1, A2}     -> cond_bin("lte",A1,A2,Vp,State);
+	{'==', A1, A2}     -> cond_bin("eq",A1,A2,Vp,State);
+	{'!=', A1, A2}     -> cond_bin("neq",A1,A2,Vp,State)
     end.
 
 var(Sym, Args, Vp, State) ->
@@ -115,7 +123,13 @@ qbuild([G|Gs],A,Vp,State) ->
 qbuild([],A,Vp,State) ->
     [build(A, Vp, State)].
 
-    
+cond_bin(Op, L, R, _Vp, State) ->
+    L1 = to_term(L),
+    R1 = to_term(R),
+    Ret = eval_term({Op,[L1,R1]}, State),
+    %% io:format("cond_bin: ~p = ~p, (state=~p)\n", [{Op,[L1,R1]},Ret,State]),
+    Ret.
+
 var_term({p,V,[]}) ->
     {atom_to_list(V), []};
 var_term({p,V,Args}) ->
@@ -128,18 +142,32 @@ to_term(#cconst{base=Base,value=Value}) ->
 to_term(#cid{name=Name}) ->
     Name;
 to_term(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
-    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
-	     '/' => "div", '%' => "rem",
-	     '&' => "band", '|' => "bor", "^" => "bxor" },
-    { maps:get(Op, Tab), [to_term(Arg1), to_term(Arg2)]};
+    to_binary_term(Op,Arg1,Arg2);
 to_term(#cunary{op=Op,arg=Arg}) ->
-    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
-    { maps:get(Op, Tab), [to_term(Arg)]};
+    to_unary_term(Op,Arg);
 to_term(#crange{from=From,to=To}) ->
     {range,to_term(From),to_term(To)};
 to_term(#ccall{func=#cid{name=Func},args=Args}) ->
-    { Func, [ to_term(A) || A <- Args]}.
+    { Func, [ to_term(A) || A <- Args]};
+to_term({uint,_Len,Value}) -> Value;
+to_term({int,_Len,Value}) -> Value;
+to_term({Op,Arg1,Arg2}) when is_atom(Op) ->
+    to_binary_term(Op,Arg1,Arg2);
+to_term({Op,Arg}) when is_atom(Op) ->
+    to_unary_term(Op,Arg).
 
+to_binary_term(Op,Arg1,Arg2) ->
+    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
+	     '/' => "div", '%' => "rem",
+	     '&' => "band", '|' => "bor", "^" => "bxor",
+	     '>' => "gt", '>=' => "gte", 
+	     '<' => "lt", '<=' => "lte", 
+	     '==' => "eq", '!=' => "neq" },
+    { maps:get(Op, Tab), [to_term(Arg1), to_term(Arg2)]}.
+
+to_unary_term(Op,Arg) ->
+    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
+    { maps:get(Op, Tab), [to_term(Arg)]}.    
 
 const_int(16,"0x"++Value) ->
     list_to_integer(Value, 16);
@@ -167,6 +195,12 @@ eval_term({"rem",[A,B]},Bs) -> eval(fun erlang:'rem'/2, A,B, Bs);
 eval_term({"band",[A,B]},Bs) -> eval(fun erlang:'band'/2, A,B, Bs);
 eval_term({"bor",[A,B]},Bs) -> eval(fun erlang:'bor'/2, A,B, Bs);
 eval_term({"bxor",[A,B]},Bs) -> eval(fun erlang:'bxor'/2, A,B, Bs);
+eval_term({"gt",[A,B]},Bs) -> eval(fun erlang:'>'/2, A,B, Bs);
+eval_term({"gte",[A,B]},Bs) -> eval(fun erlang:'>='/2, A,B, Bs);
+eval_term({"lt",[A,B]},Bs) -> eval(fun erlang:'<'/2, A,B, Bs);
+eval_term({"lte",[A,B]},Bs) -> eval(fun erlang:'=<'/2, A,B, Bs);
+eval_term({"eq",[A,B]},Bs) -> eval(fun erlang:'=='/2, A,B, Bs);
+eval_term({"neq",[A,B]},Bs) -> eval(fun erlang:'/='/2, A,B, Bs);
 eval_term({"neg",[A]},Bs) -> eval(fun erlang:'-'/1, A, Bs);
 eval_term({"pos",[A]},Bs) -> eval(fun erlang:'+'/1, A, Bs);
 eval_term({"bnot",[A]},Bs) -> eval(fun erlang:'bnot'/1, A, Bs);
@@ -201,6 +235,7 @@ eval(Fun, A, Bs) ->
 
 test(Text) ->
     {ok,{_Def,Tree}} = varp:parse(Text),
+    io:format("Tree = ~p\n", [Tree]),
     Vp = varc:new(#{xref => true}),
     F = build(Tree, Vp, #{}),
     case varc:bind(Vp, F) of

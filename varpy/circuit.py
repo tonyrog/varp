@@ -175,7 +175,7 @@ def varp_EVEN(vp, ys, x=None):
 def varp_NONE(vp, ys, x=None):
     return inv(varp_ANY(vp, ys, x))
 
-def varp_one(vp, ys, x=None):
+def varp_ONE(vp, ys, x=None):
     return eq1(vp, ys, x)
 
 def varp_EQ(vp, k, ys, x=None):

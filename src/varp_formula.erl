@@ -893,7 +893,7 @@ build_(false, Bs) ->
 build_({literal,X}, Bs) when is_integer(X) ->
     {{bool,X}, Bs};
 
-build_(V, Bs) when is_atom(V) -> %% meta variable
+build_(V=#cid{}, Bs) when is_atom(V) -> %% meta variable
     W = eval_meta(V,Bs),
     if W >=0 ->
 	    N = varp_math:unsigned_size(W),
@@ -1423,19 +1423,6 @@ eval_meta(#cid {name=Vn}, Bs) ->
 		    end
 	    catch
 		error:_ ->
-		    error({unbound, Vn})
-	    end;
-	{ok,W} -> 
-	    W
-    end;
-eval_meta(V, Bs) when is_atom(V) -> %% old format still around
-    Vn = atom_to_list(V),
-    case maps:find(Vn,Bs#bs.meta) of
-	error ->
-	    case maps:find(V, Bs#bs.literals) of
-		{ok,true} ->
-		    V;
-		error ->
 		    error({unbound, Vn})
 	    end;
 	{ok,W} -> 

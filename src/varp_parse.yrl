@@ -277,7 +277,7 @@ lexpr_var -> pcexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
 lexpr_var -> pcexpr ':' sexpr                : {uint,'$3','$1'}.
 
 lexpr_const -> integer               : constant(value('$1')).
-lexpr_const -> identifier            : name('$1').  %% meta/env variable
+lexpr_const -> identifier            : id('$1').  %% meta/env variable
 %%lexpr_prim -> '$' '(' expr ')'      : {'expr','$3'}.
 
 lexpr0 -> true                      : true.
