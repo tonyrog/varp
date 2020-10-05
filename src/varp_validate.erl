@@ -200,7 +200,7 @@ eval_sym({bit_index,Sym,Index},Bs) ->
 
 
 eval_arg(V) when is_integer(V) -> V;
-eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).
+eval_arg({const,V}) -> V.
 
 empty_vs(Bs) ->    
     (Bs#bs.vs =:= undefined) orelse  (maps:size(Bs#bs.vs) =:= 0).

@@ -105,7 +105,7 @@ quant(Gate,Gs,A,Vp,State) ->
 
 qbuild([G|Gs],A,Vp,State) ->
     case G of
-	{assign,#cid{name=X},R} ->
+	{assign,{id,X},R} ->
 	    Rt = to_term(R),
 	    case eval_term(Rt,State) of
 		{range,From,To} ->
@@ -137,12 +137,9 @@ var_term({p,V,Args}) ->
 
 %% convert tree to term form
 
-to_term(#cconst{base=Base,value=Value}) ->
-    const_int(Base, Value);
-to_term(#cid{name=Name}) ->
-    Name;
-to_term({range,From,To}) ->
-    {range,to_term(From),to_term(To)};
+to_term({const,Value}) -> Value;
+to_term({id,Name}) -> Name;
+to_term({range,From,To}) -> {range,to_term(From),to_term(To)};
 to_term({call,Func,Args}) ->
     { Func, [ to_term(A) || A <- Args]};
 to_term({uint,_Len,Value}) -> Value;
@@ -159,15 +156,6 @@ to_binary_term(Op,Arg1,Arg2) when is_atom(Op) ->
 to_unary_term(Op,Arg) when is_atom(Op) ->
     OpName = atom_to_list(Op),
     { OpName, [to_term(Arg)]}.    
-
-const_int(16,"0x"++Value) ->
-    list_to_integer(Value, 16);
-const_int(2,"0b"++Value) ->
-    list_to_integer(Value, 2);
-const_int(8,"0"++Value) ->
-    list_to_integer(Value, 8);
-const_int(Base,Value) ->
-    list_to_integer(Value, Base).
 
 eval_term(Value,_Bs) when is_integer(Value) -> 
     Value;

@@ -39,20 +39,20 @@ tree() ->
 %% {var,"n"}, all,
 %% ret,
 %%
-code() ->
-    {
+asm() ->
+    [
      {const,1},        %% 1
      {var,"n"},        %% 2
      do,               %% 3
-%% L0
-     {leave,26},       %% 4 leave L1
+{label,l0},
+     {leave,l1},       %% 4 leave L1
      {lvar,1},         %% 5 (x)
      {var,"n"},        %% 6
      {const,1},        %% 7
      iadd,             %% 8
      do,               %% 9
-%% L3	    
-     {leave,19},       %% 10 leave L2
+{label,l3},
+     {leave,l2},       %% 10 leave L2
      %% P(x) -> Q(y)
      {lvar,1},         %% 14 (y)
      {args,1},         %% 15
@@ -61,23 +61,24 @@ code() ->
      {args,1},         %% 12
      {p,'Q'},          %% 13
      cimp,             %% 17
-     {loop,10},        %% 18 loop L3
-%% L2
+     {loop,l3},        %% 18
+{label,l2},
      {var,"n"},        %% 19 n
      {lvar,1},         %% 20 x
      isub,             %% 21 n-x
      {const,2},        %% 22 1+1
      iadd,             %% 23 (n-x+1)+1
-     all,              %% 24 ALL
-     {loop,4},         %% 25 loop L0
-%% L1
+     call,             %% 24 circuit ALL
+     {loop,l0},        %% 25
+{label,l1},
      {var,"n"},        %% 26
-     all,              %% 27
+     call,             %% 27 ALL
      ret               %% 28 (label l3)
-    }.
+    ].
 
 test() ->
-    Code = code(),
+    Asm = asm(),
+    Code = assemble(Asm),
     Vp = varc:new(#{}),
     case run(Vp, #{ "n" => 3 }, Code) of
 	[Var] ->
@@ -89,6 +90,43 @@ test() ->
 	    io:format("warning stack not overflow: ~w\n", [Stack]),
 	    {Var, Vp}
     end.
+
+%% resolve all labels and replace with absolute position
+assemble(Code) ->
+    if is_tuple(Code) ->
+	    assemble_(tuple_to_list(Code), [], 1, #{});
+       is_list(Code) -> 
+	    assemble_(Code, [], 1, #{})
+    end.
+
+assemble_([{label,L} | Code], Acc, Addr, Ls) ->
+    assemble_(Code, Acc, Addr, Ls#{ L => Addr });
+assemble_([C | Code], Acc, Addr, Ls) ->
+    assemble_(Code, [C|Acc], Addr+1, Ls);
+assemble_([], Acc, _Addr, Ls) ->
+    resolve_(Acc, [], Ls).
+
+%% resolve goto, leave and loop and reverse again
+resolve_([{goto,L} | Code], Acc, Ls) ->
+    J = get_addr(L, Ls),
+    resolve_(Code, [{goto,J}|Acc], Ls);
+resolve_([{leave,L} | Code], Acc, Ls) ->
+    J = get_addr(L, Ls),
+    resolve_(Code, [{leave,J}|Acc], Ls);
+resolve_([{loop,L} | Code], Acc, Ls) ->
+    J = get_addr(L, Ls),
+    resolve_(Code, [{loop,J}|Acc], Ls);
+resolve_([C | Code], Acc, Ls) ->
+    resolve_(Code, [C | Acc], Ls);
+resolve_([], Acc, _Ls) ->
+    list_to_tuple(Acc).
+
+get_addr(L, Ls) ->
+    J = maps:get(L, Ls, 0),
+    if J =:= 0 -> error({label,L,not_defined});
+       true -> J
+    end.
+    
 
 run(Vp, Code) ->
     run(Vp, #{}, Code).

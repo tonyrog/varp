@@ -122,30 +122,18 @@ op({Op,_Ln}) -> Op.
 name({symbol,_,Name})       -> list_to_atom(Name);
 name({identifier,_,Name})   -> list_to_atom(Name).
 
-id({identifier,Line,Name}) -> #cid { line=Line, name=Name};
-id({symbol,Line,Name})     -> #cid { line=Line, name=Name}.
+id({identifier,_Line,Name}) -> {id,Name};
+id({symbol,_Line,Name})     -> {id,Name}.
 
-bin({binnum,Line,Val}) ->
-    #cconst { line=Line, base=2, value=Val}.
-    
-oct({octnum,Line,Val}) ->
-    #cconst { line=Line, base=8, value=Val}.
-
-hex({hexnum,Line,Val}) ->
-    #cconst { line=Line, base=16, value=Val}.
-
-dec({decnum,Line,Val}) ->
-    #cconst { line=Line, base=10, value=Val}.
-
-chr({chrnum,Line,Val}) ->
-    #cconst { line=Line, base=char, value=Val}.
-
-flo({flonum,Line,Val}) ->
-    #cconst { line=Line, base=float, value=Val}.
+bin({binnum,_Line,"0b"++Val}) -> {const,list_to_integer(Val,2)}.
+oct({octnum,_Line,Val}) -> {const,list_to_integer(Val,8)}.
+hex({hexnum,_Line,"0x"++Val}) -> {const,list_to_integer(Val,16)};
+hex({hexnum,_Line,"0X"++Val}) -> {const,list_to_integer(Val,16)}.
+dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
+chr({chrnum,_Line,Val}) ->  {const,Val}.
+flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
 
 to_integer({binnum,_,List}) -> list_to_integer(List,2);
 to_integer({octnum,_,List}) -> list_to_integer(List,8);
 to_integer({decnum,_,List}) -> list_to_integer(List,10);
 to_integer({hexnum,_,List}) -> list_to_integer(List,16).
-
-    

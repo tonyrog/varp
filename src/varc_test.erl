@@ -119,7 +119,7 @@ bindings1() ->
 
 test0() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
+    X1 = var(V),
     X1 = 1,
     {X2,X7} = varc:add_variables(V, 6),
     X2 = 2,
@@ -220,7 +220,7 @@ test3() ->
 
 symbols() ->
     V = varc:new(),
-    X1 = varc:add_variable(V),
+    X1 = var(V),
     {X2,X7} = varc:add_variables(V, 6),
     ok = varc:add_symbol(V, X1, "X1"),
     ok = varc:add_symbol(V, lists:seq(X2,X7), "X27"),
@@ -851,7 +851,7 @@ uorder_bump() ->
 
 %% simulate backtracking over variables
 uorder_bt() ->
-    Vp = varc:new(#{vsids=>true}),
+    Vp = varc:new(#{vsids=>true, all_used=>true }),
     {1,10} = varc:add_variables(Vp, 10),
     varc:add_clause(Vp, lists:seq(1,10)),  %% all variables are used!
     [1,2,3,4,5,6,7,8,9,10] = unbound(Vp),
@@ -1368,10 +1368,10 @@ clone1() ->
 
 decide1() ->
     V = varc:new(#{ xref => true, use_phase => true }),
-    X1 = varc:add_variable(V),
-    X2 = varc:add_variable(V),
-    X3 = varc:add_variable(V),
-    X4 = varc:add_variable(V),
+    X1 = var(V),
+    X2 = var(V),
+    X3 = var(V),
+    X4 = var(V),
     varc:add_clause(V, [X1,X2]),
     varc:add_clause(V, [-X2,X3]),
     varc:add_clause(V, [-X3,-X4]),
@@ -2034,14 +2034,16 @@ split_cix(I) ->
 	end,
      I band 16#3fffffff}.
     
+var(Vp) ->
+    Var = varc:add_variable(Vp),
+    varc:isused(Vp, Var, true),
+    Var.
 
-var(V) ->
-    varc:add_variable(V).
-
-var(V, Sym) ->
-    Vi = varc:add_variable(V),
-    varc:add_symbol(V, Vi, Sym),
-    Vi.
+var(Vp, Sym) ->
+    Var = varc:add_variable(Vp),
+    varc:add_symbol(Vp, Var, Sym),
+    varc:isused(Vp, Var, true),
+    Var.
 
 clause(V, Ls) ->
     clause(V, Ls, delta).

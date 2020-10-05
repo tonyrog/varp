@@ -1015,7 +1015,7 @@ varp_output([Out | OutputList], Fd, Partial, Model) ->
 varp_output([], _Fd, _Partial, _Model) ->
     {error, no_output}.
 
-mfa_arg(#cid{name=Name},Func) ->
+mfa_arg({id,Name},Func) ->
     {list_to_atom(Name),Func,[]};
 mfa_arg(M,Func) when is_atom(M) ->
     {list_to_atom(M),Func,[]};

@@ -381,7 +381,7 @@ eval_sym({bit_index,Sym,Index}) ->
     {bit_index,eval_sym(Sym),eval_arg(Index)}.
 
 eval_arg(V) when is_integer(V) -> V;
-eval_arg(#cconst{base=B,value=V}) -> list_to_integer(V,B).
+eval_arg({const,V}) -> V.
 
 format_error(Error) ->
     io_lib:format("~p", [Error]).

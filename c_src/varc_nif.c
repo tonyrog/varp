@@ -2309,7 +2309,7 @@ static inline void print_top(varp_t* vp, char* where)
     if (vp->top == NULL)
 	enif_fprintf(stdout, "%s: top = NULL\r\n", where);
     else 
-	enif_fprintf(stdout, "%s: top = %d\r\n", vp->top->ix);
+	enif_fprintf(stdout, "%s: top = %d\r\n", where, vp->top->ix);
 }
 
 // this is called when undo'ing a variable
@@ -2334,8 +2334,9 @@ static inline void order_set_top(varp_t* vp, variable_t* var)
 // move top if variable is unbound and used then check if variable
 static inline void order_move_top(varp_t* vp, variable_t* var)
 {
-    if (variable_is_unbound(vp, var) && variable_is_used(vp, var))
+    if (variable_is_unbound(vp, var) && variable_is_used(vp, var)) {
 	order_set_top(vp, var);
+    }
 }
 
 // remove var from order list, update top if needed
@@ -3753,7 +3754,7 @@ static int add_variables(varp_t* vp, size_t n)
 	variable_t* var;
 	if ((var = obj_alloc(&vp->var_allocator)) == NULL)
 	    return -1;
-	dlist_insert_last(&vp->order_list, var);
+	cdlist_insert_last(&vp->order_list, var);
 	var_init(vp, var, j);
 	vp->var_map[j] = var;
 	if (vp->top == NULL)
@@ -5001,6 +5002,10 @@ static ERL_NIF_TERM varp_is_used(ErlNifEnv* env, int argc,
 	prev = var->is_used;
 	if ((var->is_used = val) != 0)
 	    order_move_top(vp, var);
+	//if (vp->top != NULL) {
+	// printf("top=%d, order=%.2f\n", vp->top->ix, vp->top->link.order);
+	// }
+	// printf("var = %d, order = %.2f\n", var->ix, var->link.order);
 	return enif_make_boolean(env, prev);
     }
 }

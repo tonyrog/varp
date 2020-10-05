@@ -373,30 +373,21 @@ Erlang code.
 init() ->
     ok.
 
-id({identifier,Line,Name}) -> #cid { line=Line, name=Name};
-id({symbol,Line,Name})     -> #cid { line=Line, name=Name};
-id({true,Line})            -> #cid { line=Line, name="true"};
-id({false,Line})           -> #cid { line=Line, name="false"};
-id({'E',Line})             -> #cid { line=Line, name="E"};
-id({'A',Line})             -> #cid { line=Line, name="A"}.
+id({identifier,_Line,Name}) -> {id,Name};
+id({symbol,_Line,Name})     -> {id,Name};
+id({true,_Line})            -> {id,"true"};
+id({false,_Line})           -> {id,"false"};
+id({'E',_Line})             -> {id,"E"};
+id({'A',_Line})             -> {id,"A"}.
 
-bin({binnum,Line,Val}) ->
-    #cconst { line=Line, base=2, value=Val}.
-    
-oct({octnum,Line,Val}) ->
-    #cconst { line=Line, base=8, value=Val}.
+bin({binnum,_Line,"0b"++Val}) -> {const,list_to_integer(Val,2)}.
+oct({octnum,_Line,Val}) -> {const,list_to_integer(Val,8)}.
+hex({hexnum,_Line,"0x"++Val}) -> {const,list_to_integer(Val,16)};
+hex({hexnum,_Line,"0X"++Val}) -> {const,list_to_integer(Val,16)}.
+dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
+chr({chrnum,_Line,Val}) ->  {const,Val}.
+flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
 
-hex({hexnum,Line,Val}) ->
-    #cconst { line=Line, base=16, value=Val}.
-
-dec({decnum,Line,Val}) ->
-    #cconst { line=Line, base=10, value=Val}.
-
-chr({chrnum,Line,Val}) ->
-    #cconst { line=Line, base=char, value=Val}.
-
-flo({flonum,Line,Val}) ->
-    #cconst { line=Line, base=float, value=Val}.
 
 op({Op,_Ln})     -> Op.
 

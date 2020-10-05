@@ -161,16 +161,14 @@ new(OptMap) when is_map(OptMap) ->
       }.
 
 add_variable(Bs) ->
-    varc:add_variable(Bs#bs.vp, false).
+    Var = varc:add_variable(Bs#bs.vp, false),
+    varc:isused(Bs#bs.vp, Var, true),
+    Var.    
 
 %% Create a variable and mark all atoms as used
 add_variable(Bs, IsAtom) ->
     Var = varc:add_variable(Bs#bs.vp, IsAtom),
-    if IsAtom ->
-	    varc:isused(Bs#bs.vp, Var, true);
-       true ->
-	    ok
-    end,
+    varc:isused(Bs#bs.vp, Var, true),
     Var.
 
 %% add symbol name to literal 
@@ -658,8 +656,8 @@ fmt_index_list([I|Is]) ->
 
 fmt_index(I) when is_integer(I) ->
     integer_to_list(I);
-fmt_index(#cconst{base=B,value=V}) ->
-    integer_to_list(list_to_integer(V,B));
+fmt_index({const,I}) ->
+    integer_to_list(I);
 fmt_index(A) when is_atom(A) ->
     atom_to_list(A);
 fmt_index(Set) when is_list(Set) ->
@@ -698,7 +696,7 @@ variable(V, Bs) ->
 			    make_variable(W, Bs);
 			{Bnd2,Def} ->
 			    ?dbg0("~p = ~p\n", [Bnd2,Def]),
-			    %% Names = [Name || #cid{name=Name}<-Ps],
+			    %% Names = [Name || {id,Name}<-Ps],
 			    %% Bnd2 = lists:zip(Names,Rs),
 			    Meta = maps:merge(Bs#bs.meta,maps:from_list(Bnd2)),
 			    ?dbg0("meta bind: ~p\n", [Meta]),
@@ -791,8 +789,8 @@ match_def_args(_, _, _Acc) ->
     false.
 
 %% sub eval for match
-match_eval(#cconst{base=B,value=V}) -> list_to_integer(V,B);
-match_eval(#cid{name=Name}) -> list_to_atom(Name);
+match_eval({const,V}) -> V;
+match_eval({id,Name}) -> list_to_atom(Name);
 match_eval(X) when is_integer(X) -> X;
 match_eval(X) when is_atom(X) -> X.
 
@@ -807,7 +805,7 @@ find_subst(P, [E={_Qy,{p,P,_}}|_]) -> E;
 find_subst(P, [_|Bnd]) -> find_subst(P, Bnd);
 find_subst(_P ,[]) -> false.
 
-bind_meta([V=#cid{name=N}|Vs], Bs, Acc, Bnd) ->
+bind_meta([V={id,N}|Vs], Bs, Acc, Bnd) ->
     W = eval_meta(V,Bs),
     bind_meta(Vs, Bs, [W|Acc], [{N,W}|Bnd]);
 bind_meta([V|Vs], Bs, Acc, Bnd) ->
@@ -893,7 +891,7 @@ build_(false, Bs) ->
 build_({literal,X}, Bs) when is_integer(X) ->
     {{bool,X}, Bs};
 
-build_(V=#cid{}, Bs) -> %% meta variable
+build_(V={id,_}, Bs) -> %% meta variable
     W = eval_meta(V,Bs),
     if W >=0 ->
 	    N = varp_math:unsigned_size(W),
@@ -961,12 +959,12 @@ build_({vec,Fs}, Bs) ->
     Xs1 = join_vector(Xs),
     %% io:format("vec=~p, join=~p\n", [Xs, Xs1]),
     {{bit,length(Xs1),[bit(X)||X <- Xs1]},Bs1};
-build_({':=', L, R}, Bs) ->
+build_({'alias', L, R}, Bs) ->
     {Y,Bs1} = build__(R, Bs),
-    operation_(':=', L, Y, Bs1);
-build_({'=', L, R}, Bs) ->
+    operation_('alias', L, Y, Bs1);
+build_({'assign', L, R}, Bs) ->
     {Y,Bs1} = build__(R, Bs),
-    operation_('=', L, Y, Bs1);
+    operation_('assign', L, Y, Bs1);
 build_({'neg',F}, Bs) ->
     {Y,Bs1} = build__(F, Bs),
     operation_('neg', Y, Bs1);
@@ -1255,7 +1253,7 @@ build_quant_(F,[{'assign',V,D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_quant_domain(F, V, Ds, Qs, Bs);
 %% predicate expansion
-build_quant_(_F, [{call,#cid{name=_Def},_Args}|_Qs], Bs) ->
+build_quant_(_F, [{call,{id,_Def},_Args}|_Qs], Bs) ->
     %% lookup Def
     {[], Bs};
 
@@ -1272,7 +1270,7 @@ build_quant_(F, [], Bs) ->
 	{X,Bs1} -> {[X],Bs1}
     end.
 
-build_quant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
+build_quant_domain(F, V={id,Vn}, [Y|Ys], Xs, Bs) ->
     %% io:format("build Vn=~p Y=~w\n", [Vn,Y]),
     Bs1 = push_meta(Vn, Y, Bs),
     {Zs1,Bs2} = build_quant_(F, Xs, Bs1),
@@ -1280,7 +1278,7 @@ build_quant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
     {Zs2,Bs4} = build_quant_domain(F, V, Ys, Xs, Bs3),
     {Zs1++Zs2,Bs4};
 %% fixme handle arbitrary vector!
-build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
+build_quant_domain(F, V={vec,[{id,Vn1},{id,Vn2}]},
 		   [{vec,[Y1,Y2]}|Ys], Xs, Bs) ->
     ?dbg("Bind ~s=~w, ~s=~w\n", [Vn1,Y1,Vn2,Y2]),
     Bs1 = push_meta(Vn1, Y1, Bs),
@@ -1290,7 +1288,7 @@ build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
     {Zs2,Bs5} = build_quant_domain(F, V, Ys, Xs, Bs4),
     {Zs1++Zs2,Bs5};
 %% fixme handle arbitrary vector! handle set/seqeuences properly
-build_quant_domain(F, V={vec,[#cid{name=Vn1},#cid{name=Vn2}]},
+build_quant_domain(F, V={vec,[{id,Vn1},{id,Vn2}]},
 		   [[Y1,Y2]|Ys], Xs, Bs) ->
     ?dbg("Bind ~s=~w, ~s=~w\n", [Vn1,Y1,Vn2,Y2]),
     Bs1 = push_meta(Vn1, Y1, Bs),
@@ -1331,7 +1329,7 @@ build_iquant_(F, [], Bs) ->
 	{X,Bs1} -> {[X],Bs1}
     end.
 
-build_iquant_domain(F, V=#cid{name=Vn}, [Y|Ys], Xs, Bs) ->
+build_iquant_domain(F, V={id,Vn}, [Y|Ys], Xs, Bs) ->
     Bs1 = push_meta(Vn, Y, Bs),
     {Zs1,Bs2} = build_iquant_(F, Xs, Bs1),
     Bs3 = pop_meta(Bs2, Bs#bs.meta),
@@ -1354,33 +1352,33 @@ eval_domain({range,A,B}, Bs) ->
     if A1 =< B1 -> lists:seq(A1, B1);
        true -> lists:reverse(lists:seq(B1,A1))
     end;
-eval_domain({call,#cid{name="union"},[A,B]}, Bs) ->
+eval_domain({call,{id,"union"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:union(A1,B1);
-eval_domain({call,#cid{name="subtract"},[A,B]}, Bs) ->
+eval_domain({call,{id,"subtract"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:subtract(A1,B1);
-eval_domain({call,#cid{name="intersect"},[A,B]}, Bs) ->
+eval_domain({call,{id,"intersect"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:intersection(A1,B1);
-eval_domain({call,#cid{name="product"},[A,B]}, Bs) ->
+eval_domain({call,{id,"product"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
-eval_domain({call,#cid{name="subsets"},[A]}, Bs) ->
+eval_domain({call,{id,"subsets"},[A]}, Bs) ->
     A1 = eval_domain(A,Bs),
     subsets(A1);
-eval_domain({call,#cid{name="subsets"},[K,A]}, Bs) ->
+eval_domain({call,{id,"subsets"},[K,A]}, Bs) ->
     K1 = eval_meta(K,Bs),
     A1 = eval_domain(A,Bs),
     subsets(K1,A1);
-eval_domain({call,#cid{name="permutations"},[A]}, Bs) ->
+eval_domain({call,{id,"permutations"},[A]}, Bs) ->
     A1 = eval_domain(A,Bs),
     permute(A1);
-eval_domain({call,#cid{name="zip"},[A,B]}, Bs) ->
+eval_domain({call,{id,"zip"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [{vec,[Ai,Bi]} || {Ai,Bi} <- lists:zip(A1,B1)];
@@ -1393,16 +1391,16 @@ eval_domain(Expr, Bs) ->
     end.
 
 eval_meta(V, _Bs) when is_integer(V) -> V;
-eval_meta(#cconst{base=B,value=V}, _Bs) -> list_to_integer(V,B);
+eval_meta({const,V}, _Bs) -> V;
 eval_meta({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if A1 =< B1 -> lists:seq(A1, B1);
        true -> lists:reverse(lists:seq(B1,A1))
     end;
-eval_meta(#cid {name="true"}, _Bs)  -> true;
-eval_meta(#cid {name="false"}, _Bs) -> false;
-eval_meta(#cid {name=Vn}, Bs) ->
+eval_meta({id,"true"}, _Bs)  -> true;
+eval_meta({id,"false"}, _Bs) -> false;
+eval_meta({id,Vn}, Bs) ->
     case maps:find(Vn,Bs#bs.meta) of
 	error ->
 	    try list_to_existing_atom(Vn) of
@@ -1427,43 +1425,43 @@ eval_meta(#cid {name=Vn}, Bs) ->
     end;
 eval_meta({call,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
-	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
-	{#cid{name="binom"},[A,B]} -> varp_math:binom(A,B);
-	{#cid{name="sqrt"},[A]}    -> math:sqrt(A);
-	{#cid{name="isqrt"},[A]}   -> imath:isqrt(A);
-	{#cid{name="sqr"},[A]}     -> A*A;
-	{#cid{name="nroot"},[A,N]} -> imath:nroot(A,N);
-	{#cid{name="ln"},[A]}      -> math:log(A);
-	{#cid{name="log"},[A,N]}   -> math:log(A)/math:log(N);
-	{#cid{name="log2"},[A]}    -> math:log(A)/math:log(2);
-	{#cid{name="log10"},[A]}   -> math:log10(A);
-	{#cid{name="ilog2"},[A]}   -> imath:ilog2(A);
-	{#cid{name="isize"},[A]}   -> varp_math:signed_size(A);
-	{#cid{name="usize"},[A]}   -> varp_math:unsigned_size(A);
-	{#cid{name="pi"},[]}       -> math:pi();
-	{#cid{name="e"},[]}        -> math:exp(1);
-	{#cid{name="pow"},[A,B]}   -> 
+	{{id,"factorial"},[N]} -> varp_math:factorial(N);
+	{{id,"binom"},[A,B]} -> varp_math:binom(A,B);
+	{{id,"sqrt"},[A]}    -> math:sqrt(A);
+	{{id,"isqrt"},[A]}   -> imath:isqrt(A);
+	{{id,"sqr"},[A]}     -> A*A;
+	{{id,"nroot"},[A,N]} -> imath:nroot(A,N);
+	{{id,"ln"},[A]}      -> math:log(A);
+	{{id,"log"},[A,N]}   -> math:log(A)/math:log(N);
+	{{id,"log2"},[A]}    -> math:log(A)/math:log(2);
+	{{id,"log10"},[A]}   -> math:log10(A);
+	{{id,"ilog2"},[A]}   -> imath:ilog2(A);
+	{{id,"isize"},[A]}   -> varp_math:signed_size(A);
+	{{id,"usize"},[A]}   -> varp_math:unsigned_size(A);
+	{{id,"pi"},[]}       -> math:pi();
+	{{id,"e"},[]}        -> math:exp(1);
+	{{id,"pow"},[A,B]}   -> 
 	    if is_integer(A), is_integer(B) ->
 		    varp_math:pow(A,B);
 	       true ->
 		    math:pow(A,B)
 	    end;
-	{#cid{name="sin"},[A]}     -> math:sin(A);
-	{#cid{name="cos"},[A]}     -> math:cos(A);
-	{#cid{name="trunc"},[A]}   -> trunc(A);
-	{#cid{name="round"},[A]}   -> round(A);
-	{#cid{name="abs"},[A]}     -> abs(A);
-	{#cid{name="max"},[A,B]}   -> max(A,B);
-	{#cid{name="min"},[A,B]}   -> min(A,B);
-	{#cid{name="sum"},As}      ->
+	{{id,"sin"},[A]}     -> math:sin(A);
+	{{id,"cos"},[A]}     -> math:cos(A);
+	{{id,"trunc"},[A]}   -> trunc(A);
+	{{id,"round"},[A]}   -> round(A);
+	{{id,"abs"},[A]}     -> abs(A);
+	{{id,"max"},[A,B]}   -> max(A,B);
+	{{id,"min"},[A,B]}   -> min(A,B);
+	{{id,"sum"},As}      ->
 	    lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
 	%% ordsets
-	{#cid{name="union"},[A,B]}   -> ordsets:union(A,B);
-	{#cid{name="subtract"},[A,B]}   -> ordsets:subtract(A,B);
-	{#cid{name="intersect"},[A,B]}   -> ordsets:intersection(A,B);
-	{#cid{name="product"},[A,B]}   -> [ [Ai,Bi] || Ai <- A, Bi <- B ];
+	{{id,"union"},[A,B]}   -> ordsets:union(A,B);
+	{{id,"subtract"},[A,B]}   -> ordsets:subtract(A,B);
+	{{id,"intersect"},[A,B]}   -> ordsets:intersection(A,B);
+	{{id,"product"},[A,B]}   -> [ [Ai,Bi] || Ai <- A, Bi <- B ];
 	%% function symbol
-	{#cid{name=Func},As1} -> {f,Func,As1}
+	{{id,Func},As1} -> {f,Func,As1}
     end;
 
 eval_meta({Op,A,B},Bs) ->
@@ -1608,20 +1606,13 @@ format_meta(Expr) ->
 
 format_meta_(I,_P) when is_integer(I) -> integer_to_list(I);
 format_meta_(V,_P) when is_atom(V) -> atom_to_list(V);
-format_meta_(#cid {name=Name},_P) -> Name;
-format_meta_(#cconst {base=B,value=V},_P) ->
-    case B of
-	10 -> V;
-	2 -> [$0,$b|V];
-	8 -> [$0|V];
-	16 -> [$0,$x|V];
-	_ -> V
-    end;
+format_meta_({id,Name},_P) -> Name;
+format_meta_({const,V},_P) -> integer_to_list(V);
 format_meta_({range,A,B},_P) ->
     if A =:= B -> A;
        true -> [format_meta(A),"..",format_meta(B)]
     end;
-format_meta_({call,#cid{name=F},As},_P) ->
+format_meta_({call,{id,F},As},_P) ->
     [F,"(", format_meta_list(As), ")"];
 format_meta_({Op,A,B},P) ->
     P1 = priority(Op),
@@ -1773,7 +1764,7 @@ sum([X], Bs) ->
     {X, Bs};
 sum([X|Xs], Bs) ->
     {Xn,Bs1} = sum(Xs,Bs),
-    operation_('+', X, Xn, Bs1).
+    operation_('add', X, Xn, Bs1).
 
 prod([], Bs) ->
     const_vector(uint,1,1,Bs);
@@ -1781,7 +1772,7 @@ prod([X], Bs) ->
     {X, Bs};
 prod([X|Xs], Bs) ->
     {Xn,Bs1} = prod(Xs,Bs),
-    operation_('*', X, Xn, Bs1).
+    operation_('mul', X, Xn, Bs1).
 
 parity([], Bs) ->
     {{bool,?F},Bs};
@@ -2206,14 +2197,14 @@ operation('lt',A,B,Bs) ->
     {Lt,Bs2} = vless(Ax2,Bx2,Bs1),
     {A1,Bs3} = operation_('and',Q,Lt,Bs2),
     %%  Y<0  AND Z>=0
-    {L,Bs4} = operation_('<',{bool,Bk},{bool,Ak},Bs3),
+    {L,Bs4} = operation_('lt',{bool,Bk},{bool,Ak},Bs3),
     any([A1,L],Bs4);
 operation('gt',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
     operation_('and', {bool,Y}, negate({bool,Z}), Bs);
 operation('gt',Y,Z,Bs) ->
-    operation_('<', Z, Y, Bs);
+    operation_('lt', Z, Y, Bs);
 operation('lte',Y,Z,Bs) ->
-    {C,Bs1} = operation_('<', Z, Y, Bs),
+    {C,Bs1} = operation_('lt', Z, Y, Bs),
     {negate(C),Bs1};
 operation('gte',Y,Z,Bs) ->
     operation_('<=',Z,Y,Bs);
@@ -2251,7 +2242,7 @@ operation('alias',V,X={bool,Xb},Bs) ->
 
 %% operator '=' is kind of assignment but really a 
 %% equality test and check of overflow bits
-operation('=',R,L,Bs) ->
+operation('assign',R,L,Bs) ->
     %% FIXME: same as '==' but check overflow / truncate 
     operation('equ',R,L,Bs);
 

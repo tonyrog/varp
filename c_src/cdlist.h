@@ -13,21 +13,25 @@ typedef uint32_t order_t;
 #define ORDER_T_EPSILON 2
 #define ORDER_0 0
 #define ORDER_1 (0x7fffffff)
+#define ORDER_S 1
 #elif defined(UINT64_ORDER)
 typedef uint64_t order_t;
 #define ORDER_T_EPSILON 2
 #define ORDER_0 0
 #define ORDER_1 (0x7fffffffffffffff)
+#define ORDER_S 1
 #elif defined(DOUBLE_ORDER)
 typedef double order_t;
 #define ORDER_T_EPSILON      (4*DBL_EPSILON)
 #define ORDER_0 0.0
 #define ORDER_1 1.0
+#define ORDER_S 0.1
 #else
 typedef float order_t;
 #define ORDER_T_EPSILON      (4*FLT_EPSILON)
 #define ORDER_0 0.0f
 #define ORDER_1 1.0f
+#define ORDER_S 0.1f
 #endif
 
 // comparable doubly linked list element
@@ -189,7 +193,7 @@ CDLIST_LOCAL void* cdlist_insert_first(cdlist_t* list, void* ptr)
     if (next == NULL)
 	elem->order = 0.0;
     else
-	elem->order = next->order - 1.0;
+	elem->order = next->order - ORDER_S;
     return elem;
 }
 
@@ -200,7 +204,7 @@ CDLIST_LOCAL void* cdlist_insert_last(cdlist_t* list, void* ptr)
     if (prev == NULL)
 	elem->order = 0.0;
     else
-	elem->order = prev->order + 1.0;
+	elem->order = prev->order + ORDER_S;
     return elem;    
 }
 

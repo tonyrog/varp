@@ -77,9 +77,9 @@ constants() ->
     ok.
 
 inc() ->
-    true = sat({'==', {'+',{int,4,3},{uint,1,1}}, {int,4,4}},
+    true = sat({'eq', {'add',{int,4,3},{uint,1,1}}, {int,4,4}},
 	       [[]]),
-    true = sat({'==', {'-',{int,4,3},{uint,1,1}}, {int,4,2}},
+    true = sat({'eq', {'sub',{int,4,3},{uint,1,1}}, {int,4,2}},
 	       [[]]),
     ok.
 
@@ -87,15 +87,15 @@ add() ->
     X = {p,'X',[]},
     Y = {p,'Y',[]},
 
-    true = sat({'==', {'+',{int,4,3},{uint,4,2}}, {int,4,5}},
+    true = sat({'eq', {'add',{int,4,3},{uint,4,2}}, {int,4,5}},
 	       [[]]),
-    true = sat({'==', {'+',{int,4,3},{uint,4,2}}, {int,4,X}},
+    true = sat({'eq', {'add',{int,4,3},{uint,4,2}}, {int,4,X}},
 	       [[{X,5}]]),
-    true = sat({'==', {'+',{int,4,3},{uint,4,X}}, {int,4,5}},
+    true = sat({'eq', {'add',{int,4,3},{uint,4,X}}, {int,4,5}},
 	       [[{X,2}]]),
-    true = sat({'==', {'+',{int,4,X},{uint,4,2}}, {int,4,5}},
+    true = sat({'eq', {'add',{int,4,X},{uint,4,2}}, {int,4,5}},
 	       [[{X,3}]]),
-    true = sat({'<', {'+',{uint,2,X},{uint,2,Y}}, {uint,3,4}},
+    true = sat({'lt', {'add',{uint,2,X},{uint,2,Y}}, {uint,3,4}},
 	       [[{X,3},{Y,0}],
 		[{X,2},{Y,1}],
 		[{X,2},{Y,0}],
@@ -106,10 +106,10 @@ add() ->
 		[{X,0},{Y,2}],
 		[{X,0},{Y,1}],
 		[{X,0},{Y,0}]]),
-    true = sat({'==',{'+',{uint,2,X},{uint,3,Y}},{uint,3,5}},
+    true = sat({'eq',{'add',{uint,2,X},{uint,3,Y}},{uint,3,5}},
 	       [[{X,Xi},{Y,Yi}] || 
 		   Xi <- [0,1,2,3], Yi <- [0,1,2,3,4,5,6,7], Xi+Yi == 5]),
-    true = sat({'<', {'+',{int,2,X},{int,2,Y}}, {int,3,-1}},
+    true = sat({'lt', {'add',{int,2,X},{int,2,Y}}, {int,3,-1}},
 	       [[{X,Xi},{Y,Yi}] || 
 		   Xi <- [-2,-1,0,1], Yi <- [-2,-1,0,1], Xi+Yi< -1]),
     ok.
@@ -117,9 +117,9 @@ add() ->
 sub() ->
     X = {p,'X',[]},
 
-    true = sat({'==', {'-',{int,4,3},{uint,4,2}}, {int,4,1}},
+    true = sat({'eq', {'sub',{int,4,3},{uint,4,2}}, {int,4,1}},
 	       [[]]),
-    true = sat({'==', {'-',{int,4,3},{uint,4,2}}, {int,4,X}},
+    true = sat({'eq', {'sub',{int,4,3},{uint,4,2}}, {int,4,X}},
 	       [[{X,1}]]),
     ok.
 
@@ -127,23 +127,23 @@ mul() ->
     X = {p,'X',[]},
     Y = {p,'Y',[]},
 
-    true = sat({'==', {'*',{uint,4,3},{uint,4,2}}, {uint,8,6}},
+    true = sat({'eq', {'mul',{uint,4,3},{uint,4,2}}, {uint,8,6}},
 		    [[]]),
 
-    true = sat({'==', {'*',{int,4,3},{uint,4,2}}, {int,8,6}},
+    true = sat({'eq', {'mul',{int,4,3},{uint,4,2}}, {int,8,6}},
 		    [[]]),
 
-    true = sat({'==', {'*',{int,4,3},{uint,4,2}}, {int,8,X}},
+    true = sat({'eq', {'mul',{int,4,3},{uint,4,2}}, {int,8,X}},
 		    [[{X,6}]]),
 
-    true = sat({'==', {'*',{int,4,-3},{uint,4,2}}, {int,8,X}},
+    true = sat({'eq', {'mul',{int,4,-3},{uint,4,2}}, {int,8,X}},
 		    [[{X,-6}]]),
 
-    true = sat({'==', {'*',{uint,4,X},{uint,4,Y}}, {int,8,7}},
+    true = sat({'eq', {'mul',{uint,4,X},{uint,4,Y}}, {int,8,7}},
 		    [[{X,1},{Y,7}], 
 		     [{X,7},{Y,1}]]),
 
-    true = sat({'==', {'*',{int,4,X},{int,4,Y}}, {int,8,7}},
+    true = sat({'eq', {'mul',{int,4,X},{int,4,Y}}, {int,8,7}},
 		    [[{X,1},{Y,7}], 
 		     [{X,7},{Y,1}],
 		     [{X,-1},{Y,-7}], 
@@ -154,14 +154,14 @@ mul() ->
     X = {p,'X',[]},
     Y = {p,'Y',[]},
 
-    true = sat({'==', {'/',{uint,4,3},{uint,4,2}}, {uint,4,1}},
+    true = sat({'eq', {'div',{uint,4,3},{uint,4,2}}, {uint,4,1}},
 	       [[]]),
-    true = sat({'==', {'/',{uint,6,4},{uint,4,2}}, {uint,4,X}},
+    true = sat({'eq', {'div',{uint,6,4},{uint,4,2}}, {uint,4,X}},
 	       [[{X,2}]]),
-    true = sat({'==', {'/',{uint,6,X},{uint,4,2}}, {uint,4,5}},
+    true = sat({'eq', {'div',{uint,6,X},{uint,4,2}}, {uint,4,5}},
 	       [[{X,11}], 
 		[{X,10}]]),
-    true = sat({'==', {'/',{uint,4,X},{uint,4,Y}}, {uint,4,5}},
+    true = sat({'eq', {'div',{uint,4,X},{uint,4,Y}}, {uint,4,5}},
 		    [[{X,15},{Y,3}],
 		     [{X,11},{Y,2}],
 		     [{X,10},{Y,2}],
@@ -170,47 +170,47 @@ mul() ->
 
 cmp_1() ->
     X = {p,'X',[]},
-    true = sat({'<', {uint,4,X},{uint,4,2}},
+    true = sat({'lt', {uint,4,X},{uint,4,2}},
 	       [[{X,0}],[{X,1}]]).
 
 cmp_2() ->
     X = {p,'X',[]},
-    true = sat({'<', {int,4,X},{int,4,2}},
+    true = sat({'lt', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(-8,1)]).
 
 cmp_3() ->
     X = {p,'X',[]},
-    true = sat({'>', {uint,4,X},{uint,4,2}},
+    true = sat({'gt', {uint,4,X},{uint,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,15)]).
 
 cmp_4() ->
     X = {p,'X',[]},
-    true = sat({'>', {int,4,X},{int,4,2}},
+    true = sat({'gt', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,7)]).
 
 shift() ->
     X = {p,'X',[]},
 
-    true = sat({'==', {'<<',{uint,4,3}, {uint,1,1}}, {uint,4,6}},
+    true = sat({'eq', {'shl',{uint,4,3}, {uint,1,1}}, {uint,4,6}},
 	       [[]]),
-    true = sat({'==', {'<<',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
+    true = sat({'eq', {'shl',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,6}]]),
-    true = sat({'==', {'>>',{uint,4,3}, {uint,1,1}}, {uint,4,1}},
+    true = sat({'eq', {'shr',{uint,4,3}, {uint,1,1}}, {uint,4,1}},
 	       [[]]),
-    true = sat({'==', {'>>',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
+    true = sat({'eq', {'shr',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,1}]]),
-    true = sat({'==', {'>>',{int,4,-1}, {uint,1,1}}, {int,4,X}},
+    true = sat({'eq', {'shr',{int,4,-1}, {uint,1,1}}, {int,4,X}},
 	       [[{X,-1}]]),
-    true = sat({'==', {'<<',{int,4,-1}, {uint,1,1}}, {int,4,X}},
+    true = sat({'eq', {'shl',{int,4,-1}, {uint,1,1}}, {int,4,X}},
 	       [[{X,-2}]]),
     ok.
 
 rotate() ->
     X = {p,'X',[]},
 
-    true = sat({'==', {'<<<',{uint,4,X}, {uint,1,1}}, {uint,4,X}},
+    true = sat({'eq', {'rol',{uint,4,X}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,15}], [{X,0}]]),
-    true = sat({'==', {'<<<',{int,4,X}, {uint,1,1}}, {int,4,X}},
+    true = sat({'eq', {'rol',{int,4,X}, {uint,1,1}}, {int,4,X}},
 	       [[{X,-1}], [{X,0}]]),
     ok.
 %%
@@ -241,8 +241,8 @@ equation1() ->
 sat(
   {'ALL',
    [
-    {'==', {'SUM', [X,Y,{'-',Z},-12]}, 0},
-    {'==', {'SUM', [{'*',X,X},{'*',Y,Y},{'-',{'*',Z,Z}},-12]},0}
+    {'eq', {'SUM', [X,Y,{'neg',Z},-12]}, 0},
+    {'eq', {'SUM', [{'mul',X,X},{'mul',Y,Y},{'neg',{'mul',Z,Z}},-12]},0}
    ]},
   [[{Xv,13},{Yv,78},{Zv,(13+78)-12}],
    [{Xv,14},{Yv,45},{Zv,(14+45)-12}],
@@ -266,7 +266,7 @@ equation2() ->
     Y = {uint,N,Yv},
     Z = {uint,N,Zv},
     true = sat(
-	     {'==', {'SUM',[{'*',7,X},{'*',11,Y},{'*',26,Z},-123]}, 0},
+	     {'eq', {'SUM',[{'mul',7,X},{'mul',11,Y},{'mul',26,Z},-123]}, 0},
 	     [
 	      [{Xv,5},{Yv,8},{Zv,0}],
 	      [{Xv,6},{Yv,5},{Zv,1}],
@@ -289,6 +289,7 @@ sat_(Formula, ExpectedModels, Method) ->
     case varp:do_run(GDo,Formula,GOpts) of
 	{?DONE,Ms0,_Bs1} ->
 	    Ms = [int_model(Mi) || Mi <- Ms0],
+	    %% io:format("Ms = ~w\n", [Ms]),
 	    lists:sort(Ms) == lists:sort(ExpectedModels);
 	{?INCONSISTENT,Ms,_Bs1} ->
 	    Ms == [];
@@ -320,9 +321,3 @@ dump_clauses(F) ->
     {Var, Bs} = varp_formula:build(F),
     varc_test:dump(Bs#bs.vp),
     Var.
-
-
-    
-	
-    
-    
