@@ -24,6 +24,7 @@
 | "+" unary_expr -> pos
 | "-" unary_expr -> neg
 | "~" unary_expr -> bnot
+| "!" unary_expr -> not
 
 ?multiplicative_expr: unary_expr
 | multiplicative_expr "*" unary_expr -> mul
@@ -64,7 +65,7 @@
 |  logical_or_expr "||" logical_and_expr -> or
 
 ?conditional_expr: logical_or_expr
-| logical_or_expr "?" logical_or_expr ":" conditional_expr -> cond
+| logical_or_expr "?" logical_or_expr ":" conditional_expr -> ite
 
 ?assignment_expr: conditional_expr
 |  conditional_expr ".." conditional_expr -> range

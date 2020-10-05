@@ -105,7 +105,7 @@ quant(Gate,Gs,A,Vp,State) ->
 
 qbuild([G|Gs],A,Vp,State) ->
     case G of
-	#cassign{op='=',lhs=#cid{name=X},rhs=R} ->
+	{assign,#cid{name=X},R} ->
 	    Rt = to_term(R),
 	    case eval_term(Rt,State) of
 		{range,From,To} ->
@@ -141,13 +141,9 @@ to_term(#cconst{base=Base,value=Value}) ->
     const_int(Base, Value);
 to_term(#cid{name=Name}) ->
     Name;
-to_term(#cbinary{op=Op,arg1=Arg1,arg2=Arg2}) ->
-    to_binary_term(Op,Arg1,Arg2);
-to_term(#cunary{op=Op,arg=Arg}) ->
-    to_unary_term(Op,Arg);
-to_term(#crange{from=From,to=To}) ->
+to_term({range,From,To}) ->
     {range,to_term(From),to_term(To)};
-to_term(#ccall{func=#cid{name=Func},args=Args}) ->
+to_term({call,Func,Args}) ->
     { Func, [ to_term(A) || A <- Args]};
 to_term({uint,_Len,Value}) -> Value;
 to_term({int,_Len,Value}) -> Value;
@@ -156,18 +152,13 @@ to_term({Op,Arg1,Arg2}) when is_atom(Op) ->
 to_term({Op,Arg}) when is_atom(Op) ->
     to_unary_term(Op,Arg).
 
-to_binary_term(Op,Arg1,Arg2) ->
-    Tab = #{ '+' => "add", '-' => "sub", '*' => "mul",
-	     '/' => "div", '%' => "rem",
-	     '&' => "band", '|' => "bor", "^" => "bxor",
-	     '>' => "gt", '>=' => "gte", 
-	     '<' => "lt", '<=' => "lte", 
-	     '==' => "eq", '!=' => "neq" },
-    { maps:get(Op, Tab), [to_term(Arg1), to_term(Arg2)]}.
+to_binary_term(Op,Arg1,Arg2) when is_atom(Op) ->
+    OpName = atom_to_list(Op),
+    { OpName, [to_term(Arg1), to_term(Arg2)]}.
 
-to_unary_term(Op,Arg) ->
-    Tab = #{ '-' => "neg", '+' => "pos", '~' => "bnot" },
-    { maps:get(Op, Tab), [to_term(Arg)]}.    
+to_unary_term(Op,Arg) when is_atom(Op) ->
+    OpName = atom_to_list(Op),
+    { OpName, [to_term(Arg)]}.    
 
 const_int(16,"0x"++Value) ->
     list_to_integer(Value, 16);

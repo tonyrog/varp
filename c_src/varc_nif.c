@@ -316,7 +316,7 @@ NIF_LIST
 #define MAX_MAP_SIZE       (1024*1024)   // max inital size
 #define MAX_MAP_EXPAND     (256*1024)    // max expand
 
-#define HEAP_BLOCK_SIZE      (64*1024)   // 4096
+#define HEAP_BLOCK_SIZE      (512*1024)
 #define MAX_HEAP_ALLOC_SIZE  (HEAP_BLOCK_SIZE - sizeof(heap_t))
 #define HEAP_ALIGN           sizeof(void*)
 
@@ -395,14 +395,13 @@ typedef struct _literal_t // :slink_t
 {
     slink_t  qlink;            // literal_t is a slink (element in slist)
     ulit_t    l;               // integer literal code
-    uint32_t flags;            // LIT_FLAG_NEG | LIT_FLAG_Q
 #if defined(LIT_VALUE) && !defined(PACKED_VALUE)
     ival_t    ivalue;
 #endif
+    uint32_t flags;            // LIT_FLAG_NEG | LIT_FLAG_Q
+    uint32_t user;             // user count for sorting    
     struct _variable_t* var;   // "parent"
     struct _wlink_t* wlist;    // list of watch positions
-    uint32_t degree;           // number of ocurrences
-    uint32_t user;             // user count for sorting
     slist_t elist;             // list of 2-clause triggers
     dynarray_t* xref;          // cross references when enabled
     dynarray_t* sref;          // list of symbol/pos references
@@ -1143,6 +1142,7 @@ static int obj_pre_alloc(allocator_t* ap, size_t n)
 	size = HEAP_BLOCK_SIZE;
     if ((hp = new_heap_block(size)) == NULL)
 	return -1;
+    // printf("add heap block size = %ld\n", size);
     slist_insert_first(&ap->heap_list, hp);
     return (int) n;
 }
@@ -1634,8 +1634,7 @@ static inline int variable_is_unbound(varp_t* vp, variable_t* var)
 // variable does occure in some clause
 static inline int variable_is_used(varp_t* vp, variable_t* var)
 {
-    return vp->opt.all_used || var->is_used ||
-	(var->lit[0].degree>0) || (var->lit[1].degree>0);
+    return vp->opt.all_used || var->is_used;
 }
 
 static inline int variable_is_unused(varp_t* vp, variable_t* var)
@@ -2642,9 +2641,8 @@ static void keep_level(varp_t* vp, int level)
 
 static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
 {
-    lp->degree   = 0;
+    lp->flags    = neg ? LIT_FLAG_NEG : 0;    
     lp->user     = 0;
-    lp->flags    = neg ? LIT_FLAG_NEG : 0;
     lp->l        = MAKE_LIT(var->ix,neg);
     lp->var      = var;
     lp->wlist    = NULL;
@@ -3661,6 +3659,7 @@ static int setup(varp_t* vp, varp_config_t* config)
 
     vp->msg_env = enif_alloc_env();
     vp->caller_env = NULL;
+
     return 0;
 error:
     if (vp)
@@ -3702,6 +3701,7 @@ static ERL_NIF_TERM varp_new(ErlNifEnv* env, int argc,
 
     varc = enif_make_resource(env,vp);
     enif_release_resource(vp);
+
     return varc;
 error:
     if (vp)
@@ -3733,6 +3733,7 @@ static int add_variables(varp_t* vp, size_t n)
 	return -1;
     // only update rest of variable/values when capacity grows
     if (dynvar_capacity(vp->var_map) > cap) {
+	// printf("var capacity = %ld\n", dynvar_capacity(vp->var_map));
 	cap = dynvar_capacity(vp->var_map);
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
@@ -3746,6 +3747,8 @@ static int add_variables(varp_t* vp, size_t n)
 #endif
     }
     obj_pre_alloc(&vp->var_allocator, n);
+    // printf("pre_alloc = %ld\n", n);
+    // printf("obj_alloc = %ld .. %ld\n", k, m);
     for (j = (int)k; j < (int)m; j++) {
 	variable_t* var;
 	if ((var = obj_alloc(&vp->var_allocator)) == NULL)
@@ -3756,7 +3759,7 @@ static int add_variables(varp_t* vp, size_t n)
 	if (vp->top == NULL)
 	    vp->top = var;
     }
-    cdlist_renumber(&vp->order_list);
+    // cdlist_renumber(&vp->order_list);
     return (int)k;
 }
 
@@ -4083,14 +4086,15 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, is_atom, argv[2]))
 	return enif_make_boolean(env, var->is_atom);
     if (EQUAL_KEY(env, is_used, argv[2]))
-	return enif_make_boolean(env,
-				 var->is_used ||
-				 var->lit[0].degree ||
-				 var->lit[1].degree);
-    if (EQUAL_KEY(env, degree, argv[2]))
-	return enif_make_uint(env,
-			      var->lit[0].degree +
-			      var->lit[1].degree);
+	return enif_make_boolean(env, var->is_used);
+    if (EQUAL_KEY(env, degree, argv[2])) {
+	if (vp->opt.xref)
+	    return enif_make_uint(env,
+				  dynarray_size(var->lit[0].xref)+
+				  dynarray_size(var->lit[1].xref));
+	else
+	    return enif_make_undefined(env);
+    }
     if (EQUAL_KEY(env, symbol, argv[2])) {
 	literal_t* lp = &var->lit[LIT_POS];
 	size_t n = dynarray_size(lp->sref);
@@ -4132,8 +4136,12 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_literal(env, vp, argv[1], &lp))
 	return enif_make_badarg(env);
-    if (EQUAL_KEY(env, degree, argv[2]))
-	return enif_make_uint(env, lp->degree);
+    if (EQUAL_KEY(env, degree, argv[2])) {
+	if (vp->opt.xref)
+	    return enif_make_uint(env, dynarray_size(lp->xref));
+	else
+	    return enif_make_undefined(env);
+    }
     if (EQUAL_KEY(env, user, argv[2]))
 	return enif_make_uint(env, lp->user);
     if (EQUAL_KEY(env, edge, argv[2])) {
@@ -4344,13 +4352,12 @@ static void order_degree(varp_t* vp, float* pkey, float* nkey, int vn)
 	    if (cp != NULL) {
 		int n = cp->size;
 		if (n > 0) {
-		    float r = 1/(float)n;
 		    for (j = 0; j < n; j++) {
 			int x = export_l(cp->lit[j]);
 			if ((x > 0) && (x < vmax))
-			    pkey[x] += r;
+			    pkey[x] += 1.0;
 			else if ((x < 0) && (x > vmin))
-			    nkey[-x] += r;
+			    nkey[-x] += 1.0;
 		    }
 		}
 	    }
@@ -4392,7 +4399,6 @@ static void order_rank(varp_t* vp, float* pkey, float* nkey, int vn)
 	}
     }
 }
-
 
 static void order_identity(varp_t* vp, float* pkey, float* nkey, int vn)
 {
@@ -5420,33 +5426,10 @@ static void xref_del_clause(varp_t* vp, clause_t* cp)
     }
 }
 
-static void ref_clause(varp_t* vp, clause_t* cp)
-{
-    size_t size = cp->size;
-    lit_t* lit = cp->lit;
-    while(size--) {
-	lit_t l = *lit++;
-	literal_t* lp = l2ll(vp, l);
-	lp->degree++;
-    }
-}
-
-static void unref_clause(varp_t* vp, clause_t* cp)
-{
-    size_t size = cp->size;
-    lit_t* lit = cp->lit;
-    while(size--) {
-	lit_t l = *lit++;
-	literal_t* lp = l2ll(vp, l);
-	lp->degree--;
-    }
-}
-
 static int clause_link(varp_t* vp, clause_t* cp)
 {
     if (vp->opt.xref)
 	xref_add_clause(vp, cp);
-    ref_clause(vp, cp);
     if (vp->opt.edge && (cp->size == 2)) {
 	lit_t* lit  = cp->lit;
 	edge_insert(vp, neg_l(lit[0]), lit[1], cp->cix);
@@ -5470,7 +5453,6 @@ static void clause_unlink(varp_t* vp, clause_t* cp)
     clause_unwatch(vp, cp);      // remove watched literals
     if (vp->opt.xref)
 	xref_del_clause(vp, cp);
-    unref_clause(vp, cp);
 }
 
 // link clause and update statistics

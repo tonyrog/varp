@@ -37,30 +37,30 @@ literal -> pexpr : '$1'.
 literal -> decnum : to_integer('$1').
 literal -> '-' decnum : -to_integer('$2').
 
-bor_op  -> '|' : '$1'.
-band_op -> '&' : '$1'.
-bxor_op -> '^' : '$1'.
-bnot_op -> '~' : '$1'.
+bor_op  -> '|' : 'bor'.
+band_op -> '&' : 'band'.
+bxor_op -> '^' : 'bxor'.
+bnot_op -> '~' : 'bnor'.
 
-add_op  -> '+' : '$1'.
-add_op  -> '-' : '$1'.
-mul_op -> '*' : '$1'.
-mul_op -> '/' : '$1'.
-mul_op -> '%' : '$1'.
-mul_op -> '<<'  : '$1'.
-mul_op -> '>>'  : '$1'.
-mul_op -> '<<<' : '$1'.
-mul_op -> '>>>' : '$1'.
+add_op  -> '+' : 'add'.
+add_op  -> '-' : 'sub'.
+mul_op -> '*' : 'mul'.
+mul_op -> '/' : 'div'.
+mul_op -> '%' : 'rem'.
+mul_op -> '<<'  : 'shl'.
+mul_op -> '>>'  : 'shr'.
+mul_op -> '<<<' : 'rol'.
+mul_op -> '>>>' : 'ror'.
 
-prefix_op -> '+' : '$1'.
-prefix_op -> '-' : '$1'.
+prefix_op -> '+' : 'pos'.
+prefix_op -> '-' : 'neg'.
 
-rel_op -> '<'  : '$1'.
-rel_op -> '<=' : '$1'.
-rel_op -> '>'  : '$1'.
-rel_op -> '>=' : '$1'.
-rel_op -> '==' : '$1'.
-rel_op -> '!=' : '$1'.
+rel_op -> '<'  : 'lt'.
+rel_op -> '<=' : 'lte'.
+rel_op -> '>'  : 'gt'.
+rel_op -> '>=' : 'gte'.
+rel_op -> '==' : 'eq'.
+rel_op -> '!=' : 'neq'.
 
 constant -> hexnum : hex('$1').
 constant -> octnum : oct('$1').
@@ -75,31 +75,30 @@ constant -> chrnum : chr('$1').
 expr -> identifier        : id('$1').
 expr -> symbol            : id('$1').
 expr -> constant          : '$1'.
-expr -> bnot_op expr      : 
-	    #cunary {line=line('$1'),op=op('$1'),arg='$2'}.
+expr -> bnot_op expr      : {'bnot','$2'}.
 expr -> prefix_op expr : 
 	    case op('$1') of
 	       '-' when is_integer('$2') -> -('$2');
 	 	_ ->
-		    #cunary {line=line('$1'),op=op('$1'),arg='$2'}
+		    {op('$1'),'$2'}
 	    end.
 expr -> '(' expr ')' : '$2'.
 expr -> identifier '(' exprs ')' : 
-	    #ccall{ line=line('$2'), func='$1', args='$3'}.
+	    {call, '$1', '$3'}.
 expr -> expr add_op expr   :
-	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+	    { op('$2'), '$1', '$3'}.
 expr -> expr mul_op expr   :
-	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+	    { op('$2'), '$1', '$3'}.
 expr -> expr rel_op expr   :
-	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+	    { op=op('$2'),'$1','$3'}.
 expr -> expr band_op expr  :
-	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+	    { op('$2'), '$1', '$3'}.
 expr -> expr bor_op  expr  :
-	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+	    { op('$2'), '$1', '$3'}.
 expr -> expr bxor_op expr  :
-	    #cbinary{ line=line('$2'), op=op('$2'),arg1='$1',arg2='$3'}.
+	    { op=op('$2'), '$1', '$3'}.
 expr -> identifier '=' expr  :
-	    #cassign{ line=line('$2'), op=op('$2'), lhs='$1',rhs='$3'}.
+	    {'cassign', '$1', '$3'}.
 
 %% list of expr
 exprs -> expr : ['$1'].
@@ -119,9 +118,6 @@ Erlang code.
 -include("varp.hrl").
 
 op({Op,_Ln}) -> Op.
-
-line([H|_]) -> line(H);
-line({_,Ln}) -> Ln.
 
 name({symbol,_,Name})       -> list_to_atom(Name);
 name({identifier,_,Name})   -> list_to_atom(Name).

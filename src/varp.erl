@@ -670,15 +670,24 @@ do_run(Do, Formula, GOpts) ->
     R.
 
 do_run_(Do, Formula, GOpts) ->
-    %% special check to see if we need to set activate
-    {Main,Bs} = case varp_formula:build(Formula,GOpts) of
-		    {{bool,Var0},Bs0} -> {Var0,Bs0};
-		    {{uint,1,[Var0]},Bs0} -> {Var0,Bs0};
-		    {{_Type,_N,Vs},Bs0} -> 
+    T0 = erlang:monotonic_time(),
+    Bs0 = varp_formula:new(GOpts),
+    S0 = stat(Bs0),
+    varp_formula:info(Bs0, "pass ~p\n", [build]),
+    {Main,Bs} = case varp_formula:build(Formula,Bs0) of
+		    {{bool,Var0},Bs0_1} -> {Var0,Bs0_1};
+		    {{uint,1,[Var0]},Bs0_1} -> {Var0,Bs0_1};
+		    {{_Type,_N,Vs},Bs0_1} -> 
 			VsB = [{bool,Vi} || Vi <- Vs],
-			{{bool,M0},Bs00} = varp_formula:any(VsB,Bs0),
-			{M0,Bs00}
+			{{bool,M0},Bs0_2} = varp_formula:any(VsB,Bs0_1),
+			{M0,Bs0_2}
 		end,
+    S1 = stat(Bs),
+    T1 = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
+    Ts = Time/1000000,
+    show_info(S1, S0, Ts, Bs),
+
     Timeout = maps:get(timeout, GOpts, infinity),
     Bs1 = varp:set_global_timeout(Bs, Timeout),
     Bs2 = Bs1#bs { main = Main },

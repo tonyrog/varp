@@ -2,7 +2,7 @@
 
 Terminals
 	symbol true false define declare literals assert input output
-        order rank degree random identity user activity
+        order rank degree random identity user
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY' 'PARITY'
         'ODD' 'EVEN'
@@ -24,7 +24,7 @@ Nonterminals
 	multiplicative_expr additive_expr shift_expr
 	relational_expr equality_expr and_expr exclusive_or_expr
 	inclusive_or_expr logical_and_expr logical_or_expr
-	conditional_expr assignment_expr assignment_operator
+	conditional_expr assignment_expr
 	expr constant
 	file 
         integer sexpr
@@ -61,100 +61,74 @@ primary_expr -> '{' expr '}' : {vec,comma_list('$2')}.
     
      
 postfix_expr -> primary_expr : '$1'.
-postfix_expr -> postfix_expr '[' expr ']' : 
-		    #cbinary {line=line('$1'),op='[]',arg1='$1',arg2='$3'}.
-postfix_expr -> postfix_expr '(' ')' : 
-		    #ccall {line=line('$1'),func='$1',args=[]}.
-postfix_expr -> postfix_expr '(' argument_expr_list ')' :
-		    #ccall {line=line('$1'),func='$1',args='$3'}.
-postfix_expr -> postfix_expr '.' cidentifier :
-		    #cbinary {line=line('$1'),op='.',arg1='$1',arg2='$3' }.
-postfix_expr -> postfix_expr '->' cidentifier : 
-		    #cbinary {line=line('$1'),op='->',arg1='$1',arg2='$3'}.
+postfix_expr -> postfix_expr '[' expr ']' : {'index','$1','$3'}.
+postfix_expr -> postfix_expr '(' ')' : {'call','$1',[]}.
+postfix_expr -> postfix_expr '(' argument_expr_list ')' : {'call','$1','$3'}.
+postfix_expr -> postfix_expr '.' cidentifier : {'field','$1','$3'}.
+postfix_expr -> postfix_expr '->' cidentifier :  {'pointer','$1','$3'}.
 
 argument_expr_list -> assignment_expr : ['$1'].
 argument_expr_list -> argument_expr_list ',' assignment_expr : '$1'++['$3'].
 
 unary_expr -> postfix_expr : '$1'.
-unary_expr -> unary_operator unary_expr : 
-		  #cunary {line=line('$1'),op=op('$1'),arg='$2'}.
+unary_expr -> unary_operator unary_expr : {'$1', '$2'}.
 
-unary_operator -> '+' : '$1'.
-unary_operator -> '-' : '$1'.
-unary_operator -> '~' : '$1'.
-unary_operator -> '!' : '$1'.
+unary_operator -> '+' : 'pos'.
+unary_operator -> '-' : 'neg'.
+unary_operator -> '~' : 'bnot'.
+unary_operator -> '!' : 'not'.
 
 multiplicative_expr -> unary_expr : '$1'.
-multiplicative_expr -> multiplicative_expr '*' unary_expr : 
-		   #cbinary { line=line('$2'), op='*',arg1='$1',arg2='$3'}.
-multiplicative_expr -> multiplicative_expr '/' unary_expr :
-		   #cbinary { line=line('$2'), op='/',arg1='$1',arg2='$3'}.
-multiplicative_expr -> multiplicative_expr '%' unary_expr :
-		   #cbinary { line=line('$2'), op='%',arg1='$1',arg2='$3'}.
+multiplicative_expr -> multiplicative_expr '*' unary_expr : {'mul','$1','$3'}.
+multiplicative_expr -> multiplicative_expr '/' unary_expr : {'div','$1','$3'}.
+multiplicative_expr -> multiplicative_expr '%' unary_expr : {'rem','$1','$3'}.
 
 additive_expr -> multiplicative_expr : '$1'.
-additive_expr -> additive_expr '+' multiplicative_expr :
-		   #cbinary { line=line('$2'), op='+',arg1='$1',arg2='$3'}.
-additive_expr -> additive_expr '-' multiplicative_expr :
-		   #cbinary { line=line('$2'), op='-',arg1='$1',arg2='$3'}.
+additive_expr -> additive_expr '+' multiplicative_expr : {'add','$1','$3'}.
+additive_expr -> additive_expr '-' multiplicative_expr : {'sub','$1','$3'}.
 
 shift_expr -> additive_expr : '$1'.
-shift_expr -> shift_expr '<<' additive_expr :
-		   #cbinary { line=line('$2'),op='<<',arg1='$1',arg2='$3'}.
-shift_expr -> shift_expr '>>' additive_expr :
-		  #cbinary { line=line('$2'),op='>>',arg1='$1',arg2='$3'}.
+shift_expr -> shift_expr '<<' additive_expr : {'shl','$1','$3'}.
+shift_expr -> shift_expr '>>' additive_expr : {'shr','$1','$3'}.
 
 relational_expr -> shift_expr : '$1'.
-relational_expr -> relational_expr '<' shift_expr :
-		  #cbinary { line=line('$2'),op='<',arg1='$1',arg2='$3'}.
-relational_expr -> relational_expr '>' shift_expr :
-		  #cbinary { line=line('$2'),op='>',arg1='$1',arg2='$3'}.
-relational_expr -> relational_expr '<=' shift_expr :
-		  #cbinary { line=line('$2'),op='<=',arg1='$1',arg2='$3'}.
-relational_expr -> relational_expr '>=' shift_expr :
-		  #cbinary { line=line('$2'),op='>=',arg1='$1',arg2='$3'}.
+relational_expr -> relational_expr '<' shift_expr : {'lt','$1','$3'}.
+relational_expr -> relational_expr '>' shift_expr : {'gt','$1','$3'}.
+relational_expr -> relational_expr '<=' shift_expr : {'lte','$1','$3'}.
+relational_expr -> relational_expr '>=' shift_expr : {'gte','$1','$3'}.
 
 equality_expr -> relational_expr : '$1'.
-equality_expr -> equality_expr '==' relational_expr :
-		  #cbinary { line=line('$2'),op='==',arg1='$1',arg2='$3'}.
-equality_expr -> equality_expr '!=' relational_expr :
-		  #cbinary { line=line('$2'),op='!=',arg1='$1',arg2='$3'}.
+equality_expr -> equality_expr '==' relational_expr : {'eq','$1','$3'}.
+equality_expr -> equality_expr '!=' relational_expr : {'neq','$1','$3'}.
 
 and_expr -> equality_expr : '$1'.
-and_expr -> and_expr '&' equality_expr :
-		  #cbinary { line=line('$2'),op='&',arg1='$1',arg2='$3'}.
+and_expr -> and_expr '&' equality_expr : {'band','$1','$3'}.
 
 exclusive_or_expr -> and_expr : '$1'.
-exclusive_or_expr -> exclusive_or_expr '^' and_expr :
-		  #cbinary { line=line('$2'),op='^',arg1='$1',arg2='$3'}.
+exclusive_or_expr -> exclusive_or_expr '^' and_expr : {'bxor','$1','$3'}.
 
 inclusive_or_expr -> exclusive_or_expr : '$1'.
 inclusive_or_expr -> inclusive_or_expr '|' exclusive_or_expr :
-		  #cbinary { line=line('$2'),op='|',arg1='$1',arg2='$3'}.
+			 {'bor','$1','$3'}.
 
 logical_and_expr -> inclusive_or_expr : '$1'.
-logical_and_expr -> logical_and_expr '&&' inclusive_or_expr :
-		  #cbinary { line=line('$2'),op='&&',arg1='$1',arg2='$3'}.
+logical_and_expr -> logical_and_expr '&&' inclusive_or_expr : {'and','$1','$3'}.
 
 logical_or_expr -> logical_and_expr : '$1'.
-logical_or_expr -> logical_or_expr '||' logical_and_expr :
-		  #cbinary { line=line('$2'),op='||',arg1='$1',arg2='$3'}.
+logical_or_expr -> logical_or_expr '||' logical_and_expr : {'or','$1','$3'}.
 
 conditional_expr -> logical_or_expr : '$1'.
 conditional_expr -> logical_or_expr '?' logical_or_expr ':' conditional_expr :
-		  #cifexpr { line=line('$2'),test='$1',then='$3',else='$5'}.
+			{'ite', '$1', '$3', '$5'}.
 
 assignment_expr -> conditional_expr : '$1'.
 assignment_expr -> conditional_expr '..' conditional_expr :
-		       #crange { line=line('$2'), from='$1', to='$3' }.
-assignment_expr -> unary_expr assignment_operator assignment_expr :
-		       #cassign {line=line('$2'),op=op('$2'),lhs='$1',rhs='$3'}.
-
-assignment_operator -> '=' : '$1'.
+		       {'range', '$1', '$3'}.
+assignment_expr -> unary_expr '=' assignment_expr :
+		       {'assign', '$1', '$3'}.
 
 expr -> assignment_expr : '$1'.
-expr -> expr ',' assignment_expr : 
-     	#cbinary { line=line('$2'), op=',',arg1='$1',arg2='$3'}.
+expr -> expr ',' assignment_expr : {',', '$1', '$3'}. %% fixme? list?
 
 constant -> hexnum : hex('$1').
 constant -> octnum : oct('$1').
@@ -260,10 +234,10 @@ odecl -> oexpr      : '$1'.
     
 %% bit collection
 oexpr -> pexpr                          : '$1'.
-oexpr -> pexpr '[' expr ']'             : {bit_index,'$1','$3'}.
-oexpr -> pexpr '[' expr ':' expr ']'    : {bit_range, '$1', '$3', '$5', 1}.
+oexpr -> pexpr '[' expr ']'             : {bitindex,'$1','$3'}.
+oexpr -> pexpr '[' expr ':' expr ']'    : {bitrange, '$1', '$3', '$5', 1}.
 oexpr -> pexpr '[' expr ':' expr ':' expr ']'  : 
-	     { bit_range, '$1', '$3', '$5', '$7'}.
+	     { bitrange, '$1', '$3', '$5', '$7'}.
 oexpr -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 oexpr -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
 oexpr -> '!' pexpr                      : {'!', '$2'}.
@@ -285,75 +259,75 @@ lexpr0 -> false                     : false.
 lexpr0 -> lexpr_var                 : '$1'.
 lexpr0 -> lexpr_const               : '$1'.
 %% lexpr0 -> lexpr_var '=' lexpr       : { op('$2'), '$1', '$3' }.
-lexpr0 -> '-' lexpr0                : {'-', '$2'}.
-lexpr0 -> 'not' lexpr0              : { op('$1'), '$2' }.
-lexpr0 -> '!' lexpr0                : { op('$1'), '$2' }.
-lexpr0 -> '~' lexpr0                : { op('$1'), '$2' }.
+lexpr0 -> '-' lexpr0                : {'neg', '$2'}.
+lexpr0 -> 'not' lexpr0              : {'not', '$2' }.
+lexpr0 -> '!' lexpr0                : {'not', '$2' }.
+lexpr0 -> '~' lexpr0                : {'bnot', '$2' }.
 lexpr0 -> '(' lexpr ')'             : '$2'.
 lexpr0 -> '{' lexprs '}'            : {vec,'$2'}.
 lexpr0 -> identifier '(' lexprs ')' : { name('$1'), '$3'}. %% meta function
 lexpr0 -> quantifier '(' lexprs ')' : {'$1','$3'}.
 lexpr0 -> quantifier lexpr0         : {'$1','$2'}.
-lexpr0 -> lexpr0 '[' expr ']'           : { bit_index, '$1', '$3'}.
-lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bit_range,'$1','$3','$5', 1}.
+lexpr0 -> lexpr0 '[' expr ']'           : { bitindex, '$1', '$3'}.
+lexpr0 -> lexpr0 '[' expr ':' expr ']'  : { bitrange,'$1','$3','$5', 1}.
 lexpr0 -> lexpr0 '[' expr ':' expr ':' expr ']' :
 	      { bit_range,'$1','$3','$5','$7'}.
 
 lexpr10 -> lexpr0                 : '$1'.
-lexpr10 -> lexpr10 '*' lexpr0     : { op('$2'), '$1', '$3'}.
-lexpr10 -> lexpr10 '/' lexpr0     : { op('$2'), '$1', '$3'}.
-lexpr10 -> lexpr10 '%' lexpr0     : { op('$2'), '$1', '$3'}.
+lexpr10 -> lexpr10 '*' lexpr0     : { 'mul', '$1', '$3'}.
+lexpr10 -> lexpr10 '/' lexpr0     : { 'div', '$1', '$3'}.
+lexpr10 -> lexpr10 '%' lexpr0     : { 'rem', '$1', '$3'}.
 
 lexpr20 -> lexpr10                : '$1'.
-lexpr20 -> lexpr20 '+' lexpr10    : { op('$2'), '$1', '$3' }.
-lexpr20 -> lexpr20 '-' lexpr10    : { op('$2'), '$1', '$3' }.
+lexpr20 -> lexpr20 '+' lexpr10    : { 'add', '$1', '$3' }.
+lexpr20 -> lexpr20 '-' lexpr10    : { 'sub', '$1', '$3' }.
 
 lexpr30 -> lexpr20                : '$1'.
-lexpr30 -> lexpr30 '<<' lexpr20   : { op('$2'), '$1', '$3'}.
-lexpr30 -> lexpr30 '>>' lexpr20   : { op('$2'), '$1', '$3'}.
-lexpr30 -> lexpr30 '<<<' lexpr20  : { op('$2'), '$1', '$3'}.
-lexpr30 -> lexpr30 '>>>' lexpr20  : { op('$2'), '$1', '$3'}.
+lexpr30 -> lexpr30 '<<' lexpr20   : { 'shl', '$1', '$3'}.
+lexpr30 -> lexpr30 '>>' lexpr20   : { 'shr', '$1', '$3'}.
+lexpr30 -> lexpr30 '<<<' lexpr20  : { 'rol', '$1', '$3'}.
+lexpr30 -> lexpr30 '>>>' lexpr20  : { 'ror', '$1', '$3'}.
 
 lexpr40 -> lexpr30                : '$1'.
-lexpr40 -> lexpr40 '<'  lexpr30   : { op('$2'), '$1', '$3' }.
-lexpr40 -> lexpr40 '<=' lexpr30   : { op('$2'), '$1', '$3' }.
-lexpr40 -> lexpr40 '>'  lexpr30   : { op('$2'), '$1', '$3' }.
-lexpr40 -> lexpr40 '>=' lexpr30   : { op('$2'), '$1', '$3' }.
+lexpr40 -> lexpr40 '<'  lexpr30   : { 'lt', '$1', '$3' }.
+lexpr40 -> lexpr40 '<=' lexpr30   : { 'lte', '$1', '$3' }.
+lexpr40 -> lexpr40 '>'  lexpr30   : { 'gt', '$1', '$3' }.
+lexpr40 -> lexpr40 '>=' lexpr30   : { 'gte', '$1', '$3' }.
 
 lexpr41 -> lexpr40                : '$1'.
-lexpr41 -> lexpr41 '==' lexpr40   : { op('$2'), '$1', '$3' }.
-lexpr41 -> lexpr41 ':=' lexpr40   : { op('$2'), '$1', '$3' }.
-lexpr41 -> lexpr41 '!=' lexpr40   : { op('$2'), '$1', '$3' }.
+lexpr41 -> lexpr41 '==' lexpr40   : { 'eq', '$1', '$3' }.
+lexpr41 -> lexpr41 ':=' lexpr40   : { 'alias', '$1', '$3' }.
+lexpr41 -> lexpr41 '!=' lexpr40   : { 'neq', '$1', '$3' }.
 
 lexpr43 -> lexpr41                : '$1'.
-lexpr43 -> lexpr43 '&' lexpr41    : { op('$2'), '$1', '$3' }.   
+lexpr43 -> lexpr43 '&' lexpr41    : { 'band', '$1', '$3' }.   
 
 lexpr45 -> lexpr43                : '$1'.
-lexpr45 -> lexpr45 '^' lexpr43    : { op('$2'), '$1', '$3' }.
+lexpr45 -> lexpr45 '^' lexpr43    : { 'bxor', '$1', '$3' }.
 
 lexpr47 -> lexpr45                : '$1'.
-lexpr47 -> lexpr47 '|' lexpr45    : { op('$2'), '$1', '$3' }.
+lexpr47 -> lexpr47 '|' lexpr45    : { 'bor', '$1', '$3' }.
 
 lexpr50 -> lexpr47                : '$1'.
-lexpr50 -> lexpr50 'and' lexpr47  : { op('$2'), '$1', '$3' }.
-lexpr50 -> lexpr50 '&&'  lexpr47  : { op('$2'), '$1', '$3' }.
+lexpr50 -> lexpr50 'and' lexpr47  : { 'and', '$1', '$3' }.
+lexpr50 -> lexpr50 '&&'  lexpr47  : { 'and', '$1', '$3' }.
 
 lexpr60 -> lexpr50                  : '$1'.
 lexpr60 -> lexpr60 'xor' lexpr50    : { op('$2'), '$1', '$3' }.
 
 lexpr70 -> lexpr60                  : '$1'.
-lexpr70 -> lexpr70 'or'  lexpr60    : { op('$2'), '$1', '$3' }.
-lexpr70 -> lexpr70 '||'  lexpr60    : { op('$2'), '$1', '$3' }.
+lexpr70 -> lexpr70 'or'  lexpr60    : { 'or', '$1', '$3' }.
+lexpr70 -> lexpr70 '||'  lexpr60    : { 'and', '$1', '$3' }.
 
 lexpr80 -> lexpr70                  : '$1'.
-lexpr80 -> lexpr80 '->'  lexpr70    : { op('$2'), '$1', '$3' }.
-lexpr80 -> lexpr80 'imp' lexpr70    : { op('$2'), '$1', '$3' }.
-lexpr80 -> lexpr80 'implies' lexpr70 : { op('$2'), '$1', '$3' }.
+lexpr80 -> lexpr80 '->'  lexpr70    : { 'imp', '$1', '$3' }.
+lexpr80 -> lexpr80 'imp' lexpr70    : { 'imp', '$1', '$3' }.
+lexpr80 -> lexpr80 'implies' lexpr70 : { 'imp', '$1', '$3' }.
 
 lexpr90 -> lexpr80                  : '$1'.
-lexpr90 -> lexpr90 'equ' lexpr80    : { op('$2'), '$1', '$3' }.
-lexpr90 -> lexpr90 'equivalent' lexpr80 : { op('$2'), '$1', '$3' }.
-lexpr90 -> lexpr90 '<->' lexpr80    : { op('$2'), '$1', '$3' }.
+lexpr90 -> lexpr90 'equ' lexpr80    : { 'equ', '$1', '$3' }.
+lexpr90 -> lexpr90 'equivalent' lexpr80 : { 'equ', '$1', '$3' }.
+lexpr90 -> lexpr90 '<->' lexpr80    : { 'equ', '$1', '$3' }.
 
 lexpr -> lexpr90                    : '$1'.
 
@@ -426,9 +400,6 @@ flo({flonum,Line,Val}) ->
 
 op({Op,_Ln})     -> Op.
 
-line([H|_]) -> line(H);
-line(T) when is_tuple(T) -> element(2,T).
-
 constant(N) when N >= 0   -> {uint,varp_math:unsigned_size(N),N};
 constant(N) when N < 0   -> {int,varp_math:signed_size(N),N}.
 
@@ -440,7 +411,7 @@ value({octnum,_,Num})       -> list_to_integer(Num,8);
 value({hexnum,_,"0x"++Num}) -> list_to_integer(Num,16);
 value({binnum,_,"0b"++Num}) -> list_to_integer(Num,2).
 
-comma_list(#cbinary{op=',',arg1=A1,arg2=A2}) ->
+comma_list({',',A1,A2}) ->
     comma_list(A1) ++ comma_list(A2);
 comma_list(A) ->
     [A].

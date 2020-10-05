@@ -57,7 +57,11 @@ all() ->
 	   cnf_install,
 	   cnf_delete_sort,
 	   cnf_sort_offset_delete,
-	   decide1
+	   decide1,
+	   
+	   %% partial eval
+	   build_all,
+	   build_any
 	  ]),
     if Failed > 0 ->
 	    io:format("~w FAILED CASES\n", [Failed]);
@@ -1383,6 +1387,37 @@ decide1() ->
     1 = varc:variable_info(V, X3, phase),
     -1 = varc:variable_info(V, X4, phase),
     ok.
+
+%% Check that install of variables partial evaluate!
+build_all() ->
+    Vp = varc:new(#{}),
+    X1 = var(Vp, {'P',[1]}),
+    X2 = var(Vp, {'P',[2]}),
+    X3 = var(Vp, {'P',[3]}),
+    X4 = var(Vp, {'P',[4]}),
+    X5 = var(Vp, {'P',[5]}),
+    
+    varc:bind(Vp, -X3),
+
+    F = varp_circuit:all(Vp, [X1,X2,X3,X4,X5]),
+    %% print_clauses(Vp,false,true),
+    false = varc:value(Vp, F).
+
+%% Check that install of variables partial evaluate!
+build_any() ->
+    Vp = varc:new(#{}),
+    X1 = var(Vp, {'P',[1]}),
+    X2 = var(Vp, {'P',[2]}),
+    X3 = var(Vp, {'P',[3]}),
+    X4 = var(Vp, {'P',[4]}),
+    X5 = var(Vp, {'P',[5]}),
+    
+    varc:bind(Vp, X3),
+
+    F = varp_circuit:any(Vp, [X1,X2,X3,X4,X5]),
+    %% print_clauses(Vp,false,true),
+    true = varc:value(Vp, F).
+    
 
 %% install and check integrity
 cnf_install() ->

@@ -893,7 +893,7 @@ build_(false, Bs) ->
 build_({literal,X}, Bs) when is_integer(X) ->
     {{bool,X}, Bs};
 
-build_(V=#cid{}, Bs) when is_atom(V) -> %% meta variable
+build_(V=#cid{}, Bs) -> %% meta variable
     W = eval_meta(V,Bs),
     if W >=0 ->
 	    N = varp_math:unsigned_size(W),
@@ -967,20 +967,17 @@ build_({':=', L, R}, Bs) ->
 build_({'=', L, R}, Bs) ->
     {Y,Bs1} = build__(R, Bs),
     operation_('=', L, Y, Bs1);
-build_({'-',F}, Bs) ->
+build_({'neg',F}, Bs) ->
     {Y,Bs1} = build__(F, Bs),
-    operation_('-', Y, Bs1);
+    operation_('neg', Y, Bs1);
 build_({'not',A}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
     operation_('not', Y, Bs1);
-build_({'~',A}, Bs) ->
+build_({'bnot',A}, Bs) ->
     {Y,Bs1} = build__(A, Bs),
-    operation_('~', Y, Bs1);
-build_({'!',A}, Bs) ->
-    {Y,Bs1} = build__(A, Bs),
-    operation_('!', Y, Bs1);
+    operation_('bnot', Y, Bs1);
 
-build_({bit_index,A,I},Bs) ->
+build_({bitindex,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
     case A of
 	{p,P,Ps} ->  %% check if declared
@@ -1006,7 +1003,7 @@ build_({bit_index,A,I},Bs) ->
 	    end
     end;
 
-build_({bit_range,A,I,J,S},Bs) ->
+build_({bitrange,A,I,J,S},Bs) ->
     I1 = eval_meta(I,Bs),
     J1 = eval_meta(J,Bs),
     S1 = eval_meta(S,Bs),
@@ -1018,22 +1015,22 @@ build_({bit_range,A,I,J,S},Bs) ->
     end;
 
 %% Fixme: implement shift for variable argument
-build_({'<<',A,K},Bs) ->
+build_({'shl',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     {Z,Bs2} = build__(K,Bs1),
-    operation_('<<',Y,Z,Bs2);
-build_({'<<<',A,K},Bs) ->
+    operation_('shl',Y,Z,Bs2);
+build_({'rol',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     {Z,Bs2} = build__(K,Bs1),
-    operation_('<<<',Y,Z,Bs2);
-build_({'>>',A,K},Bs) ->
+    operation_('rol',Y,Z,Bs2);
+build_({'shr',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     {Z,Bs2} = build__(K,Bs1),
-    operation_('>>',Y,Z,Bs2);
-build_({'>>>',A,K},Bs) ->
+    operation_('shr',Y,Z,Bs2);
+build_({'ror',A,K},Bs) ->
     {Y,Bs1} = build__(A,Bs),
     {Z,Bs2} = build__(K,Bs1),
-    operation_('>>>',Y,Z,Bs2);
+    operation_('ror',Y,Z,Bs2);
 
 build_({cnf,{[],[],_Sections}},Bs) ->
     build__(false, Bs);
@@ -1254,11 +1251,11 @@ build_quant(Fs, Qs, Bs) when is_list(Fs), is_list(Qs) ->
 build_quant(F, Qs, Bs) when is_list(Qs) ->
     build_quant_(F, Qs, Bs).
 
-build_quant_(F,[#cassign{op='=',lhs=V,rhs=D}|Qs], Bs) ->
+build_quant_(F,[{'assign',V,D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_quant_domain(F, V, Ds, Qs, Bs);
 %% predicate expansion
-build_quant_(_F, [#ccall{ func=#cid{name=_Def},args=_Args}|_Qs], Bs) ->
+build_quant_(_F, [{call,#cid{name=_Def},_Args}|_Qs], Bs) ->
     %% lookup Def
     {[], Bs};
 
@@ -1320,7 +1317,7 @@ build_iquant(Fs, Qs, Bs) when is_list(Fs), is_list(Qs) ->
 build_iquant(F, Qs, Bs) when is_list(Qs) ->
     build_iquant_(F, Qs, Bs).
 
-build_iquant_(F,[#cassign{op='=',lhs=V,rhs=D}|Qs], Bs) ->
+build_iquant_(F,[{assign,V,D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_iquant_domain(F, V, Ds, Qs, Bs);
 build_iquant_(F, [Expr|Qs], Bs) ->
@@ -1351,39 +1348,39 @@ build_iquant_list([], _Xs, Bs) ->
     {[],Bs}.
 
 %% expand domain expressions
-eval_domain(#crange{from=A,to=B}, Bs) ->
+eval_domain({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if A1 =< B1 -> lists:seq(A1, B1);
        true -> lists:reverse(lists:seq(B1,A1))
     end;
-eval_domain(#ccall{func=#cid{name="union"},args=[A,B]}, Bs) ->
+eval_domain({call,#cid{name="union"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:union(A1,B1);
-eval_domain(#ccall{func=#cid{name="subtract"},args=[A,B]}, Bs) ->
+eval_domain({call,#cid{name="subtract"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:subtract(A1,B1);
-eval_domain(#ccall{func=#cid{name="intersect"},args=[A,B]}, Bs) ->
+eval_domain({call,#cid{name="intersect"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     ordsets:intersection(A1,B1);
-eval_domain(#ccall{func=#cid{name="product"},args=[A,B]}, Bs) ->
+eval_domain({call,#cid{name="product"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [ [Ai,Bi] || Ai <- A1, Bi <- B1 ];
-eval_domain(#ccall{func=#cid{name="subsets"},args=[A]}, Bs) ->
+eval_domain({call,#cid{name="subsets"},[A]}, Bs) ->
     A1 = eval_domain(A,Bs),
     subsets(A1);
-eval_domain(#ccall{func=#cid{name="subsets"},args=[K,A]}, Bs) ->
+eval_domain({call,#cid{name="subsets"},[K,A]}, Bs) ->
     K1 = eval_meta(K,Bs),
     A1 = eval_domain(A,Bs),
     subsets(K1,A1);
-eval_domain(#ccall{func=#cid{name="permutations"},args=[A]}, Bs) ->
+eval_domain({call,#cid{name="permutations"},[A]}, Bs) ->
     A1 = eval_domain(A,Bs),
     permute(A1);
-eval_domain(#ccall{func=#cid{name="zip"},args=[A,B]}, Bs) ->
+eval_domain({call,#cid{name="zip"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
     B1 = eval_domain(B,Bs),
     [{vec,[Ai,Bi]} || {Ai,Bi} <- lists:zip(A1,B1)];
@@ -1397,7 +1394,7 @@ eval_domain(Expr, Bs) ->
 
 eval_meta(V, _Bs) when is_integer(V) -> V;
 eval_meta(#cconst{base=B,value=V}, _Bs) -> list_to_integer(V,B);
-eval_meta(#crange{from=A,to=B}, Bs) ->
+eval_meta({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if A1 =< B1 -> lists:seq(A1, B1);
@@ -1428,7 +1425,7 @@ eval_meta(#cid {name=Vn}, Bs) ->
 	{ok,W} -> 
 	    W
     end;
-eval_meta(#ccall{func=F,args=As},Bs) ->
+eval_meta({call,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
 	{#cid{name="factorial"},[N]} -> varp_math:factorial(N);
 	{#cid{name="binom"},[A,B]} -> varp_math:binom(A,B);
@@ -1469,38 +1466,37 @@ eval_meta(#ccall{func=F,args=As},Bs) ->
 	{#cid{name=Func},As1} -> {f,Func,As1}
     end;
 
-eval_meta(#cbinary{op=Op,arg1=A,arg2=B},Bs) ->
+eval_meta({Op,A,B},Bs) ->
     case {Op,eval_meta(A,Bs),eval_meta(B,Bs)} of
-	{'<',A1,B1} -> A1 < B1;
-	{'<=', A1, B1} -> A1 =< B1;
-	{'>',A1,B1} -> A1 > B1;
-	{'>=', A1, B1} -> A1 >= B1;
-	{'==', A1, B1} -> A1 == B1;
-	{'!=', A1, B1} -> A1 =/= B1;
-	{'&&',A1,B1} -> A1 and B1;
-	{'||',A1,B1} -> A1 or B1;
-	{'&',A1,B1} -> A1 band B1;
-	{'|',A1,B1} -> A1 bor B1;
-	{'^',A1,B1} -> A1 bxor B1;
-	{'<<',A1,B1} -> A1 bsl B1;
-	{'>>',A1,B1} -> A1 bsr B1;
-	{'+',A1,B1} -> A1+B1;
-	{'-',A1,B1} -> A1-B1;
-	{'*',A1,B1} -> A1*B1;
-	{'/',A1,B1} -> A1 div B1;
-	{'%',A1,B1} -> A1 rem B1
+	{'lt',A1,B1} -> A1 < B1;
+	{'lte', A1, B1} -> A1 =< B1;
+	{'gt',A1,B1} -> A1 > B1;
+	{'gte', A1, B1} -> A1 >= B1;
+	{'eq', A1, B1} -> A1 == B1;
+	{'neq', A1, B1} -> A1 =/= B1;
+	{'and',A1,B1} -> A1 and B1;
+	{'or',A1,B1} -> A1 or B1;
+	{'band',A1,B1} -> A1 band B1;
+	{'bor',A1,B1} -> A1 bor B1;
+	{'bxor',A1,B1} -> A1 bxor B1;
+	{'shl',A1,B1} -> A1 bsl B1;
+	{'shr',A1,B1} -> A1 bsr B1;
+	{'add',A1,B1} -> A1+B1;
+	{'sub',A1,B1} -> A1-B1;
+	{'mul',A1,B1} -> A1*B1;
+	{'div',A1,B1} -> A1 div B1;
+	{'rem',A1,B1} -> A1 rem B1
     end;
 
-eval_meta(#cunary{op=Op,arg=A},Bs) ->
-    case {Op,eval_meta(A,Bs)} of
-	{'-',A1} -> -A1;
-	{'+',A1} -> +A1;
-	{'~',A1} ->  bnot A1;
-	{'!',A1} -> not A1
-    end;
 eval_meta({vec,Ls}, Bs) -> %% literal vector
-    eval_meta_list(Ls, Bs).
-
+    eval_meta_list(Ls, Bs);
+eval_meta({Op,A},Bs) ->
+    case {Op,eval_meta(A,Bs)} of
+	{'neg',A1} -> -A1;
+	{'pos',A1} -> +A1;
+	{'bnot',A1} ->  bnot A1;
+	{'not',A1} -> not A1
+    end.
 
 eval_meta_list(As,Bs) ->
     lists:map(fun(A) -> eval_meta(A,Bs) end, As).
@@ -1548,28 +1544,43 @@ next([_Aj], _Acc) -> [].
 
 -define(MAX_PRIO, 0).
 
-priority('*') -> 10;
-priority('/') -> 10;
-priority('%') -> 10;
-priority('+') -> 20;
-priority('-') -> 20;
-priority('<<') -> 30;
-priority('>>') -> 30;
-priority('<') -> 40;
-priority('<=') -> 40;
-priority('>') -> 40;
-priority('>=') -> 40;
-priority('==') -> 41;
-priority('!=') -> 41;
-priority('&') -> 43;
-priority('^') -> 45;
-priority('|') -> 47;
-priority('&&') -> 50;
-priority('||') -> 70.
+priority('mul') -> 10;
+priority('div') -> 10;
+priority('rem') -> 10;
+priority('add') -> 20;
+priority('sub') -> 20;
+priority('shl') -> 30;
+priority('shr') -> 30;
+priority('lt') -> 40;
+priority('lte') -> 40;
+priority('gt') -> 40;
+priority('gte') -> 40;
+priority('eq') -> 41;
+priority('neq') -> 41;
+priority('band') -> 43;
+priority('bxor') -> 45;
+priority('bor') -> 47;
+priority('and') -> 50;
+priority('or') -> 70.
 
-upriority('-')   -> 1;
-upriority('!')   -> 1;
-upriority('~')   -> 1.
+upriority('neg')   -> 1;
+upriority('pos')   -> 1;
+upriority('not')   -> 1;
+upriority('bnot')   -> 1.
+
+format_op(Op) ->
+    T =
+	#{  'mul' => "*",'div' => "/",'rem' => "%",'add' => "+",'sub' => "-",
+	    'shl' => "<<", 'shr' => "<<",
+	    'lt'  => "<", 'lte' => "<=", 'gt' => ">", 'gte' => ">=",
+	    'eq' => "==", 'neq' => "!=", 
+	    'band' => "&", 'bxor' => "^", 'bor' => "|",
+	    'and' => "&&", 'or' => "||",
+	    'neg' => "-", 'pos' => "+",
+	    'bnot' => "~", 'not' => "!"
+	 },
+    maps:get(Op, T).
+
 
 lookup_or_add_decl({p,P,Ps},PType,Size,Bs) ->
     PSym = varp:make_psym(P,Ps),
@@ -1606,28 +1617,28 @@ format_meta_(#cconst {base=B,value=V},_P) ->
 	16 -> [$0,$x|V];
 	_ -> V
     end;
-format_meta_(#crange{from=A,to=B},_P) ->
+format_meta_({range,A,B},_P) ->
     if A =:= B -> A;
        true -> [format_meta(A),"..",format_meta(B)]
     end;
-format_meta_(#ccall{func=#cid{name=F},args=As},_P) ->
+format_meta_({call,#cid{name=F},As},_P) ->
     [F,"(", format_meta_list(As), ")"];
-format_meta_(#cbinary{op=Op,arg1=A,arg2=B},P) ->
+format_meta_({Op,A,B},P) ->
     P1 = priority(Op),
     Fa = format_meta_(A,P1),
     Fb = format_meta_(B,P1),
     if P1 > P ->
-	    ["(",Fa," ",atom_to_list(Op)," ",Fb,")"];
+	    ["(",Fa," ",format_op(Op)," ",Fb,")"];
        true ->
-	    [Fa," ",atom_to_list(Op)," ",Fb]
+	    [Fa," ",format_op(Op)," ",Fb]
     end;
-format_meta_(#cunary{op=Op,arg=A},P) ->
+format_meta_({Op,A},P) ->
     P1 = upriority(Op),
     Fa = format_meta_(A,P1),
     if P1 > P ->
-	    ["(",atom_to_list(Op)," ",Fa,")"];
+	    ["(",format_op(Op)," ",Fa,")"];
        true ->
-	    [atom_to_list(Op)," ",Fa]
+	    [format_op(Op)," ",Fa]
     end.
 
 format_meta_list([]) -> [];
@@ -2024,15 +2035,13 @@ operation_(Op, A,B, Bs) ->
 %%
 operation('not',{bool,Y},Bs) ->
     {{bool,lnot(Y)},Bs};
-operation('!',{bool,Y},Bs) ->
-    {{bool,lnot(Y)},Bs};
-operation('~',Y={bool,_Y},Bs) ->
+operation('bnot',Y={bool,_Y},Bs) ->
     operation('not',Y,Bs);
-operation('~', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
+operation('bnot', {Type,N,Ys}, Bs) when ?is_vec_type(Type) ->
     Ys1 = vnot(Ys),
     {{Type,N,Ys1}, Bs};
 
-operation('-', A, Bs) ->
+operation('neg', A, Bs) ->
     {_At,An,Ax} = varg(A),
     case vconst(A) of
 	false ->
@@ -2048,7 +2057,7 @@ operation('-', A, Bs) ->
 
 operation('abs', A={int,N,Ys}, Bs) ->
     SignBit = sign_bit(A),
-    {{_,_,Zs},Bs1} = operation_('-',A,Bs),
+    {{_,_,Zs},Bs1} = operation_('neg',A,Bs),
     {Xs,Bs2} = vite(SignBit, Zs, Ys, Bs1),
     {{int,N,Xs},Bs2};
 operation('abs', A={uint,_N,_Ys}, Bs) ->
@@ -2057,9 +2066,6 @@ operation('abs', A={uint,_N,_Ys}, Bs) ->
 %%
 %% Binary operator
 %%
-operation('&&', A, B, Bs) ->
-    operation_('and', A, B, Bs);
-
 operation('and',{bool,?T},{bool,?T}, Bs) ->
     {{bool,?T},Bs};
 operation('and',{bool,?F},{bool,_Z}, Bs) ->
@@ -2074,10 +2080,7 @@ operation('and',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
     {{bool,X},and_gate(Bs,X,[Y,Z])};
 
-operation('and',A,B,Bs) ->
-    operation_('&',A,B,Bs);
-
-operation('&',A,B,Bs) ->
+operation('band',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
     Cn = erlang:max(An,Bn),
@@ -2092,9 +2095,6 @@ operation('&',A,B,Bs) ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
 
-operation('||', A, B, Bs) ->
-    operation_('or', A, B, Bs);
-
 operation('or',{bool,?F},{bool,?F}, Bs) -> {{bool,?F},Bs};
 operation('or',{bool,?T},{bool,_Z}, Bs) -> {{bool,?T},Bs};
 operation('or',{bool,_Y},{bool,?T}, Bs) -> {{bool,?T},Bs};
@@ -2104,10 +2104,7 @@ operation('or',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
     {{bool,X},or_gate(Bs,X,[Y,Z])};
 
-operation('or',A,B,Bs) ->
-    operation_('|',A,B,Bs);
-
-operation('|',A,B,Bs) ->
+operation('bor',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
     Cn = erlang:max(An,Bn),
@@ -2122,9 +2119,6 @@ operation('|',A,B,Bs) ->
 	    {{Ct,Cn,Cx},Bs1}
     end;
 
-operation('implies',A,B,Bs) ->
-    operation_('imp',A,B,Bs);
-
 operation('imp',{bool,?F},{bool,?T}, Bs) ->  {{bool,?T},Bs};
 operation('imp',{bool,?F},{bool,?F}, Bs) -> {{bool,?T},Bs};
 operation('imp',{bool,?T},{bool,?T}, Bs) ->   {{bool,?T},Bs};
@@ -2135,9 +2129,6 @@ operation('imp',{bool,Y},{bool,Z}, Bs) ->
 operation('imp',A,B,Bs) ->
     {An,Bs1} = operation_('~',A,Bs),
     operation_('|',An,B,Bs1);
-
-operation('equivalent',A,B,Bs) ->
-    operation_('equ',A,B,Bs);
 
 operation('equ',{bool,?T},{bool,?F},Bs) -> {{bool,?F},Bs};    
 operation('equ',{bool,?F},{bool,?T},Bs) -> {{bool,?F},Bs};
@@ -2150,7 +2141,6 @@ operation('equ',{bool,Y},{bool,?F},Bs) -> {{bool,lnot(Y)},Bs};
 operation('equ',{bool,Y},{bool,Z},Bs) ->
     X = add_variable(Bs),
     {{bool,X},xor_gate(Bs,X,[lnot(Y),Z])};
-
 
 operation('equ',A,B,Bs) ->
     {At,An,Ax} = varg(A),
@@ -2179,10 +2169,7 @@ operation('xor',{bool,Y},{bool,Z}, Bs) ->
     X = add_variable(Bs),
     {{bool,X},xor_gate(Bs,X,[Y,Z])};
 
-operation('xor',A,B,Bs) ->
-    operation_('^',A,B,Bs);
-
-operation('^',A,B,Bs) ->
+operation('bxor',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     {Bt,Bn,Bx} = varg(B),
     Cn = erlang:max(An,Bn),
@@ -2199,14 +2186,14 @@ operation('^',A,B,Bs) ->
 
 %% FIXME:
 %% A < B  <=>  A - B < 0
-operation('<',{bool,Y},{bool,Z},Bs) ->  %% Y < Z
+operation('lt',{bool,Y},{bool,Z},Bs) ->  %% Y < Z
     operation_('and', negate({bool,Y}),{bool,Z}, Bs);
-operation('<',{uint,An,Ax},{uint,Bn,Bx},Bs) ->
+operation('lt',{uint,An,Ax},{uint,Bn,Bx},Bs) ->
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(uint,Ax,An,Cn),
     Bx1 = vextend(uint,Bx,Bn,Cn),
     vless(Ax1,Bx1,Bs);
-operation('<',A,B,Bs) ->
+operation('lt',A,B,Bs) ->
     {_At,An,Ax} = iarg(A),
     {_Bt,Bn,Bx} = iarg(B),
     Cn = erlang:max(An,Bn),
@@ -2221,30 +2208,30 @@ operation('<',A,B,Bs) ->
     %%  Y<0  AND Z>=0
     {L,Bs4} = operation_('<',{bool,Bk},{bool,Ak},Bs3),
     any([A1,L],Bs4);
-operation('>',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
+operation('gt',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
     operation_('and', {bool,Y}, negate({bool,Z}), Bs);
-operation('>',Y,Z,Bs) ->
+operation('gt',Y,Z,Bs) ->
     operation_('<', Z, Y, Bs);
-operation('<=',Y,Z,Bs) ->
+operation('lte',Y,Z,Bs) ->
     {C,Bs1} = operation_('<', Z, Y, Bs),
     {negate(C),Bs1};
-operation('>=',Y,Z,Bs) ->
+operation('gte',Y,Z,Bs) ->
     operation_('<=',Z,Y,Bs);
 
-operation('!=',A={bool,_},B={bool,_},Bs) ->
+operation('neq',A={bool,_},B={bool,_},Bs) ->
     operation_('xor',A,B,Bs);
-operation('!=',Y,Z,Bs) ->
+operation('neq',Y,Z,Bs) ->
     {C,Bs1} = operation_('==', Y, Z, Bs),
     {negate(C),Bs1};
 
-operation('==',A={bool,_},B={bool,_},Bs) ->
+operation('eq',A={bool,_},B={bool,_},Bs) ->
     operation_('equ',A,B,Bs);
-operation('==',{uint,An,Ax},{uint,Bn,Bx},Bs) ->
+operation('eq',{uint,An,Ax},{uint,Bn,Bx},Bs) ->
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(uint,Ax,An,Cn),
     Bx1 = vextend(uint,Bx,Bn,Cn),    
     veq(Ax1,Bx1,Bs);
-operation('==',A,B,Bs) ->
+operation('eq',A,B,Bs) ->
     {At,An,Ax} = iarg(A),
     {Bt,Bn,Bx} = iarg(B),
     Cn = erlang:max(An,Bn),
@@ -2254,27 +2241,21 @@ operation('==',A,B,Bs) ->
 %%	      [A, B, {At,length(Ax1),Ax1}, {Bt,length(Bx1),Bx1}]),
     veq(Ax1,Bx1,Bs);
 
-operation('<->', A, B, Bs) ->
-    operation_('==', A, B, Bs);
-
-operation('->', A, B, Bs) ->
-    operation_('imp', A, B, Bs);
-
 %%
 %% Alias operation
 %%
-operation(':=',V,X={T,Size,Xs},Bs) when ?is_vec_type(T) ->
+operation('alias',V,X={T,Size,Xs},Bs) when ?is_vec_type(T) ->
     {X, alias_vector(Bs,T,V,Size,Xs)};
-operation(':=',V,X={bool,Xb},Bs) ->
+operation('alias',V,X={bool,Xb},Bs) ->
     {X, alias(V,Xb,Bs)};
 
 %% operator '=' is kind of assignment but really a 
 %% equality test and check of overflow bits
 operation('=',R,L,Bs) ->
     %% FIXME: same as '==' but check overflow / truncate 
-    operation('==',R,L,Bs);
+    operation('equ',R,L,Bs);
 
-operation('<<',A,B,Bs) ->
+operation('shl',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
@@ -2289,7 +2270,7 @@ operation('<<',A,B,Bs) ->
     Shift = normalize(At,Ax1),
     {Shift, Bs};
 
-operation('>>',A,B,Bs) ->
+operation('shr',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
@@ -2305,7 +2286,7 @@ operation('>>',A,B,Bs) ->
     {Shift, Bs};
 	    
 %% rotate left
-operation('<<<',A,B,Bs) ->
+operation('rol',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     if K =:= false ->
@@ -2318,7 +2299,7 @@ operation('<<<',A,B,Bs) ->
     end;
 
 %% rotate right
-operation('>>>',A,B,Bs) ->
+operation('ror',A,B,Bs) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     if K =:= false ->
@@ -2331,7 +2312,7 @@ operation('>>>',A,B,Bs) ->
     end;
 
 
-operation('+',A,B,Bs) ->
+operation('add',A,B,Bs) ->
     Ct = case mix_type(A,B) of
 	     bool -> uint;
 	     Ct0 -> Ct0
@@ -2351,7 +2332,7 @@ operation('+',A,B,Bs) ->
 %%	      [A, B, {At,length(Ax1),Ax1}, {Bt,length(Bx1),Bx1}, Sum]),
     {Sum,Bs3};
 
-operation('-',A,B,Bs) ->
+operation('sub',A,B,Bs) ->
     Ct = case mix_type(A,B) of
 	     bool -> int;
 	     uint -> int;
@@ -2369,7 +2350,7 @@ operation('-',A,B,Bs) ->
     Diff = normalize(Ct,length(Cx),Cx),
     {Diff,Bs3};
 
-operation('*',A,B,Bs) ->
+operation('mul',A,B,Bs) ->
     Ct = case mix_type(A,B) of
 	     bool -> uint;
 	     Ct0 -> Ct0
@@ -2396,7 +2377,7 @@ operation('*',A,B,Bs) ->
 
 %% DivZero  coould be used to generate a Exception output
 %% Signed?
-operation('/',Y,{uint,Zm,Zs},Bs) ->
+operation('div',Y,{uint,Zm,Zs},Bs) ->
     {Yt,Yn,Ys} = varg(Y),
     K = erlang:max(Yn,Zm),
     Ys1 = vextend(Yt,Ys,Yn,K),
@@ -2408,7 +2389,7 @@ operation('/',Y,{uint,Zm,Zs},Bs) ->
 
 %% DivZero  coould be used to generate a Exception output
 %% Signed?
-operation('%',{uint,N,Ys},{uint,M,Zs},Bs) ->
+operation('rem',{uint,N,Ys},{uint,M,Zs},Bs) ->
     K = erlang:max(N,M),
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
@@ -2441,7 +2422,6 @@ operation('max',A,B,Bs) ->
     {Cx,Bs2} = vite(Cond, Ax1, Bx1, Bs1),
     Ct = mix_type(At,Bt),
     {{Ct,Cn,Cx},Bs2}.
-
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
 set_status_({bool,Ci}, false, Bs) ->    %% never generate carry
@@ -2821,20 +2801,20 @@ veq(Ys, Zs, Bs) ->
     
 %% Compare less
 vless([Y],[Z],Bs) ->
-    operation('<',{bool,Y},{bool,Z},Bs);
+    operation('lt',{bool,Y},{bool,Z},Bs);
 vless([Y|Ys],[Z|Zs],Bs) ->
     {Lv,Ev,Bs1} = vlteq(Ys,Zs,Bs),
-    {L1,Bs2} = operation('<',{bool,Y},{bool,Z},Bs1),
+    {L1,Bs2} = operation('lt',{bool,Y},{bool,Z},Bs1),
     {L2,Bs3} = operation('and',Ev,L1,Bs2),
     operation('or',L2,Lv,Bs3).
 
 vlteq([Y],[Z],Bs) ->
-    {Lt,Bs1} = operation('<', {bool,Y},{bool,Z},Bs),
+    {Lt,Bs1} = operation('lt', {bool,Y},{bool,Z},Bs),
     {Eq,Bs2} = operation('equ',{bool,Y},{bool,Z},Bs1),
     {Lt,Eq,Bs2};
 vlteq([Y|Ys],[Z|Zs],Bs) ->
     {Lv,Ev,Bs1} = vlteq(Ys,Zs,Bs),
-    {L1,Bs2} = operation('<',{bool,Y},{bool,Z},Bs1),
+    {L1,Bs2} = operation('lt',{bool,Y},{bool,Z},Bs1),
     {E1,Bs3} = operation('equ',{bool,Y},{bool,Z},Bs2),
     {L2,Bs4} = operation('and',Ev,L1,Bs3),
     {Lv2,Bs5} = operation('or',L2,Lv,Bs4),
@@ -3217,7 +3197,7 @@ format_p({p,V,As}) when is_atom(V) ->
     [atom_to_list(V)|format_params(As)];
 format_p({p,Name,As}) when is_list(Name); is_binary(Name) ->
     [Name|format_params(As)];
-format_p({bit_index,Var,Index}) ->
+format_p({bitindex,Var,Index}) ->
     [format_p(Var),"[",integer_to_list(Index), "]"];
 format_p({index,Var,Index}) ->
     [format_p(Var),"[",integer_to_list(Index), "]"].
@@ -3292,7 +3272,7 @@ format_symbol({uint,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({int,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
-format_symbol({bit_index,V,I}) ->
+format_symbol({bitindex,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol(Var={p,_,_}) ->
     format_p(Var).
