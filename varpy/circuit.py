@@ -33,7 +33,7 @@ def inv_clauses(vp, y, x):
     return x
 
 def inv_gate(vp, y, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return inv_clauses(vp, y, x)
 
 def inv_pin(vp, y):
@@ -41,64 +41,64 @@ def inv_pin(vp, y):
 
 # x = y OR z
 def or_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return or_clauses(vp, y, z, x)
 
 # x = NOT (y OR z)
 def nor_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return inv(or_clauses(vp, y, z, x))
 
 # x = y -> z (NOT y OR z)
 def imp_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return or_clauses(vp, inv(y), z, x)
 
 # x = y -/> z ( NOT (y -> z) ) = NOT (NOT y OR Z) =  (y AND NOT z)
 def nimp_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return and_clauses(vp, y, inv(z), x)
 
 # x = y AND z
 def and_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return and_clauses(vp, y, z, x)
 
 # x = NOT (y AND z)
 def nand_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return inv(and_clauses(vp, y, z, x))
 
 # x = y XOR z
 def xor_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return xor_clauses(vp, y, z, x)
 
 # x = NOT (y XOR z)
 def xnor_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return inv(xor_clauses(vp, y, z, x))
 
 # x = MIN(y,z) = (y AND z)
 def min_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return and_clauses(vp, y, z, x)
 
 # x = MAX(y,z) = (y OR z)
 def max_gate(vp, y, z, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     return or_clauses(vp, y, z, x)
 
 def half_adder(vp, y, z, x=None, co=None):
-    if x == None: x = varpy.add_variable(vp)
-    if co == None: co = varpy.add_variable(vp)
+    if x == None: x = var(vp)
+    if co == None: co = var(vp)
     x = xor_gate(vp, y, z, x)
     co = and_gate(vp, y, z, co)
     return (x, co)
 
 def full_adder(vp, y, z, ci=False, x=None, co=None):
-    if x == None: x = varpy.add_variable(vp)
-    if co == None: co = varpy.add_variable(vp)
+    if x == None: x = var(vp)
+    if co == None: co = var(vp)
     x1 = xor_gate(vp,y,z,x)  # hmmmm check x!
     x = xor_gate(vp,x1,ci)
     a1 = and_gate(vp,x1,ci)
@@ -108,8 +108,8 @@ def full_adder(vp, y, z, ci=False, x=None, co=None):
 
 # (min,max) circuit
 def comparator(vp, y, z, x0=None, x1=None):
-    if x0 == None: x0 = varpy.add_variable(vp)
-    if x1 == None: x1 = varpy.add_variable(vp)
+    if x0 == None: x0 = var(vp)
+    if x1 == None: x1 = var(vp)
     return (min_gate(vp, y, z, x0), max_gate(vp, y, z, x1))
 
 # x = (((y[0] o y[1]) o y[2]) .. y[n-1])
@@ -129,7 +129,7 @@ def right_assoc(vp, gate, ys, x=None):
     return gate(vp, y, ys[0], x)
 
 def none_assoc(vp,gate,ys,x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     if gate == or_gate:
         clause(vp, [inv(x)] + ys)
         for xi in ys: clause(vp,[x,inv(xi)])
@@ -147,13 +147,13 @@ def none_assoc_(vp,gate,ys,x=None):
     if len(u) == 1 and len(v) == 1:
         return gate(vp,u[0],v[0],x)
     elif len(u) == 1 and len(v) == 2:
-        x1 = varpy.add_variable(vp)
+        x1 = var(vp)
         gate(vp,v[0],v[1],x1)
         return gate(vp,u[0],x1,x)
     else:
-        x1 = varpy.add_variable(vp)
+        x1 = var(vp)
         none_assoc_(vp,gate,u,x1)
-        x2 = varpy.add_variable(vp)
+        x2 = var(vp)
         none_assoc_(vp,gate,v,x2)
         return gate(vp,x1,x2,x)
 
@@ -209,7 +209,7 @@ def varp_LTE(vp, k, ys, x=None):
 # sort all ys one lap then or over the
 # fixme len(ys) < 2
 def eq1(vp, ys, x=None):
-    if x == None: x = varpy.add_variable(vp)
+    if x == None: x = var(vp)
     (z0,z1) = comparator(vp, ys[0], ys[1])
     zs = [z0]
     for y in ys[2:]:
@@ -264,8 +264,16 @@ def minmax(vp,xs):
     ys.append(mx)
     return ys
 
-def var(vp, name):
+def var(vp, name=None):
+    x = varpy.add_variable(vp, False)
+    varpy.isused(vp, x, True)
+    if name != None:
+        varpy.add_symbol(vp, x, name)
+    return x
+
+def atom(vp, name):
     x = varpy.add_variable(vp, True)
+    varpy.isused(vp, x, True)
     varpy.add_symbol(vp, x, name)
     return x
 
@@ -276,8 +284,8 @@ def clause(vp, ls):
 
 def test_gate(gate):
     vp = varpy.new({'xref':True})
-    a = var(vp, "a")
-    b = var(vp, "b")
+    a = atom(vp, "a")
+    b = atom(vp, "b")
     c = gate(vp, a, b)
     if not varpy.bind(vp, c):
         print("0 models found")
@@ -306,10 +314,10 @@ def test_xnor():
 
 def test():
     vp = varpy.new({'xref':True})
-    a = var(vp, "a")
-    b = var(vp, "b")
-    c = var(vp, "c")
-    d = var(vp, "d")
+    a = atom(vp, "a")
+    b = atom(vp, "b")
+    c = atom(vp, "c")
+    d = atom(vp, "d")
     e = left_assoc(vp, and_gate, [a,b,c,d])
     f = right_assoc(vp, or_gate, [a,b,c,d])
     g = right_assoc(vp, xor_gate, [a,b,e,f])
@@ -317,10 +325,10 @@ def test():
 
 def test_eq1():
     vp = varpy.new({'xref':True})
-    a = var(vp, "a")
-    b = var(vp, "b")
-    c = var(vp, "c")
-    d = var(vp, "d")
+    a = atom(vp, "a")
+    b = atom(vp, "b")
+    c = atom(vp, "c")
+    d = atom(vp, "d")
     e = eq1(vp, [a,b,c,d])
     varpy.bind(vp, e)
     varpy.set_level(vp, 1)
@@ -328,14 +336,14 @@ def test_eq1():
 
 def test_half_adder1():
     vp = varpy.new({'xref':True})
-    a = var(vp, "a")
-    b = var(vp, "b")
+    a = atom(vp, "a")
+    b = atom(vp, "b")
     return half_adder(vp, a, b)
 
 def test_full_adder1():
     vp = varpy.new({'xref':True})
-    a = var(vp, "a")
-    b = var(vp, "b")
+    a = atom(vp, "a")
+    b = atom(vp, "b")
     r = full_adder(vp, a, b)
     varpy.ic(vp)
     return r

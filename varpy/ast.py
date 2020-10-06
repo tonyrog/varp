@@ -173,9 +173,8 @@ def varp_var(vp, tree, vs):
     x = varpy.find_symbol(vp, term)
     if x == False:
         x = varpy.add_variable(vp, True)
-        varpy.isused(vp, True)
+        varpy.isused(vp, x, True)
         varpy.add_symbol(vp, x, term)
-#        print("added variable " + varpy.symbol_str(term))
         return x
     else:
         return x
