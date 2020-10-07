@@ -15,11 +15,185 @@
 formula() ->
     "[A x=1..n][A y=x..n+1] (P(x) -> Q(y))".
 
-%% tree:
+parse(Formula) ->
+    {ok,{_Opts,Tree}} = varp:parse(Formula),
+    Tree.
+
+%% This is the demo parse tree
 tree() ->
     {{'ALL',[{assign,{id,"x"}, {range,{const,1},{id,"n"}}}]},
      {{'ALL',[{assign,{id,"y"},{range,{id,"x"},{add,{id,"n"},{const,1}}}}]},
       {imp,{p,'P',[{id,"x"}]},{p,'Q',[{id,"y"}]}}}}.
+
+
+compile(Tree) ->
+    erase(label_counter),
+    lists:flatten(compile(Tree,[])).
+
+compile(Tree,E) ->
+    case Tree of
+	true -> [{const,true}];
+	false -> [{const,false}];
+	{'p', Sym, Args} -> compile_var(Sym, Args,E);
+	{'not', A}       -> compile_unary('cor',A, E);
+	{'or', A1, A2}   -> compile_binary('cor',A1,A2,E);
+	{'and', A1, A2}  -> compile_binary('cand',A1,A2,E);
+	{'imp', A1, A2}  -> compile_binary('cimp',A1,A2,E);
+	{'equ', A1, A2}  -> compile_binary('cequ',A1,A2,E);
+	{'xor', A1, A2}  -> compile_binary('cxor',A1,A2,E);
+	{{'ALL',Gs},A} -> compile_quant('call',Gs,A,E);
+	{{'ANY',Gs},A} -> compile_quant('cany',Gs,A,E)
+    end.
+
+compile_unary(Op, A,E) ->
+    [compile(A,E),Op].
+
+compile_binary(Op,A1,A2,E) ->
+    [compile(A1,E),compile(A2,E),Op].
+
+compile_quant(Op,[G|Gs],A,E) ->
+    case G of
+	{assign,{id,X},R} ->
+	    L1 = new_label(),
+	    L2 = new_label(),
+	    Range = compile_range(R, E),
+	    [[Range,'do'],
+	     {label,L1},
+	     {leave,L2},
+	     compile_quant(Op, Gs, A, [X|E]),
+	     {loop,L1},
+	     {label,L2},
+	     Range,swap,'isub',{const,1},'iadd',
+	     Op];
+	_ ->
+	    L1 = new_label(),
+	    [compile_expr(G, E),
+	     {jumpz,L1},
+	     compile_quant(Op, Gs, A, E),
+	     {label,L1}]
+    end;
+compile_quant(_Op,[],A,E) ->
+    compile(A, E).
+
+new_label() ->
+    L = case get(label_counter) of
+	    undefined -> 1;
+	    C -> C+1
+	end,
+    put(label_counter, L),
+    {l,L}.
+
+compile_var(Sym,[],_E) ->
+    [{args,0},{p,Sym}];
+compile_var(Sym,Args,E) ->
+    [compile_args(Args,E),{args,length(Args)},{p,Sym}].
+
+compile_args([A|As],E) ->
+    [compile_args(As,E),compile_arg(A,E)];
+compile_args([A],E) ->
+    compile_arg(A,E);
+compile_args([],_E) ->
+    [].
+
+compile_arg(X,_E) when is_integer(X) ->
+    {const,X};
+compile_arg(Const={const,_},_E) ->
+    Const;
+compile_arg({id,V},E) ->
+    case index(V, E) of
+	false -> {var,V};
+	I -> {lvar,I}
+    end;
+compile_arg({F,[A1,A2]},E) ->
+    case F of
+	"add" -> compile_binary_args(iadd,A1,A2,E);
+	"sub" -> compile_binary_args(isub,A1,A2,E);
+	"mul" -> compile_binary_args(imul,A1,A2,E);
+	"div" -> compile_binary_args(idiv,A1,A2,E);
+	"rem" -> compile_binary_args(irem,A1,A2,E);
+	"band" -> compile_binary_args(iband,A1,A2,E);
+	"bor" -> compile_binary_args(ibor,A1,A2,E);
+	"bxor" -> compile_binary_args(ibxor,A1,A2,E);
+	"or" -> compile_binary_args(ior,A1,A2,E);
+	"and" -> compile_binary_args(iand,A1,A2,E);
+	"shl" -> compile_binary_args(ishl,A1,A2,E);
+	"shr" -> compile_binary_args(ishr,A1,A2,E);
+	"gt" -> compile_binary_args(igt,A1,A2,E);
+	"gte" -> compile_binary_args(igte,A1,A2,E);
+	"lt" -> compile_binary_args(ilt,A1,A2,E);
+	"lte" -> compile_binary_args(ilte,A1,A2,E);
+	"eq" -> compile_binary_args(ieq,A1,A2,E);
+	"neq" -> compile_binary_args(ineq,A1,A2,E)
+    end;
+compile_arg({F,[A1]},E) ->
+    case F of
+	"not" -> compile_unary_args(inot,A1,E);
+	"neg" -> compile_unary_args(ineg,A1,E);
+	"pos" -> compile_unary_args(ipos,A1,E);
+	"bnot" -> compile_unary_args(ibnot,A1,E)
+    end.
+	    
+compile_unary_args(Op,A,E) ->
+    [compile_args(A,E),Op].
+
+compile_binary_args(Op,A1,A2,E) ->
+    [compile_args(A1,E),compile_args(A2,E),Op].
+
+compile_range({range,From,To}, E) ->
+    [compile_expr(From,E),compile_expr(To,E)];
+compile_range(Value, E) ->
+    [compile_expr(Value,E),dup].
+    
+
+compile_expr({const,X},_E) ->
+    [{const,X}];
+compile_expr({id,ID},E) ->
+    case index(ID, E) of
+	false -> [{var,ID}];
+	I -> [{lvar,I}]
+    end;
+compile_expr({range,From,To},E) ->
+    [compile_expr(From,E),compile_expr(To,E)];
+compile_expr({F,A1,A2},E) when is_atom(F) ->
+    case F of
+	'add'-> compile_binary_expr(iadd,A1,A2,E);
+	'sub' -> compile_binary_expr(isub,A1,A2,E);
+	'mul' -> compile_binary_expr(imul,A1,A2,E);
+	'div' -> compile_binary_expr(idiv,A1,A2,E);
+	'rem' -> compile_binary_expr(irem,A1,A2,E);
+	'band' -> compile_binary_expr(iband,A1,A2,E);
+	'bor' -> compile_binary_expr(ibor,A1,A2,E);
+	'bxor' -> compile_binary_expr(ibxor,A1,A2,E);
+	'or' -> compile_binary_expr(ior,A1,A2,E);
+	'and' -> compile_binary_expr(iand,A1,A2,E);
+	'shl' -> compile_binary_expr(ishl,A1,A2,E);
+	'shr' -> compile_binary_expr(ishr,A1,A2,E);
+	'gt' -> compile_binary_expr(igt,A1,A2,E);
+	'gte' -> compile_binary_expr(igte,A1,A2,E);
+	'lt' -> compile_binary_expr(ilt,A1,A2,E);
+	'lte' -> compile_binary_expr(ilte,A1,A2,E);
+	'eq' -> compile_binary_expr(ieq,A1,A2,E);
+	'neq' -> compile_binary_expr(ineq,A1,A2,E)
+    end;
+compile_expr({F,A}, E) when is_atom(F) ->
+    case F of
+	'neg' -> compile_unary_expr(inet, A, E);
+	'pos' -> compile_unary_expr(ipos, A, E);
+	'bnot' -> compile_unary_expr(ibnot, A, E)
+    end.
+
+compile_unary_expr(Op,A,E) ->
+    [compile_expr(A,E),Op].
+
+compile_binary_expr(Op,A1,A2,E) ->
+    [compile_expr(A1,E),compile_expr(A2,E),Op].
+
+index(A, As) ->
+    index(A, As, 1).
+
+index(A, [A|_As], I) -> I;
+index(A, [_|As], I) -> index(A, As, I+1);
+index(_A, [], _) ->  false.
 
 %% compile:
 %%
@@ -54,12 +228,12 @@ asm() ->
 {label,l3},
      {leave,l2},       %% 10 leave L2
      %% P(x) -> Q(y)
-     {lvar,1},         %% 14 (y)
+     {lvar,2},         %% 14 (x)
      {args,1},         %% 15
-     {p,'P'},          %% 16
-     {lvar,2},         %% 11 (x)
+     {p,'P'},          %% 16 P(x)
+     {lvar,1},         %% 11 (y)
      {args,1},         %% 12
-     {p,'Q'},          %% 13
+     {p,'Q'},          %% 13 Q(y)
      cimp,             %% 17
      {loop,l3},        %% 18
 {label,l2},

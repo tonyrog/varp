@@ -25,16 +25,11 @@ build(Tree, Vp, State) ->
 	false -> false;
 	{'p', Sym, Args}   -> var(Sym, Args, Vp, State);
 	{'not', A}         -> unary('not',A,Vp,State);
-	{'!', A}           -> unary('not',A,Vp,State);
 	{'and', A1, A2}    -> binary('and',A1,A2,Vp,State);
-	{'&&', A1, A2}     -> binary('and',A1,A2,Vp,State);
 	{'or', A1, A2}     -> binary('or',A1,A2,Vp,State);
-	{'||', A1, A2}     -> binary('or',A1,A2,Vp,State);
 	{'imp', A1, A2}    -> binary('imp',A1,A2,Vp,State);
-	{'->', A1, A2}     -> binary('imp',A1,A2,Vp,State);
 	{'xor', A1, A2}    -> binary('xor',A1,A2,Vp,State);
 	{'equ', A1, A2}    -> binary('equ',A1,A2,Vp,State);
-	{'<->', A1, A2}    -> binary('equ',A1,A2,Vp,State);
 	{'ALL',As}         -> nary('all',As,Vp,State);
 	{'ANY',As}         -> nary('any',As,Vp,State);
 	{'NONE',As}        -> nary('none',As,Vp,State);
@@ -55,13 +50,13 @@ build(Tree, Vp, State) ->
 	{{'LTE',[K|Gs]},A} -> quant_k('lte',K,Gs,A,Vp,State);
 	{{'GT',[K|Gs]},A}  -> quant_k('gt',K,Gs,A,Vp,State);
 	{{'GTE',[K|Gs]},A} -> quant_k('gte',K,Gs,A,Vp,State);
-	%% allowed conditionals in logic part (must expand to contant!)
-	{'>',  A1, A2}     -> cond_bin("gt",A1,A2,Vp,State);
-	{'>=', A1, A2}     -> cond_bin("gte",A1,A2,Vp,State);
-	{'<', A1, A2}      -> cond_bin("lt",A1,A2,Vp,State);
-	{'<=', A1, A2}     -> cond_bin("lte",A1,A2,Vp,State);
-	{'==', A1, A2}     -> cond_bin("eq",A1,A2,Vp,State);
-	{'!=', A1, A2}     -> cond_bin("neq",A1,A2,Vp,State)
+	%% allowed conditionals in logic part (must expand to constant!)
+	{'gt',  A1, A2}     -> cond_bin("gt",A1,A2,Vp,State);
+	{'gte', A1, A2}     -> cond_bin("gte",A1,A2,Vp,State);
+	{'lt', A1, A2}      -> cond_bin("lt",A1,A2,Vp,State);
+	{'lte', A1, A2}     -> cond_bin("lte",A1,A2,Vp,State);
+	{'eq', A1, A2}      -> cond_bin("eq",A1,A2,Vp,State);
+	{'neq', A1, A2}     -> cond_bin("neq",A1,A2,Vp,State)
     end.
 
 var(Sym, Args, Vp, State) ->
