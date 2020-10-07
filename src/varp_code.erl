@@ -10,6 +10,7 @@
 -compile(export_all).
 
 -define(dbg(F,A), io:format((F),(A))).
+
 %% compile:
 %% parse:
 formula() ->
@@ -36,13 +37,39 @@ compile(Tree,E) ->
 	false -> [{const,false}];
 	{'p', Sym, Args} -> compile_var(Sym, Args,E);
 	{'not', A}       -> compile_unary('cor',A, E);
-	{'or', A1, A2}   -> compile_binary('cor',A1,A2,E);
 	{'and', A1, A2}  -> compile_binary('cand',A1,A2,E);
+	{'or', A1, A2}   -> compile_binary('cor',A1,A2,E);
 	{'imp', A1, A2}  -> compile_binary('cimp',A1,A2,E);
-	{'equ', A1, A2}  -> compile_binary('cequ',A1,A2,E);
 	{'xor', A1, A2}  -> compile_binary('cxor',A1,A2,E);
-	{{'ALL',Gs},A} -> compile_quant('call',Gs,A,E);
-	{{'ANY',Gs},A} -> compile_quant('cany',Gs,A,E)
+	{'equ', A1, A2}  -> compile_binary('cequ',A1,A2,E);
+	
+	{'ALL',As}         -> compile_nary('call',As,E);
+	{'ANY',As}         -> compile_nary('cany',As,E);
+	{'NONE',As}        -> compile_nary('cnone',As,E);
+	{'ONE',As}         -> compile_nary('cone',As,E);
+	{'ODD',As}         -> compile_nary('codd',As,E);
+	{'EVEN',As}        -> compile_nary('ceven',As,E);
+	{'PARITY',As}      -> compile_nary('cparity',As,E);
+	{{'ALL',Gs},A}     -> compile_quant('call',Gs,A,E);
+	{{'ANY',Gs},A}     -> compile_quant('cany',Gs,A,E);
+	{{'NONE',Gs},A}    -> compile_quant('cnone',Gs,A,E);
+	{{'ONE',Gs},A}     -> compile_quant('cone',Gs,A,E);
+	{{'ODD',Gs},A}     -> compile_quant('codd',Gs,A,E);
+	{{'EVEN',Gs},A}    -> compile_quant('ceven',Gs,A,E);
+	{{'PARITY',Gs},A}  -> compile_quant('cparity',Gs,A,E);
+	{{'EQ',[K|Gs]},A}  -> compile_quant_k('ceqk',K,Gs,A,E);
+	{{'NEQ',[K|Gs]},A} -> compile_quant_k('cneqk',K,Gs,A,E);
+	{{'LT',[K|Gs]},A}  -> compile_quant_k('cltk',K,Gs,A,E);
+	{{'LTE',[K|Gs]},A} -> compile_quant_k('cltek',K,Gs,A,E);
+	{{'GT',[K|Gs]},A}  -> compile_quant_k('cgtk',K,Gs,A,E);
+	{{'GTE',[K|Gs]},A} -> compile_quant_k('cgtek',K,Gs,A,E);
+	%% allowed conditionals in logic part (must expand to constant!)
+	{'gt',  A1, A2}     -> compile_cond_binary("gt",A1,A2,E);
+	{'gte', A1, A2}     -> compile_cond_binary("gte",A1,A2,E);
+	{'lt', A1, A2}      -> compile_cond_binary("lt",A1,A2,E);
+	{'lte', A1, A2}     -> compile_cond_binary("lte",A1,A2,E);
+	{'eq', A1, A2}      -> compile_cond_binary("eq",A1,A2,E);
+	{'neq', A1, A2}     -> compile_cond_binary("neq",A1,A2,E)
     end.
 
 compile_unary(Op, A,E) ->
@@ -51,7 +78,20 @@ compile_unary(Op, A,E) ->
 compile_binary(Op,A1,A2,E) ->
     [compile(A1,E),compile(A2,E),Op].
 
-compile_quant(Op,[G|Gs],A,E) ->
+compile_nary(Op,As,E) ->
+    [[compile(Ai,E) || Ai <- As],{const,length(As)},Op].
+
+compile_quant_k(Op,K,Gs,A,E) ->
+    compile_quant_(Op,K,Gs,A,E).
+
+compile_quant(Op,Gs,A,E) ->
+    compile_quant_(Op,undefined,Gs,A,E).
+
+%% FIXME: this is not correct !
+%% we should compile 
+%% [E! x=1..3,y=1..3]P(x,y) different than [E! x=1..3][E! y=1..3]P(x,y)
+%%
+compile_quant_(Op,K,[G|Gs],A,E) ->
     case G of
 	{assign,{id,X},R} ->
 	    L1 = new_label(),
@@ -60,19 +100,27 @@ compile_quant(Op,[G|Gs],A,E) ->
 	    [[Range,'do'],
 	     {label,L1},
 	     {leave,L2},
-	     compile_quant(Op, Gs, A, [X|E]),
+	     compile_quant_(Op, K, Gs, A, [X|E]), %% K=undefined?
 	     {loop,L1},
 	     {label,L2},
+	     %% if K is defined then it is used by op like K N gtk ...
+	     if K =:= undefined ->
+		     [];
+		true ->
+		     compile_expr(K, E)
+	     end,
+	     %% calculate number of results from loop
+	     %% {range, A, B} => A B swap - + 1 = (B-A)+1
 	     Range,swap,'isub',{const,1},'iadd',
 	     Op];
 	_ ->
 	    L1 = new_label(),
 	    [compile_expr(G, E),
 	     {jumpz,L1},
-	     compile_quant(Op, Gs, A, E),
+	     compile_quant_(Op, K, Gs, A, E),
 	     {label,L1}]
     end;
-compile_quant(_Op,[],A,E) ->
+compile_quant_(_Op,_K,[],A,E) ->
     compile(A, E).
 
 new_label() ->
@@ -88,10 +136,10 @@ compile_var(Sym,[],_E) ->
 compile_var(Sym,Args,E) ->
     [compile_args(Args,E),{args,length(Args)},{p,Sym}].
 
-compile_args([A|As],E) ->
-    [compile_args(As,E),compile_arg(A,E)];
 compile_args([A],E) ->
     compile_arg(A,E);
+compile_args([A|As],E) ->
+    [compile_arg(A,E),compile_args(As,E)];
 compile_args([],_E) ->
     [].
 
@@ -134,16 +182,19 @@ compile_arg({F,[A1]},E) ->
     end.
 	    
 compile_unary_args(Op,A,E) ->
-    [compile_args(A,E),Op].
+    [compile_arg(A,E),Op].
 
 compile_binary_args(Op,A1,A2,E) ->
-    [compile_args(A1,E),compile_args(A2,E),Op].
+    [compile_arg(A1,E),compile_arg(A2,E),Op].
+
+%% compile arg expression should compute to constant!
+compile_cond_binary(Op,A1,A2,E) ->
+    [compile_arg({Op,[A1,A2]}, E), ibool].
 
 compile_range({range,From,To}, E) ->
     [compile_expr(From,E),compile_expr(To,E)];
 compile_range(Value, E) ->
     [compile_expr(Value,E),dup].
-    
 
 compile_expr({const,X},_E) ->
     [{const,X}];
@@ -250,6 +301,26 @@ asm() ->
      ret               %% 28 (label l3)
     ].
 
+test(Text) ->
+    test(Text, #{}).
+
+test(Text, Env) ->
+    Tree = parse(Text),
+    Asm  = compile(Tree),
+    Code = assemble(Asm),
+    Vp = varc:new(#{}),
+    case run(Vp, Env, Code) of
+	[Var] ->
+	    {Var, Vp};
+	[] ->
+	    io:format("warning stack underflow\n", []),
+	    {undefined, Vp};
+	[Var|Stack] ->
+	    io:format("warning stack not overflow: ~w\n", [Stack]),
+	    {Var, Vp}
+    end.
+
+
 test() ->
     Asm = asm(),
     Code = assemble(Asm),
@@ -314,6 +385,15 @@ step(Vp, Vs, I, Code, Stack, Loop) ->
     Op = element(I,Code),
     io:format("~w: op=~w, stack=~w, loop=~w\n", [I,Op,Stack,Loop]),
     case Op of
+	{const,V} -> step(Vp,Vs,I+1,Code,[V | Stack],Loop);
+	{args,N} -> step(Vp,Vs,I+1,Code,args(Vp,N,Stack),Loop);
+	{p,P} -> step(Vp,Vs,I+1,Code,p(Vp,P,Stack),Loop);
+	{lvar,K} ->
+	    {X,_} = lists:nth(K,Loop),
+	    step(Vp,Vs,I+1,Code,[X|Stack],Loop);
+	{var,Var} ->
+	    X = maps:get(Var,Vs,0),
+	    step(Vp,Vs,I+1,Code,[X|Stack],Loop);
 	iadd -> step(Vp,Vs,I+1,Code,iadd(Stack),Loop);
 	isub -> step(Vp,Vs,I+1,Code,isub(Stack),Loop);
 	imul -> step(Vp,Vs,I+1,Code,imul(Stack),Loop);
@@ -336,23 +416,26 @@ step(Vp, Vs, I, Code, Stack, Loop) ->
 	ipos -> step(Vp,Vs,I+1,Code,Stack,Loop);  %% noop
 	ibnot -> step(Vp,Vs,I+1,Code,ibnot(Stack),Loop);
 	inot -> step(Vp,Vs,I+1,Code,inot(Stack),Loop);
-	{const,V} -> step(Vp,Vs,I+1,Code,[V | Stack],Loop);
-	{goto,J} -> step(Vp,Vs,J,Code,Stack,Loop);
-	{args,N} -> step(Vp,Vs,I+1,Code,args(Vp,N,Stack),Loop);
-	{p,P} -> step(Vp,Vs,I+1,Code,p(Vp,P,Stack),Loop);
+	ibool -> step(Vp,Vs,I+1,Code,ibool(Stack),Loop);
 	cor -> step(Vp,Vs,I+1,Code,cor(Vp,Stack),Loop);
 	cand -> step(Vp,Vs,I+1,Code,cand(Vp,Stack),Loop);
 	cimp -> step(Vp,Vs,I+1,Code,cimp(Vp,Stack),Loop);
 	cequ -> step(Vp,Vs,I+1,Code,cequ(Vp,Stack),Loop);
 	call  -> step(Vp,Vs,I+1,Code,call(Vp,Stack),Loop);
 	cany  -> step(Vp,Vs,I+1,Code,cany(Vp,Stack),Loop);
+	cnone -> step(Vp,Vs,I+1,Code,cnone(Vp,Stack),Loop);
+	cone -> step(Vp,Vs,I+1,Code,cone(Vp,Stack),Loop);
+	ceven -> step(Vp,Vs,I+1,Code,ceven(Vp,Stack),Loop);
+	codd -> step(Vp,Vs,I+1,Code,codd(Vp,Stack),Loop);
+	cparity -> step(Vp,Vs,I+1,Code,cparity(Vp,Stack),Loop);
+	%% EQk/NEQk/LTk/LTEk/GTk/GTEk
+	ceqk -> step(Vp,Vs,I+1,Code,ceqk(Vp,Stack),Loop);
+	cneqk -> step(Vp,Vs,I+1,Code,cneqk(Vp,Stack),Loop);
+	cltk -> step(Vp,Vs,I+1,Code,cltk(Vp,Stack),Loop);
+	cltek -> step(Vp,Vs,I+1,Code,cltek(Vp,Stack),Loop);
+	cgtk -> step(Vp,Vs,I+1,Code,cgtk(Vp,Stack),Loop);
+	cgtek -> step(Vp,Vs,I+1,Code,cgtek(Vp,Stack),Loop);
 	clause -> step(Vp,Vs,I+1,Code,clause(Vp,Stack),Loop);
-	{lvar,K} ->
-	    {X,_} = lists:nth(K,Loop),
-	    step(Vp,Vs,I+1,Code,[X|Stack],Loop);
-	{var,Var} ->
-	    X = maps:get(Var,Vs,0),
-	    step(Vp,Vs,I+1,Code,[X|Stack],Loop);
 	dup ->
 	    [X|_] = Stack,
 	    step(Vp,Vs,I+1,Code,[X|Stack],Loop);
@@ -379,6 +462,8 @@ step(Vp, Vs, I, Code, Stack, Loop) ->
 	{loop,J} -> 
 	    [{Index,Limit}|Loop1] = Loop,
 	    step(Vp,Vs,J,Code,Stack,[{Index+1,Limit}|Loop1]);
+	{goto,J} ->
+	    step(Vp,Vs,J,Code,Stack,Loop);
 	ret ->
 	    Stack;
 	ok -> ok
@@ -411,6 +496,7 @@ ineq([V1,V2|Vs]) -> [if V2 =/= V1 -> 1; true -> 0 end | Vs].
 ineg([V1|Vs]) -> [-V1 | Vs].
 ibnot([V1|Vs]) -> [bnot V1 | Vs].
 inot([V1|Vs]) -> [if V1 =:= 0 -> 1; true -> 1 end | Vs].
+ibool([V1|Vs]) -> [(V1 =/= 0) | Vs].
 
 p(Vp,P,[Args|Stack]) ->
     Term = {P,Args},
@@ -426,15 +512,25 @@ p(Vp,P,[Args|Stack]) ->
 	    [Var|Stack]
     end.
 
+sym(_Vp,true) -> true;
+sym(_Vp,false) -> false;
 sym(Vp,Lit) ->
     case varc:get_symbol(Vp, Lit) of
 	[{Term,_}|_] -> Term;
 	_ -> Lit
     end.
-	    
+
+%% get argument list (in reverse)
+nargs(N, Stack) ->
+    nargs_(N, Stack, []).
+
+nargs_(0, Stack, Args) ->
+    [Args | Stack];
+nargs_(I, [V|Stack], Args) ->
+    nargs_(I-1, Stack, [V|Args]).
+
 args(_Vp,N,Stack) ->
-    {Args,Stack1} = lists:split(N, Stack),
-    [Args | Stack1].
+    nargs(N, Stack).
 
 cor(Vp, [X1,X2|Vs]) ->
     ?dbg("~w or ~w\n", [sym(Vp,X2),sym(Vp,X1)]),
@@ -461,20 +557,90 @@ cinv(Vp, [X1 | Vs]) ->
     X = varp_circuit:inv_pin(Vp, X1),
     [X | Vs].
 
+
 clause(Vp, [N|Stack]) ->
-    {Args,Stack1} = lists:split(N, Stack),
+    [Args|Stack1] = nargs(N, Stack),
     varc:add_clause(Vp, Args),
     Stack1.
 
 %% ciruit-all not call
 call(Vp, [N|Stack]) ->
-    {Args,Stack1} = lists:split(N, Stack),
+    [Args|Stack1] = nargs(N, Stack),
     ?dbg("ALL ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:all(Vp, Args),
     [X | Stack1].
 
 cany(Vp, [N|Stack]) ->
-    {Args,Stack1} = lists:split(N, Stack),
+    [Args|Stack1] = nargs(N, Stack),
     ?dbg("ANY ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:any(Vp, Args),
     [X | Stack1].
+
+cnone(Vp, [N|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("NONE ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:none(Vp, Args),
+    [X | Stack1].
+
+cone(Vp, [N|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("ONE ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:one(Vp, Args),
+    [X | Stack1].
+
+codd(Vp, [N|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("ODD ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:odd(Vp, Args),
+    [X | Stack1].
+
+ceven(Vp, [N|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("EVEN ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:even(Vp, Args),
+    [X | Stack1].
+
+cparity(Vp, [N|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("PARITY ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:parity(Vp, Args),
+    [X | Stack1].
+
+%% EQk/NEQk/LTk/LTEk/GTk/GTEk
+ceqk(Vp, [N,K|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("EQk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:eqk(Vp, K, Args),
+    [X | Stack1].
+
+cneqk(Vp, [N,K|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("NEQk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:neqk(Vp, K, Args),
+    [X | Stack1].
+
+cltk(Vp, [N,K|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("LTk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:ltk(Vp, K, Args),
+    [X | Stack1].
+
+cltek(Vp, [N,K|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("LTEk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:ltek(Vp, K, Args),
+    [X | Stack1].
+
+cgtk(Vp, [N,K|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("GTk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:gtk(Vp, K, Args),
+    [X | Stack1].
+
+cgtek(Vp, [N,K|Stack]) ->
+    [Args|Stack1] = nargs(N, Stack),
+    ?dbg("GTEk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
+    X = varp_circuit:gtek(Vp, K, Args),
+    [X | Stack1].
+
+    

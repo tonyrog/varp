@@ -34,14 +34,12 @@
 -export([even/2, even/3]).
 -export([parity/2, parity/3]).
 
--export([eq/3, eq/4]).
--export([neq/3, neq/4]).
--export([lt/3, lt/4]).
--export([lte/3, lte/4]).
--export([gt/3, gt/4]).
--export([gte/3, gte/4]).
-
--export([eqk/4, gtk/4]).
+-export([eqk/3, eqk/4]).
+-export([neqk/3, neqk/4]).
+-export([ltk/3, ltk/4]).
+-export([ltek/3, ltek/4]).
+-export([gtk/3, gtk/4]).
+-export([gtek/3, gtek/4]).
 
 -export([add/3, add/4]).
 -export([add_ci/4, add_ci/5]).
@@ -62,6 +60,22 @@
 inv(true) -> false;
 inv(false) -> true;
 inv(X) -> -X.
+
+var(Vp) -> var(Vp, undefined).
+var(Vp, Symbol) ->
+    X = varc:add_variable(Vp,false),
+    varc:isused(Vp, X, true),
+    sym(Vp, X, Symbol).
+
+atom(Vp, Symbol) ->
+    X = varc:add_variable(Vp,true),
+    varc:isused(Vp, X, true),
+    sym(Vp, X, Symbol).
+
+sym(_Vp, X, undefined) -> X;
+sym(Vp, X, Symbol) ->
+    varc:add_symbol(Vp, X, Symbol),
+    X.
 
 or_clauses(Vp, X, Y, Z) ->
     clause(Vp, [inv(X),Y,Z]),
@@ -89,7 +103,7 @@ inv_clauses(Vp, X, Y) ->
     X.
 
 inv_gate(Vp, Y) ->
-    inv_gate(Vp, varc:add_variable(Vp), Y).
+    inv_gate(Vp, var(Vp), Y).
 
 inv_gate(Vp, X, Y) ->
     inv_clauses(Vp, X, Y).
@@ -99,62 +113,62 @@ inv_pin(_Vp, Y) ->
 
 %% x = y OR z
 or_gate(Vp, Y, Z) ->
-    or_gate(Vp, varc:add_variable(Vp), Y, Z).
+    or_gate(Vp, var(Vp), Y, Z).
 
 or_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, X, Y, Z).
 
 %% x = NOT (y OR z)
 nor_gate(Vp, Y, Z) ->
-    nor_gate(Vp, varc:add_variable(Vp), Y, Z).
+    nor_gate(Vp, var(Vp), Y, Z).
 
 nor_gate(Vp, X, Y, Z) ->
     inv(or_clauses(Vp, X, Y, Z)).
 
 %% x = y -> z (NOT y OR z)
 imp_gate(Vp, Y, Z) ->
-    imp_gate(Vp, varc:add_variable(Vp), Y, Z).
+    imp_gate(Vp, var(Vp), Y, Z).
 
 imp_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, X, inv(Y), Z).
 
 %% = y -/> z ( NOT (y -> z) ) = NOT (NOT y OR Z) =  (y AND NOT z)
 nimp_gate(Vp, Y, Z) ->
-    nimp_gate(Vp, varc:add_variable(Vp), Y, Z).
+    nimp_gate(Vp, var(Vp), Y, Z).
 
 nimp_gate(Vp, X, Y, Z) ->
     and_clauses(Vp, X, Y, inv(Z)).
 
 %% x = y AND z
 and_gate(Vp, Y, Z) ->
-    and_gate(Vp, varc:add_variable(Vp), Y, Z).
+    and_gate(Vp, var(Vp), Y, Z).
 
 and_gate(Vp, X, Y, Z) ->
     and_clauses(Vp, X, Y, Z).
 
 %% x = NOT (y AND z)
 nand_gate(Vp, Y, Z) ->
-    nand_gate(Vp, varc:add_variable(Vp), Y, Z).
+    nand_gate(Vp, var(Vp), Y, Z).
 nand_gate(Vp, X, Y, Z) ->
     inv(and_clauses(Vp, X, Y, Z)).
 
 %% x = y XOR z
 xor_gate(Vp, Y, Z) ->
-    xor_gate(Vp, varc:add_variable(Vp), Y, Z).
+    xor_gate(Vp, var(Vp), Y, Z).
 
 xor_gate(Vp, X, Y, Z) ->
     xor_clauses(Vp, X, Y, Z).
 
 %% x = NOT (y XOR z)
 xnor_gate(Vp, Y, Z) ->
-    xnor_gate(Vp, varc:add_variable(Vp), Y, Z).
+    xnor_gate(Vp, var(Vp), Y, Z).
 
 xnor_gate(Vp, X, Y, Z) ->
     inv(xor_clauses(Vp, X, Y, Z)).
 
 %% x = (y == z)
 equ_gate(Vp, Y, Z) ->
-    equ_gate(Vp, varc:add_variable(Vp), Y, Z).
+    equ_gate(Vp, var(Vp), Y, Z).
 
 equ_gate(Vp, X, Y, Z) ->
     inv(xor_clauses(Vp, X, Y, Z)).
@@ -179,12 +193,12 @@ gate(Vp,'xor',X,Y,Z) -> xor_gate(Vp,X,Y,Z);
 gate(Vp,'xnor',X,Y,Z) -> xnor_gate(Vp,X,Y,Z);
 gate(Vp,'equ',X,Y,Z) -> equ_gate(Vp,X,Y,Z);
 
-gate(Vp,'eq',K,X,Ys) -> eq(Vp,K,X,Ys);
-gate(Vp,'neq',K,X,Ys) -> neq(Vp,K,X,Ys);
-gate(Vp,'lt',K,X,Ys) -> lt(Vp,K,X,Ys);
-gate(Vp,'lte',K,X,Ys) -> lte(Vp,K,X,Ys);
-gate(Vp,'gt',K,X,Ys) -> gt(Vp,K,X,Ys);
-gate(Vp,'gte',K,X,Ys) -> gte(Vp,K,X,Ys).
+gate(Vp,'eq',K,X,Ys) -> eqk(Vp,K,X,Ys);
+gate(Vp,'neq',K,X,Ys) -> neqk(Vp,K,X,Ys);
+gate(Vp,'lt',K,X,Ys) -> ltk(Vp,K,X,Ys);
+gate(Vp,'lte',K,X,Ys) -> ltek(Vp,K,X,Ys);
+gate(Vp,'gt',K,X,Ys) -> gtk(Vp,K,X,Ys);
+gate(Vp,'gte',K,X,Ys) -> gtek(Vp,K,X,Ys).
 
 
 gate(Vp,'not',X,Y) -> inv_clauses(Vp, X, Y), X;
@@ -206,33 +220,33 @@ gate(Vp,'odd',X,Ys) -> odd(Vp,X,Ys);
 gate(Vp,'even',X,Ys) -> even(Vp,X,Ys);
 gate(Vp,'parity',X,Ys) -> parity(Vp,X,Ys);
 
-gate(Vp,'eq',K,Ys) -> eq(Vp,K,Ys);
-gate(Vp,'neq',K,Ys) -> neq(Vp,K,Ys);
-gate(Vp,'lt',K,Ys) -> lt(Vp,K,Ys);
-gate(Vp,'lte',K,Ys) -> lte(Vp,K,Ys);
-gate(Vp,'gt',K,Ys) -> gt(Vp,K,Ys);
-gate(Vp,'gte',K,Ys) -> gte(Vp,K,Ys).
+gate(Vp,'eq',K,Ys) -> eqk(Vp,K,Ys);
+gate(Vp,'neq',K,Ys) -> neqk(Vp,K,Ys);
+gate(Vp,'lt',K,Ys) -> ltk(Vp,K,Ys);
+gate(Vp,'lte',K,Ys) -> ltek(Vp,K,Ys);
+gate(Vp,'gt',K,Ys) -> gtk(Vp,K,Ys);
+gate(Vp,'gte',K,Ys) -> gtek(Vp,K,Ys).
 
 
 %% x = MIN(y,z) = (y AND z)
 min_gate(Vp, Y, Z) ->
-    min_gate(Vp, varc:add_variable(Vp), Y, Z).
+    min_gate(Vp, var(Vp), Y, Z).
 
 min_gate(Vp, X, Y, Z) ->
     and_clauses(Vp, X, Y, Z).
 
 %% x = MAX(y,z) = (y OR z)
 max_gate(Vp, Y, Z) ->
-    max_gate(Vp, varc:add_variable(Vp), Y, Z).
+    max_gate(Vp, var(Vp), Y, Z).
 
 max_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, X, Y, Z).
 
 half_adder(Vp, Y, Z) ->
-    half_adder(Vp, varc:add_variable(Vp), Y, Z).
+    half_adder(Vp, var(Vp), Y, Z).
 
 half_adder(Vp, X, Y, Z) ->
-    half_adder(Vp, X, Y, Z, varc:add_variable(Vp)).
+    half_adder(Vp, X, Y, Z, var(Vp)).
 
 half_adder(Vp, X, Y, Z, Co) ->
     S1 = xor_gate(Vp, X, Y, Z),
@@ -240,13 +254,13 @@ half_adder(Vp, X, Y, Z, Co) ->
     {S1, Co1}.
 
 full_adder(Vp, Y, Z) ->
-    full_adder(Vp, varc:add_variable(Vp), Y, Z).
+    full_adder(Vp, var(Vp), Y, Z).
 
 full_adder(Vp, X, Y, Z) ->
     full_adder(Vp, X, Y, Z, false).
 
 full_adder(Vp, X, Y, Z, Ci) ->
-    full_adder(Vp, X, Y, Z, Ci, varc:add_variable(Vp)).
+    full_adder(Vp, X, Y, Z, Ci, var(Vp)).
 
 full_adder(Vp, X, Y, Z, Ci, Co) ->
     S1 = xor_gate(Vp,Y,Z),
@@ -258,7 +272,7 @@ full_adder(Vp, X, Y, Z, Ci, Co) ->
 
 %% (min,max) = SORT(y, z)
 comparator(Vp, Y, Z) ->
-    comparator(Vp, Y, Z, varc:add_variable(Vp), varc:add_variable(Vp)).
+    comparator(Vp, Y, Z, var(Vp), var(Vp)).
 
 comparator(Vp, Y, Z, X0, X1) ->
     {min_gate(Vp, X0, Y, Z), max_gate(Vp, X1, Y, Z)}.
@@ -309,31 +323,31 @@ parity(Vp,X,Ys) -> left_assoc(Vp,'xor',X,Ys).
     
 %% left balanced circuit 
 left_assoc(Vp,Gate,Ys) ->
-    left_assoc(Vp,Gate,varc:add_variable(Vp),Ys).
+    left_assoc(Vp,Gate,var(Vp),Ys).
 
 left_assoc(Vp,Gate,X,[X1,X2]) ->
     gate(Vp,Gate,X,X1,X2);
 left_assoc(Vp,Gate,X,[X1,X2|Xs]) ->
-    Y1 = varc:add_variable(Vp),
+    Y1 = var(Vp),
     gate(Vp,Gate,Y1,X1,X2),
     left_assoc_(Vp,Gate,X,Xs,Y1).
 
 left_assoc_(Vp,Gate,X,[Xn],Yi) ->
     gate(Vp,Gate,X,Yi,Xn);
 left_assoc_(Vp,Gate,X,[Xi|Xs],Yi) ->
-    Yj = varc:add_variable(Vp),
+    Yj = var(Vp),
     gate(Vp,Gate,Yj,Yi,Xi),
     left_assoc_(Vp,Gate,X,Xs,Yj).
 
 %% right balanced 
 right_assoc(Vp,Gate,Xs) ->
-    right_assoc(Vp,Gate,varc:add_variable(Vp),Xs).
+    right_assoc(Vp,Gate,var(Vp),Xs).
     
 right_assoc(Vp,Gate,X,Xs) ->
     left_assoc(Vp,Gate,X,lists:reverse(Xs)).
 
 none_assoc(Vp,Gate,Xs) ->
-    none_assoc(Vp,Gate,varc:add_variable(Vp),Xs).
+    none_assoc(Vp,Gate,var(Vp),Xs).
 
 none_assoc(Vp,Gate,X,Xs) when is_list(Xs) ->
     case Gate of
@@ -360,54 +374,41 @@ none_assoc_(Vp,Gate,X,Xs) ->
 	{[U],[V]} ->
 	    gate(Vp,Gate,X,U,V);
 	{[U],[V1,V2]} ->
-	    X1 = varc:add_variable(Vp),
+	    X1 = var(Vp),
 	    gate(Vp,Gate,X1,V1,V2),
 	    gate(Vp,Gate,X,U,X1);
 	{Us,Vs} ->
-	    X1 = varc:add_variable(Vp),
+	    X1 = var(Vp),
 	    _R = none_assoc_(Vp,Gate,X1,Us),
-	    X2 = varc:add_variable(Vp),
+	    X2 = var(Vp),
 	    _L = none_assoc_(Vp,Gate,X2,Vs),
 	    gate(Vp,Gate,X,X1,X2)
     end.
 
-eq(Vp,K,Ys) ->
-    eq(Vp,K,varc:add_variable(Vp),Ys).
-neq(Vp,K,Ys) ->
-    neq(Vp,K,varc:add_variable(Vp),Ys).
-lt(Vp,K,Ys) ->
-    lt(Vp,K,varc:add_variable(Vp),Ys).
-lte(Vp,K,Ys) ->
-    lte(Vp,K,varc:add_variable(Vp),Ys).
-gt(Vp,K,Ys) ->
-    gt(Vp,K,varc:add_variable(Vp),Ys).
-gte(Vp,K,Ys) ->
-    gte(Vp,K,varc:add_variable(Vp),Ys).
+eqk(Vp,K,Ys) ->  eqk(Vp,K,var(Vp),Ys).
+neqk(Vp,K,Ys) -> neqk(Vp,K,var(Vp),Ys).
+ltk(Vp,K,Ys) ->  ltk(Vp,K,var(Vp),Ys).
+ltek(Vp,K,Ys) -> ltek(Vp,K,var(Vp),Ys).
+gtk(Vp,K,Ys) ->  gtk(Vp,K,var(Vp),Ys).
+gtek(Vp,K,Ys) -> gtek(Vp,K,var(Vp),Ys).
 
-eq(Vp,1,X,Ys) -> one(Vp, X, Ys);
-eq(Vp,K,X,Ys) -> eqk(Vp,K,X,Ys).
-
-neq(Vp,K,X,Ys) ->
-    inv(eqk(Vp,K,X,Ys)).
+neqk(Vp,K,X,Ys) -> inv(eqk(Vp,K,X,Ys)).
     
-lt(Vp,1,X,Ys) -> none(Vp,X,Ys);
-lt(Vp,K,X,Ys) when is_integer(K), K>1 ->
+ltk(Vp,1,X,Ys) -> none(Vp,X,Ys);
+ltk(Vp,K,X,Ys) when is_integer(K), K>1 ->
     N = length(Ys),
     gtk_(Vp, N-K, N, X, [inv(Yi) || Yi <- Ys]).
     
-lte(Vp,0,X,Ys) -> none(Vp,X,Ys);
-lte(Vp,K,X,Ys) when is_integer(X), X>0 ->
+ltek(Vp,0,X,Ys) -> none(Vp,X,Ys);
+ltek(Vp,K,X,Ys) when is_integer(X), X>0 ->
     N = length(Ys),
     gtk_(Vp,N-K-1, N, X, [inv(Yi) || Yi <- Ys]).
 
-gte(Vp,0,X,Ys) -> any(Vp,X,Ys);
-gte(Vp,K,X,Ys) when is_integer(K), K>0 ->
+gtek(Vp,0,X,Ys) -> any(Vp,X,Ys);
+gtek(Vp,K,X,Ys) when is_integer(K), K>0 ->
     gtk(Vp, K-1, X, Ys).
 
-gt(Vp,K,X,Ys) when is_integer(K), K >= 0 ->
-    gtk(Vp, K, X, Ys).
-
-gtk(Vp, K, X, Ys) ->
+gtk(Vp, K, X, Ys) when is_integer(K), K >= 0 ->
     gtk_(Vp, K, length(Ys), X, Ys).
 
 gtk_(Vp,0,_N,X,Ys) ->
@@ -422,6 +423,8 @@ gtk_(Vp,K,N,X,Ys) ->
     and_gate(Vp, X, A1, B1).
 
 %% Generate a formula where exact K out of N formulas are true.
+eqk(Vp,1,X,Ys) ->
+    one(Vp, X, Ys);
 eqk(Vp,K,X,Ys) ->
     eqk_(Vp,K,length(Ys),X,Ys).
     
@@ -442,7 +445,7 @@ eqk_(Vp,K,N,X,Ys) ->
 %% sort all ys one lap then or over the
 %% fixme len(ys) < 2
 one(Vp, Ys) ->
-    one(Vp, varc:add_variable(Vp), Ys).
+    one(Vp, var(Vp), Ys).
 
 one(Vp, X, [Y0,Y1|Ys]) ->
     {Z0,Z1} = comparator(Vp, Y0, Y1),
@@ -456,7 +459,7 @@ eq1_(Vp, X, [], Zi, Zs) ->
 
 %% variables
 vars(Vp,N) ->
-    {L,H} = varc:add_variables(Vp,N),
+    {L,H} = vars(Vp,N),
     lists:seq(L,H).
 
 'bnot'(_Vp, Ys) ->
@@ -470,17 +473,17 @@ sub(Vp, Xs, Ys, Zs) ->
 
 %% adder
 add(Vp, Ys, Zs) ->
-    add_(Vp, Ys, Zs, false, varc:add_variable(Vp)).
+    add_(Vp, Ys, Zs, false, var(Vp)).
 
 add(Vp, Xs, Ys, Zs) ->
-    add_(Vp, Xs, Ys, Zs, false, varc:add_variable(Vp)).
+    add_(Vp, Xs, Ys, Zs, false, var(Vp)).
 
 %% adder with carry in
 add_ci(Vp, Ys, Zs, Ci) ->
-    add_(Vp, Ys, Zs, Ci, varc:add_variable(Vp)).
+    add_(Vp, Ys, Zs, Ci, var(Vp)).
 
 add_ci(Vp, Xs, Ys, Zs, Ci) ->
-    add_(Vp, Xs, Ys, Zs, Ci, varc:add_variable(Vp)).
+    add_(Vp, Xs, Ys, Zs, Ci, var(Vp)).
 
 %% adder with carry out
 add_co(Vp, Ys, Zs, Co) ->
@@ -512,11 +515,6 @@ add__(Vp, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
     add__(Vp, Xs, Ys, Zs, [Cx|Cs], Co).
 
 %% TEST
-
-var(Vp, Name) ->
-    X = varc:add_variable(Vp, true),
-    varc:add_symbol(Vp, X, Name),
-    X.
 
 clause(Vp, Ls) ->
     %%io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
