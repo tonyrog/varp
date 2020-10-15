@@ -82,46 +82,46 @@ compile_nary(Op,As,E) ->
     [[compile(Ai,E) || Ai <- As],{const,length(As)},Op].
 
 compile_quant_k(Op,K,Gs,A,E) ->
-    compile_quant_(Op,K,Gs,A,E).
+    compile_quant_(Op,K,0,Gs,A,E).
 
 compile_quant(Op,Gs,A,E) ->
-    compile_quant_(Op,undefined,Gs,A,E).
+    compile_quant_(Op,undefined,0,Gs,A,E).
 
 %% FIXME: this is not correct !
 %% we should compile 
 %% [E! x=1..3,y=1..3]P(x,y) different than [E! x=1..3][E! y=1..3]P(x,y)
 %%
-compile_quant_(Op,K,[G|Gs],A,E) ->
+compile_quant_(Op,K,D,[G|Gs],A,E) ->
     case G of
 	{assign,{id,X},R} ->
 	    L1 = new_label(),
 	    L2 = new_label(),
 	    Range = compile_range(R, E),
 	    [[Range,'do'],
+	     if D =:= 0 -> 'nil'; true -> [] end,
 	     {label,L1},
 	     {leave,L2},
-	     compile_quant_(Op, K, Gs, A, [X|E]), %% K=undefined?
+	     compile_quant_(Op,K,D+1,Gs,A,[X|E]), %% K=undefined?
 	     {loop,L1},
 	     {label,L2},
 	     %% if K is defined then it is used by op like K N gtk ...
-	     if K =:= undefined ->
-		     [];
+
+	     if D =:= 0 ->
+		     if K =:= undefined -> [Op];
+			true -> [compile_expr(K, E),Op]
+		     end;
 		true ->
-		     compile_expr(K, E)
-	     end,
-	     %% calculate number of results from loop
-	     %% {range, A, B} => A B swap - + 1 = (B-A)+1
-	     Range,swap,'isub',{const,1},'iadd',
-	     Op];
+		     [] 
+	     end];
 	_ ->
 	    L1 = new_label(),
 	    [compile_expr(G, E),
 	     {jumpz,L1},
-	     compile_quant_(Op, K, Gs, A, E),
+	     compile_quant_(Op,K,D,Gs,A,E),
 	     {label,L1}]
     end;
-compile_quant_(_Op,_K,[],A,E) ->
-    compile(A, E).
+compile_quant_(_Op,_K,_D,[],A,E) ->
+    [compile(A, E), 'cons'].
 
 new_label() ->
     L = case get(label_counter) of
@@ -266,48 +266,49 @@ index(_A, [], _) ->  false.
 %%
 asm() ->
     [
-     {const,1},        %% 1
-     {var,"n"},        %% 2
-     do,               %% 3
+     {const,1},
+     {var,"n"},
+     do,
+     nil,              %% [] list of literals
 {label,l0},
-     {leave,l1},       %% 4 leave L1
-     {lvar,1},         %% 5 (x)
-     {var,"n"},        %% 6
-     {const,1},        %% 7
-     iadd,             %% 8
-     do,               %% 9
+     {leave,l1},
+     {lvar,1},         %% x ..
+     {var,"n"},        
+     {const,1},
+     iadd,             %% n+1
+     do,               %% do y=x..n+1
+     nil,
 {label,l3},
-     {leave,l2},       %% 10 leave L2
+     {leave,l2},
      %% P(x) -> Q(y)
-     {lvar,2},         %% 14 (x)
-     {args,1},         %% 15
-     {p,'P'},          %% 16 P(x)
-     {lvar,1},         %% 11 (y)
-     {args,1},         %% 12
-     {p,'Q'},          %% 13 Q(y)
-     cimp,             %% 17
-     {loop,l3},        %% 18
+     {lvar,2},         %% (x)
+     {args,1},         %% 
+     {p,'P'},          %% P(x)
+     {lvar,1},         %% (y)
+     {args,1},         %% 
+     {p,'Q'},          %% Q(y)
+     cimp,             %% P(x) -> Q(y)
+     cons,
+     {loop,l3},
 {label,l2},
-     {var,"n"},        %% 19 n
-     {lvar,1},         %% 20 x
-     isub,             %% 21 n-x
-     {const,2},        %% 22 1+1
-     iadd,             %% 23 (n-x+1)+1
-     call,             %% 24 circuit ALL
-     {loop,l0},        %% 25
+     call,             %% ALL
+     cons,
+     {loop,l0},
 {label,l1},
-     {var,"n"},        %% 26
-     call,             %% 27 ALL
-     ret               %% 28 (label l3)
+     call,             %% ALL
+     ret
     ].
+
+test_compile(Text) ->
+    Tree = parse(Text),
+    Asm  = compile(Tree),
+    assemble(Asm).
 
 test(Text) ->
     test(Text, #{}).
 
 test(Text, Env) ->
-    Tree = parse(Text),
-    Asm  = compile(Tree),
-    Code = assemble(Asm),
+    Code = test_compile(Text),
     Vp = varc:new(#{}),
     case run(Vp, Env, Code) of
 	[Var] ->
@@ -445,6 +446,11 @@ step(Vp, Vs, I, Code, Stack, Loop) ->
 	drop ->
 	    [_|Stack1] = Stack,
 	    step(Vp,Vs,I+1,Code,Stack1,Loop);
+	nil ->
+	    step(Vp,Vs,I+1,Code,[[]|Stack],Loop);
+	cons ->
+	    [X,L|Stack1] = Stack,
+	    step(Vp,Vs,I+1,Code,[[X|L]|Stack1],Loop);
 	print ->
 	    io:format("~w\n", [hd(Stack)]),
 	    step(Vp,Vs,I+1,Code,tl(Stack),Loop);
@@ -558,89 +564,73 @@ cinv(Vp, [X1 | Vs]) ->
     [X | Vs].
 
 
-clause(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+clause(Vp, [Args|Stack]) ->
     varc:add_clause(Vp, Args),
-    Stack1.
+    Stack.
 
 %% ciruit-all not call
-call(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+call(Vp, [Args|Stack]) ->
     ?dbg("ALL ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:all(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cany(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cany(Vp, [Args|Stack]) ->
     ?dbg("ANY ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:any(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cnone(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cnone(Vp, [Args|Stack]) ->
     ?dbg("NONE ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:none(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cone(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cone(Vp, [Args|Stack]) ->
     ?dbg("ONE ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:one(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
-codd(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+codd(Vp, [Args|Stack]) ->
     ?dbg("ODD ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:odd(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
-ceven(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+ceven(Vp, [Args|Stack]) ->
     ?dbg("EVEN ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:even(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cparity(Vp, [N|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cparity(Vp, [Args|Stack]) ->
     ?dbg("PARITY ~w\n", [[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:parity(Vp, Args),
-    [X | Stack1].
+    [X | Stack].
 
 %% EQk/NEQk/LTk/LTEk/GTk/GTEk
-ceqk(Vp, [N,K|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+ceqk(Vp, [K,Args|Stack]) ->
     ?dbg("EQk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:eqk(Vp, K, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cneqk(Vp, [N,K|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cneqk(Vp, [K,Args|Stack]) ->
     ?dbg("NEQk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:neqk(Vp, K, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cltk(Vp, [N,K|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cltk(Vp, [K,Args|Stack]) ->
     ?dbg("LTk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:ltk(Vp, K, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cltek(Vp, [N,K|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cltek(Vp, [K,Args|Stack]) ->
     ?dbg("LTEk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:ltek(Vp, K, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cgtk(Vp, [N,K|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cgtk(Vp, [K,Args|Stack]) ->
     ?dbg("GTk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:gtk(Vp, K, Args),
-    [X | Stack1].
+    [X | Stack].
 
-cgtek(Vp, [N,K|Stack]) ->
-    [Args|Stack1] = nargs(N, Stack),
+cgtek(Vp, [K,Args|Stack]) ->
     ?dbg("GTEk ~w,~w\n", [K,[sym(Vp,Xi) || Xi <- Args]]),
     X = varp_circuit:gtek(Vp, K, Args),
-    [X | Stack1].
-
-    
+    [X | Stack].

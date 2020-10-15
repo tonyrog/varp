@@ -398,7 +398,7 @@ ltk(Vp,1,X,Ys) -> none(Vp,X,Ys);
 ltk(Vp,K,X,Ys) when is_integer(K), K>1 ->
     N = length(Ys),
     gtk_(Vp, N-K, N, X, [inv(Yi) || Yi <- Ys]).
-    
+
 ltek(Vp,0,X,Ys) -> none(Vp,X,Ys);
 ltek(Vp,K,X,Ys) when is_integer(X), X>0 ->
     N = length(Ys),
