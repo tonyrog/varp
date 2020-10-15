@@ -53,8 +53,6 @@
 -export([number_of_variables/1]).
 -export([number_of_clauses/1]).
 -export([number_of_dead_clauses/1]).
--export([number_of_edges/1]).
--export([number_of_dead_edges/1]).
 -export([number_of_bound/1]).
 -export([number_of_unbound/1]).
 -export([clause_bcp_counter/1]).
@@ -84,7 +82,6 @@
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([clean_clauses/1, clean_clauses/2]).
--export([clean_edges/1]).
 -export([set_var/3, add_var/4]).
 -export([config/3]).
 -export([const_vector/2, const_vector/3]).
@@ -112,8 +109,7 @@ new(OptMap) when is_map(OptMap) ->
 		 xref       => maps:get(xref,OptMap),
 		 hash       => maps:get(hash,OptMap),
 		 init_phase => maps:get(phase,OptMap),
-		 use_phase  => maps:get(use_phase,OptMap),
-		 edge       => maps:get(edge,OptMap)
+		 use_phase  => maps:get(use_phase,OptMap)
 	       },
     %% io:format("new(~w)\n", [NewOpts]),
     Vp  = varc:new(NewOpts),
@@ -322,15 +318,6 @@ clean_clauses_(Bs, I) ->
     varc:clean_clause(Bs#bs.vp, I),
     clean_clauses_(Bs, varc:clauseset_next(Bs#bs.vp, I)).
 
-clean_edges(Bs) ->
-    each_unbound(Bs, 
-		 fun(X) ->
-			 varc:clean_edges(Bs#bs.vp, X),
-			 varc:clean_edges(Bs#bs.vp, -X)
-		 end),
-    Bs.
-
-
 %% "balanced tree"
 gate_tree(Bs,Op,X,Xs) ->
     case ?GETOPT_BS(Bs,assoc) of
@@ -492,12 +479,6 @@ number_of_clauses(Bs) ->
 number_of_dead_clauses(Bs) ->
     varc:get_number_of_dead_clauses(Bs#bs.vp).
 
-number_of_edges(Bs) ->
-    varc:get_number_of_edges(Bs#bs.vp).
-
-number_of_dead_edges(Bs) ->
-    varc:get_number_of_dead_edges(Bs#bs.vp).
-    
 number_of_bound(Bs) ->
     varc:get_number_of_bound_variables(Bs#bs.vp).
 

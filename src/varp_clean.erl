@@ -12,14 +12,7 @@
 -include("varp.hrl").
 
 options() ->
-    [#{ long  => "edges",
-	short => "e",
-	key   => edges,
-	spec  => {enum,[?BOOL]},
-	default => false,
-	description => "remove edges that are true."
-      },
-     #{ long  => "clauses",
+    [#{ long  => "clauses",
 	short => "c",
 	key   => clauses,
 	spec  => {enum,[?BOOL]},
@@ -34,9 +27,4 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 	    false -> Bs;
 	    true -> varp_formula:clean_clauses(Bs)
 	end,
-    Bs2 = 
-	case maps:get(edges, Param, false) of
-	    false -> Bs1;
-	    true -> varp_formula:clean_edges(Bs1)
-	end,
-    {?CONTINUE, [], Bs2}.
+    {?CONTINUE, [], Bs1}.

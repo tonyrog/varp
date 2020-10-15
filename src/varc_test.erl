@@ -51,7 +51,6 @@ all() ->
 	   uorder_bump,
 	   uorder_bt,
 	   
-	   edge_list0, edge_list1, edge_list2, edge_list3,
 	   subst0a, subst0b, subst0c, subst0d, 
 	   subst1, subst2, subst3, subst4, subst5, subst6,
 	   cnf_install,
@@ -1251,85 +1250,6 @@ watch1() ->
     0 = varc:clause_info(V, C3, watch0),
     1 = varc:clause_info(V, C3, watch1),
 
-    ok.
-
-edge_list0() ->
-    V = varc:new(#{edge=>true}),
-    true = varc:info(V, edge),
-
-    A = var(V),
-    B = var(V),
-
-    {true,_C0} = varc:add_clause(V, [A, B]),
-    
-    %% eval should put in edges (A,B) ~A -> B, ~B -> A 
-    [B] = varc:literal_info(V, -A, edge),
-    [A] = varc:literal_info(V, -B, edge),
-    ok.
-
-edge_list1() ->
-    V = varc:new(#{edge=>true}),
-    true = varc:info(V, edge),
-
-    A = var(V),
-    B = var(V),
-    C = var(V),
-
-    {true,_C0} = varc:add_clause(V, [A, B, C]),
-    %% assume A,B are watched
-    varc:bind(V, -A),
-    true = varc:bcp(V),
-
-    %% eval should put in edges (B,C) ~C -> B, ~B -> C
-    [B] = varc:literal_info(V, -C, edge),
-    [C] = varc:literal_info(V, -B, edge),
-    ok.
-
-edge_list2() ->
-    V = varc:new(#{edge=>true}),
-    true = varc:info(V, edge),
-
-    A = var(V),
-    B = var(V),
-    C = var(V),
-
-    varc:bind(V, -C),
-
-    {true,_C0} = varc:add_clause(V, [A, B, C]),
-
-    %% eval should put in edges (A,B) ~A -> B, ~B -> A 
-    [B] = varc:literal_info(V, -A, edge),
-    [A] = varc:literal_info(V, -B, edge),
-    ok.
-
-edge_list3() ->
-    V = varc:new(#{edge=>true}),
-    true = varc:info(V, edge),
-
-    A = var(V),
-    B = var(V),
-    C = var(V),
-    D = var(V),
-
-    {true,_C0} = varc:add_clause(V, [A, B]),
-    {true,_C1} = varc:add_clause(V, [A, C]),
-    {true,_C2} = varc:add_clause(V, [A, -D]),
-
-    %% eval should put in edges (A,B) -A -> B, -B -> A 
-    %% eval should put in edges (A,C) -A -> C, -C -> A
-    %% eval should put in edges (A,-D) -A -> -D, D -> A
-    ND = -D,
-    [ND,B,C] = lists:sort(varc:literal_info(V, -A, edge)),
-
-    [A] = varc:literal_info(V, -B, edge),
-    [A] = varc:literal_info(V, -C, edge),
-    [A] = varc:literal_info(V, D, edge),
-
-    true = varc:bind(V, -A),
-    true = varc:bcp(V),
-    ?T = varc:value(V, B),
-    ?T = varc:value(V, C),
-    ?F = varc:value(V, D),
     ok.
 
 clone1() ->

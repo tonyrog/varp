@@ -1,3 +1,11 @@
+- fix STACK OVERFLOW
+
+Running some large formulas the qtype=recursive can recurse to
+deep on the runtime stack. bcp1 is called over and over.
+This can partly be improved by checking for short cut instead of
+doing a recursion. (work around use qype=lifo|fifo)
+
+
 - add predicate info
 
   add_predicate(Vp, "Name", [{arity,N},{type,bool|int|uint|bits}])

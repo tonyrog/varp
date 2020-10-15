@@ -87,22 +87,20 @@ def i(vp=False):
         vp = varc.new({})
         il(vp,
            ['version','literal_size','literal_integer',
-	    'value_packing','edge','xref','hash',
+	    'value_packing','xref','hash',
 	    'init_phase', 'use_phase'])
     else:
         il(vp,
            ['version','literal_size','literal_integer',
-	    'value_packing','edge','xref','hash',
+	    'value_packing','xref','hash',
 	    'init_phase', 'use_phase',
             'number_of_clauses','number_of_dead_clauses',
-            'number_of_edges','number_of_dead_edges',
             'number_of_conflicting_clauses', 'number_of_variables',
             'number_of_bound_variables',
             'number_of_unbound_variables',
             'bcp_counter', 'conflict_counter',
             'clause_n_counter', 'clause_2_counter',
             'clause_3_counter', 'clause_d_counter',
-            'edge_2_counter', 'edge_d_counter',
             'size', 'level'])
         
 def il(vp, keylist):

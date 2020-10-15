@@ -52,15 +52,11 @@
 	 clause_2_counter,
 	 clause_3_counter,
 	 clause_d_counter,
-	 edge_2_counter,
-	 edge_d_counter,
 	 bcp_count,
 	 conflict_count,
 	 bound,
 	 clauses,
-	 dead_clauses,
-	 edges,
-	 dead_edges
+	 dead_clauses
 	}).
 
 global_options() ->
@@ -242,12 +238,6 @@ global_options() ->
 	 spec =>  {enum,[?BOOL]},
 	 default => false,
 	 description => "use clause hash, speed up validate."
-       },
-      #{ long => "edge",
-	 key => edge,
-	 spec =>  {enum,[?BOOL]},
-	 default => false,
-	 description => "use edge list, instead of 2-clauses."
        },
       #{ long => "xref",
 	 key => xref,
@@ -779,18 +769,14 @@ combine_result(Ns,M) when is_list(Ns), is_integer(M) ->
     length(Ns)+M.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | bcp: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w,E:~w,D:~w\n    | #clauses:~w, #dead:~w, #edges:~w, #dead-edges:~w,#conflict:~w\n | time=~.2fs\n",
+    varp_formula:info(Bs, "    | bcp: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w\n    | #clauses:~w, #dead:~w, #conflict:~w\n | time=~.2fs\n",
 		      [S1#stat.bcp_count-S0#stat.bcp_count,
 		       S1#stat.clause_n_counter - S0#stat.clause_n_counter,
 		       S1#stat.clause_2_counter - S0#stat.clause_2_counter,
 		       S1#stat.clause_3_counter - S0#stat.clause_3_counter,
 		       S1#stat.clause_d_counter - S0#stat.clause_d_counter,
-		       S1#stat.edge_2_counter - S0#stat.edge_2_counter,
-		       S1#stat.edge_d_counter - S0#stat.edge_d_counter,
 		       S1#stat.clauses,
 		       S1#stat.dead_clauses,
-		       S1#stat.edges,
-		       S1#stat.dead_edges,
 		       S1#stat.conflict_count-S0#stat.conflict_count,
 		       Ts]),
     varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
@@ -804,15 +790,11 @@ stat(Bs) ->
 	    clause_2_counter = varp_formula:clause_bcp_counter(Bs,2),
 	    clause_3_counter = varp_formula:clause_bcp_counter(Bs,3),
 	    clause_d_counter = varp_formula:clause_bcp_counter(Bs,dead),
-	    edge_2_counter = varp_formula:clause_bcp_counter(Bs,edge_bcp),
-	    edge_d_counter = varp_formula:clause_bcp_counter(Bs,edge_dead),
 	    bcp_count     = varp_formula:bcp_counter(Bs),
 	    conflict_count = varp_formula:conflict_counter(Bs),
 	    bound          = varp_formula:number_of_bound(Bs),
 	    clauses        = varp_formula:number_of_clauses(Bs),
-	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs),
-	    edges          = varp_formula:number_of_edges(Bs),
-	    dead_edges     = varp_formula:number_of_dead_edges(Bs)
+	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs)
 	  }.
 
 %% extract "method" form Do list

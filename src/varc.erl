@@ -63,7 +63,6 @@
 -export([move_clause/3]).
 -export([compress_clause/2]).
 -export([clean_clause/2]).
--export([clean_edges/2]).
 -export([get_clauses/2]).
 -export([get_clauses/3]).
 -export([use_clause/2]).
@@ -101,8 +100,6 @@
 -export([get_number_of_variables/1]).
 -export([get_number_of_clauses/1]).
 -export([get_number_of_dead_clauses/1]).
--export([get_number_of_edges/1]).
--export([get_number_of_dead_edges/1]).
 -export([get_number_of_conflicting_clauses/1]).
 -export([get_number_of_bound_variables/1]).
 -export([get_number_of_unbound_variables/1]).
@@ -185,9 +182,8 @@ new() ->
 	  %% use phase saving
 	  use_phase => boolean(),
 	  %% initial phase
-	  phase     => boolean(),
-	  %% use edge instead of 2-clauses
-	  edge      => boolean() }.
+	  phase     => boolean()
+	 }.
 
 -spec new(new_options()) -> varc().
 
@@ -296,7 +292,7 @@ literal_info(Vp,Index) ->
     [{What,literal_info(Vp,Index,What)} || What <- literal_info_keys()].
 
 literal_info_keys() ->
-    [degree, user, edge, xref, symbol].
+    [degree, user, xref, symbol].
 
 %%
 %% Get literal value 
@@ -533,10 +529,6 @@ clean_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
-clean_edges(_Vp,Lit)
-  when is_integer(Lit), Lit >= 1 ->
-    ?nif_stub().
-
 get_clauses(Vp,Var) ->
     get_clauses(Vp,Var,literal).
 
@@ -741,7 +733,6 @@ i() ->
 		 literal_size,
 		 literal_integer,
 		 value_packing,
-		 edge,
 		 xref,
 		 hash,
 		 init_phase,
@@ -759,8 +750,6 @@ info_keys() ->
     [
      number_of_clauses,
      number_of_dead_clauses,
-     number_of_edges,
-     number_of_dead_edges,
      number_of_conflicting_clauses,
      number_of_variables,
      number_of_bound_variables,
@@ -771,15 +760,12 @@ info_keys() ->
      clause_2_counter,
      clause_3_counter,
      clause_d_counter,
-     edge_2_counter,
-     edge_d_counter,
      size,
      level,
      version,
      literal_size,     %% 8,16,32,64 (sizeof literal)
      literal_integer,  %% true,false (integer or pointer)
      value_packing,    %% 1,4,undefined (variable value packing)
-     edge,             %% true,false (edge_list is enabled or not)
      xref,             %% xref is used (need for saturate with substitution)
      hash,             %% hash is used
      init_phase,       %% initial phase value
@@ -817,12 +803,6 @@ get_number_of_clauses(Vp) ->
 get_number_of_dead_clauses(Vp) ->
     info(Vp, number_of_dead_clauses).
 
-get_number_of_edges(Vp) ->
-    info(Vp, number_of_edges).
-
-get_number_of_dead_edges(Vp) ->
-    info(Vp, number_of_dead_edges).
-
 get_number_of_conflicting_clauses(Vp) ->
     info(Vp, number_of_conflicting_clauses).
 
@@ -839,11 +819,7 @@ get_clause_bcp_counter(Vp,2) ->
 get_clause_bcp_counter(Vp,3) ->
     info(Vp, clause_3_counter);
 get_clause_bcp_counter(Vp,dead) ->
-    info(Vp, clause_d_counter);
-get_clause_bcp_counter(Vp,edge_bcp) ->
-    info(Vp, edge_2_counter);
-get_clause_bcp_counter(Vp,edge_dead) ->
-    info(Vp, edge_d_counter).
+    info(Vp, clause_d_counter).
 
 get_bcp_counter(Vp) ->
     info(Vp, bcp_counter).

@@ -29,13 +29,13 @@ PIGEON n=10 benchmark
 
 CNF
 ---
-varp satisfy bt n=10 pigeon.varp		4.77s
+varp satisfy bt n=10 pigeon.varp		4.10s
 eval: 9825028
 clause:56521750,29978157(2),0(3),14730808(dead)
 
 FORMULA (execute 3-clause instead of 2-clause)
 -------
-varp -xref=1 satisfy bt n=10 pigeon.varp	4.88s
+varp -xref=1 satisfy bt n=10 pigeon.varp	3.16s 
 eval: 9825028
 clause:56521750,0(2),29978157(3),14730808(dead),0(edge)
 

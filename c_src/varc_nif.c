@@ -251,7 +251,6 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "literal_info",        3,  varp_literal_info ) \
     NIF( "del_clause",          2,  varp_del_clause )  \
     NIF( "clean_clause",        2,  varp_clean_clause )  \
-    NIF( "clean_edges",         2,  varp_clean_edges )  \
     NIF( "get_clauses",         3,  varp_get_clauses ) \
     NIF( "get_decision",        2,  varp_get_decision ) \
     NIF( "get_undo_state",      2,  varp_get_undo_state ) \
@@ -402,7 +401,6 @@ typedef struct _literal_t // :slink_t
     uint32_t user;             // user count for sorting    
     struct _variable_t* var;   // "parent"
     struct _wlink_t* wlist;    // list of watch positions
-    slist_t elist;             // list of 2-clause triggers
     dynarray_t* xref;          // cross references when enabled
     dynarray_t* sref;          // list of symbol/pos references
 } literal_t;
@@ -427,13 +425,6 @@ typedef struct _xref_t
     cix_t cix;
     pos_t p;
 } xref_t;
-
-typedef struct _edge_t // :slink_t in slist_t
-{
-    slink_t link;
-    cix_t    cix;            // real 2-clause
-    lit_t l;
-} edge_t;
 
 #define LIT_POS 0
 #define LIT_NEG 1
@@ -575,7 +566,6 @@ typedef struct _varp_config_t
     bool_t   xref;       // xref used or not    
     bool_t   hash;       // clause has or not
     bool_t   vsids;      // variable state independent decaying sum
-    bool_t   edge;       // keep edge list for 2-clauses
     bool_t   use_phase;  // use saved phase
     bool_t   all_used;   // all variables are used
     ival_t   init_phase; // initial phase selection    
@@ -604,8 +594,6 @@ typedef struct _varp_t {
     uint32_t coffs[NUM_CSET]; // offset for clause iterator
 
     uint32_t cdead;           // number of dead clauses (level=0)
-    uint32_t edead;           // number of dead edges (level=0)
-    uint32_t nedge;           // number of edges in use
 
     int num_conflicting;      // number of conflicting clauses saved
     int max_conflicting;      // max number of conflicting <= MAX_CONFLICTING
@@ -664,7 +652,6 @@ typedef struct _varp_t {
     allocator_t var_allocator;     // heap storage for variable_t
     allocator_t sym_allocator;     // heap storage for symbols_t
     allocator_t sub_allocator;     // heap storage for subscription_t
-    allocator_t edge_allocator;    // heap storage for edge_t
     allocator_t hlink_allocator;   // heap storage for hlink_t
 } varp_t;
 
@@ -737,9 +724,6 @@ DECL_ATOM(dead);
 DECL_ATOM(default);
 DECL_ATOM(delta);
 DECL_ATOM(done);
-DECL_ATOM(edge);
-DECL_ATOM(edge_2_counter);
-DECL_ATOM(edge_d_counter);
 DECL_ATOM(error);
 DECL_ATOM(exclamation_mark);
 DECL_ATOM(false);
@@ -768,8 +752,6 @@ DECL_ATOM(number_of_bound_variables);
 DECL_ATOM(number_of_clauses);
 DECL_ATOM(number_of_conflicting_clauses);
 DECL_ATOM(number_of_dead_clauses);
-DECL_ATOM(number_of_dead_edges);
-DECL_ATOM(number_of_edges);
 DECL_ATOM(number_of_learnt_clauses);
 DECL_ATOM(number_of_subst_variables);
 DECL_ATOM(number_of_unbound_variables);
@@ -2439,53 +2421,9 @@ static void kill_clauses(varp_t* vp, literal_t* xp)
 	if (cp && !(cp->flags & CLAUSE_FLAG_DEAD)) { // not alread dead
 	    vp->cdead++;
 	    cp->flags |= CLAUSE_FLAG_DEAD;
-	    if ((cp->size == 2) && vp->opt.edge) {
-#ifdef DEBUG_EDGE
-		print_sym_clause(vp, "  KILL EDGE", cp);
-#endif
-		; // not watched
-	    }
-	    else {
-#ifdef DEBUG_EDGE
-		print_sym_clause(vp, "  SCHEDULE-UNWATCH/KILL", cp);
-#endif
-		schedule_unwatch_clause(vp, cp);
-	    }
+	    schedule_unwatch_clause(vp, cp);
 	}
 	xptr++;
-    }
-}
-
-// insert implication edge a -> b, this will trigger
-// when a=1 and yield b=1
-static void edge_insert(varp_t* vp, lit_t a, lit_t b, cix_t cix)
-{
-    edge_t* ep;
-    literal_t* ap = l2ll(vp, a);
-
-    ep = obj_alloc(&vp->edge_allocator);
-    ep->l = b;
-    ep->cix = cix;
-    slist_insert_last(&ap->elist, ep);
-    vp->nedge++;
-}
-
-static void edge_remove(varp_t* vp, lit_t a, lit_t b, cix_t cix)
-{
-    literal_t* ap = l2ll(vp, a);
-    slist_iter_t iter;
-
-    slist_iter_init(&iter, &ap->elist);
-
-    while(!slist_iter_eol(&iter)) {
-	edge_t* pp = slist_iter_current(&iter);
-	if ((pp->l == b) && (pp->cix == cix)) {
-	    slist_iter_remove(&iter);
-	    obj_free(&vp->edge_allocator, pp);
-	    vp->nedge--;
-	    return;
-	}
-	slist_iter_next(&iter);
     }
 }
 
@@ -2647,7 +2585,6 @@ static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
     lp->l        = MAKE_LIT(var->ix,neg);
     lp->var      = var;
     lp->wlist    = NULL;
-    slist_init(&lp->elist);
     lp->xref     = NULL;
     lp->sref     = NULL;
 }
@@ -3217,7 +3154,6 @@ static void cleanup(varp_t* vp)
     allocator_cleanup(&vp->var_allocator);
     allocator_cleanup(&vp->sym_allocator);
     allocator_cleanup(&vp->sub_allocator);
-    allocator_cleanup(&vp->edge_allocator);
     allocator_cleanup(&vp->hlink_allocator);
 }
 
@@ -3227,7 +3163,6 @@ static void default_config(varp_config_t* conf)
     conf->qtype = recursive;
     conf->xref  = false;
     conf->hash  = false;
-    conf->edge  = false;
     conf->vsids = true;
     conf->init_phase = I_TRUE;
     conf->use_phase = false;
@@ -3293,12 +3228,6 @@ static int vif_config(ErlNifEnv* env,
     }
     else if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
 	opt->init_phase = I_FALSE;
-    }
-    else if (EQUAL_KEY(env, edge, key) && enif_is_true(env, value)) {
-	opt->edge = true;
-    }
-    else if (EQUAL_KEY(env, edge, key) && enif_is_false(env, value)) {
-	opt->edge = false;
     }
     else
 	return 0;
@@ -3611,7 +3540,6 @@ static int setup(varp_t* vp, varp_config_t* config)
 	goto error;
 
     vp->cdead = 0;
-    vp->edead = 0;
 
     vp->unwatch = NULL;
 
@@ -3622,8 +3550,6 @@ static int setup(varp_t* vp, varp_config_t* config)
     if (allocator_init(&vp->sym_allocator, sizeof(symbol_t)) < 0)
 	goto error;
     if (allocator_init(&vp->sub_allocator, sizeof(subscription_t)) < 0)
-	goto error;
-    if (allocator_init(&vp->edge_allocator, sizeof(edge_t)) < 0)
 	goto error;
     if (allocator_init(&vp->hlink_allocator, sizeof(hlink_t)) < 0)
 	goto error;
@@ -4145,20 +4071,6 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
     }
     if (EQUAL_KEY(env, user, argv[2]))
 	return enif_make_uint(env, lp->user);
-    if (EQUAL_KEY(env, edge, argv[2])) {
-	ERL_NIF_TERM list = enif_make_list(env, 0);
-	slist_iter_t iter;
-
-	slist_iter_init(&iter, &lp->elist);
-	
-	while(!slist_iter_eol(&iter)) {
-	    edge_t* ep = slist_iter_current(&iter);
-	    ERL_NIF_TERM elem = enif_make_int(env, export_l(ep->l));
-	    list = enif_make_list_cell(env, elem, list);
-	    slist_iter_next(&iter);
-	}
-	return list;
-    }
     if (EQUAL_KEY(env, xref, argv[2])) {
 	if (!vp->opt.xref)
 	    return ATOM(undefined);
@@ -5435,26 +5347,11 @@ static int clause_link(varp_t* vp, clause_t* cp)
 {
     if (vp->opt.xref)
 	xref_add_clause(vp, cp);
-    if (vp->opt.edge && (cp->size == 2)) {
-	lit_t* lit  = cp->lit;
-	edge_insert(vp, neg_l(lit[0]), lit[1], cp->cix);
-	edge_insert(vp, neg_l(lit[1]), lit[0], cp->cix);
-	cp->wl[0].p = -1;
-	cp->wl[1].p = -1;
-	// cp->flags |= CLAUSE_FLAG_DEAD;
-	DBG("  edge-list added (no watch)\r\n");
-	return 1;
-    }
     return clause_watch(vp, cp);
 }
 
 static void clause_unlink(varp_t* vp, clause_t* cp)
 {
-    if ((cp->size == 2) && vp->opt.edge) {
-	lit_t* lit  = cp->lit;
-	edge_remove(vp, neg_l(lit[0]), lit[1], cp->cix);
-	edge_remove(vp, neg_l(lit[1]), lit[0], cp->cix);
-    }
     clause_unwatch(vp, cp);      // remove watched literals
     if (vp->opt.xref)
 	xref_del_clause(vp, cp);
@@ -5638,63 +5535,6 @@ error:
 	enif_release_resource(vp);
     return enif_make_badarg(env);
 }
-
-//  2-clause coding...
-//  (Y,A) (Y,B) (Y,C), (X,D) (X,A), (X, Y)
-//  !X -> D, A, Y
-//  !Y -> A, B, C, X
-//  !A -> Y, X
-//  !B -> Y
-//  !C -> Y
-//  !D -> X
-//  [X/Y]  -> each L in !Y do in !L find Y and replace with X done
-//            move all pairs in !Y to !X
-//
-//  (X,A) (X,B) (X,C), (X,D) (X,A), (X,X)
-//  !A -> X, X (ignore?)
-//  !B -> X
-//  !C -> X
-//  !X -> D, A, X, A, B, C, X
-//  !D -> X
-//
-
-// FIXME!!!
-#if 0
-static void subst_2_clause(varp_t* vp, lit_t xl, lit_t yl)
-{
-    literal_t* xp = l2ll(vp, xl);
-    literal_t* yp = l2ll(vp, yl);
-    literal_t* nyp = neg_ll(yp);   // !Y
-    literal_t* nxp = neg_ll(xp);   // !X
-    slist_iter_t piter;
-
-    slist_iter_init(&piter, &nyp->elist);
-    while(!slist_iter_eol(&piter)) {
-	// edge_t* pl = slist_iter_current(&piter);
-	// literal_t* lp = l2ll(vp, pl->l);  // each L in !Y
-	// literal_t* nlp = neg_ll(lp);
-	slist_iter_t qiter;
-
-	slist_iter_init(&piter, &nyp->elist);
-	while(!slist_iter_eol(&qiter)) {
-	    edge_t* ql = slist_iter_current(&qiter);
-
-	    if (ql->l == yl)
-		ql->l = xl;
-	    // detect X, !X ? FIXME! MUST
-	    slist_iter_next(&qiter);
-	}
-	slist_iter_next(&piter);
-    }
-
-    slist_iter_init(&piter, &nyp->elist);
-    while(!slist_iter_eol(&piter)) {    
-    	edge_t* pl = slist_iter_current(&piter);
-	slist_iter_remove(&piter);
-    }
-}
-#endif
-
 
 int valid_xref(literal_t* xp)
 {
@@ -6087,19 +5927,6 @@ static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
     case I_UNDEF:
     case I_BOUND:
     default:
-	// convert 3-clause into 2-clause edge-list?
-	// the 3-clause is then dead because it is evaluated by
-	// edge lists
-	if ((vp->opt.edge) && (vp->level == 0)) {
-	    // check watch?
-	    cp->flags |= CLAUSE_FLAG_TWO;
-	    vp->cdead++;
-#ifdef DEBUG_EDGE
-	    print_sym_clause(vp, "  SCHEDULE-UNWATCH/BCP3 ", cp);
-#endif
-	    schedule_unwatch_clause(vp, cp);
-	    return EV_NONE;
-	}
 	break;
     }
     DBG_BCP("%sMovewp3: %s %d=>%ld\r\n", indent(vp->level), format_lit(vp, cp->lit[wl0->p]), wl0->p, p);
@@ -6187,68 +6014,7 @@ static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
     }
 }
 
-static int bcp1(varp_t* vp, literal_t* lp);
-
-// bcp edge list lp=1 (implication chain) set all implicants to TRUE
-static int bcp_edge_list(varp_t* vp, literal_t* lp)
-{
-    slist_iter_t iter;
-
-    slist_iter_init(&iter, &lp->elist);
-
-    while(!slist_iter_eol(&iter)) {
-	edge_t* ep = slist_iter_current(&iter);
-	literal_t* lp1;
-
-	COUNT(vp, EDGE_2);
-
-	DBG_BCP("%sEdge: %s -> %s\r\n",
-		indent(vp->level),format_literal(vp, lp),format_lit(vp, ep->l));
-	switch(get_l(vp, ep->l)) {
-	case I_TRUE:
-	    COUNT(vp, EDGE_D);
-	    break; // noop
-	case I_FALSE:
-	    if (vp->max_conflicting == 1) {
-		vp->conflicting_clauses[vp->num_conflicting++] = ep->cix;
-		goto conflict;
-	    }
-	    else if (vp->num_conflicting < vp->max_conflicting) {
-		vp->conflicting_clauses[vp->num_conflicting++] = ep->cix;
-	    }
-	    else
-		goto conflict;
-	    break;
-	case I_UNDEF:
-	    lp1 = l2ll(vp, ep->l);
-	    put_nq_ll(vp, lp1, I_TRUE, 1, ep->cix, vp->level);
-	    if (vp->level == 0) {
-		// unlink dead edge!
-		slist_iter_remove(&iter);
-		obj_free(&vp->edge_allocator, ep);
-		vp->edead++;
-		// remove will advance to next item!
-		continue;
-	    }
-	    if (vp->opt.qtype == recursive) {
-		if (bcp1(vp, neg_ll(lp1)) < 0)
-		    goto conflict;
-	    }
-	    else {
-		lqueue_insert_ll(vp, neg_ll(lp1));
-	    }
-	    break;
-	case I_BOUND:
-	default:
-	    ASSERT(0);
-	    break;
-	}
-	slist_iter_next(&iter);
-    }
-    return 0;
-conflict:
-    return -1;
-}
+static int bcp_clauses(varp_t* vp, literal_t* lp);
 
 static int is_turbo_clause(varp_t* vp, clause_t* cp, lit_t x, lit_t* zp)
 {
@@ -6314,9 +6080,13 @@ int bcp_is_looping(literal_t* lp)
 // bcp literal chain lp
 static int bcp_clauses(varp_t* vp, literal_t* lp0)
 {
-    wlink_t** wlp = &lp0->wlist;
+    wlink_t** wlp;
     wlink_t*  wl;
-    literal_t* lp = lp0;
+    literal_t* lp;
+
+restart:
+    wlp = &lp0->wlist;
+    lp = lp0;
 
     DBG_BCP("%sBcp_clauses: %s\r\n", indent(vp->level),
 	    format_literal(vp, neg_ll(lp)));
@@ -6352,22 +6122,19 @@ static int bcp_clauses(varp_t* vp, literal_t* lp0)
 	    case ev_CONFLICT:
 		if (vp->max_conflicting == 1) {
 		    vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
-		    return -1;
+		    goto conflict;
 		}
 		else if (vp->num_conflicting < vp->max_conflicting) {
 		    vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
 		    cp->flags |= CLAUSE_FLAG_CONFLICT;
 		}
 		else
-		    return -1;
+		    goto conflict;
 		break;
 	    case ev_DEAD:
 		if (vp->level == 0) {
 		    vp->cdead++;
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-#ifdef DEBUG_EDGE
-		    print_sym_clause(vp, "  SCHEDULE-UNWATCH/DEAD", cp);
-#endif
 		    schedule_unwatch_clause(vp, cp);
 		}
 		break;
@@ -6377,14 +6144,20 @@ static int bcp_clauses(varp_t* vp, literal_t* lp0)
 		if (vp->level == 0) {
 		    vp->cdead++;
 		    cp->flags |= CLAUSE_FLAG_DEAD;
-#ifdef DEBUG_EDGE
-		    print_sym_clause(vp, "  SCHEDULE-UNWATCH/SET", cp);
-#endif
 		    schedule_unwatch_clause(vp, cp);
 		}
 		if (vp->opt.qtype == recursive) {
-		    if (bcp1(vp, neg_ll(lp)) < 0)
-			return -1;
+		    // check if we can skip recursion... and restart loop
+		    if (wl->next == NULL) {
+			if ((vp->level == 0) && vp->opt.xref)
+			    kill_clauses(vp, neg_ll(lp0));
+			lp0 = neg_ll(lp);
+			goto restart;
+		    }
+		    else {
+			if (bcp_clauses(vp, neg_ll(lp)) < 0)
+			    goto conflict;
+		    }
 		}
 		else {
 		    lqueue_insert_ll(vp, neg_ll(lp));
@@ -6395,22 +6168,15 @@ static int bcp_clauses(varp_t* vp, literal_t* lp0)
 	if (*wlp == wl)
 	    wlp = &wl->next;
     }
-    return 0;
-}
-
-// bcp1, bcp literal lp=0
-static int bcp1(varp_t* vp, literal_t* lp)
-{
-    int r;
-    DBG_BCP("%sBcp1: %s\r\n",indent(vp->level),format_literal(vp, neg_ll(lp)));
-    r = bcp_clauses(vp, lp);
-    // keep bcp_edge_list after bcp_clauses since some clauses may
-    // be converted to edge lists by bcp_clauses
-    if ((r >= 0) && vp->opt.edge)
-	r = bcp_edge_list(vp, neg_ll(lp));
+    
     if ((vp->level == 0) && vp->opt.xref)
-	kill_clauses(vp, neg_ll(lp));
-    return r;
+	kill_clauses(vp, neg_ll(lp0));
+    return 0;    
+    
+conflict:
+    if ((vp->level == 0) && vp->opt.xref)
+	kill_clauses(vp, neg_ll(lp0)); 
+    return -1;
 }
 
 static int bcp(varp_t* vp)
@@ -6419,62 +6185,18 @@ static int bcp(varp_t* vp)
     DBG_BCP("%sBcp: %s\r\n",
 	    indent(vp->level), format_literal(vp, slist_first(&vp->q)));
     while((lp = lqueue_deq(vp)) != NULL) {
-	if (bcp1(vp, lp) < 0)
+	if (bcp_clauses(vp, lp) < 0)
 	    return -1;
     }
     return 0;
 }
 
-// run unwatch, remove clauses that are dead (level=0) and convert
-// marked 3-clauses into 2-clauses (or edges)
+// run unwatch, remove clauses that are dead (level=0)
 static void bcp_unwatch(varp_t* vp)
 {
     clause_t* cp = vp->unwatch;
 
     while(cp != NULL) {
-	if (cp->flags & CLAUSE_FLAG_DEAD)
-	    ;
-	else if (vp->opt.edge && (cp->flags&CLAUSE_FLAG_TWO)) { // 3 -> 2 clause
-	    int w0, w1;
-	    if (((w0=cp->wl[0].p) >= 0) && ((w1=cp->wl[1].p) >= 0)) {
-		lit_t a = cp->lit[w0];
-		lit_t b = cp->lit[w1];
-		int w2 = 3-(w0+w1);
-		lit_t c = cp->lit[w2];
-
-		if ((get_l(vp,a) == I_TRUE) ||
-		    (get_l(vp,b) == I_TRUE) ||
-		    (get_l(vp,c) == I_TRUE)) {
-		    cp->flags |= CLAUSE_FLAG_DEAD;
-		}
-		else {
-		    DBG("%d: add edge lists w0=%d, w1=%d, w2=%d\r\n", cp->cix,
-			w0, w1, w2);
-#ifdef DEBUG_EDGE
-		    print_sym_clause(vp, "EDGE-INSERT", cp);
-		    enif_fprintf(stdout, "a:%s=%s ",
-				 format_lit(vp, a),
-				 format_ival(get_l(vp,a)));
-		    enif_fprintf(stdout, "b:%s=%s ",
-				 format_lit(vp, b),
-				 format_ival(get_l(vp,b)));
-		    enif_fprintf(stdout, "c:%s=%s\r\n",
-				 format_lit(vp, c),
-				 format_ival(get_l(vp,c)));
-#endif
-		    // either a or b are FALSE so the edge is
-		    // ~b -> (a or c),  ~a -> (b or c)
-		    if (get_l(vp, b) == I_FALSE) {
-			edge_insert(vp, neg_l(a), c, cp->cix);
-			edge_insert(vp, neg_l(c), a, cp->cix);
-		    }
-		    else {
-			edge_insert(vp, neg_l(b), c, cp->cix);
-			edge_insert(vp, neg_l(c), b, cp->cix);
-		    }
-		}
-	    }
-	}
 	clause_unwatch(vp, cp);
 	cp->flags &= ~CLAUSE_FLAG_UNWATCH;
 	cp = cp->uwatch;
@@ -6762,14 +6484,8 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, number_of_clauses, argv[1])) {
 	return enif_make_int(env, get_number_of_clauses(vp));
     }
-    if (EQUAL_KEY(env, number_of_edges, argv[1])) {
-	return enif_make_int(env, vp->nedge);
-    }
     if (EQUAL_KEY(env, number_of_dead_clauses, argv[1])) {
 	return enif_make_int(env, vp->cdead);
-    }
-    if (EQUAL_KEY(env, number_of_dead_edges, argv[1])) {
-	return enif_make_int(env, vp->edead);
     }
     if (EQUAL_KEY(env, number_of_learnt_clauses, argv[1])) {
 	return enif_make_int(env, vp->cnum[1]);
@@ -6794,12 +6510,6 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     }
     if (EQUAL_KEY(env, clause_d_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_D]);
-    }
-    if (EQUAL_KEY(env, edge_2_counter, argv[1])) {
-	return enif_make_uint64(env, vp->counter[EDGE_2]);
-    }
-    if (EQUAL_KEY(env, edge_d_counter, argv[1])) {
-	return enif_make_uint64(env, vp->counter[EDGE_D]);
     }
     if (EQUAL_KEY(env, size, argv[1])) {
 	return enif_make_uint(env, vp->opt.vsize);
@@ -6843,9 +6553,6 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 #else
 	return enif_make_boolean(env, false);
 #endif
-    }
-    if (EQUAL_KEY(env, edge, argv[1])) {
-	return enif_make_boolean(env, vp->opt.edge);
     }
     if (EQUAL_KEY(env, xref, argv[1])) {
 	return enif_make_boolean(env, vp->opt.xref);
@@ -7681,31 +7388,17 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_cix(env, vp, argv[1], &cix)) {
-	int size;
-	ERL_NIF_TERM list;
-	ERL_NIF_TERM head, tail;
-
-	list = argv[1];
-	size = 0;
-	// FIXME get_list_length!
-	while(enif_get_list_cell(env, list, &head, &tail)) {
-	    size++;
-	    list = tail;
-	}
-	if (!enif_is_empty_list(env, list))
+	unsigned int len;
+	
+	if (!enif_get_list_length(env, argv[1], &len))
 	    return enif_make_badarg(env);
 	else {
 	    ERL_NIF_TERM r = enif_make_ok(env);
-	    STK_BEGIN(lit_t, literals, size) {
-		lit_t* lpp = &literals[0];
-		list = argv[1];
-		while(enif_get_list_cell(env, list, &head, &tail)) {
-		    if (!vif_get_lit(env, vp, head, lpp)) {
-			r = enif_raise_exception(env, ATOM(literal));
-			STK_LEAVE(literals);
-		    }
-		    lpp++;
-		    list = tail;
+	    STK_BEGIN(lit_t, literals, len) {
+		int size = len;
+		if (!vif_get_lit_list(env, vp, argv[1], &size, literals)) {
+		    r = enif_raise_exception(env, ATOM(literal));
+		    STK_LEAVE(literals);
 		}
 		size = sort_clause_array(vp, literals, size, true);
 		if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE) {
@@ -7793,33 +7486,6 @@ error:
     return enif_make_badarg(env);
 }
 
-// may only clean literal on level 0!
-static ERL_NIF_TERM varp_clean_edges(ErlNifEnv* env, int argc,
-				     const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    literal_t* lp;
-    slist_iter_t iter;
-    
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!vif_get_literal(env, vp, argv[1], &lp))
-	return enif_raise_exception(env, ATOM(literal));
-
-    slist_iter_init(&iter, &lp->elist);
-    while(!slist_iter_eol(&iter)) {
-	edge_t* ep = slist_iter_current(&iter);
-	if (get_l(vp, ep->l) != I_UNDEF) {
-	    slist_iter_remove(&iter);
-	    obj_free(&vp->edge_allocator, ep);
-	}
-	else
-	    slist_iter_next(&iter);
-    }
-    return enif_make_ok(env);
-}
-
 static int cmp_xref QSORT_ARGS(const void* a, const void* b,void* arg)
 {
     UNUSED(arg);
@@ -7859,19 +7525,6 @@ static void xref_remap(literal_t* lp, int si, int* remap, int n)
     }
     // must sort for subst to work!
     QSORT(xptr0, len0, sizeof(xref_t), cmp_xref, NULL);
-}
-
-
-static void edge_remap(literal_t* lp, int si, int* remap, int n)
-{
-    slist_iter_t iter;
-
-    slist_iter_init(&iter, &lp->elist);
-    while(!slist_iter_eol(&iter)) {
-	edge_t* ep = slist_iter_current(&iter);
-	remap_cix(&ep->cix, "edge", si, remap, n);
-	slist_iter_next(&iter);
-    }
 }
 
 static void hashtab_remap(varp_t* vp,int i,int si,int* remap,int n)
@@ -7988,13 +7641,6 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	    for (i = 1; i < (int)vn; i++) {
 		xref_remap(&vp->var_map[i]->lit[0], si, rmap, n);
 		xref_remap(&vp->var_map[i]->lit[1], si, rmap, n);
-	    }
-	}
-	if (vp->opt.edge) {
-	    size_t vn = dynvar_size(vp->var_map);
-	    for (i = 1; i < (int)vn; i++) {
-		edge_remap(&vp->var_map[i]->lit[0], si, rmap, n);
-		edge_remap(&vp->var_map[i]->lit[1], si, rmap, n);
 	    }
 	}
 	if (vp->opt.hash && (si != ALPHA)) {
@@ -8423,22 +8069,6 @@ static ERL_NIF_TERM varp_subscribe(ErlNifEnv* env, int argc,
     return enif_make_ok(env);
 }
 
-static ERL_NIF_TERM make_edge_list(ErlNifEnv* env, varp_t* vp,
-				  literal_t* lp, ERL_NIF_TERM list)
-{
-    UNUSED(vp);
-    slist_iter_t iter;
-    
-    slist_iter_init(&iter, &lp->elist);
-    while(!slist_iter_eol(&iter)) {
-	edge_t* pl = slist_iter_current(&iter);
-	ERL_NIF_TERM elem = make_cix(env, pl->cix);
-	list = enif_make_list_cell(env, elem, list);
-	slist_iter_next(&iter);
-    }
-    return list;
-}
-
 static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
@@ -8463,10 +8093,6 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	    ERL_NIF_TERM elem = make_cix(env, cp->cix);
 	    list = enif_make_list_cell(env, elem, list);
 	    wl = wl->next;
-	}
-	if (vp->opt.edge) {
-	    list = make_edge_list(env, vp, neg_ll(lp), list);
-	    list = make_edge_list(env, vp, lp, list);
 	}
     }
     else if (argv[2] == ATOM(literal)) {
@@ -9099,9 +8725,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(default);
     LOAD_ATOM(delta);
     LOAD_ATOM(done);
-    LOAD_ATOM(edge);
-    LOAD_ATOM(edge_2_counter);
-    LOAD_ATOM(edge_d_counter);
     LOAD_ATOM(error);
     LOAD_ATOM(false);
     LOAD_ATOM(fifo);
@@ -9129,8 +8752,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(number_of_clauses);
     LOAD_ATOM(number_of_conflicting_clauses);
     LOAD_ATOM(number_of_dead_clauses);
-    LOAD_ATOM(number_of_dead_edges);
-    LOAD_ATOM(number_of_edges);
     LOAD_ATOM(number_of_learnt_clauses);
     LOAD_ATOM(number_of_subst_variables);
     LOAD_ATOM(number_of_unbound_variables);
