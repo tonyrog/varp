@@ -14,7 +14,7 @@
 -export([saturate/5]).
 -export([saturate/8]).
 
-%% -define(DEBUG, true).
+-define(DEBUG, true).
 %% -compile(export_all).
 
 -include("varp.hrl").
@@ -82,7 +82,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     Threshold = maps:get(threshold, Param, 0),
     Laps = maps:get(laps, Param, infinity),
-    ?dbg0("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
+    ?dbg1("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
     saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold).
 
 saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
@@ -109,10 +109,10 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
     end.
 
 loop(Bs,K,Q,F,R,N,Level,Laps,Threshold,FriendMap) ->
-    ?dbg1("Laps=~w n=~w\n", [Laps, N]),
     case lap(Bs,K,Q,F,R,FriendMap) of
 	true ->
 	    N1 = varp_formula:number_of_bound(Bs),
+	    ?dbg1("Laps=~w n=~w\n", [Laps, N]),
 	    Laps1 = Laps-1,
 	    if N1 - N =< Threshold ->
 		    loop_done(?THRESHOLD,Laps,Bs);
