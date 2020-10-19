@@ -1394,7 +1394,7 @@ eval_meta({id,Vn}, Bs) ->
 				false ->
 				    error({unbound, Vn});
 				Def ->
-				    Def
+				    eval_meta(Def, Bs)
 			    end
 		    end
 	    catch
