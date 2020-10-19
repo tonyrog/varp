@@ -99,6 +99,7 @@ bt(Bs,Func,Acc,UseTurbo) ->
 init(Bs,UseTurbo) ->
     case varc:next_unbound(Bs#bs.vp) of
 	false ->
+	    ?dbg("no variables unbound\n", []),
 	    {model,[]};
 	Xi ->
 	    ?dbg("~sinit ~w @~w\n", [indent(?LEVEL),Xi,?LEVEL]),

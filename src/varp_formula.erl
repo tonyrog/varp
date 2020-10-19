@@ -1020,6 +1020,7 @@ build_({cnf,{Vars,_Clauses,_Sections,Cs}},Bs)
     {1,Vars} = varc:add_variables(Bs#bs.vp, Vars),
     %% fixme bind all literals in Ls = TRUE
     lists:foreach(fun(CL) ->
+			  use_clause(Bs#bs.vp, CL),
 			  try varc:add_clause(Bs#bs.vp, CL) of
 			      {false,_I} ->
 				  throw(contradiction);
@@ -1205,6 +1206,9 @@ build_snf([CL|CLs], Bs) ->
     end;
 build_snf([], Bs) ->
     Bs.
+
+use_clause(Vp, CL) ->
+    lists:foreach(fun(Li) -> varc:isused(Vp, abs(Li), true) end, CL).
 
 -ifdef(__UNUSED__).
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->

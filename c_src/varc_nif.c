@@ -348,19 +348,24 @@ typedef struct _allocator_t
     slist_t free_list;   // list of free objects
 } allocator_t;
 
+// Dirty scheduler stack size is set to 40K default?
+#define ONSTACK_LIMIT (64*1024)
+
+#define ON_STACK(n) ((n) < ONSTACK_LIMIT)
 
 #if defined(__WIN32__) || defined(_WIN32)
-#define ALLOC_STACK(n)  _malloca((n))
-#define FREE_STACK(ptr) _freea((ptr))
+
+#define ALLOC_STACK(onstk,n)  ((onstk) ? _malloca((n)) : malloc((n)))
+#define FREE_STACK(onstk,ptr) if ((onstk)) _freea((ptr)); else free((ptr))
 #else
-#define ALLOC_STACK(n) alloca((n))
-#define FREE_STACK(ptr)
+#define ALLOC_STACK(onstk,n) ((onstk) ? alloca((n)) : malloc((n)))
+#define FREE_STACK(onstk,ptr)  if (!(onstk)) free((ptr))
 #endif
 
-#define STK_BEGIN(type,name,n) do { type* name = ALLOC_STACK(sizeof(type)*(n)); do {
+#define STK_BEGIN(type,name,n) do { int name##_onstack = ON_STACK((n)); type* name = ALLOC_STACK(name##_onstack,sizeof(type)*(n)); do {
 #define STK_LEAVE(name) goto L##name
-#define STK_END0(name) } while(0); FREE_STACK((name)); } while(0)
-#define STK_END(name)  } while(0); L##name: FREE_STACK((name)); } while(0)
+#define STK_END0(name) } while(0); FREE_STACK(name##_onstack,(name)); } while(0)
+#define STK_END(name)  } while(0); L##name: FREE_STACK(name##_onstack,(name)); } while(0)
 
 
 #ifdef LIT_INTEGER
@@ -4642,7 +4647,6 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    kp.sort_key = sort_key;
 
 	    QSORT(sort_map, m, sizeof(int), cmp_keys, &kp);
-
 	    // setup variable phases & order
 	    k1 = abs(sort_key[0])-1;
 	    k2 = abs(sort_key[1])-1;
@@ -6014,8 +6018,6 @@ static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
     }
 }
 
-static int bcp_clauses(varp_t* vp, literal_t* lp);
-
 static int is_turbo_clause(varp_t* vp, clause_t* cp, lit_t x, lit_t* zp)
 {
     lit_t* yp = cp->lit;
@@ -6077,6 +6079,7 @@ int bcp_is_looping(literal_t* lp)
     return 0;
 }
 
+// FIXME: add max depth else insert on queue
 // bcp literal chain lp
 static int bcp_clauses(varp_t* vp, literal_t* lp0)
 {
@@ -6155,6 +6158,7 @@ restart:
 			goto restart;
 		    }
 		    else {
+			// FIXME: add max depth else insert on queue
 			if (bcp_clauses(vp, neg_ll(lp)) < 0)
 			    goto conflict;
 		    }
@@ -7411,8 +7415,8 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 	}
     }
 
-    if (vp->level != 0)
-	return enif_raise_exception(env, ATOM(level));
+//    if (vp->level != 0)
+//	return enif_raise_exception(env, ATOM(level));
 
     si = GET_SI(cix);
     ix = GET_IX(cix);

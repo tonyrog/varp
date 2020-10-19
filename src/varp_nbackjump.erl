@@ -32,7 +32,8 @@
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_UNDEFINED)}
+	 {0,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)}
+%%	 {1,{saturate,[{level,1},{laps,1}]}}
 	]).
 
 options() ->
@@ -357,7 +358,7 @@ restart(Bs,Param,Level,MaxLearned,MR) ->
 	       RestartByTimeout ->
 		    varp_formula:proof_output(Bs,$c,"timeout"),
 		    undo_until(Bs, Level, ?TOP_LEVEL),
-		    %% reorder(Bs, Param),
+		    reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       true ->
 		    timeout_or_cancel(Bs,Param,MaxLearned,MR)
@@ -370,7 +371,7 @@ reorder(Bs, Param) ->
     ReorderMap = maps:from_list(maps:get(reorder,Param)),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
-	    ?dbg0("Reorder: ~p\n", [Opts]),
+	    ?dbg1("Reorder: ~p\n", [Opts]),
 	    Seed = proplists:get_value(seed, Opts, -1),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
@@ -380,9 +381,10 @@ reorder(Bs, Param) ->
 		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
 	    end;
 	{ok,{saturate,Opts}} ->
+	    ?dbg1("Saturate: ~p\n", [Opts]),
 	    Laps = proplists:get_value(laps,Opts,0),
 	    Timeout = proplists:get_value(timeout,Opts,infinity),
-	    varp_saturate:saturate(Bs,1,Timeout,{{Laps},{Laps}}, 0);
+	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
 	_ ->
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
