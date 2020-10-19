@@ -1,0 +1,111 @@
+//
+// https://web.stanford.edu/~laurik/fsmbook/examples/Einstein%27sPuzzle.html
+//
+
+literals blue, green, red, white, yellow;
+define Color {blue, green, red, white, yellow};
+
+literals dane, englishman, german, swede, norwegian;
+define Nationality {dane, englishman, german, swede, norwegian};
+
+literals bier, coffee, milk, tea, water;
+define Drink { bier, coffee, milk, tea, water };
+
+literals blend, bluemaster, dunhill, pallmall, prince;
+define Cigarette {blend, bluemaster, dunhill, pallmall, prince};
+
+literals birds, cats, dogs, fish, horses;
+define Pet {birds, cats, dogs, fish, horses};
+
+// Predicates used
+
+// C(h,c)  Color of house h is c
+// N(h,n)  Nationality of person living in house h is n
+// D(h,d)  drink preferance of person living in house h is d
+// S(h,s)  ciggarete brand preferance of person living in house h is s
+// P(h,p)  The pet living in house h is a p
+
+// Each house has exactly one color
+// And all houses has different colos
+[A h=1..5][E! c=Color] C(h,c) and
+[A c=Color][E! h=1..5] C(h,c) and
+
+// There is exacly one nationality in each house
+// And there is each house has extacly one nationality
+[A h=1..5][E! n=Nationality] N(h,n) and
+[A n=Nationality][E! h=1..5] N(h,n) and
+
+// There is exacly one type of pet in each house
+[A h=1..5][E! p=Pet] P(h,p) and
+[A p=Pet][E! h=1..5] P(h,p) and
+
+// There is exacly one type of ciggarete brand in each house
+[A h=1..5][E! s=Cigarette] S(h,s) and
+[A s=Cigarette][E! h=1..5] S(h,s) and
+
+// There is exacly one type of drink in each house
+[A h=1..5][E! d=Drink] D(h,d) and
+[A d=Drink][E! h=1..5] D(h,d) and
+
+// 1. The Englishman lives in the red house.
+[A h=1..5] ( N(h,englishman) -> C(h,red) ) and
+
+// 2. The Swede keeps dogs
+[A h=1..5] ( N(h,swede) -> P(h,dogs) ) and
+
+// 3. The Dane drinks tea
+[A h=1..5] ( N(h,dane) -> D(h,tea) ) and
+
+// 4. The green house is just to the left of the white one.
+[A h=1..4] ( C(h,green) -> C(h+1,white) ) and
+// and the green house can not be the last house
+not C(5,green) and
+
+// 5. The owner of the green house drinks coffee.
+[A h=1..5] ( C(h,green) -> D(h,coffee) ) and
+
+// 6. The Pall Mall smoker keeps birds.
+[A h=1..5] ( S(h,pallmall) -> P(h,birds) ) and
+
+// 7. The owner of the yellow house smokes Dunhills.
+[A h=1..5] ( C(h,yellow) -> S(h, dunhill) ) and
+
+// 8. The man in the center house drinks milk.
+D(3,milk) and
+
+// 9. The Norwegian lives in the first house.
+N(1,norwegian) and
+
+// 10. The Blend smoker has a neighbor who keeps cats.
+(S(1,blend) -> P(2,cats)) and
+[A h=2..4] ( S(h,blend) -> (P(h+1,cats) or P(h-1,cats)) ) and
+(S(5,blend) -> P(4,cats)) and
+ 
+// 11. The man who smokes Blue Masters drinks bier.
+[A h=1..5] ( S(h,bluemaster) -> D(h, bier) ) and
+
+// 12. The man who keeps horses lives next to the Dunhill smoker.
+
+(P(1,horses) -> S(2,dunhill)) and
+[A h=2..4] ( P(h,horses) -> (S(h+1,dunhill) or S(h-1,dunhill) ) ) and
+(P(5,horses) -> S(4,dunhill)) and 
+
+// 13. The German smokes Prince.
+[A h=1..5] ( N(h,german) -> S(h,prince) ) and
+
+// 14. The Norwegian lives next to the blue house.
+
+(N(1,norwegian) -> C(2,blue)) and
+[A h=2..4] ( N(h,norwegian) -> (C(h+1,blue) or C(h-1,blue) ) ) and
+(N(5,norwegian) -> C(4,blue)) and
+
+// 15. The Blend smoker has a neighbor who drinks water.
+
+(S(1,blend) -> D(2,water)) and
+[A h=2..4] ( S(h,blend) -> (D(h+1,water) or D(h-1,water)) ) and
+(S(5,blend) -> D(4,water)) and
+
+// Who keeps fish?
+
+true
+
