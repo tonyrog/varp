@@ -32,8 +32,8 @@
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)},
-	 {1,{saturate,[{level,2},{laps,1}]}}
+	 {0,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)}
+%%	 {1,{saturate,[{level,1},{laps,1}]}}
 	]).
 
 options() ->
