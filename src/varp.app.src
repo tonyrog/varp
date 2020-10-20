@@ -1,8 +1,9 @@
 %% -*- erlang -*-
 {application, varp,
  [{description, "VARP"},
-  {vsn, git},
+  {vsn, "%VSN%"},
   {registered, []},
+  {modules, [%MODULES%]},
   {env, [
 	 {plugins, [
 		    {"sat",   "satisfy",     varp_satisfy},
