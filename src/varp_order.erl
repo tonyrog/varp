@@ -105,7 +105,7 @@ display_order(Bs,Param) ->
 	false ->
 	    ok;
 	true ->
-	    Order = varc:order_all(Bs#bs.vp),
+	    Order = varp_nif:order_all(Bs#bs.vp),
 	    lists:foreach(fun(V) ->
 				  io:format("~s ",[varp_formula:fmt_var(Bs,V)])
 			  end, Order),

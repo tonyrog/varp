@@ -1,11 +1,11 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2019, Tony Rogvall
 %%% @doc
-%%%    Test of varc
+%%%    Test of varp_nif
 %%% @end
 %%% Created : 14 Mar 2019 by Tony Rogvall <tony@rogvall.se>
 
--module(varc_test).
+-module(varp_nif_test).
 
 -compile(export_all).
 
@@ -84,7 +84,7 @@ sync_apply(Mod, Fun, Args) ->
     end.
 
 bindings1() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -94,39 +94,39 @@ bindings1() ->
 
     clause(V, [-X1, X3]),
     clause(V, [-X1,-X2]),
-    varc:set_level(V, 1),
-    varc:bind(V, X1),
-    true = varc:bcp(V),
+    varp_nif:set_level(V, 1),
+    varp_nif:bind(V, X1),
+    true = varp_nif:bcp(V),
 
     clause(V, [X4, -X6]),
     clause(V, [X4, X5]),
-    varc:set_level(V, 2),
-    varc:bind(V, -X4),
-    true = varc:bcp(V),
+    varp_nif:set_level(V, 2),
+    varp_nif:bind(V, -X4),
+    true = varp_nif:bcp(V),
 
     %% FIXME tests are deependent on clause order!!
     Match1a = [X1,-X2,X3],
-    Match1a = varc:get_bindings_list(V, 1),
+    Match1a = varp_nif:get_bindings_list(V, 1),
     Match1b = [X3,-X2,X1],
-    Match1b = varc:get_bindings_list(V, 1, false, true),
+    Match1b = varp_nif:get_bindings_list(V, 1, false, true),
 
     Match2a = [-X4,X5,-X6],
-    Match2a = varc:get_bindings_list(V, 2),
+    Match2a = varp_nif:get_bindings_list(V, 2),
     Match2b = [-X6,X5,-X4],
-    Match2b = varc:get_bindings_list(V, 2, false, true),
+    Match2b = varp_nif:get_bindings_list(V, 2, false, true),
     ok.
 
 test0() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X1 = 1,
-    {X2,X7} = varc:add_variables(V, 6),
+    {X2,X7} = varp_nif:add_variables(V, 6),
     X2 = 2,
     X7 = 7,
     ok.
 
 test1() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -144,7 +144,7 @@ test1() ->
     ok.
 
 test1_gamma() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -162,7 +162,7 @@ test1_gamma() ->
     ok.
     
 test2() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -179,7 +179,7 @@ test2() ->
 %% Test clause / queue 
 %%    
 test3() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -198,40 +198,40 @@ test3() ->
     [X3,X4,X5,X6] = get_clause(V, C2),
     [X5,X6,X7] = get_clause(V, C3),
 
-    true = lists:sort([C0]) =:= lists:sort(varc:get_clauses(V, X1)),
+    true = lists:sort([C0]) =:= lists:sort(varp_nif:get_clauses(V, X1)),
 
-    true = lists:sort([C0,C1]) =:= lists:sort(varc:get_clauses(V, X2)),
-    true = lists:sort([C0,C1,C2]) =:= lists:sort(varc:get_clauses(V, X3)),
-    true = lists:sort([C1,C2]) =:= lists:sort(varc:get_clauses(V, X4)),
-    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X5)),
-    true = lists:sort([C2,C3]) =:= lists:sort(varc:get_clauses(V, X6)),
-    true = lists:sort([C3]) =:= lists:sort(varc:get_clauses(V, X7)),
+    true = lists:sort([C0,C1]) =:= lists:sort(varp_nif:get_clauses(V, X2)),
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varp_nif:get_clauses(V, X3)),
+    true = lists:sort([C1,C2]) =:= lists:sort(varp_nif:get_clauses(V, X4)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varp_nif:get_clauses(V, X5)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varp_nif:get_clauses(V, X6)),
+    true = lists:sort([C3]) =:= lists:sort(varp_nif:get_clauses(V, X7)),
 
-    ?verbose("X5 clauses = ~p\n", [varc:get_clauses(V, X5)]),
-    ?verbose("X6 clauses = ~p\n", [varc:get_clauses(V, X6)]),
-    ?verbose("X7 clauses = ~p\n", [varc:get_clauses(V, X7)]),
+    ?verbose("X5 clauses = ~p\n", [varp_nif:get_clauses(V, X5)]),
+    ?verbose("X6 clauses = ~p\n", [varp_nif:get_clauses(V, X6)]),
+    ?verbose("X7 clauses = ~p\n", [varp_nif:get_clauses(V, X7)]),
 
-    true = varc:bcp(V),
-    true = varc:set_level(V, 1),
-    true = varc:bind(V, X2),
-    true = varc:bind(V, X3),
-    {varc:get_bindings_list(V, 1), varc:get_number_of_clauses(V)}.
+    true = varp_nif:bcp(V),
+    true = varp_nif:set_level(V, 1),
+    true = varp_nif:bind(V, X2),
+    true = varp_nif:bind(V, X3),
+    {varp_nif:get_bindings_list(V, 1), varp_nif:get_number_of_clauses(V)}.
 
 symbols() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
-    {X2,X7} = varc:add_variables(V, 6),
-    ok = varc:add_symbol(V, X1, "X1"),
-    ok = varc:add_symbol(V, lists:seq(X2,X7), "X27"),
-    X1 = varc:find_symbol(V, "X1"),
-    [X2,_X3,_X4,_X5,_X6,X7] = varc:find_symbol(V, "X27"),
+    {X2,X7} = varp_nif:add_variables(V, 6),
+    ok = varp_nif:add_symbol(V, X1, "X1"),
+    ok = varp_nif:add_symbol(V, lists:seq(X2,X7), "X27"),
+    X1 = varp_nif:find_symbol(V, "X1"),
+    [X2,_X3,_X4,_X5,_X6,X7] = varp_nif:find_symbol(V, "X27"),
     ok.
 
 symbol_as_uint(V, Sym) ->
-    b2u([case varc:value(V,X) of
+    b2u([case varp_nif:value(V,X) of
 	     ?T -> 1;
 	     ?F -> 0
-	 end || X <- varc:find_symbol(V, Sym)]).
+	 end || X <- varp_nif:find_symbol(V, Sym)]).
 
 b2u(Ds) ->
     b2u(Ds,0,0).
@@ -249,7 +249,7 @@ b2u([],_,Sum) ->
 
 %% Test all clause simplifications
 clause_simplify() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -280,7 +280,7 @@ clause_simplify() ->
     ok.
 
 bcp2() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     clause(V, [X, Y]),
@@ -292,7 +292,7 @@ bcp2() ->
     ok.
 
 bcp3() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Z = var(V, <<"Z">>),
@@ -304,7 +304,7 @@ bcp3() ->
     ok.
 
 bcp4() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Z = var(V, <<"Z">>),
@@ -319,7 +319,7 @@ bcp4() ->
     ok.
 
 bcp_turbo1() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Y1 = var(V, <<"Y1">>),
@@ -343,37 +343,37 @@ bcp_turbo1() ->
     clause(V, [Y, Z2, Y2]),
     clause(V, [Y, Z3, Y3]),
 
-    varc:set_level(V, 1),
-    varc:bind(V, X),  %% X=1
-    turbo = varc:bcp(V, [X]),
-    turbo = varc:bcp(V, [Y]),
-    {turbo,[Y,X]} = varc:bcp(V, [X,Y], true),
+    varp_nif:set_level(V, 1),
+    varp_nif:bind(V, X),  %% X=1
+    turbo = varp_nif:bcp(V, [X]),
+    turbo = varp_nif:bcp(V, [Y]),
+    {turbo,[Y,X]} = varp_nif:bcp(V, [X,Y], true),
     ok.
 
 bcp_add() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Z = var(V, <<"Z">>),
-    varc:set_level(V, 1),
-    varc:bind(V, -Y),
+    varp_nif:set_level(V, 1),
+    varp_nif:bind(V, -Y),
     Cix1 = clause(V, [X, Y, Z]),
-    varc:undo_level(V, 1),
-    varc:set_level(V, 0),
-    0 = varc:clause_info(V, Cix1, watch0),
-    2 = varc:clause_info(V, Cix1, watch1),
-    varc:bind(V, -X),
-    true = varc:bcp(V),
+    varp_nif:undo_level(V, 1),
+    varp_nif:set_level(V, 0),
+    0 = varp_nif:clause_info(V, Cix1, watch0),
+    2 = varp_nif:clause_info(V, Cix1, watch1),
+    varp_nif:bind(V, -X),
+    true = varp_nif:bcp(V),
     _Cix2 = clause(V, [X, -Z]),
-    true = varc:bcp(V),
+    true = varp_nif:bcp(V),
     Match = [-X,-Z,Y],
-    Match = varc:get_bindings_list(V, 0),
+    Match = varp_nif:get_bindings_list(V, 0),
     %% dump(V).
     ok.
 
 %% saturate test where first bcp is missing
 sat_no_bcp() ->
-    Vp = varc:new(),
+    Vp = varp_nif:new(),
     X1 = {p,'X1',[]},
     X2 = {p,'X2',[]},
     X3 = {p,'X3',[]},
@@ -392,13 +392,13 @@ sat_no_bcp() ->
 		  {'->', {'not',X1}, X5},
 		  {'->', X1, X6},
 		  {'->', X6, X7}]}, Vp),
-    varc:bind(Vp, F),
-    Bs = saturate_var(Vp,  varc:find_symbol(Vp,{"X1",[]})),
+    varp_nif:bind(Vp, F),
+    Bs = saturate_var(Vp,  varp_nif:find_symbol(Vp,{"X1",[]})),
     install_bindings(Vp, Bs),
     saturate_lap(Vp).
 
 saturate_lap(Vp) ->
-    saturate_lap(Vp, varc:next_unbound(Vp)).
+    saturate_lap(Vp, varp_nif:next_unbound(Vp)).
 
 saturate_lap(_Vp, false) ->
     true;
@@ -409,20 +409,20 @@ saturate_lap(Vp, X) ->
 	    false;
 	Bs ->
 	    install_bindings(Vp, Bs),
-	    saturate_lap(Vp, varc:next_unbound(Vp, X))
+	    saturate_lap(Vp, varp_nif:next_unbound(Vp, X))
     end.
 
 install_bindings(_Vp, {}) ->
     ok;
 install_bindings(Vp, Bs) ->
-    varc:set_level(Vp, 0),
+    varp_nif:set_level(Vp, 0),
     lists:foreach(
       fun(A) when is_integer(A) ->
 	      io:format("bind ~w\n", [A]),
-	      varc:bind(Vp, A);
+	      varp_nif:bind(Vp, A);
 	 ({A,B}) ->
 	      io:format("subst ~w / ~w\n", [A, B]),
-	      varc:subst(Vp, A, B)
+	      varp_nif:subst(Vp, A, B)
       end, tuple_to_list(Bs)).
 
 
@@ -430,18 +430,18 @@ install_bindings(Vp, Bs) ->
 saturate_var(Vp, X) ->
     case l_eval(Vp, X) of
 	true ->
-	    varc:mark(Vp, 2),
+	    varp_nif:mark(Vp, 2),
 	    l_undo(Vp),
 	    case l_eval(Vp, -X) of
 		true ->
-		    Bs = varc:intersect_var(Vp, X, 2, true),
-		    varc:unmark(Vp),
+		    Bs = varp_nif:intersect_var(Vp, X, 2, true),
+		    varp_nif:unmark(Vp),
 		    l_undo(Vp),
 		    Bs;
 		false ->
-		    varc:mark(Vp, 1),
-		    Bs = varc:get_marked(Vp, true),
-		    varc:unmark(Vp),
+		    varp_nif:mark(Vp, 1),
+		    Bs = varp_nif:get_marked(Vp, true),
+		    varp_nif:unmark(Vp),
 		    l_undo(Vp),
 		    Bs
 	    end;
@@ -449,7 +449,7 @@ saturate_var(Vp, X) ->
 	    l_undo(Vp),
 	    case l_eval(Vp, -X) of
 		true ->
-		    Bs = varc:get_bindings(Vp, 2),
+		    Bs = varp_nif:get_bindings(Vp, 2),
 		    l_undo(Vp),
 		    Bs;
 		false ->
@@ -459,35 +459,35 @@ saturate_var(Vp, X) ->
     end.
 
 l_eval(Vp, X) ->
-    varc:set_level(Vp, 1),
-    case varc:bind(Vp, X) of
+    varp_nif:set_level(Vp, 1),
+    case varp_nif:bind(Vp, X) of
 	true ->
-	    varc:set_level(Vp, 2),
-	    varc:bcp(Vp);
+	    varp_nif:set_level(Vp, 2),
+	    varp_nif:bcp(Vp);
 	false ->
 	    false
     end.
 
 l_undo(Vp) ->
-    varc:undo_level(Vp, 2),
-    varc:undo_level(Vp, 1).
+    varp_nif:undo_level(Vp, 2),
+    varp_nif:undo_level(Vp, 1).
 	      
 	      
 
 %% Test eval
 clause_bcp() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
     X4 = var(V),
 
-    undefined = varc:value(V, X1),
-    undefined = varc:value(V, X2),
-    undefined = varc:value(V, X3),
-    undefined = varc:value(V, X4),
+    undefined = varp_nif:value(V, X1),
+    undefined = varp_nif:value(V, X2),
+    undefined = varp_nif:value(V, X3),
+    undefined = varp_nif:value(V, X4),
 
-    varc:set_level(V, 1),
+    varp_nif:set_level(V, 1),
     _C0 = clause(V, [X1, ?F, ?F]),
     _C1 = clause(V, [X2, ?T, ?T, ?T]),
     _C2 = clause(V, [-X3, ?F, ?F, ?F]),
@@ -495,18 +495,18 @@ clause_bcp() ->
     %% ?verbose("clause_bcp: clauses=~p\n", [[_C0,_C1,_C2,_C3]]),
     %% print_clauses(V),
 
-    true = varc:bcp(V),
+    true = varp_nif:bcp(V),
 
-    V1 = varc:value(V, X1),
+    V1 = varp_nif:value(V, X1),
     true = V1 =:= ?T,
 
-    V2 = varc:value(V, X2),
+    V2 = varp_nif:value(V, X2),
     true = V2 =:= undefined,
 
-    V3 = varc:value(V, X3),
+    V3 = varp_nif:value(V, X3),
     true = V3 =:= ?F,
 
-    V4 = varc:value(V, X4),
+    V4 = varp_nif:value(V, X4),
     true = V4 =:= undefined,
 
     true.
@@ -515,61 +515,61 @@ clause_bcp() ->
 %% add clause with bindings
 %%
 or_bcp_bindings() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
     X4 = var(V),
 
-    varc:set_level(V, 1),
+    varp_nif:set_level(V, 1),
     clause(V, [-X1, -X2, -X3]),
     clause(V, [-X1, -X2,  X4]),
     clause(V, [-X1,  X2, -X3]),
     clause(V, [-X1,  X2,  X3]),
-    ?verbose("Bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
-    ?verbose("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
+    ?verbose("Bindings@0 = ~w\n", [varp_nif:get_bindings(V,0)]),
+    ?verbose("Bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     
     %% print_clauses(V),
     ?verbose("2/1\n", []),
-    varc:bind(V, X1),
-    true = varc:bcp(V),
-    ?verbose("Bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
+    varp_nif:bind(V, X1),
+    true = varp_nif:bcp(V),
+    ?verbose("Bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     %% print_clauses(V),
 
-    varc:set_level(V, 2),
+    varp_nif:set_level(V, 2),
     clause(V, [-X1,  X2,  X3, -X4]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     ?verbose("3/1\n", []),
-    varc:bind(V, X2),
-    true = varc:bcp(V),
-    ?verbose("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
-    ?verbose("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
-    ?verbose("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
+    varp_nif:bind(V, X2),
+    true = varp_nif:bcp(V),
+    ?verbose("bindings@2 = ~w\n", [varp_nif:get_bindings(V,2)]),
+    ?verbose("bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
+    ?verbose("bindings@0 = ~w\n", [varp_nif:get_bindings(V,0)]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     %% print_clauses(V),
 
     ?verbose("undo 2\n", []),
-    varc:undo_level(V, 2),
-    ?verbose("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
-    ?verbose("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
-    ?verbose("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
+    varp_nif:undo_level(V, 2),
+    ?verbose("bindings@2 = ~w\n", [varp_nif:get_bindings(V,2)]),
+    ?verbose("bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
+    ?verbose("bindings@0 = ~w\n", [varp_nif:get_bindings(V,0)]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     %% print_clauses(V),
 
     ?verbose("undo 1\n", []),
-    varc:undo_level(V, 1),
-    ?verbose("bindings@2 = ~w\n", [varc:get_bindings(V,2)]),
-    ?verbose("bindings@1 = ~w\n", [varc:get_bindings(V,1)]),
-    ?verbose("bindings@0 = ~w\n", [varc:get_bindings(V,0)]),
+    varp_nif:undo_level(V, 1),
+    ?verbose("bindings@2 = ~w\n", [varp_nif:get_bindings(V,2)]),
+    ?verbose("bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
+    ?verbose("bindings@0 = ~w\n", [varp_nif:get_bindings(V,0)]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     %% print_clauses(V),
     ok.
 
 %% pigeon=3
 p3() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V, <<"P(1,1)">>),
     X2 = var(V, <<"P(1,2)">>),
     X3 = var(V, <<"P(2,1)">>),
@@ -589,7 +589,7 @@ p3() ->
 
 %% pigeon=4
 p4() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V, <<"P(1,1)">>),
     X2 = var(V, <<"P(1,2)">>),
     X3 = var(V, <<"P(1,3)">>),
@@ -629,16 +629,16 @@ p4() ->
 
 nbcp_p3() ->
     P3 = p3(),
-    varc:set_level(P3, 1),
-    false = varc:nbcp(P3),
-    _Bn1 = varc:get_all_bindings(P3),
+    varp_nif:set_level(P3, 1),
+    false = varp_nif:nbcp(P3),
+    _Bn1 = varp_nif:get_all_bindings(P3),
     ?verbose("bindings = ~w\n", [_Bn1]),
-    varc:undo(P3),
-    false = varc:nbcp(P3),
-    _Bn2 = varc:get_all_bindings(P3),
+    varp_nif:undo(P3),
+    false = varp_nif:nbcp(P3),
+    _Bn2 = varp_nif:get_all_bindings(P3),
     ?verbose("bindings = ~w\n", [_Bn2]),
-    varc:undo(P3),
-    _BnX = varc:get_all_bindings(P3),
+    varp_nif:undo(P3),
+    _BnX = varp_nif:get_all_bindings(P3),
     ?verbose("bindings = ~w\n", [_BnX]),
     ok.
 
@@ -657,26 +657,26 @@ nbcp_p4() ->
 			     <<"P(3,1)">>,
 			     <<"P(3,3)">>,
 			     <<"P(4,2)">>]),
-    varc:set_level(P4, 1),
+    varp_nif:set_level(P4, 1),
     nbcp_loop(P4).
 
 symlist_sort_first(V, SymList) ->
-    varc:order_first(V, [varc:find_symbol(V, Sym) || Sym <- SymList]).
+    varp_nif:order_first(V, [varp_nif:find_symbol(V, Sym) || Sym <- SymList]).
 
 nbcp_loop(V) ->
-    false = varc:nbcp(V),
-    _Bs = varc:get_all_bindings(V),
+    false = varp_nif:nbcp(V),
+    _Bs = varp_nif:get_all_bindings(V),
     ?verbose("bindings = ~w\n", [_Bs]),
-    case varc:undo(V) of
+    case varp_nif:undo(V) of
 	false ->
-	    ?verbose("bcp_count = ~w\n", [varc:info(V, bcp_counter)]),
+	    ?verbose("bcp_count = ~w\n", [varp_nif:info(V, bcp_counter)]),
 	    contradiction;
 	true ->
 	    nbcp_loop(V)
     end.
     
 order_install() ->
-    V = varc:new(#{}),
+    V = varp_nif:new(#{}),
     X1 = var(V, <<"X1">>),
     X2 = var(V, <<"X2">>),
     X3 = var(V, <<"X3">>),
@@ -695,34 +695,34 @@ order_install() ->
     _C3 = clause(V, [            X4, X5, X6, Y1], ?GAMMA),
     _C4 = clause(V, [                X5, X6, Y1], ?GAMMA),
     _C5 = clause(V, [                    X6, Y1], ?GAMMA),
-    varc:bind(V, Y1),
-    varc:bind(V, Y2),
-    varc:bind(V, Y3),
+    varp_nif:bind(V, Y1),
+    varp_nif:bind(V, Y2),
+    varp_nif:bind(V, Y3),
     {V, [X1,X2,X3,X4,X5,X6]}.
 
 
 order_identity() ->    
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
-    ok = varc:order_sort(V, ?ORDER_IDENTITY),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_IDENTITY),
+    [X1, X2, X3, X4, X5, X6] = varp_nif:order_all(V),
     ok.
     
 order_user() ->    
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     lists:foreach(
       fun({L,Cp,Cn}) ->
-	      varc:set_user_count(V,L,Cp),
-	      varc:set_user_count(V,-L,Cn)
+	      varp_nif:set_user_count(V,L,Cp),
+	      varp_nif:set_user_count(V,-L,Cn)
       end, [{X1,12,10},{X2,11,13},{X3,16,14},{X4,15,17},{X5,20,18},{X6,19,21}]),
-    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
+    ok = varp_nif:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
     %% U1 = [X1,-X2,X3,-X4,X5,-X6],
-    [X1,X2,X3,X4,X5,X6] = varc:order_all(V),
-    [1,-1,1,-1,1,-1] = varc:phase_all(V),
+    [X1,X2,X3,X4,X5,X6] = varp_nif:order_all(V),
+    [1,-1,1,-1,1,-1] = varp_nif:phase_all(V),
 
-    ok = varc:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
+    ok = varp_nif:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
     %% U2 = [-X6,X5,-X4,X3,-X2,X1],
-    [X6,X5,X4,X3,X2,X1] = varc:order_all(V),
-    [-1,1,-1,1,-1,1] = varc:phase_all(V),
+    [X6,X5,X4,X3,X2,X1] = varp_nif:order_all(V),
+    [-1,1,-1,1,-1,1] = varp_nif:phase_all(V),
     ok.
 
 order_degree() ->
@@ -734,11 +734,11 @@ order_degree() ->
     %% d(X5) = 5
     %% d(X6) = 6
 
-    ok = varc:order_sort(V, ?ORDER_DEGREE bor ?ORDER_DESCEND),
-    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_DEGREE bor ?ORDER_DESCEND),
+    [X6, X5, X4, X3, X2, X1] = varp_nif:order_all(V),
 
-    ok = varc:order_sort(V, ?ORDER_DEGREE bor ?ORDER_ASCEND),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_DEGREE bor ?ORDER_ASCEND),
+    [X1, X2, X3, X4, X5, X6] = varp_nif:order_all(V),
     ok.
 
 order_rank() ->
@@ -750,138 +750,138 @@ order_rank() ->
     %% r(X5) = 1/7+1/6+1/5+1/4+1/3
     %% r(X6) = 1/7+1/6+1/5+1/4+1/3+1/2
 
-    ok = varc:order_sort(V, ?ORDER_RANK bor ?ORDER_DESCEND),
-    [X6, X5, X4, X3, X2, X1] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_RANK bor ?ORDER_DESCEND),
+    [X6, X5, X4, X3, X2, X1] = varp_nif:order_all(V),
 
-    ok = varc:order_sort(V, ?ORDER_RANK bor ?ORDER_ASCEND),
-    [X1, X2, X3, X4, X5, X6] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_RANK bor ?ORDER_ASCEND),
+    [X1, X2, X3, X4, X5, X6] = varp_nif:order_all(V),
     ok.
 
 order_first() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first check
-    ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_first(V, [X5, X6]),
-    [X5, X6, X1, X2, X3, X4] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
+    ok = varp_nif:order_first(V, [X5, X6]),
+    [X5, X6, X1, X2, X3, X4] = varp_nif:order_all(V),
     ok.
 
 order_last() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% last check
-    ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_last(V, [X1,X2]),
-    [X3, X4, X5, X6, X1, X2] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
+    ok = varp_nif:order_last(V, [X1,X2]),
+    [X3, X4, X5, X6, X1, X2] = varp_nif:order_all(V),
     ok.
 
 order_first_and_last() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first & last check
-    ok = varc:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
-    ok = varc:order_first(V, [X5, X6]),
-    ok = varc:order_last(V, [X1,X2]),
-    [X5, X6, X3, X4, X1, X2] = varc:order_all(V),
+    ok = varp_nif:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
+    ok = varp_nif:order_first(V, [X5, X6]),
+    ok = varp_nif:order_last(V, [X1,X2]),
+    [X5, X6, X3, X4, X1, X2] = varp_nif:order_all(V),
     ok.
 
 order_random() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
-    ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
+    ok = varp_nif:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1001),
     %% Rand1001 = [X1,X6,-X3,X5,-X4,X2],
-    [X1,X6,X3,X5,X4,X2] = varc:order_all(V),
-    [1,1,-1,1,-1,1] = varc:phase_all(V),
+    [X1,X6,X3,X5,X4,X2] = varp_nif:order_all(V),
+    [1,1,-1,1,-1,1] = varp_nif:phase_all(V),
     
     %% ?verbose("random,1001, Vs = ~p\n", [Sort1]),
 
-    ok = varc:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
+    ok = varp_nif:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1003),
     %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
-    [X1,X4,X6,X2,X3,X5] = varc:order_all(V),
-    [-1,1,-1,-1,1,1] = varc:phase_all(V),
+    [X1,X4,X6,X2,X3,X5] = varp_nif:order_all(V),
+    [-1,1,-1,-1,1,1] = varp_nif:phase_all(V),
     %% ?verbose("random,1003, Vs = ~p\n", [Sort2]),
     ok.
 
 unbound(Vp, X) ->
-    X1 = varc:next_unbound(Vp,X),
+    X1 = varp_nif:next_unbound(Vp,X),
     %% io:format("Xi = ~w\n", [X1]),
     if X1 =:= false -> [];
        true -> [X1 | unbound(Vp, X1)]
     end.
 
 unbound(Vp) ->
-    case varc:next_unbound(Vp) of
+    case varp_nif:next_unbound(Vp) of
 	false -> [];
 	X0 -> [X0 | unbound(Vp, X0)]
     end.
     
 %% check basic variable unbound variables
 uorder_basic() ->
-    Vp = varc:new(#{}),
-    {1,10} = varc:add_variables(Vp, 10),
+    Vp = varp_nif:new(#{}),
+    {1,10} = varp_nif:add_variables(Vp, 10),
     [] = unbound(Vp),
-    varc:isused(Vp, 5, true),
+    varp_nif:isused(Vp, 5, true),
     [5] = unbound(Vp),
-    _ = [varc:isused(Vp, I, true) || I <- lists:seq(1,10)],
+    _ = [varp_nif:isused(Vp, I, true) || I <- lists:seq(1,10)],
     [1,2,3,4,5,6,7,8,9,10] = unbound(Vp),
-    varc:bind(Vp, 1),
-    varc:bind(Vp, 5),
+    varp_nif:bind(Vp, 1),
+    varp_nif:bind(Vp, 5),
     [2,3,4,6,7,8,9,10] = unbound(Vp),
-    varc:config(Vp, xref, true),
-    varc:subst(Vp, 4, 6),
+    varp_nif:config(Vp, xref, true),
+    varp_nif:subst(Vp, 4, 6),
     [2,3,4,7,8,9,10] = unbound(Vp),
     ok.
 
 uorder_bump() ->
-    Vp = varc:new(#{vsids=>true}),
-    {1,10} = varc:add_variables(Vp, 10),
-    _ = [varc:isused(Vp, I, true) || I <- lists:seq(1,10)],
+    Vp = varp_nif:new(#{vsids=>true}),
+    {1,10} = varp_nif:add_variables(Vp, 10),
+    _ = [varp_nif:isused(Vp, I, true) || I <- lists:seq(1,10)],
     [1,2,3,4,5,6,7,8,9,10] = unbound(Vp),
-    varc:bump(Vp, 5, 1),  %% move 5 one step
+    varp_nif:bump(Vp, 5, 1),  %% move 5 one step
     [1,2,3,5,4,6,7,8,9,10] = unbound(Vp),
-    varc:bump(Vp, 5, 2),  %% move 5 two steps
+    varp_nif:bump(Vp, 5, 2),  %% move 5 two steps
     [1,5,2,3,4,6,7,8,9,10] = unbound(Vp),
-    varc:bump(Vp, 5, 13),  %% test more bumps than needed
+    varp_nif:bump(Vp, 5, 13),  %% test more bumps than needed
     [5,1,2,3,4,6,7,8,9,10] = unbound(Vp),
     %%
-    varc:bind(Vp, 5),
-    varc:bind(Vp, 1),
-    varc:bump(Vp, 8, next),  %% 8 should be next
+    varp_nif:bind(Vp, 5),
+    varp_nif:bind(Vp, 1),
+    varp_nif:bump(Vp, 8, next),  %% 8 should be next
     [8,2,3,4,6,7,9,10] = unbound(Vp),
     ok.
 
 %% simulate backtracking over variables
 uorder_bt() ->
-    Vp = varc:new(#{vsids=>true, all_used=>true }),
-    {1,10} = varc:add_variables(Vp, 10),
-    varc:add_clause(Vp, lists:seq(1,10)),  %% all variables are used!
+    Vp = varp_nif:new(#{vsids=>true, all_used=>true }),
+    {1,10} = varp_nif:add_variables(Vp, 10),
+    varp_nif:add_clause(Vp, lists:seq(1,10)),  %% all variables are used!
     [1,2,3,4,5,6,7,8,9,10] = unbound(Vp),
-    1 = varc:next_unbound(Vp),
-    varc:set_level(Vp, 1),
-    varc:bind(Vp, 1), varc:bind(Vp, 3), varc:bind(Vp, 5),
-    2 = varc:next_unbound(Vp),
-    varc:set_level(Vp, 2),
-    varc:bind(Vp, 2), varc:bind(Vp, 4), varc:bind(Vp, 6),
-    7 = varc:next_unbound(Vp),
-    varc:set_level(Vp, 3),
-    varc:bind(Vp, 7), varc:bind(Vp, 8), varc:bind(Vp, 9),
-    10 = varc:next_unbound(Vp),
-    varc:set_level(Vp, 4),
-    varc:bind(Vp, 10),
-    false = varc:next_unbound(Vp),
+    1 = varp_nif:next_unbound(Vp),
+    varp_nif:set_level(Vp, 1),
+    varp_nif:bind(Vp, 1), varp_nif:bind(Vp, 3), varp_nif:bind(Vp, 5),
+    2 = varp_nif:next_unbound(Vp),
+    varp_nif:set_level(Vp, 2),
+    varp_nif:bind(Vp, 2), varp_nif:bind(Vp, 4), varp_nif:bind(Vp, 6),
+    7 = varp_nif:next_unbound(Vp),
+    varp_nif:set_level(Vp, 3),
+    varp_nif:bind(Vp, 7), varp_nif:bind(Vp, 8), varp_nif:bind(Vp, 9),
+    10 = varp_nif:next_unbound(Vp),
+    varp_nif:set_level(Vp, 4),
+    varp_nif:bind(Vp, 10),
+    false = varp_nif:next_unbound(Vp),
     %% no undo and check
-    varc:undo_level(Vp, 4),
-    10 = varc:next_unbound(Vp),
-    varc:undo_level(Vp, 3),
-    7 = varc:next_unbound(Vp),
-    varc:undo_level(Vp, 2),
-    2 = varc:next_unbound(Vp),
-    varc:undo_level(Vp, 1),
-    1 = varc:next_unbound(Vp),
+    varp_nif:undo_level(Vp, 4),
+    10 = varp_nif:next_unbound(Vp),
+    varp_nif:undo_level(Vp, 3),
+    7 = varp_nif:next_unbound(Vp),
+    varp_nif:undo_level(Vp, 2),
+    2 = varp_nif:next_unbound(Vp),
+    varp_nif:undo_level(Vp, 1),
+    1 = varp_nif:next_unbound(Vp),
     ok.
 
     
 
 subst0a() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     A = var(V),
     B = var(V),
     C = var(V),
@@ -893,16 +893,16 @@ subst0a() ->
     %% print_clauses(V),
 
     ?verbose(" [~w/~w]\n", [X,Y]),
-    varc:subst(V, X, Y),
+    varp_nif:subst(V, X, Y),
 
     ?verbose("clause after\n",[]),
     %% print_clauses(V,true),
-    Bs = varc:get_bindings(V,0),
+    Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
     Bs.
 
 subst0b() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     A = var(V),
     B = var(V),
     C = var(V),
@@ -914,16 +914,16 @@ subst0b() ->
     %% print_clauses(V),
 
     ?verbose(" [~w/~w]\n", [X,Y]),
-    varc:subst(V, X, Y),
+    varp_nif:subst(V, X, Y),
 
     ?verbose("clause after\n",[]),
     %% print_clauses(V,true),
-    Bs = varc:get_bindings(V,0),
+    Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
     Bs.
 
 subst0c() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     A = var(V),
     B = var(V),
     C = var(V),
@@ -935,16 +935,16 @@ subst0c() ->
     %% print_clauses(V),
 
     ?verbose(" [~w/~w]\n", [X,Y]),
-    varc:subst(V, X, Y),
+    varp_nif:subst(V, X, Y),
 
     ?verbose("clause after\n",[]),
     %% print_clauses(V,true),
-    Bs = varc:get_bindings(V,0),
+    Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
     Bs.
 
 subst0d() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     X = var(V),
     Y = var(V),
 
@@ -953,17 +953,17 @@ subst0d() ->
     %% print_clauses(V),
 
     ?verbose(" [~w/~w]\n", [X,Y]),
-    varc:subst(V, X, Y),
+    varp_nif:subst(V, X, Y),
 
     %% ?verbose("clause after\n",[]),
     %% print_clauses(V,true),
-    Bs = varc:get_bindings(V,0),
+    Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
     Bs.
     
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
-    V = varc:new(#{xref=>true}), 
+    V = varp_nif:new(#{xref=>true}), 
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -972,46 +972,46 @@ subst1() ->
     C1 = clause(V, [X1,-X2]),
     ?verbose("\nbefore\n", []),
     %% print_clauses(V),
-    varc:subst(V, X3, X2),
+    varp_nif:subst(V, X3, X2),
     %% ?verbose("clause after\n",[]),
     %% print_clauses(V),
-    [X1,X3] = lists:sort(varc:get_clause(V, C0)),
-    [NX3,X1] = lists:sort(varc:get_clause(V, C1)),
+    [X1,X3] = lists:sort(varp_nif:get_clause(V, C0)),
+    [NX3,X1] = lists:sort(varp_nif:get_clause(V, C1)),
     ok.
 
 %% simply substitute {X1,X2} [X1/X2] => {X1}
 subst2() ->
-    V = varc:new(#{xref=>true}), 
+    V = varp_nif:new(#{xref=>true}), 
     X1 = var(V),
     X2 = var(V),
     C0 = clause(V, [X1,X2]),
     %% ?verbose("\nbefore\n",[]),
     %% print_clauses(V),
-    varc:subst(V, X1, X2),
+    varp_nif:subst(V, X1, X2),
     %% ?verbose("clause after\n",[]),
     %% print_clauses(V),
-    ?verbose("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
-    true = varc:get_clause(V, C0),
-    ?T = varc:value(V, X1),
+    ?verbose("raw clause = ~w\n", [varp_nif:get_clause(V, C0, undefined, true)]),
+    true = varp_nif:get_clause(V, C0),
+    ?T = varp_nif:value(V, X1),
     ok.
 
 subst3() ->
-    V = varc:new(#{xref=>true}), 
+    V = varp_nif:new(#{xref=>true}), 
     X2 = var(V),
     X3 = var(V),
     C0 = clause(V, [-X2,X3]),
     %% ?verbose("\nbefore\n",[]),
     %% print_clauses(V),
-    varc:subst(V, -X2, X3),
+    varp_nif:subst(V, -X2, X3),
     %% ?verbose("clause after\n",[]),
     %% print_clauses(V),
-    ?verbose("raw clause = ~w\n", [varc:get_clause(V, C0, undefined, true)]),
-    true = varc:get_clause(V, C0),
-    ?F = varc:value(V, X2),
+    ?verbose("raw clause = ~w\n", [varp_nif:get_clause(V, C0, undefined, true)]),
+    true = varp_nif:get_clause(V, C0),
+    ?F = varp_nif:value(V, X2),
     ok.
     
 subst4() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -1028,31 +1028,31 @@ subst4() ->
     _C6 = clause(V, [X6, X3, -X1]),
     ?verbose("\nbefore\n",[]),
     print_clauses(V),
-    io:format("xref(5) = ~w\n", [varc:literal_info(V, X5, xref)]),
-    io:format("xref(2) = ~w\n", [varc:literal_info(V, X2, xref)]),
-    io:format("xref(-5) = ~w\n", [varc:literal_info(V, -X5, xref)]),
-    io:format("xref(-2) = ~w\n", [varc:literal_info(V, -X2, xref)]),
+    io:format("xref(5) = ~w\n", [varp_nif:literal_info(V, X5, xref)]),
+    io:format("xref(2) = ~w\n", [varp_nif:literal_info(V, X2, xref)]),
+    io:format("xref(-5) = ~w\n", [varp_nif:literal_info(V, -X5, xref)]),
+    io:format("xref(-2) = ~w\n", [varp_nif:literal_info(V, -X2, xref)]),
 
     ?verbose(" [~w/~w]\n", [X5,X2]),
-    varc:subst(V, X5, X2),
-    io:format("xref(5) = ~w\n", [varc:literal_info(V, X5, xref)]),
-    io:format("xref(2) = ~w\n", [varc:literal_info(V, X2, xref)]),
-    io:format("xref(-5) = ~w\n", [varc:literal_info(V, -X5, xref)]),
-    io:format("xref(-2) = ~w\n", [varc:literal_info(V, -X2, xref)]),
-    io:format("_C0 = ~w\n", [varc:get_clause(V, _C0, undefined, true)]),
+    varp_nif:subst(V, X5, X2),
+    io:format("xref(5) = ~w\n", [varp_nif:literal_info(V, X5, xref)]),
+    io:format("xref(2) = ~w\n", [varp_nif:literal_info(V, X2, xref)]),
+    io:format("xref(-5) = ~w\n", [varp_nif:literal_info(V, -X5, xref)]),
+    io:format("xref(-2) = ~w\n", [varp_nif:literal_info(V, -X2, xref)]),
+    io:format("_C0 = ~w\n", [varp_nif:get_clause(V, _C0, undefined, true)]),
 
     ?verbose("clause after\n",[]),
 
     %% FIXME: clause 2 has bad watch points should be {0,1} is {0,2}!
     print_clauses(V),
 
-    true = varc:bcp(V),
-    Bs = varc:get_bindings(V,0),
+    true = varp_nif:bcp(V),
+    Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
     Bs.
 
 subst5() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     X2 = var(V),
     X3 = var(V),
     X4 = var(V),
@@ -1068,21 +1068,21 @@ subst5() ->
 
     %%print_clauses(V),
     %% ?verbose(" [~w/~w]\n", [X7,X3]),
-    %% varc:subst(V, X7, X3),
+    %% varp_nif:subst(V, X7, X3),
     ?verbose(" [~w/~w]\n", [X3,X7]),
-    varc:subst(V, X3, X7),
+    varp_nif:subst(V, X3, X7),
 
     %% FIXME: clause 1 has bad watch points should be {0,1} should be {-1,-1}
 
     %% ?verbose("clause after\n",[]),
     %% print_clauses(V,true),
-    true = varc:bcp(V),
-    Bs = [X3,X4,X6] = lists:sort(varc:get_bindings_list(V,0)),
+    true = varp_nif:bcp(V),
+    Bs = [X3,X4,X6] = lists:sort(varp_nif:get_bindings_list(V,0)),
     ?verbose("bindings@0 = ~w\n", [Bs]),
     Bs.
 
 subst6() ->
-    V = varc:new(#{xref=>true}),
+    V = varp_nif:new(#{xref=>true}),
     Y = var(V),
     B = var(V),
     C = var(V),
@@ -1099,48 +1099,48 @@ subst6() ->
     %% print_clauses(V),
 
     ?verbose(" [~w/~w]\n", [X,Y]),
-    varc:subst(V, X, Y),
+    varp_nif:subst(V, X, Y),
 
     %% ?verbose("clause after\n",[]),
     %% print_clauses(V,true),
     ok.
 
 intersect1() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
-    varc:mark(V, [1,3,5,7,9,11,13,15,17,19]),
-    varc:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
-    {} = varc:get_marked(V, true),
+    varp_nif:mark(V, [1,3,5,7,9,11,13,15,17,19]),
+    varp_nif:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
+    {} = varp_nif:get_marked(V, true),
 
-    varc:mark(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
-    varc:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
-    {10} = varc:get_marked(V, true),
+    varp_nif:mark(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
+    varp_nif:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
+    {10} = varp_nif:get_marked(V, true),
 
-    varc:mark(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
-    varc:intersect_marks(V, [2,4,6,-8,10,-12,14,16,18,20]),
-    {-8,-12} = varc:get_marked(V, true),
+    varp_nif:mark(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
+    varp_nif:intersect_marks(V, [2,4,6,-8,10,-12,14,16,18,20]),
+    {-8,-12} = varp_nif:get_marked(V, true),
 
-    varc:mark(V, []),
-    {} = varc:get_marked(V, true),
+    varp_nif:mark(V, []),
+    {} = varp_nif:get_marked(V, true),
     ok.
 
 intersect2() ->
-    V = varc:new(),    
+    V = varp_nif:new(),    
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
-    varc:mark(V, {1,3,5,7,9,11,13,15,17,19}),
-    varc:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
-    {} = varc:get_marked(V, true),
+    varp_nif:mark(V, {1,3,5,7,9,11,13,15,17,19}),
+    varp_nif:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
+    {} = varp_nif:get_marked(V, true),
 
-    varc:mark(V, {1,3,5,7,-8,9,10,11,-12,13,15,17,19}),
-    varc:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
-    {10} = varc:get_marked(V, true),
+    varp_nif:mark(V, {1,3,5,7,-8,9,10,11,-12,13,15,17,19}),
+    varp_nif:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
+    {10} = varp_nif:get_marked(V, true),
 
-    varc:mark(V, {1,3,5,7,-8,9,-10,11,-12,13,15,17,19}),
-    varc:intersect_marks(V, {2,4,6,-8,10,-12,14,16,18,20}),
-    {-8,-12} = varc:get_marked(V, true),
+    varp_nif:mark(V, {1,3,5,7,-8,9,-10,11,-12,13,15,17,19}),
+    varp_nif:intersect_marks(V, {2,4,6,-8,10,-12,14,16,18,20}),
+    {-8,-12} = varp_nif:get_marked(V, true),
 
-    varc:mark(V, {}),
-    {} = varc:get_marked(V, true),
+    varp_nif:mark(V, {}),
+    {} = varp_nif:get_marked(V, true),
     ok.
 
 intersect_var0() ->
@@ -1148,11 +1148,11 @@ intersect_var0() ->
     Bs0 = [-X2,X3,-X4,X5,X6],
     Bs1 = [-X2,X3,X4,-X5],
     Di = [-X2,X3,{X1,X4},{X1,-X5}],
-    Di = varc:intersect_var0(dummy, X1, Bs0, Bs1),
+    Di = varp_nif:intersect_var0(dummy, X1, Bs0, Bs1),
     ok.
 
 intersect_var1() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -1160,14 +1160,14 @@ intersect_var1() ->
     X5 = var(V),
     X6 = var(V),
     %% X1 -> {-X2,X3,X4,-X5}
-    varc:mark(V, {-X2,X3,X4,-X5}),  
+    varp_nif:mark(V, {-X2,X3,X4,-X5}),  
     %% -X1 -> {-X2,X3,-X4,X5,X6}
     Di = {-X2,X3,{X1,X4},{X1,-X5}},
-    Di = varc:intersect_var(V, X1, {-X2,X3,-X4,X5,X6}, true),
+    Di = varp_nif:intersect_var(V, X1, {-X2,X3,-X4,X5,X6}, true),
     ok.
 
 intersect_var2() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -1175,17 +1175,17 @@ intersect_var2() ->
     X5 = var(V),
     X6 = var(V),
     %% X1 -> {-X2,X3,X4,-X5}
-    varc:mark(V, {-X2,X3,X4,-X5}),
-    varc:set_level(V, 1),
+    varp_nif:mark(V, {-X2,X3,X4,-X5}),
+    varp_nif:set_level(V, 1),
     %% -X1 -> {-X2,X3,-X4,X5,X6}
-    _ = [begin true = varc:bind(V,Xi) end || Xi <- [-X2,X3,-X4,X5,X6]],
+    _ = [begin true = varp_nif:bind(V,Xi) end || Xi <- [-X2,X3,-X4,X5,X6]],
     Di = {-X2,X3,{X1,X4},{X1,-X5}},
-    Di = varc:intersect_var(V, X1, 1, true),
+    Di = varp_nif:intersect_var(V, X1, 1, true),
     ok.
     
 
 watch1() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -1193,67 +1193,67 @@ watch1() ->
     X5 = var(V),
 
     C1 = clause(V, [X5,X4,X3,X2,X1]),
-       [X1,X2,X3,X4,X5] = varc:get_clause(V, C1),
+       [X1,X2,X3,X4,X5] = varp_nif:get_clause(V, C1),
     %%  0  A   0  0  0
     %% initial watch points are set in the end!
-    0 = varc:clause_info(V, C1, watch0),
-    1 = varc:clause_info(V, C1, watch1),
+    0 = varp_nif:clause_info(V, C1, watch0),
+    1 = varp_nif:clause_info(V, C1, watch1),
 
     %% bind X4, move wp 0
-    varc:set_level(V, 1),
-    varc:bind(V, -X4),
-    true = varc:bcp(V),
+    varp_nif:set_level(V, 1),
+    varp_nif:bind(V, -X4),
+    true = varp_nif:bcp(V),
 
-    0 = varc:clause_info(V, C1, watch0),
-    1 = varc:clause_info(V, C1, watch1),
+    0 = varp_nif:clause_info(V, C1, watch0),
+    1 = varp_nif:clause_info(V, C1, watch1),
 
     %% bind -X3, not watched, watch points should stay the same
-    varc:set_level(V, 2),
-    varc:bind(V, -X3),
-    true = varc:bcp(V),
+    varp_nif:set_level(V, 2),
+    varp_nif:bind(V, -X3),
+    true = varp_nif:bcp(V),
 
-    0 = varc:clause_info(V, C1, watch0),
-    1 = varc:clause_info(V, C1, watch1),
+    0 = varp_nif:clause_info(V, C1, watch0),
+    1 = varp_nif:clause_info(V, C1, watch1),
 
-    varc:set_level(V, 3),
-    varc:bind(V, -X1),
-    true = varc:bcp(V),
+    varp_nif:set_level(V, 3),
+    varp_nif:bind(V, -X1),
+    true = varp_nif:bcp(V),
 
-    4 = varc:clause_info(V, C1, watch0),
-    1 = varc:clause_info(V, C1, watch1),
+    4 = varp_nif:clause_info(V, C1, watch0),
+    1 = varp_nif:clause_info(V, C1, watch1),
 
-    varc:set_level(V, 4),
-    varc:bind(V, -X5),
-    true = varc:bcp(V),
+    varp_nif:set_level(V, 4),
+    varp_nif:bind(V, -X5),
+    true = varp_nif:bcp(V),
 
-    4 = varc:clause_info(V, C1, watch0),
-    1 = varc:clause_info(V, C1, watch1),
+    4 = varp_nif:clause_info(V, C1, watch0),
+    1 = varp_nif:clause_info(V, C1, watch1),
 
-    ?T = varc:value(V, X2),
+    ?T = varp_nif:value(V, X2),
 
-    C1 = varc:implication_clause(V, X2),
-    1 = varc:implication_pos(V, X2),
-    4 = varc:implication_level(V, X2),
+    C1 = varp_nif:implication_clause(V, X2),
+    1 = varp_nif:implication_pos(V, X2),
+    4 = varp_nif:implication_level(V, X2),
 
     %% add clauses under the above bindings
     Y3 = -X5, Y2 = -X4, Y1 = -X2, 
     C2 = clause(V, [Y3, Y2, Y1]),
-    [Y1, Y2, Y3] = varc:get_clause(V, C2),
+    [Y1, Y2, Y3] = varp_nif:get_clause(V, C2),
 
-    0 = varc:clause_info(V, C2, watch0),
-    2 = varc:clause_info(V, C2, watch1),
+    0 = varp_nif:clause_info(V, C2, watch0),
+    2 = varp_nif:clause_info(V, C2, watch1),
 
     Z3 = X4, Z2 = X3, Z1 = -X1,
     C3 = clause(V, [Z3,Z2,Z1]),
-    [Z1,Z2,Z3] = varc:get_clause(V, C3),
+    [Z1,Z2,Z3] = varp_nif:get_clause(V, C3),
 
-    0 = varc:clause_info(V, C3, watch0),
-    1 = varc:clause_info(V, C3, watch1),
+    0 = varp_nif:clause_info(V, C3, watch0),
+    1 = varp_nif:clause_info(V, C3, watch1),
 
     ok.
 
 clone1() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     X1 = var(V, <<"P(1,1)">>),
     X2 = var(V, <<"P(1,2)">>),
     X3 = var(V, <<"P(2,1)">>),
@@ -1271,72 +1271,72 @@ clone1() ->
     clause(V, [-X2, -X6]),
     clause(V, [-X4, -X6]),
 
-    varc:set_level(V, 1),
-    false = varc:nbcp(V),
+    varp_nif:set_level(V, 1),
+    false = varp_nif:nbcp(V),
 
     %% print_clauses(V),
     %% dump_variables(V, [X1,X2,X3,X4,X5,X6]),
 
-    W = varc:clone(V),
+    W = varp_nif:clone(V),
 
-    varc:set_level(W, 1),
-    false = varc:nbcp(W),
+    varp_nif:set_level(W, 1),
+    false = varp_nif:nbcp(W),
 
     %% print_clauses(W),
     %% dump_variables(W, [X1,X2,X3,X4,X5,X6]),
     ok.
 
 decide1() ->
-    V = varc:new(#{ xref => true, use_phase => true }),
+    V = varp_nif:new(#{ xref => true, use_phase => true }),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
     X4 = var(V),
-    varc:add_clause(V, [X1,X2]),
-    varc:add_clause(V, [-X2,X3]),
-    varc:add_clause(V, [-X3,-X4]),
-    varc:set_level(V, 1),
-    true = varc:bind(V, -X1),
-    true = varc:bcp(V),
-    ?F = varc:value(V, X1),
-    ?T = varc:value(V, X2),
-    ?T = varc:value(V, X3),
-    ?F = varc:value(V, X4),
+    varp_nif:add_clause(V, [X1,X2]),
+    varp_nif:add_clause(V, [-X2,X3]),
+    varp_nif:add_clause(V, [-X3,-X4]),
+    varp_nif:set_level(V, 1),
+    true = varp_nif:bind(V, -X1),
+    true = varp_nif:bcp(V),
+    ?F = varp_nif:value(V, X1),
+    ?T = varp_nif:value(V, X2),
+    ?T = varp_nif:value(V, X3),
+    ?F = varp_nif:value(V, X4),
     
-    1 = varc:variable_info(V, X2, phase),
-    1 = varc:variable_info(V, X3, phase),
-    -1 = varc:variable_info(V, X4, phase),
+    1 = varp_nif:variable_info(V, X2, phase),
+    1 = varp_nif:variable_info(V, X3, phase),
+    -1 = varp_nif:variable_info(V, X4, phase),
     ok.
 
 %% Check that install of variables partial evaluate!
 build_all() ->
-    Vp = varc:new(#{}),
+    Vp = varp_nif:new(#{}),
     X1 = var(Vp, {'P',[1]}),
     X2 = var(Vp, {'P',[2]}),
     X3 = var(Vp, {'P',[3]}),
     X4 = var(Vp, {'P',[4]}),
     X5 = var(Vp, {'P',[5]}),
     
-    varc:bind(Vp, -X3),
+    varp_nif:bind(Vp, -X3),
 
     F = varp_circuit:all(Vp, [X1,X2,X3,X4,X5]),
     %% print_clauses(Vp,false,true),
-    false = varc:value(Vp, F).
+    false = varp_nif:value(Vp, F).
 
 %% Check that install of variables partial evaluate!
 build_any() ->
-    Vp = varc:new(#{}),
+    Vp = varp_nif:new(#{}),
     X1 = var(Vp, {'P',[1]}),
     X2 = var(Vp, {'P',[2]}),
     X3 = var(Vp, {'P',[3]}),
     X4 = var(Vp, {'P',[4]}),
     X5 = var(Vp, {'P',[5]}),
     
-    varc:bind(Vp, X3),
+    varp_nif:bind(Vp, X3),
 
     F = varp_circuit:any(Vp, [X1,X2,X3,X4,X5]),
     %% print_clauses(Vp,false,true),
-    true = varc:value(Vp, F).
+    true = varp_nif:value(Vp, F).
     
 
 %% install and check integrity
@@ -1345,7 +1345,7 @@ cnf_install() ->
     cnf_install(20, 3, 10).
 
 cnf_install(N,M,K) ->
-    V = varc:new(#{xref=>true,hash=>true}),
+    V = varp_nif:new(#{xref=>true,hash=>true}),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
@@ -1363,15 +1363,15 @@ cnf_delete_sort() ->
     cnf_delete_sort(20, 3, 10).
 
 cnf_delete_sort(N, M, K) ->
-    V = varc:new(#{xref=>true,hash=>true}),
+    V = varp_nif:new(#{xref=>true,hash=>true}),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
     C5 = lists:nth(5, CNF),
-    Ci = varc:find_clause(V, C5),
-    varc:del_clause(V, Ci),
+    Ci = varp_nif:find_clause(V, C5),
+    varp_nif:del_clause(V, Ci),
     CNF1 = CNF -- [C5],
-    varc:clauseset_sort(V, delta),
+    varp_nif:clauseset_sort(V, delta),
     verify_xref(V, CNF1),
     verify_hash(V, CNF1),
     V.
@@ -1387,28 +1387,28 @@ cnf_sort_offset_delete() ->
     cnf_sort_offset_delete(20, 3, 10).
 
 cnf_sort_offset_delete(N, M, K) ->
-    V = varc:new(#{xref=>true,hash=>true}),
+    V = varp_nif:new(#{xref=>true,hash=>true}),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, delta),
     use_clauses(V, delta),
-    varc:clauseset_sort(V, delta),
-    varc:clauseset_offset(V, delta, 5),
+    varp_nif:clauseset_sort(V, delta),
+    varp_nif:clauseset_offset(V, delta, 5),
     CiList = clause_list(V, delta),
     CNF1 = lists:foldr(
 	     fun(Ci,CNFi) ->
-		     Clause = varc:get_clause(V, Ci),
+		     Clause = varp_nif:get_clause(V, Ci),
 		     CNFi -- [Clause]
 	     end, CNF, CiList),
     ok = delete_clauses(V, delta),
-    varc:clauseset_offset(V, delta, 0),
+    varp_nif:clauseset_offset(V, delta, 0),
     verify_xref(V, CNF1),
     verify_hash(V, CNF1),    
     V.
 
 clause_learn_d1() ->
-    V = varc:new(),
-    ok = varc:config(V, max_conflicting, 1),
+    V = varp_nif:new(),
+    ok = varp_nif:config(V, max_conflicting, 1),
     A = var(V, <<"A">>),  %% 1
     B = var(V, <<"B">>),  %% 2
     C = var(V, <<"C">>),  %% 3
@@ -1432,8 +1432,8 @@ clause_learn_d1() ->
     true = bind_and_bcp(V, 3, C),
     false = bind_and_bcp(V, 4, X),
 
-    _Dix = varc:conflicting_clause(V, 0),
-    %% ?verbose("conflicting_clause1: ~w: ~w\n",[Dix,varc:get_clause(V,_Dix)]),
+    _Dix = varp_nif:conflicting_clause(V, 0),
+    %% ?verbose("conflicting_clause1: ~w: ~w\n",[Dix,varp_nif:get_clause(V,_Dix)]),
     Learnt1 = varp_conflict:analyze_clause(V, 4, 1.0, 0),
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
@@ -1448,28 +1448,28 @@ clause_learn_d1() ->
     %% ?verbose("DUMP3\n"),
     %% dump(V, false),
 
-    false = varc:bcp(V),
-    _Cix2 = varc:conflicting_clause(V, 0),
+    false = varp_nif:bcp(V),
+    _Cix2 = varp_nif:conflicting_clause(V, 0),
     ?verbose("conflicting_clause2: ~w: ~w\n", 
-	     [_Cix2,varc:get_clause(V,_Cix2)]),
+	     [_Cix2,varp_nif:get_clause(V,_Cix2)]),
     %% ?verbose("DUMP4\n"),
     %% dump(V, false),
     Learnt2 = varp_conflict:analyze_clause(V, 1, 1.0, 0),
     ?verbose("learnt_clause: ~w\n", [Learnt2]),
     true = ([-1] == abs_sort(Learnt2)),
-    varc:undo_level(V,1),
-    varc:set_level(V, 0),
+    varp_nif:undo_level(V,1),
+    varp_nif:set_level(V, 0),
     true = clause(V, Learnt2, gamma),
     
-    true = varc:bcp(V),
+    true = varp_nif:bcp(V),
     Match = [-A,B],
-    Match = varc:get_bindings_list(V, 0),
+    Match = varp_nif:get_bindings_list(V, 0),
     ok.
 
 
 clause_learn_a1() ->
-    V = varc:new(),
-    ok = varc:config(V, max_conflicting, 1),
+    V = varp_nif:new(),
+    ok = varp_nif:config(V, max_conflicting, 1),
     A = var(V, <<"A">>),  %% 1
     B = var(V, <<"B">>),  %% 2
     C = var(V, <<"C">>),  %% 3
@@ -1493,8 +1493,8 @@ clause_learn_a1() ->
     true = bind_and_bcp(V, 3, C),
     false = bind_and_bcp(V, 4, X),
 
-    Aix1 = varc:conflict(V, 4, 1.0, 0),
-    Learnt1 = varc:get_clause(V,Aix1),
+    Aix1 = varp_nif:conflict(V, 4, 1.0, 0),
+    Learnt1 = varp_nif:get_clause(V,Aix1),
     ?verbose("conflicting_clause1: ~w: ~w\n",
 	      [split_cix(Aix1),Learnt1]),
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
@@ -1506,14 +1506,14 @@ clause_learn_a1() ->
     %% dump(V, false),
 
     %% add learnt clause to gamma
-    {true,_Gix1} = varc:move_clause(V, Aix1, gamma),
+    {true,_Gix1} = varp_nif:move_clause(V, Aix1, gamma),
 
     %% ?verbose("DUMP3\n",[]),
     %% dump(V, false),
 
-    false = varc:bcp(V),
-    Aix2 = varc:conflict(V, 1, 1.0, 0),
-    Learnt2 = varc:get_clause(V,Aix2),
+    false = varp_nif:bcp(V),
+    Aix2 = varp_nif:conflict(V, 1, 1.0, 0),
+    Learnt2 = varp_nif:get_clause(V,Aix2),
     ?verbose("conflicting_clause2: ~w: ~w\n",
 	      [split_cix(Aix2),Learnt2]),
     ?verbose("learnt_clause: ~w\n", [Learnt2]),
@@ -1523,18 +1523,18 @@ clause_learn_a1() ->
     %% dump(V, false),
 
     undo_until(V, 1, 0),
-    true = varc:move_clause(V, Aix2, gamma),
+    true = varp_nif:move_clause(V, Aix2, gamma),
     
-    true = varc:bcp(V),
+    true = varp_nif:bcp(V),
     Match = [-A,B],
-    Match = varc:get_bindings_list(V, 0),
+    Match = varp_nif:get_bindings_list(V, 0),
 
     %% ?verbose("DUMP5\n",[]),
     %% dump(V, false),
     ok.
 
 implication_depth() ->
-    V = varc:new(),
+    V = varp_nif:new(),
     Y1 = var(V, <<"Y1">>),
     Y2 = var(V, <<"Y2">>),
     Y3 = var(V, <<"Y3">>),
@@ -1549,12 +1549,12 @@ implication_depth() ->
     clause(V, [-X,-Y3,Y5]),
     clause(V, [-Y4,-Y5,Y6]),
     true = bind_and_bcp(V, 1, X),
-    ?T = varc:value(V, Y1),
-    ?T = varc:value(V, Y2),
-    ?T = varc:value(V, Y3),
-    ?T = varc:value(V, Y4),
-    ?T = varc:value(V, Y5),
-    ?T = varc:value(V, Y6),
+    ?T = varp_nif:value(V, Y1),
+    ?T = varp_nif:value(V, Y2),
+    ?T = varp_nif:value(V, Y3),
+    ?T = varp_nif:value(V, Y4),
+    ?T = varp_nif:value(V, Y5),
+    ?T = varp_nif:value(V, Y6),
     M0 = #{ X => 0 },
     {1, M1} = depth(V, Y1, M0),
     {1, M2} = depth(V, Y2, M1),
@@ -1565,8 +1565,8 @@ implication_depth() ->
     ok.
 
 depth(V, Yi, DepthMap) ->
-    Cix = varc:implication_clause(V, Yi),
-    Clause = varc:get_clause(V, Cix, Yi),
+    Cix = varp_nif:implication_clause(V, Yi),
+    Clause = varp_nif:get_clause(V, Cix, Yi),
     Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
     {Depth, DepthMap#{ Yi => Depth }}.
 
@@ -1592,19 +1592,19 @@ bench(N) ->
 	      "LITERAL_SIZE=~w,"
 	      "VALUE_PACKING=~w\n",
 	      [Bcp/Ts, 
-	       varc:info(V, number_of_clauses),
-	       varc:info(V, literal_integer),
-	       varc:info(V, literal_size),
-	       varc:info(V, value_packing)]),
+	       varp_nif:info(V, number_of_clauses),
+	       varp_nif:info(V, literal_integer),
+	       varp_nif:info(V, literal_size),
+	       varp_nif:info(V, value_packing)]),
     Bcp / Ts.
 
 bench_(V, _X0, 0) ->
-    varc:info(V, bcp_counter);
+    varp_nif:info(V, bcp_counter);
 bench_(V, X0, I) ->
-    varc:set_level(V, 1),
-    true = varc:bind(V, X0),
-    true = varc:bcp(V),
-    varc:undo_level(V, 1),
+    varp_nif:set_level(V, 1),
+    true = varp_nif:bind(V, X0),
+    true = varp_nif:bcp(V),
+    varp_nif:undo_level(V, 1),
     bench_(V, X0, I-1).
 
 bench_cnf_build() ->
@@ -1614,7 +1614,7 @@ bench_cnf_build(N) ->
     bench_install_cnf(bench_cnf(N)).
     
 bench_install_cnf(CNF) ->
-    V = varc:new(),
+    V = varp_nif:new(),
     Vs = lists:usort(lists:append([[abs(L) || L <- Ci] || Ci <- CNF])),
     K  = lists:max(Vs),
     _ = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
@@ -1663,60 +1663,60 @@ bench_clauses(Xs, Ys, T) ->
 
 
 bind_and_bcp(V, Level, X) ->
-    varc:set_level(V, Level),
-    varc:bind(V, X) andalso varc:bcp(V).
+    varp_nif:set_level(V, Level),
+    varp_nif:bind(V, X) andalso varp_nif:bcp(V).
 
 undo_until(V, From, To) when From > To ->
-    varc:undo_level(V, From),
+    varp_nif:undo_level(V, From),
     undo_until(V, From-1, To);
 undo_until(V, _From, To) ->
-    varc:set_level(V, To),
+    varp_nif:set_level(V, To),
     To.
 
 %% multi bind and eval
 eval_bindings(V, Xs) ->
-    varc:set_level(V, 1),
-    _ = [(true = varc:bind(V, X)) || X <- Xs ],
-    varc:set_level(V, 2),
-    true = varc:bcp(V),
-    R = varc:get_bindings_list(V, 2),
-    varc:undo_level(V, 2),
-    varc:undo_level(V, 1),
+    varp_nif:set_level(V, 1),
+    _ = [(true = varp_nif:bind(V, X)) || X <- Xs ],
+    varp_nif:set_level(V, 2),
+    true = varp_nif:bcp(V),
+    R = varp_nif:get_bindings_list(V, 2),
+    varp_nif:undo_level(V, 2),
+    varp_nif:undo_level(V, 1),
     R.
 
 %% will have the effect that clause 1 have stamp T1 and clause N have stamp Tn
 use_clauses(V, Set) ->
-    use_clauses(V, Set, varc:clauseset_first(V, Set)).
+    use_clauses(V, Set, varp_nif:clauseset_first(V, Set)).
 
 use_clauses(_V, _Set, false) ->
     ok;
 use_clauses(V, Set, I) ->
-    varc:bcp(V),
-    use_clauses(V, Set, varc:clauseset_next(V, I)).
+    varp_nif:bcp(V),
+    use_clauses(V, Set, varp_nif:clauseset_next(V, I)).
 
 %% get list of all clauses
 clause_list(V) ->
     clause_list(V, delta).
 
 clause_list(V, Set) ->
-    clause_list_(V, Set, varc:clauseset_first(V, Set)).
+    clause_list_(V, Set, varp_nif:clauseset_first(V, Set)).
 
 clause_list_(_V, _Set, false) ->
     [];
 clause_list_(V, Set, I) ->
-    [I|clause_list_(V, Set, varc:clauseset_next(V, I))].
+    [I|clause_list_(V, Set, varp_nif:clauseset_next(V, I))].
     
 
 %% delete all clauses (from offset to end)
 delete_clauses(V, Set) ->
-    delete_clauses(V, Set, varc:clauseset_first(V, Set)).
+    delete_clauses(V, Set, varp_nif:clauseset_first(V, Set)).
 
 delete_clauses(_V, _Set, false) ->
     ok;
 delete_clauses(V, Set, I) ->
     ?verbose("delete clause ~w\n", [I]),
-    ok = varc:del_clause(V, I),
-    delete_clauses(V, Set, varc:clauseset_next(V, I)).
+    ok = varp_nif:del_clause(V, I),
+    delete_clauses(V, Set, varp_nif:clauseset_next(V, I)).
 
 random_cnf() ->
     random_cnf(20, 6, 7).
@@ -1724,7 +1724,7 @@ random_cnf() ->
 random_cnf(N, M, K) ->
     random_cnf(N, M, K, delta).
 random_cnf(N, M, K, Set) ->
-    V = varc:new(),
+    V = varp_nif:new(),
     _Vs = [ var(V) || _ <- lists:seq(1,K)], %% install K variables
     CNF = generate_cnf(N, M, K),
     _ = install_cnf(V, CNF, Set),
@@ -1762,7 +1762,7 @@ install_cnf(V, CNF, Set) ->
 		      [true|Acc];
 		  Ci ->
 		      %% check the clause
-		      GetClause = varc:get_clause(V, Ci),
+		      GetClause = varp_nif:get_clause(V, Ci),
 		      assert_equal(GetClause, abs_sort(Clause)),
 		      [Ci|Acc]
 	      end
@@ -1788,7 +1788,7 @@ assert_equal(Value1, Value2) ->
 val(_V, true) ->
     true;
 val(V, [Li]) ->
-    case varc:value(V, Li) of
+    case varp_nif:value(V, Li) of
 	?T -> true;
 	?F -> false;
 	undefined -> true
@@ -1797,7 +1797,7 @@ val(V, Ls) ->
     val(V, Ls, false).
 
 val(V, [Li|Ls], Val) ->
-    case varc:value(V, Li) of
+    case varp_nif:value(V, Li) of
 	?T -> true;
 	?F -> val(V, Ls, Val);
 	undefined -> val(V,Ls,undefined)
@@ -1806,12 +1806,12 @@ val(_V, [], Val) -> Val.
 
 %% Verify that we can reach all clauses via xref
 verify_xref(V, CNF) ->
-    true = varc:info(V, xref),  %% assert we have xref enabled
+    true = varp_nif:info(V, xref),  %% assert we have xref enabled
     DegLs = deg_literal_list(CNF),
     %% check that clauses reached by Ls are in CNF
     lists:foreach(
       fun({Li,Deg}) ->
-	      XRefs = varc:get_clauses(V, Li, literal),
+	      XRefs = varp_nif:get_clauses(V, Li, literal),
 	      XRefLen = length(XRefs),
 	      if XRefLen =:= Deg -> ok;
 		 true ->
@@ -1822,27 +1822,27 @@ verify_xref(V, CNF) ->
 	      end,
 	      lists:foreach(
 		fun(Ci) ->
-			Clause = varc:get_clause(V, Ci),
+			Clause = varp_nif:get_clause(V, Ci),
 			true = lists:member(Clause, CNF)
 		end, XRefs)
       end, DegLs).
 
 verify_hash(V, CNF) ->
-    true = varc:info(V, hash),  %% assert we have hash enabled
+    true = varp_nif:info(V, hash),  %% assert we have hash enabled
     lists:foreach(
       fun(Clause) ->
-	      Ci = varc:find_clause(V, Clause),
-	      Clause = varc:get_clause(V, Ci)
+	      Ci = varp_nif:find_clause(V, Clause),
+	      Clause = varp_nif:get_clause(V, Ci)
       end, CNF).
 
 %% Utils
 
 get_watched(V) ->
-    get_watched(V, lists:seq(1, varc:info(V, number_of_variables))).
+    get_watched(V, lists:seq(1, varp_nif:info(V, number_of_variables))).
 
 get_watched(V, [Xi|Xs]) ->
-    Wi0 = varc:get_clauses(V, Xi, watch),
-    Wi1 = varc:get_clauses(V, -Xi, watch),
+    Wi0 = varp_nif:get_clauses(V, Xi, watch),
+    Wi1 = varp_nif:get_clauses(V, -Xi, watch),
     [{Xi,Wi0},{-Xi,Wi1}|get_watched(V, Xs)];
 get_watched(_V, []) ->
     [].
@@ -1855,48 +1855,48 @@ dump(V, Verb) ->
 	    lists:foreach(
 	      fun({Key, Value}) ->
 		      io:format("  ~s: ~p\n", [Key,Value])
-	      end, varc:info(V));
+	      end, varp_nif:info(V));
        true -> ok
     end,
     io:format("VARIABLES\n"),
-    dump_variables(V, lists:seq(1, varc:info(V,number_of_variables)), Verb),
+    dump_variables(V, lists:seq(1, varp_nif:info(V,number_of_variables)), Verb),
     io:format("CLAUSES DELTA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,delta), Verb),
+    dump_clauses(V, true, varp_nif:clauseset_first(V,delta), Verb),
     io:format("CLAUSES GAMMA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,gamma), Verb),
+    dump_clauses(V, true, varp_nif:clauseset_first(V,gamma), Verb),
     io:format("CLAUSES BETA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,beta), Verb),
+    dump_clauses(V, true, varp_nif:clauseset_first(V,beta), Verb),
     io:format("CLAUSES ALPHA\n"),
-    dump_clauses(V, true, varc:clauseset_first(V,alpha), Verb),
+    dump_clauses(V, true, varp_nif:clauseset_first(V,alpha), Verb),
     io:format("BINDINGS\n"),
     lists:foreach(
       fun(L) ->
-	      io:format("~w: ~p\n", [L, varc:get_bindings(V, L)])
-      end, lists:seq(0, varc:info(V,level))),
+	      io:format("~w: ~p\n", [L, varp_nif:get_bindings(V, L)])
+      end, lists:seq(0, varp_nif:info(V,level))),
     ok.
 
 print_clauses(V) ->  print_clauses(V, true).
 print_clauses(V, Verb) ->  print_clauses(V,false,Verb).
 
 print_clauses(V,Raw,Verb) ->
-    dump_clauses(V, Raw, varc:clauseset_first(V,delta), Verb).
+    dump_clauses(V, Raw, varp_nif:clauseset_first(V,delta), Verb).
 
 dump_clauses(_V, _Raw, false, _Verb) ->
     ok;
 dump_clauses(V, Raw, I, Verb) ->
     {_,SI,IX} = split_cix(I),
-    WATCH = case varc:clause_info(V, I, watch) of
+    WATCH = case varp_nif:clause_info(V, I, watch) of
 		{-1,-1} -> "";
 		{P1,P2} -> " watch:"++integer_to_list(P1)++","++
 			       integer_to_list(P2)
 	    end,
-    STATUS = case varc:clause_info(V, I, status) of
+    STATUS = case varp_nif:clause_info(V, I, status) of
 		 ok -> "";
 		 Status -> io_lib:format(" ~p", [Status])
 	     end,
     io:format("~w - ~s:~w~s~s\n", [I,SI,IX,WATCH,STATUS]),
-    io:format("  ~w\n", [varc:get_clause(V,I,undefined,Raw)]),
-    dump_clauses(V, Raw, varc:clauseset_next(V, I), Verb).
+    io:format("  ~w\n", [varp_nif:get_clause(V,I,undefined,Raw)]),
+    dump_clauses(V, Raw, varp_nif:clauseset_next(V, I), Verb).
 
 dump_variables(V, List) ->
     dump_variables(V, List, true).
@@ -1904,19 +1904,19 @@ dump_variables(V, List) ->
 dump_variables(V, List, Verb) ->
     lists:foreach(
       fun(X) ->
-	      Keys = varc:variable_info_keys() -- [implication,symbol,level],
-	      Sym = case varc:variable_info(V,X,symbol) of
+	      Keys = varp_nif:variable_info_keys() -- [implication,symbol,level],
+	      Sym = case varp_nif:variable_info(V,X,symbol) of
 			[] -> no_symbol;
 			[{S,_}|_] -> var_str(S)
 		    end,
-	      Level = varc:variable_info(V,X,level),
-	      Value = varc:value(V, X),
+	      Level = varp_nif:variable_info(V,X,level),
+	      Value = varp_nif:value(V, X),
 	      io:format("~w: ~s = ~w @~w\n", [X, Sym, Value,Level]),
 	      if Verb ->
 		      lists:foreach(
 			fun(Key) ->
 				io:format("  ~s: ~p\n", 
-					  [Key,varc:variable_info(V,X,Key)])
+					  [Key,varp_nif:variable_info(V,X,Key)])
 			end, Keys),
 		      io:format(" +xref: ~p\n", [get_cix_list(V,X,literal)]),
 		      io:format(" +watch: ~p\n", [get_cix_list(V,X,watch)]),
@@ -1943,7 +1943,7 @@ var_arg(A) when is_list(A) -> A.
     
 
 get_cix_list(V, X, How) ->
-    [split_cix(I) || I <- varc:get_clauses(V, X, How)].
+    [split_cix(I) || I <- varp_nif:get_clauses(V, X, How)].
 
 split_cix(I) ->
     {I, case (I bsr 30) band 3 of 
@@ -1955,28 +1955,28 @@ split_cix(I) ->
      I band 16#3fffffff}.
     
 var(Vp) ->
-    Var = varc:add_variable(Vp),
-    varc:isused(Vp, Var, true),
+    Var = varp_nif:add_variable(Vp),
+    varp_nif:isused(Vp, Var, true),
     Var.
 
 var(Vp, Sym) ->
-    Var = varc:add_variable(Vp),
-    varc:add_symbol(Vp, Var, Sym),
-    varc:isused(Vp, Var, true),
+    Var = varp_nif:add_variable(Vp),
+    varp_nif:add_symbol(Vp, Var, Sym),
+    varp_nif:isused(Vp, Var, true),
     Var.
 
 clause(V, Ls) ->
     clause(V, Ls, delta).
 
 clause(V, Ls, Set) ->
-    case varc:add_clause(V, Ls, Set) of
+    case varp_nif:add_clause(V, Ls, Set) of
 	{true,Ci} -> Ci;
 	true -> true;
 	false -> false
     end.
 
 get_clause(V, ClauseIndex) ->
-    Literals = varc:get_clause(V, ClauseIndex),
+    Literals = varp_nif:get_clause(V, ClauseIndex),
     lists:sort(Literals).
 
 format_clause_flags(Fs) ->

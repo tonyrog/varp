@@ -8935,6 +8935,6 @@ static void varp_unload(ErlNifEnv* env, void* priv_data)
     DBG("varp_unload called\r\n");
 }
 
-ERL_NIF_INIT(varc, varp_funcs,
+ERL_NIF_INIT(varp_nif, varp_funcs,
 	     varp_load, NULL,
 	     varp_upgrade, varp_unload)

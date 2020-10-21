@@ -11,7 +11,7 @@
 -include("varp.hrl").
 
 clause(Bs, Cix) when is_integer(Cix) ->
-    case varc:minimize(Bs#bs.vp, Cix) of
+    case varp_nif:minimize(Bs#bs.vp, Cix) of
 	undefined -> undefined;
 	_Len -> Cix
     end;
@@ -32,11 +32,11 @@ clause(Bs,Clause0) ->
     end.
 
 clause_(Bs, [Li|Ls], Clause, NewClause, Removed, Length) ->
-    case varc:implication_clause(Bs#bs.vp, -Li) of
+    case varp_nif:implication_clause(Bs#bs.vp, -Li) of
 	-1 ->
 	    clause_(Bs, Ls, Clause, [Li|NewClause], Removed, Length+1);
 	I ->
-	    A = varc:get_clause(Bs#bs.vp,I),
+	    A = varp_nif:get_clause(Bs#bs.vp,I),
 	    %% io:format("implication clause of ~w = ~w, clause=~w\n", 
 	    %%    [-Li, A, Clause]),
 	    %% if A-{~Li} is a subset of Clause then remove Li from clause

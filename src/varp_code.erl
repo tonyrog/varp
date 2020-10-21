@@ -309,7 +309,7 @@ test(Text) ->
 
 test(Text, Env) ->
     Code = test_compile(Text),
-    Vp = varc:new(#{}),
+    Vp = varp_nif:new(#{}),
     case run(Vp, Env, Code) of
 	[Var] ->
 	    {Var, Vp};
@@ -325,7 +325,7 @@ test(Text, Env) ->
 test() ->
     Asm = asm(),
     Code = assemble(Asm),
-    Vp = varc:new(#{}),
+    Vp = varp_nif:new(#{}),
     case run(Vp, #{ "n" => 3 }, Code) of
 	[Var] ->
 	    {Var, Vp};
@@ -506,12 +506,12 @@ ibool([V1|Vs]) -> [(V1 =/= 0) | Vs].
 
 p(Vp,P,[Args|Stack]) ->
     Term = {P,Args},
-    case varc:find_symbol(Vp, Term) of
+    case varp_nif:find_symbol(Vp, Term) of
 	false ->
-	    Var = varc:add_variable(Vp, true),
+	    Var = varp_nif:add_variable(Vp, true),
 	    io:format("new ~w = ~w\n", [Term, Var]),
-	    varc:isused(Vp, Var, true),  %% mark as in use!
-	    varc:add_symbol(Vp, Var, Term),
+	    varp_nif:isused(Vp, Var, true),  %% mark as in use!
+	    varp_nif:add_symbol(Vp, Var, Term),
 	    [Var|Stack];
 	Var when is_integer(Var) ->
 	    io:format("~w = ~w\n", [Term, Var]),
@@ -521,7 +521,7 @@ p(Vp,P,[Args|Stack]) ->
 sym(_Vp,true) -> true;
 sym(_Vp,false) -> false;
 sym(Vp,Lit) ->
-    case varc:get_symbol(Vp, Lit) of
+    case varp_nif:get_symbol(Vp, Lit) of
 	[{Term,_}|_] -> Term;
 	_ -> Lit
     end.
@@ -565,7 +565,7 @@ cinv(Vp, [X1 | Vs]) ->
 
 
 clause(Vp, [Args|Stack]) ->
-    varc:add_clause(Vp, Args),
+    varp_nif:add_clause(Vp, Args),
     Stack.
 
 %% ciruit-all not call

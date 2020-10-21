@@ -112,7 +112,7 @@ new(OptMap) when is_map(OptMap) ->
 		 use_phase  => maps:get(use_phase,OptMap)
 	       },
     %% io:format("new(~w)\n", [NewOpts]),
-    Vp  = varc:new(NewOpts),
+    Vp  = varp_nif:new(NewOpts),
     Symbols  = maps:get(syms,OptMap),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
@@ -157,21 +157,21 @@ new(OptMap) when is_map(OptMap) ->
       }.
 
 add_variable(Bs) ->
-    Var = varc:add_variable(Bs#bs.vp, false),
-    varc:isused(Bs#bs.vp, Var, true),
+    Var = varp_nif:add_variable(Bs#bs.vp, false),
+    varp_nif:isused(Bs#bs.vp, Var, true),
     Var.    
 
 %% Create a variable and mark all atoms as used
 add_variable(Bs, IsAtom) ->
-    Var = varc:add_variable(Bs#bs.vp, IsAtom),
-    varc:isused(Bs#bs.vp, Var, true),
+    Var = varp_nif:add_variable(Bs#bs.vp, IsAtom),
+    varp_nif:isused(Bs#bs.vp, Var, true),
     Var.
 
 %% add symbol name to literal 
 -spec add_symbol(Bs::#bs{}, L::integer(), Sym::term()|iolist()) ->
 		       ok.
 add_symbol(Bs, L, Sym) ->
-    varc:add_symbol(Bs#bs.vp, L, Sym).
+    varp_nif:add_symbol(Bs#bs.vp, L, Sym).
 
 
 %% build an OR gate with Y as output and Xs as input
@@ -224,15 +224,15 @@ add_clause(Bs,Ls) ->
 
 add_clause(Bs,Ls,Set) ->
     ?dbg("add clause: ~s\n", [format_clause(Bs,Ls)]),
-    case varc:add_clause(Bs#bs.vp,Ls,Set) of
+    case varp_nif:add_clause(Bs#bs.vp,Ls,Set) of
 	{false,_I} ->
 	    throw(contradiction);
 	false ->
 	    throw(contradiction);
 	{true,I} -> %% non conflict
 	    ?dcall(fun() ->
-			   CL = varc:get_clause(Bs#bs.vp, I),
-			   Flags = varc:clause_info(Bs#bs.vp, I),
+			   CL = varp_nif:get_clause(Bs#bs.vp, I),
+			   Flags = varp_nif:clause_info(Bs#bs.vp, I),
 			   {W0,W1} = proplists:get_value(watch, Flags, {-1,-1}),
 			   io:format("~w:(~w,~w) ~s\n",
 				     [I,W0,W1,format_clause(Bs,CL)])
@@ -272,51 +272,51 @@ cix(I) ->
 
 %% delete clause by index or list of literals
 del_clause(Bs, IndexOrClause) ->
-    varc:del_clause(Bs#bs.vp, IndexOrClause).
+    varp_nif:del_clause(Bs#bs.vp, IndexOrClause).
 
 del_unused_clauses(Bs) ->
     V = Bs#bs.vp,
     ?dbg("del_unused_clause gamma offset=~w, size=~w\n", 
-	 [varc:clauseset_offset(V, ?GAMMA), 
-	  varc:clauseset_size(V, ?GAMMA)]),
-    varc:clauseset_sort(V, ?GAMMA),  %% learnt clauses
+	 [varp_nif:clauseset_offset(V, ?GAMMA), 
+	  varp_nif:clauseset_size(V, ?GAMMA)]),
+    varp_nif:clauseset_sort(V, ?GAMMA),  %% learnt clauses
     case want_proof_output(Bs) of
 	false ->
-	    del_clauses(V, varc:clauseset_first(V, ?GAMMA));
+	    del_clauses(V, varp_nif:clauseset_first(V, ?GAMMA));
 	_ ->
-	    del_proof_clauses(Bs, V, varc:clauseset_first(V, ?GAMMA))
+	    del_proof_clauses(Bs, V, varp_nif:clauseset_first(V, ?GAMMA))
     end,
     ?dbg("del_unused_clause size=~w\n", 
-	 [varc:clauseset_size(V, ?GAMMA)]),
+	 [varp_nif:clauseset_size(V, ?GAMMA)]),
     ok.
     
 
 del_clauses(_V, false) ->
     ok;
 del_clauses(V, I) ->
-    varc:del_clause(V, I),
+    varp_nif:del_clause(V, I),
     ?dbg0("del_clause: ~w\n", [cix(I)]),
-    del_clauses(V, varc:clauseset_next(V, I)).
+    del_clauses(V, varp_nif:clauseset_next(V, I)).
 
 del_proof_clauses(_Bs, _V, false) ->
     ok;
 del_proof_clauses(Bs, V, I) ->
     proof_output(Bs, $d, I),  
-    varc:del_clause(V, I),
+    varp_nif:del_clause(V, I),
     ?dbg0("proof del_clause: ~w\n", [cix(I)]),
-    del_proof_clauses(Bs, V, varc:clauseset_next(V, I)).
+    del_proof_clauses(Bs, V, varp_nif:clauseset_next(V, I)).
 
 clean_clauses(Bs) ->
     clean_clauses(Bs, ?DELTA).
 
 clean_clauses(Bs, Set) ->
-    clean_clauses_(Bs, varc:clauseset_first(Bs#bs.vp, Set)).
+    clean_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp, Set)).
 
 clean_clauses_(Bs, false) ->
     Bs;
 clean_clauses_(Bs, I) ->
-    varc:clean_clause(Bs#bs.vp, I),
-    clean_clauses_(Bs, varc:clauseset_next(Bs#bs.vp, I)).
+    varp_nif:clean_clause(Bs#bs.vp, I),
+    clean_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp, I)).
 
 %% "balanced tree"
 gate_tree(Bs,Op,X,Xs) ->
@@ -396,13 +396,13 @@ make_variable(V, Bs) ->
 order_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
     ?dbg("last=~w\n",[lists:reverse(RevLast)]),
-    ok = varc:order_last(Bs#bs.vp, lists:reverse(RevLast)),
+    ok = varp_nif:order_last(Bs#bs.vp, lists:reverse(RevLast)),
     Bs1.
 
 order_first(Bs, VarList) ->
     {RevFirst,Bs1} = variable_list_(Bs,VarList,[]),
     ?dbg("first=~w\n",[lists:reverse(RevFirst)]),
-    ok = varc:order_first(Bs#bs.vp, lists:reverse(RevFirst)),
+    ok = varp_nif:order_first(Bs#bs.vp, lists:reverse(RevFirst)),
     Bs1.
 
 variable_list_(Bs, [X|Vs], Acc) when is_integer(X) ->
@@ -423,8 +423,8 @@ variable_list_(Bs, [], Acc) ->
     {Acc,Bs}.
 
 %% get_variable_info(Bs, [X|Xs]) ->
-%%     U  = varc:literal_info(Bs#bs.vp, X, user),
-%%     Un = varc:literal_info(Bs#bs.vp, -X, user),
+%%     U  = varp_nif:literal_info(Bs#bs.vp, X, user),
+%%     Un = varp_nif:literal_info(Bs#bs.vp, -X, user),
 %%     if U >= Un ->
 %% 	    [{X,U}|get_variable_info(Bs, Xs)];
 %%        true ->
@@ -441,70 +441,70 @@ order_sort(Bs,[Key1]) -> order_sort(Bs,Key1,?ORDER_UNDEFINED,-1).
 
 order_sort(Bs,Key1,Key2,Arg) 
   when is_integer(Key1), is_integer(Key2), is_integer(Arg) ->
-    varc:order_sort(Bs#bs.vp,Key1,Key2,Arg).
+    varp_nif:order_sort(Bs#bs.vp,Key1,Key2,Arg).
 
 value(Bs,V) ->
-    varc:value(Bs#bs.vp, V).
+    varp_nif:value(Bs#bs.vp, V).
 
 config(Bs, Item, Value) ->
-    varc:config(Bs#bs.vp, Item, Value).
+    varp_nif:config(Bs#bs.vp, Item, Value).
 
 info(Bs) ->
-    varc:info(Bs#bs.vp).
+    varp_nif:info(Bs#bs.vp).
 
 info(Bs, Key) ->
-    varc:info(Bs#bs.vp, Key).
+    varp_nif:info(Bs#bs.vp, Key).
 
 is_bound(Bs,Lit) ->
-    varc:is_bound(Bs#bs.vp,Lit).
+    varp_nif:is_bound(Bs#bs.vp,Lit).
 
 is_unbound(Bs,Lit) ->
-    not varc:is_bound(Bs#bs.vp,Lit).
+    not varp_nif:is_bound(Bs#bs.vp,Lit).
 
 is_equal(Bs,LitA, LitB) ->
-    not varc:is_equal(Bs#bs.vp,LitA,LitB).
+    not varp_nif:is_equal(Bs#bs.vp,LitA,LitB).
 
 subst(Bs, X, Y) ->
-    varc:subst(Bs#bs.vp,X,Y).
+    varp_nif:subst(Bs#bs.vp,X,Y).
 
 getopt(Bs,Key) ->
     ?GETOPT_BS(Bs, Key).
 
 number_of_variables(Bs) ->
-    varc:get_number_of_variables(Bs#bs.vp).
+    varp_nif:get_number_of_variables(Bs#bs.vp).
 
 number_of_clauses(Bs) ->
-    varc:get_number_of_clauses(Bs#bs.vp).
+    varp_nif:get_number_of_clauses(Bs#bs.vp).
 
 number_of_dead_clauses(Bs) ->
-    varc:get_number_of_dead_clauses(Bs#bs.vp).
+    varp_nif:get_number_of_dead_clauses(Bs#bs.vp).
 
 number_of_bound(Bs) ->
-    varc:get_number_of_bound_variables(Bs#bs.vp).
+    varp_nif:get_number_of_bound_variables(Bs#bs.vp).
 
 number_of_unbound(Bs) ->
-    varc:get_number_of_unbound_variables(Bs#bs.vp).
+    varp_nif:get_number_of_unbound_variables(Bs#bs.vp).
 
 clause_bcp_counter(Bs) ->
-    varc:get_clause_bcp_counter(Bs#bs.vp).
+    varp_nif:get_clause_bcp_counter(Bs#bs.vp).
 
 clause_bcp_counter(Bs,N) ->
-    varc:get_clause_bcp_counter(Bs#bs.vp,N).
+    varp_nif:get_clause_bcp_counter(Bs#bs.vp,N).
 
 bcp_counter(Bs) ->
-    varc:get_bcp_counter(Bs#bs.vp).
+    varp_nif:get_bcp_counter(Bs#bs.vp).
 
 conflict_counter(Bs) ->
-    varc:get_conflict_counter(Bs#bs.vp).
+    varp_nif:get_conflict_counter(Bs#bs.vp).
 
 next_unbound(Bs) ->
-    varc:next_unbound(Bs#bs.vp).
+    varp_nif:next_unbound(Bs#bs.vp).
 
 next_unbound(Bs, X) ->
-    varc:next_unbound(Bs#bs.vp, X).
+    varp_nif:next_unbound(Bs#bs.vp, X).
 
 get_bindings(Bs,Level) when is_integer(Level) ->
-    varc:get_bindings(Bs#bs.vp, Level).
+    varp_nif:get_bindings(Bs#bs.vp, Level).
 
 info(Bs,Fmt,As) -> ?info(Bs#bs.option, Fmt, As).
 
@@ -514,17 +514,17 @@ conflicting_clause(Bs) ->
     conflicting_clause(Bs,0).
 
 conflicting_clause(Bs,I) ->
-    varc:conflicting_clause(Bs#bs.vp,I).
+    varp_nif:conflicting_clause(Bs#bs.vp,I).
 
 %% How = watch|literal|variable
 get_clauses(Bs, L, How) ->
-    varc:get_clauses(Bs#bs.vp, L, How).
+    varp_nif:get_clauses(Bs#bs.vp, L, How).
 
 get_clause_info(Bs, I) ->
-    varc:clause_info(Bs#bs.vp, I).
+    varp_nif:clause_info(Bs#bs.vp, I).
 
 get_clause_info(Bs, I, What) ->
-    varc:clause_info(Bs#bs.vp, I, What).
+    varp_nif:clause_info(Bs#bs.vp, I, What).
 
 %% Bs is under the assumption that Var = TRUE
 intersect_bindings(Bs, Var, Bs0) ->
@@ -532,7 +532,7 @@ intersect_bindings(Bs, Var, Bs0) ->
 
 intersect_(Bs,Var,[X|B0]) when is_integer(X) -> %% , X > 0 ->
     %% !Var -> X
-    case varc:value(Bs#bs.vp, X) of
+    case varp_nif:value(Bs#bs.vp, X) of
 	?T ->  %% Var -> X, !Var -> X   =>  X
 	    [X | intersect_(Bs,Var,B0)];
 	?F -> %% Var -> !X, !Var -> X  =>  Var=!X
@@ -541,7 +541,7 @@ intersect_(Bs,Var,[X|B0]) when is_integer(X) -> %% , X > 0 ->
 	    intersect_(Bs,Var,B0)
     end;
 intersect_(Bs,Var,[{X,Y}|B0]) ->  %% not used in varp prover
-    Y1 = varc:value(Bs#bs.vp, X),
+    Y1 = varp_nif:value(Bs#bs.vp, X),
     if Y =:= ?T,  Y1 =:= ?F -> %% !Var => X, Var => !X
 	    [{Var,-X} | intersect_(Bs,Var,B0)];
        Y =:= ?F, Y1 =:= ?T -> %% !Var => !X, Var => X
@@ -560,19 +560,19 @@ install_bindings(Bs,Level,Bnds) ->
     install_(Bs,Level,Bnds).
 
 install_(Bs,Level,[X|Xs]) when is_integer(X) ->
-    true = varc:bind(Bs#bs.vp, X),
+    true = varp_nif:bind(Bs#bs.vp, X),
     install_(Bs,Level,Xs);
 install_(Bs,Level,[{X,X}|Xs]) ->
     install_(Bs,Level,Xs);
 install_(Bs,Level=?TOP_LEVEL,[{X,?T}|Xs]) ->
-    true = varc:bind(Bs#bs.vp, X),
+    true = varp_nif:bind(Bs#bs.vp, X),
     install_(Bs,Level,Xs);
 install_(Bs,Level=?TOP_LEVEL,[{X,?F}|Xs]) ->
-    true = varc:bind(Bs#bs.vp, -X),
+    true = varp_nif:bind(Bs#bs.vp, -X),
     install_(Bs,Level,Xs);
 install_(Bs,?TOP_LEVEL,[{X,Y}|Xs]) ->
-    Xa = varc:variable_info(Bs#bs.vp, X, is_atom),
-    Ya = varc:variable_info(Bs#bs.vp, Y, is_atom),
+    Xa = varp_nif:variable_info(Bs#bs.vp, X, is_atom),
+    Ya = varp_nif:variable_info(Bs#bs.vp, Y, is_atom),
     if Ya, not Xa ->
 	    ?dbg("subst: ~s/~s\n", [format_lit(Bs,Y), format_lit(Bs,X)]),
 	    subst(Bs, Y, X);
@@ -1017,11 +1017,11 @@ build_({cnf,{Vars,_Clauses,_Sections,Cs}},Bs)
   when is_list(Cs) ->
     %% CNF only works as first formula! variables
     %% must be numerated 1..Vars
-    {1,Vars} = varc:add_variables(Bs#bs.vp, Vars),
+    {1,Vars} = varp_nif:add_variables(Bs#bs.vp, Vars),
     %% fixme bind all literals in Ls = TRUE
     lists:foreach(fun(CL) ->
 			  use_clause(Bs#bs.vp, CL),
-			  try varc:add_clause(Bs#bs.vp, CL) of
+			  try varp_nif:add_clause(Bs#bs.vp, CL) of
 			      {false,_I} ->
 				  throw(contradiction);
 			      false ->
@@ -1208,7 +1208,7 @@ build_snf([], Bs) ->
     Bs.
 
 use_clause(Vp, CL) ->
-    lists:foreach(fun(Li) -> varc:isused(Vp, abs(Li), true) end, CL).
+    lists:foreach(fun(Li) -> varp_nif:isused(Vp, abs(Li), true) end, CL).
 
 -ifdef(__UNUSED__).
 build_meta(F,X,[Xi|Xs],Acc,Bs) ->
@@ -2891,7 +2891,7 @@ fold_unbound_(Bs, Fun, Acc, Xi) ->
     fold_unbound_(Bs, Fun, Acc1, next_unbound(Bs, Xi)).
 
 each_variable(Bs, Fun) ->
-    each_variable_(Bs, Fun, 1, varc:info(Bs#bs.vp, number_of_variables)+1).
+    each_variable_(Bs, Fun, 1, varp_nif:info(Bs#bs.vp, number_of_variables)+1).
 
 each_variable_(_Bs, _Fun, Max, Max) ->
     ok;
@@ -2903,8 +2903,8 @@ clear_user_count(Bs) ->
     Vp = Bs#bs.vp,
     each_variable(Bs,
 		 fun(X) ->
-			 varc:set_user_count(Vp, X, 0),
-			 varc:set_user_count(Vp, -X, 0)
+			 varp_nif:set_user_count(Vp, X, 0),
+			 varp_nif:set_user_count(Vp, -X, 0)
 		 end).
 %%
 %% collect the model
@@ -2924,10 +2924,10 @@ model(Vp, Vs) ->
 collect_model(Vp,Vs) ->
     case maps:size(Vs) of
 	0 -> %% fixme mixed model! CNF with is declarations
-	    N = varc:get_number_of_variables(Vp),
+	    N = varp_nif:get_number_of_variables(Vp),
 	    lists:foldr(
 	      fun(I,Acc) ->
-		      case varc:value(Vp,I) of
+		      case varp_nif:value(Vp,I) of
 			  ?T -> [{{p,'x',[I]}, true}|Acc];
 			  ?F -> [{{p,'x',[I]},false}|Acc];
 			  _ -> Acc
@@ -2944,14 +2944,14 @@ collect_model(Vp,Vs) ->
     end.
 
 model_vars(Vp,Vs,[{Type,X,N,I}|Xs],Y,Ms) ->
-    V = case varc:value(Vp, Y) of
+    V = case varp_nif:value(Vp, Y) of
 	    ?T -> $1;
 	    ?F -> $0;
 	    _  -> $*
 	end,
     model_vars(Vp,Vs,Xs,Y,model_setvec(Type,X,N,I,V,Ms));
 model_vars(Vp,Vs,[X|Xs],Y,Ms) ->
-    case varc:value(Vp, Y) of
+    case varp_nif:value(Vp, Y) of
 	?T ->
 	    model_vars(Vp,Vs,Xs,Y,[{X,true}|Ms]);
 	?F ->
@@ -3106,7 +3106,7 @@ proof_output(Bs, Prefix, Clause) ->
 	binary ->
 	    Clause1 = lookup_clause(Bs, Clause),
 	    %% fixme: lookup literals!
-	    Bin = varc:compress_clause(Bs#bs.vp, Clause1),
+	    Bin = varp_nif:compress_clause(Bs#bs.vp, Clause1),
 	    file:write(Bs#bs.proof_fd, <<Prefix, Bin/binary, 0>>);
 	user ->
 	    Clause1 = lookup_clause(Bs, Clause),
@@ -3117,7 +3117,7 @@ proof_output(Bs, Prefix, Clause) ->
     end.
 
 lookup_clause(Bs, ClauseIndex) when is_integer(ClauseIndex) ->
-    varc:get_clause(Bs#bs.vp, ClauseIndex, undefined, true);
+    varp_nif:get_clause(Bs#bs.vp, ClauseIndex, undefined, true);
 lookup_clause(_Bs, Clause) when is_list(Clause) ->
     Clause.
 
@@ -3228,7 +3228,7 @@ format_bnd(Bs, X, Var, true) ->
 	    end,
     format_symbol(Var) ++ Value;
 format_bnd(Bs, X, Var, level) ->
-    L = varc:implication_level(Bs#bs.vp, X), 
+    L = varp_nif:implication_level(Bs#bs.vp, X), 
     Value = case value(Bs, X) of
 		true -> "=1@"++integer_to_list(L);
 		false -> "=0@"++integer_to_list(L);

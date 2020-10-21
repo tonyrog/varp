@@ -97,7 +97,7 @@ bt(Bs,Func,Acc,UseTurbo) ->
 
 %% initalise backtrack stack
 init(Bs,UseTurbo) ->
-    case varc:next_unbound(Bs#bs.vp) of
+    case varp_nif:next_unbound(Bs#bs.vp) of
 	false ->
 	    ?dbg("no variables unbound\n", []),
 	    {model,[]};
@@ -110,7 +110,7 @@ next([#e{ls=[]}|Stack1],Bs,UseTurbo) ->
     undo(Bs,Stack1),
     next(Stack1,Bs,UseTurbo);
 next([#e{ls=[Xi|Xs],level=Level,turbo=Turbo}|Stack],Bs,UseTurbo) ->
-    varc:set_level(Bs#bs.vp,Level),
+    varp_nif:set_level(Bs#bs.vp,Level),
     case eqv(Bs,Xi,Level,Turbo) of
 	false ->
 	    Stack1 = [#e{lit=Xi,ls=Xs,level=Level,turbo=Turbo}|Stack],
@@ -124,7 +124,7 @@ next([#e{ls=[Xi|Xs],level=Level,turbo=Turbo}|Stack],Bs,UseTurbo) ->
 	    undo_level(Bs,Level),
 	    next(Stack1,Bs,UseTurbo);
 	true ->
-	    case varc:next_unbound(Bs#bs.vp) of
+	    case varp_nif:next_unbound(Bs#bs.vp) of
 		false ->
 		    {model,[#e{lit=Xi,ls=Xs,level=Level,turbo=Turbo}|Stack]};
 		Xj ->
@@ -181,7 +181,7 @@ undo_all(_Bs, []) ->
 
 undo_level(Bs, Level) ->
     ?dbg("~sundo@~w\n", [indent(Level),Level]),
-    varc:undo_level(Bs#bs.vp,Level).
+    varp_nif:undo_level(Bs#bs.vp,Level).
     
 %% Xi is the current decision, that failed,
 %% Stack contains the negated previous decisions
@@ -198,14 +198,14 @@ proof_output(Bs, Stack) ->
 eqv(Bs,L,_Level,Turbo) ->
     ?dbg("~sdecide+bcp ~s/~w turbo=~w\n",
 	 [indent(_Level),varp_formula:format_lit(Bs,L),
-	  varc:info(Bs#bs.vp, phase),Turbo]),
-    case varc:decide(Bs#bs.vp,L) of
+	  varp_nif:info(Bs#bs.vp, phase),Turbo]),
+    case varp_nif:decide(Bs#bs.vp,L) of
 	false -> false;
 	true ->
 	    if Turbo ->
-		    varc:bcp(Bs#bs.vp,[L]);
+		    varp_nif:bcp(Bs#bs.vp,[L]);
 	       true ->
-		    varc:bcp(Bs#bs.vp)
+		    varp_nif:bcp(Bs#bs.vp)
 	    end
     end.
 

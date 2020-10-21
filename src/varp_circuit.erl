@@ -63,18 +63,18 @@ inv(X) -> -X.
 
 var(Vp) -> var(Vp, undefined).
 var(Vp, Symbol) ->
-    X = varc:add_variable(Vp,false),
-    varc:isused(Vp, X, true),
+    X = varp_nif:add_variable(Vp,false),
+    varp_nif:isused(Vp, X, true),
     sym(Vp, X, Symbol).
 
 atom(Vp, Symbol) ->
-    X = varc:add_variable(Vp,true),
-    varc:isused(Vp, X, true),
+    X = varp_nif:add_variable(Vp,true),
+    varp_nif:isused(Vp, X, true),
     sym(Vp, X, Symbol).
 
 sym(_Vp, X, undefined) -> X;
 sym(Vp, X, Symbol) ->
-    varc:add_symbol(Vp, X, Symbol),
+    varp_nif:add_symbol(Vp, X, Symbol),
     X.
 
 or_clauses(Vp, X, Y, Z) ->
@@ -518,16 +518,16 @@ add__(Vp, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
 
 clause(Vp, Ls) ->
     %%io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
-    varc:add_clause(Vp, Ls).
+    varp_nif:add_clause(Vp, Ls).
 
 test_gate(Gate) ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     X = var(Vp, "X"),
     C = gate(Vp,Gate,X,A,B),
-    varc:bind(Vp, C),
-    varc:set_level(Vp, 1),
+    varp_nif:bind(Vp, C),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 test_or() ->
@@ -549,63 +549,63 @@ test_xnor() ->
     test_gate('xnor').
 
 test_any() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
     E = any(Vp, [A,B,C,D]),
-    varc:bind(Vp, E),
-    varc:set_level(Vp, 1),
+    varp_nif:bind(Vp, E),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 test_all() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
     E = all(Vp, [A,B,C,D]),
-    varc:bind(Vp, E),
-    varc:set_level(Vp, 1),
+    varp_nif:bind(Vp, E),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 test_none() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
     E = none(Vp, [A,B,C,D]),
-    varc:bind(Vp, E),
-    varc:set_level(Vp, 1),
+    varp_nif:bind(Vp, E),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 
 test_eq1() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = var(Vp, "D"),
     E = one(Vp, [A,B,C,D]),
-    varc:bind(Vp, E),
-    varc:set_level(Vp, 1),
+    varp_nif:bind(Vp, E),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 test_eq1_2() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
     C = var(Vp, "C"),
     D = false,
     E = one(Vp, [A,B,C,D]),
-    varc:bind(Vp, E),
-    varc:set_level(Vp, 1),
+    varp_nif:bind(Vp, E),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 test_half_adder1() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     S = var(Vp, "S"),
     A = var(Vp, "A"),
     B = var(Vp, "B"),
@@ -614,7 +614,7 @@ test_half_adder1() ->
     bt_all(Vp).
 
 test_full_adder1() ->
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     X = var(Vp, "X"),
     Y = var(Vp, "Y"),
     Z = var(Vp, "Z"),
@@ -627,22 +627,22 @@ test_add() ->
     test_add(3).
 
 test_add(N) ->
-    Vp = varc:new(#{xref => true}),
-    {Y0,Y1} = varc:add_variables(Vp,N),
-    {Z0,Z1} = varc:add_variables(Vp,N),
+    Vp = varp_nif:new(#{xref => true}),
+    {Y0,Y1} = varp_nif:add_variables(Vp,N),
+    {Z0,Z1} = varp_nif:add_variables(Vp,N),
     Ys = lists:seq(Y0,Y1),
-    varc:add_symbol(Vp, Ys, "Y"),
+    varp_nif:add_symbol(Vp, Ys, "Y"),
     io:format("Y = ~w\n", [Ys]),
     Zs = lists:seq(Z0,Z1),
-    varc:add_symbol(Vp, Zs, "Z"),
+    varp_nif:add_symbol(Vp, Zs, "Z"),
     io:format("Z = ~w\n", [Zs]),
     {[Ci,_Cj|_], Xs} = add(Vp, Ys, Zs),
-    varc:add_symbol(Vp, Ci, "Carry"),
+    varp_nif:add_symbol(Vp, Ci, "Carry"),
     io:format("X = ~w\n", [Xs]),
-    varc:add_symbol(Vp, Xs, "X"),
+    varp_nif:add_symbol(Vp, Xs, "X"),
     set_status(Vp, Ci, false),
     %% set_overflow(Vp, uint, Ci, Cj, false),
-    varc:set_level(Vp, 1),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 
@@ -650,22 +650,22 @@ test_sub() ->
     test_sub(3).
 
 test_sub(N) ->
-    Vp = varc:new(#{xref => true}),
-    {Y0,Y1} = varc:add_variables(Vp,N),
-    {Z0,Z1} = varc:add_variables(Vp,N),
+    Vp = varp_nif:new(#{xref => true}),
+    {Y0,Y1} = varp_nif:add_variables(Vp,N),
+    {Z0,Z1} = varp_nif:add_variables(Vp,N),
     Ys = lists:seq(Y0,Y1),
-    varc:add_symbol(Vp, Ys, "Y"),
+    varp_nif:add_symbol(Vp, Ys, "Y"),
     io:format("Y = ~w\n", [Ys]),
     Zs = lists:seq(Z0,Z1),
-    varc:add_symbol(Vp, Zs, "Z"),
+    varp_nif:add_symbol(Vp, Zs, "Z"),
     io:format("Z = ~w\n", [Zs]),
     {[Ci,_Cj|_], Xs} = sub(Vp, Ys, Zs),
-    varc:add_symbol(Vp, -Ci, "Br"),
+    varp_nif:add_symbol(Vp, -Ci, "Br"),
     io:format("X = ~w\n", [Xs]),
-    varc:add_symbol(Vp, Xs, "X"),
+    varp_nif:add_symbol(Vp, Xs, "X"),
     set_status(Vp, -Ci, false),
     %% set_overflow(Vp, uint, Ci, Cj, false),
-    varc:set_level(Vp, 1),
+    varp_nif:set_level(Vp, 1),
     bt_all(Vp).
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
@@ -690,9 +690,9 @@ set_overflow(_Vp,_Type,_Ci,_Cj, ignore) ->  %% allow carry overflow
 
 
 bt(Vp) ->
-    case not varc:nbcp(Vp) of
+    case not varp_nif:nbcp(Vp) of
 	true ->
-	    case varc:undo(Vp) of
+	    case varp_nif:undo(Vp) of
 		false -> false;  %% contradiction
 		true -> bt(Vp)
 	    end;
@@ -707,7 +707,7 @@ bt_all(Vp) ->
 bt_all(Vp, Limit) ->
     T0 = erlang:monotonic_time(),
     Count = 
-	case varc:next_unbound(Vp) of
+	case varp_nif:next_unbound(Vp) of
 	    false ->
 		0;
 	    _ ->
@@ -725,7 +725,7 @@ bt_all(Vp, Limit) ->
     Count.
 
 bt_all_(Vp, Count, Limit) ->
-    case varc:undo(Vp) andalso not bt_done(Count, Limit) of
+    case varp_nif:undo(Vp) andalso not bt_done(Count, Limit) of
 	true ->
 	    case bt(Vp) of
 		true ->
@@ -742,13 +742,13 @@ bt_done(_Count, undefined) -> false;
 bt_done(Count, Limit) -> Count >= Limit.
 
 %% model(Vp) ->
-%%    N = varc:info(Vp, 'number_of_variables'),
+%%    N = varp_nif:info(Vp, 'number_of_variables'),
 %%    [symbol(Vp, X) ||
 %%	X <- lists:seq(1, N),
-%%	varc:value(Vp, X), varc:variable_info(Vp, X, 'is_atom')].
+%%	varp_nif:value(Vp, X), varp_nif:variable_info(Vp, X, 'is_atom')].
 
 model(Vp) ->
-    model_(Vp, varc:first_symbol(Vp), []).
+    model_(Vp, varp_nif:first_symbol(Vp), []).
 
 model_(_Vp, false, Model) ->
     Model;
@@ -757,23 +757,23 @@ model_(Vp, Var, Model) ->
 	undefined ->
 	    error({not_defined, Var});
 	false -> 
-	    model_(Vp, varc:next_symbol(Vp,Var), Model);
+	    model_(Vp, varp_nif:next_symbol(Vp,Var), Model);
 	Value ->
-	    model_(Vp, varc:next_symbol(Vp,Var), [{Var,Value}|Model])
+	    model_(Vp, varp_nif:next_symbol(Vp,Var), [{Var,Value}|Model])
     end.
 
 symbol_value(Vp, Symbol) ->
-    case varc:find_symbol(Vp, Symbol) of
+    case varp_nif:find_symbol(Vp, Symbol) of
 	false -> undefined;
 	Xs when is_list(Xs) -> unsigned_value(Vp, Xs);
-	X when is_integer(X) -> varc:value(Vp, X)
+	X when is_integer(X) -> varp_nif:value(Vp, X)
     end.
 
 unsigned_value(Vp, Xs) ->
     unsigned_value_(Vp, Xs, 0, 0).
 
 unsigned_value_(Vp, [X|Xs], I, Value) ->
-    case varc:value(Vp, X) of
+    case varp_nif:value(Vp, X) of
 	undefined -> 
 	    io:format("~w index=~w undefined\n", [X,I]),
 	    undefined;
@@ -793,16 +793,16 @@ signed_value(Vp, Xs) ->
     end.
 
 bind_symbol(Vp, Symbol, Value) ->
-    case varc:find_symbol(Vp, Symbol) of
+    case varp_nif:find_symbol(Vp, Symbol) of
 	false -> false;
 	Xs when is_list(Xs) -> 
 	    bind_value(Vp, Xs, Value);
 	X when is_integer(X) ->
 	    case Value of
-		true -> varc:bind(Vp, X);
-		false -> varc:bind(Vp, -X);
-		1 -> varc:bind(Vp, X);
-		0 -> varc:bind(Vp, -X)
+		true -> varp_nif:bind(Vp, X);
+		false -> varp_nif:bind(Vp, -X);
+		1 -> varp_nif:bind(Vp, X);
+		0 -> varp_nif:bind(Vp, -X)
 	    end
     end.
 	
@@ -814,8 +814,8 @@ bind_value(Vp, Xs, Value) when is_bitstring(Value) ->
 %% bind bits in integer
 bind_integer(Vp, [X|Xs], Value) ->
     case Value band 1 of
-	1 -> varc:bind(Vp, X);
-	0 -> varc:bind(Vp, -X)
+	1 -> varp_nif:bind(Vp, X);
+	0 -> varp_nif:bind(Vp, -X)
     end,
     bind_integer(Vp, Xs, Value bsr 1);
 bind_integer(_Vp, [], _Value) ->
@@ -824,12 +824,12 @@ bind_integer(_Vp, [], _Value) ->
 %% bind bits (fixme what is the "natural" order?)
 bind_bits(Vp, [X|Xs], <<Value:1,Rest/bits>>) ->
     case Value of
-	1 -> varc:bind(Vp, X);
-	0 -> varc:bind(Vp, -X)
+	1 -> varp_nif:bind(Vp, X);
+	0 -> varp_nif:bind(Vp, -X)
     end,
     bind_bits(Vp, Xs, Rest);
 bind_bits(Vp, [X|Xs], <<>>) ->
-    varc:bind(Vp, -X),
+    varp_nif:bind(Vp, -X),
     bind_bits(Vp, Xs, <<>>);
 bind_bits(_Vp, [], _) ->
     ok.
@@ -837,17 +837,17 @@ bind_bits(_Vp, [], _) ->
 symbol(_Vp,true) -> "t";
 symbol(_Vp,false) -> "f";
 symbol(Vp, X) when is_integer(X) ->
-    case varc:variable_info(Vp, X, 'symbol') of
+    case varp_nif:variable_info(Vp, X, 'symbol') of
 	[] ->
 	    "X("++integer_to_list(X)++")";
 	[{Name,0}|_] when is_binary(Name) ->
-	    case varc:find_symbol(Vp,Name) of
+	    case varp_nif:find_symbol(Vp,Name) of
 		false -> "X("++integer_to_list(X)++")";
 		Y when is_integer(Y), abs(Y) =:= X -> binary_to_list(Name);
 		Ys when is_list(Ys) -> binary_to_list(Name)++"[0]"
 	    end;
 	[{Term,0}|_] when is_tuple(Term) ->
-	    case varc:find_symbol(Vp,Term) of
+	    case varp_nif:find_symbol(Vp,Term) of
 		false -> "X("++integer_to_list(X)++")";
 		Y when is_integer(Y), abs(Y) =:= X -> var_to_list(Term);
 		Ys when is_list(Ys) -> var_to_list(Term)++"[0]"

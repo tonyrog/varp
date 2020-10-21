@@ -63,17 +63,17 @@ succ(Fd, Type, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [M, N])
     end,
-    I = varc:clauseset_first(Bs#bs.vp),
+    I = varp_nif:clauseset_first(Bs#bs.vp),
     succ_(Fd, Type, I, Bs).
 
 succ_(_Fd,_Type,false,Bs) ->
     {?CONTINUE,[],Bs};
 succ_(Fd,Type,I,Bs) ->
-    case varc:get_clause(Bs#bs.vp, I, undefined, false) of
+    case varp_nif:get_clause(Bs#bs.vp, I, undefined, false) of
 	true ->
-	    succ_(Fd,Type,varc:clauseset_next(Bs#bs.vp,I),Bs);
+	    succ_(Fd,Type,varp_nif:clauseset_next(Bs#bs.vp,I),Bs);
 	[] ->
-	    succ_(Fd,Type,varc:clauseset_next(Bs#bs.vp,I),Bs);
+	    succ_(Fd,Type,varp_nif:clauseset_next(Bs#bs.vp,I),Bs);
 	CL ->
 	    Bn = clause_bn(Bs,CL),
 	    Gn = group_bn(Bn),
@@ -97,7 +97,7 @@ succ_(Fd,Type,I,Bs) ->
 %%		      snf -> format_succ_snf_clause(Bs,Bn)
 %%		  end,
 %%	    io:put_chars(Fd,[Fmt,"\n"]),
-	    succ_(Fd,Type,varc:clauseset_next(Bs#bs.vp,I),Bs)
+	    succ_(Fd,Type,varp_nif:clauseset_next(Bs#bs.vp,I),Bs)
     end.
 
 %% generate succesor covering from grouped "binary" number
@@ -159,7 +159,7 @@ cat(C,I,L) -> [C|cat(C,I-1,L)].
 
 %% return b1b2..bn!
 clause_bn(Bs, CL) ->
-    clause_bn_(Bs, varc:next_unbound(Bs#bs.vp), CL, []).
+    clause_bn_(Bs, varp_nif:next_unbound(Bs#bs.vp), CL, []).
 
 clause_bn_(_Bs, false, _CL, Acc) -> 
     lists:reverse(Acc);
@@ -178,19 +178,19 @@ clause_bn_(Bs, Xi, CL, Acc) ->
 			 $*
 		 end
 	 end,
-    clause_bn_(Bs, varc:next_unbound(Bs#bs.vp, Xi), CL, [Bi | Acc]).
+    clause_bn_(Bs, varp_nif:next_unbound(Bs#bs.vp, Xi), CL, [Bi | Acc]).
 
 %% get unbound mapped to "bit number"
 get_var_map(Bs) ->
     get_var_map_(Bs, #{}).
 
 get_var_map_(Bs, Map) ->
-    get_var_map_(Bs, varc:next_unbound(Bs#bs.vp), Map, 1).
+    get_var_map_(Bs, varp_nif:next_unbound(Bs#bs.vp), Map, 1).
 
 get_var_map_(_Bs, false, Map, _N) ->
     Map;
 get_var_map_(Bs, Xi, Map, J) ->
-    get_var_map_(Bs,varc:next_unbound(Bs,Xi),maps:put(Xi,J,Map), J+1).
+    get_var_map_(Bs,varp_nif:next_unbound(Bs,Xi),maps:put(Xi,J,Map), J+1).
 
 format_succ_cnf_clause(_Bs,CL) ->
     [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].
@@ -200,16 +200,16 @@ format_succ_snf_clause(Bs,CL) ->
 
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varc:clauseset_first(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;
 count_number_of_clauses_(Bs, I, N) ->
-    case varc:get_clause(Bs#bs.vp, I, undefined, false) of
+    case varp_nif:get_clause(Bs#bs.vp, I, undefined, false) of
 	true -> 
-	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
+	    count_number_of_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp,I),N);
 	[] ->
-	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
+	    count_number_of_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp,I),N);
 	_CL ->    
-	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N+1)
+	    count_number_of_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp,I),N+1)
     end.

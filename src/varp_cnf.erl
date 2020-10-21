@@ -79,22 +79,22 @@ emit_fd(Fd, Type, Symbols, Raw, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [NumVars, NumClauses])
     end,
-    cnf_(Fd, Type, Raw, varc:clauseset_first(Bs#bs.vp), VarMap, Bs).
+    cnf_(Fd, Type, Raw, varp_nif:clauseset_first(Bs#bs.vp), VarMap, Bs).
 
 
 cnf_(_Fd,_Type,_Raw,false,_VarMap,Bs) ->
     {?CONTINUE,[],Bs};
 cnf_(Fd,Type,Raw,I,VarMap,Bs) ->
-    case varc:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
+    case varp_nif:get_clause(Bs#bs.vp, I, undefined, Raw=/=false) of
 	true ->
-	    cnf_(Fd,Type,Raw,varc:clauseset_next(Bs#bs.vp,I),VarMap,Bs);
+	    cnf_(Fd,Type,Raw,varp_nif:clauseset_next(Bs#bs.vp,I),VarMap,Bs);
 	CL when is_list(CL) ->
 	    Fmt = case Type of
 		      cnf -> format_cnf_clause(Bs,CL,Raw,VarMap); 
 		      snf -> format_snf_clause(Bs,CL,Raw,VarMap)
 		  end,
 	    io:put_chars(Fd,[Fmt,"\n"]),
-	    cnf_(Fd,Type,Raw,varc:clauseset_next(Bs#bs.vp,I),VarMap,Bs)
+	    cnf_(Fd,Type,Raw,varp_nif:clauseset_next(Bs#bs.vp,I),VarMap,Bs)
     end.
 
 format_cnf_clause(_Bs,CL,_,VarMap) ->
@@ -133,14 +133,14 @@ renumerate_clauses(Bs, Raw) ->
     renumerate_clauses(Bs, Raw, #{}, 0).
 
 renumerate_clauses(Bs, Raw, VarMap, NumClauses) ->
-    renumerate_clauses(Bs, varc:clauseset_first(Bs#bs.vp),
+    renumerate_clauses(Bs, varp_nif:clauseset_first(Bs#bs.vp),
 		       Raw, VarMap, NumClauses).
 
 renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses) ->
     {VarMap, NumClauses, maps:size(VarMap)};
 renumerate_clauses(Bs, I, Raw, VarMap, NumClauses) ->
-    I1 = varc:clauseset_next(Bs#bs.vp,I),
-    case varc:get_clause(Bs#bs.vp, I, undefined, Raw) of
+    I1 = varp_nif:clauseset_next(Bs#bs.vp,I),
+    case varp_nif:get_clause(Bs#bs.vp, I, undefined, Raw) of
 	true ->
 	    renumerate_clauses(Bs,I1,Raw,VarMap,NumClauses);
 	CL when is_list(CL) ->
@@ -176,15 +176,15 @@ translate_literal(L, VarMap) when L > 0 ->
 -ifdef(unused).
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varc:clauseset_first(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;
 count_number_of_clauses_(Bs, I, N) ->
-    case varc:get_clause(Bs#bs.vp, I, undefined, false) of
+    case varp_nif:get_clause(Bs#bs.vp, I, undefined, false) of
 	true -> 
-	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N);
+	    count_number_of_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp,I),N);
 	_CL when is_list(_CL) ->    
-	    count_number_of_clauses_(Bs, varc:clauseset_next(Bs#bs.vp,I),N+1)
+	    count_number_of_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp,I),N+1)
     end.
 -endif.

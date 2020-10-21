@@ -23,19 +23,19 @@ run(Bs, Param)  when is_record(Bs,bs), is_map(Param) ->
 	?T ->
 	    {?INCONSISTENT,[],Bs};
 	?F ->
-	    case varc:bcp(Bs#bs.vp) of
+	    case varp_nif:bcp(Bs#bs.vp) of
 		false -> 
 		    {?INCONSISTENT,[],Bs};
 		true -> 
 		    {?CONTINUE,[],Bs}
 	    end;
 	Main ->
-	    varc:set_level(Bs#bs.vp,?TOP_LEVEL),
-	    case varc:bind(Bs#bs.vp, -Main) of
+	    varp_nif:set_level(Bs#bs.vp,?TOP_LEVEL),
+	    case varp_nif:bind(Bs#bs.vp, -Main) of
 		false ->
 		    {?INCONSISTENT,[],Bs};
 		true ->
-		    case varc:bcp(Bs#bs.vp) of
+		    case varp_nif:bcp(Bs#bs.vp) of
 			false -> 
 			    {?INCONSISTENT,[],Bs};
 			true -> 

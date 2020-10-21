@@ -23,7 +23,7 @@ run(Bs, _Param) ->
 	spawn_monitor(
 	  fun() ->
 		  io:format("monitor ~p started\n", [self()]),
-		  varc:subscribe(Bs#bs.vp, Info),
+		  varp_nif:subscribe(Bs#bs.vp, Info),
 		  Mon = monitor(process, SELF),
 		  SELF ! {ack,Ref},
 		  loop(Bs, Mon)

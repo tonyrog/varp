@@ -42,7 +42,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     varp_formula:config(Bs, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
-    varc:set_level(Bs#bs.vp, ?ROOT_LEVEL),
+    varp_nif:set_level(Bs#bs.vp, ?ROOT_LEVEL),
     case varp_formula:getopt(Bs1,method) of
 	collect -> collect(Bs1, 0, N, []);
 	count   -> count(Bs1, 0, N)
@@ -64,20 +64,20 @@ collect(Bs, Count, N, Acc) ->
     end.
 
 collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
-    case varc:nbcp(Bs#bs.vp) of
+    case varp_nif:nbcp(Bs#bs.vp) of
 	true ->
-	    %% io:format("model: ~p\n", [varc:get_all_bindings(Bs#bs.vp)]),
+	    %% io:format("model: ~p\n", [varp_nif:get_all_bindings(Bs#bs.vp)]),
 	    Model = varp:output_model(Bs,false,Count+1),
-	    case varc:undo(Bs#bs.vp) of
+	    case varp_nif:undo(Bs#bs.vp) of
 		true ->
 		    collect(Bs, Count+1, N, [Model|Acc]);
 		false ->
 		    {?DONE, [Model|Acc], Bs}
 	    end;
 	false ->
-	    %% io:format("contradiction: ~p\n", [varc:get_all_bindings(Bs#bs.vp)]),
+	    %% io:format("contradiction: ~p\n", [varp_nif:get_all_bindings(Bs#bs.vp)]),
 	    proof_output(Bs),
-	    case varc:undo(Bs#bs.vp) of
+	    case varp_nif:undo(Bs#bs.vp) of
 		true ->
 		    collect(Bs, Count, N, Acc);
 		false ->
@@ -106,13 +106,13 @@ count(Bs, Count, N) ->
     end.
 
 count_(Bs, Count, N) when N =:= 0; Count < N ->
-    case varc:nbcp(Bs#bs.vp) of
+    case varp_nif:nbcp(Bs#bs.vp) of
 	true ->
 	    case varp_formula:getopt(Bs,print) of
 		false -> ok;
 		_ -> varp:output_model(Bs,false,Count+1)
 	    end,
-	    case varc:undo(Bs#bs.vp) of
+	    case varp_nif:undo(Bs#bs.vp) of
 		true ->
 		    count(Bs, Count+1, N);
 		false ->
@@ -120,7 +120,7 @@ count_(Bs, Count, N) when N =:= 0; Count < N ->
 	    end;
 	false ->
 	    proof_output(Bs),
-	    case varc:undo(Bs#bs.vp) of
+	    case varp_nif:undo(Bs#bs.vp) of
 		true ->
 		    count(Bs, Count, N);
 		false ->
@@ -135,13 +135,13 @@ count_(Bs, Count, N) when N =:= 0; Count < N ->
 
 %% undo all levels (except 0) and set level = 0
 undo_all(Bs) ->
-    Level = varc:info(Bs#bs.vp, level),
+    Level = varp_nif:info(Bs#bs.vp, level),
     undo_all_levels(Bs, Level).
 
 undo_all_levels(Bs, 0) ->
-    varc:set_level(Bs#bs.vp, 0);
+    varp_nif:set_level(Bs#bs.vp, 0);
 undo_all_levels(Bs, I) ->
-    varc:undo_level(Bs#bs.vp,I),
+    varp_nif:undo_level(Bs#bs.vp,I),
     undo_all_levels(Bs, I-1).
 
 %% Xi is the current decision, that failed, 

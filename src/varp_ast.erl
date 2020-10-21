@@ -13,7 +13,7 @@
 -export([test/1]).
 
 build(Tree) ->
-    build(Tree, varc:new(#{})).
+    build(Tree, varp_nif:new(#{})).
 
 build(Tree, Vp) ->
     build(Tree, Vp, #{}).
@@ -63,11 +63,11 @@ var(Sym, Args, Vp, State) ->
     {P, As} = var_term({p,Sym,Args}),
     As1 = [eval_term(Ai,State) || Ai <- As],
     Term1 = {P, As1},
-    case varc:find_symbol(Vp, Term1) of
+    case varp_nif:find_symbol(Vp, Term1) of
 	false ->
-	    Var = varc:add_variable(Vp, true),
-	    varc:isused(Vp, Var, true),  %% mark as in use!
-	    varc:add_symbol(Vp, Var, Term1),
+	    Var = varp_nif:add_variable(Vp, true),
+	    varp_nif:isused(Vp, Var, true),  %% mark as in use!
+	    varp_nif:add_symbol(Vp, Var, Term1),
 	    Var;
 	Var when is_integer(Var) ->
 	    Var;
@@ -210,13 +210,13 @@ eval(Fun, A, Bs) ->
 test(Text) ->
     {ok,{_Def,Tree}} = varp:parse(Text),
     io:format("Tree = ~p\n", [Tree]),
-    Vp = varc:new(#{xref => true}),
+    Vp = varp_nif:new(#{xref => true}),
     F = build(Tree, Vp, #{}),
-    case varc:bind(Vp, F) of
+    case varp_nif:bind(Vp, F) of
 	false ->
 	    io:format("0 models found\n", []),
 	    0;
 	true ->
-	    varc:set_level(Vp, 1),
+	    varp_nif:set_level(Vp, 1),
 	    varp_circuit:bt_all(Vp)
     end.

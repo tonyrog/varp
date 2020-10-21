@@ -5,7 +5,7 @@
 %%% @end
 %%% Created : 20 Aug 2015 by Tony Rogvall <tony@rogvall.se>
 
--module(varc).
+-module(varp_nif).
 
 -on_load(init/0).
 
@@ -160,7 +160,7 @@
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
 
 init() ->
-    Nif = filename:join([code:priv_dir(varp), "varc_nif"]),
+    Nif = filename:join([code:priv_dir(varp), "varp_nif"]),
     ?debug("Loading: ~s\n", [Nif]),
     erlang:load_nif(Nif, 0).
 
@@ -720,10 +720,10 @@ order_all_(Vp,Xi,Acc) ->
     order_all_(Vp, next_unbound(Vp, Xi), [Xi|Acc]).
 
 phase_all(Vp) ->
-    [varc:variable_info(Vp,Vi,phase) || Vi <- order_all(Vp)].
+    [variable_info(Vp,Vi,phase) || Vi <- order_all(Vp)].
 
 version() ->
-    varc:info(new(), version).
+    info(new(), version).
 
 i() ->
     Vt = new(),
@@ -1270,15 +1270,15 @@ add_friends([], _X, Map) ->
 
 %% FIXME: add depth info for all friends?
 %% depth(V, Yi, DepthMap) ->
-%%    Cix = varc:implication_clause(V, Yi),
-%%    Clause = varc:get_clause(V, Cix, Yi),
+%%    Cix = varp_nif:implication_clause(V, Yi),
+%%    Clause = varp_nif:get_clause(V, Cix, Yi),
 %%    Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
 %%    {Depth, DepthMap#{ Yi => Depth }}.
     
 %% add (at most) R random elements to Vec (not already in Vec)
 vec_extend_rand(V, Vec, R) ->
-    N = varc:get_number_of_variables(V),
-    M = varc:get_number_of_unbound_variables(V) - length(Vec),
+    N = varp_nif:get_number_of_variables(V),
+    M = varp_nif:get_number_of_unbound_variables(V) - length(Vec),
     vec_extend_rand_(V, Vec, N, M, R).
 
 vec_extend_rand_(_V, Vec, _N, _M, 0) -> Vec;

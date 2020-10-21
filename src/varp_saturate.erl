@@ -89,21 +89,21 @@ saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
     saturate(Bs,K,0,0,0,Timeout,MaxLaps,Threshold).
 
 saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
-    varc:config(Bs#bs.vp, xref, true),
+    varp_nif:config(Bs#bs.vp, xref, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     Level = ?TOP_LEVEL,
     N = varp_formula:number_of_bound(Bs),
     FriendMap = if F =:= 0 ->
 			undefined;  %% not needed
 		   true ->
-			varc:make_friend_map(Bs#bs.vp)
+			varp_nif:make_friend_map(Bs#bs.vp)
 		end,
     %% io:format("FriendMap = ~w\n", [FriendMap]),
     case loop(Bs1,K,Q,F,R,N,Level,MaxLaps,Threshold,FriendMap) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
 	{Reason,Bs1} -> 
-	    varc:config(Bs#bs.vp, xref, false),
+	    varp_nif:config(Bs#bs.vp, xref, false),
 	    ?dbg("saturate limit ~w\n", [Reason]),
 	    {Reason,[],Bs1#bs{ t_local = undefined }}
     end.
@@ -133,7 +133,7 @@ loop_done(Reason, _Laps, Bs) ->
 %% Variables in every eval is K+Q+R
 
 lap(Bs,K,Q,F,R,FriendMap) ->
-    case varc:vec_create(Bs#bs.vp, varc:next_unbound(Bs#bs.vp), K) of
+    case varp_nif:vec_create(Bs#bs.vp, varp_nif:next_unbound(Bs#bs.vp), K) of
 	[] -> true;
 	Vec0 -> lap_(Bs,Vec0,Q,F,R,1,FriendMap)
     end.
@@ -150,10 +150,10 @@ lap_(Bs,Vec0,Q,F,R,Count,FriendMap) ->
     lap__(Bs,Vec0,Q,F,R,Count,FriendMap).
 
 lap__(Bs,Vec0,Q,F,R,Count,FriendMap) ->
-    case varc:vec_sat(Bs#bs.vp,Vec0,Q,F,R,FriendMap) of
+    case varp_nif:vec_sat(Bs#bs.vp,Vec0,Q,F,R,FriendMap) of
 	false -> false;
 	true ->
-	    case varc:vec_step(Bs#bs.vp, Vec0) of
+	    case varp_nif:vec_step(Bs#bs.vp, Vec0) of
 		false -> true;
 		Vec1 -> lap_(Bs,Vec1,Q,F,R,Count+1,FriendMap)
 	    end

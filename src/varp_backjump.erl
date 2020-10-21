@@ -176,7 +176,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     init(Bs1, Param, MaxLearned, M0).
 
 init(Bs, Param, MaxLearned, MR) ->
-    varc:set_level(Bs#bs.vp, ?TOP_LEVEL),
+    varp_nif:set_level(Bs#bs.vp, ?TOP_LEVEL),
     timeout_or_cancel(Bs,Param,?TOP_LEVEL,MaxLearned,MR,[]).
 
 timeout_or_cancel(Bs,Param,Level,MaxLearned,MR,Stack) ->
@@ -190,7 +190,7 @@ timeout_or_cancel(Bs,Param,Level,MaxLearned,MR,Stack) ->
     end.
 
 main(Bs,Param,Level,MaxLearned,MR,Stack) ->
-    case varc:bcp(Bs#bs.vp) of
+    case varp_nif:bcp(Bs#bs.vp) of
 	false ->
 	    if Level =:= 0, MR#m.n =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
@@ -228,8 +228,8 @@ conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    move_to_gamma(Bs,Len,Clause),
 	    if JType =:= olle ->
 		    io:format("olle=~w\n", [Lj]),
-		    undefined = varc:value(Bs#bs.vp, Lj),
-		    varc:order_first(Bs#bs.vp, [Lj]);
+		    undefined = varp_nif:value(Bs#bs.vp, Lj),
+		    varp_nif:order_first(Bs#bs.vp, [Lj]);
 	       true ->
 		    ok
 	    end,
@@ -264,8 +264,8 @@ conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	    %% install the conflict clause
 	    move_to_gamma(Bs,ALen,Aix),
 	    if JType =:= olle ->
-		    undefined = varc:value(Bs#bs.vp, Lj),
-		    varc:order_first(Bs#bs.vp, [Lj]);
+		    undefined = varp_nif:value(Bs#bs.vp, Lj),
+		    varp_nif:order_first(Bs#bs.vp, [Lj]);
 	       true ->
 		    ok
 	    end,
@@ -273,10 +273,10 @@ conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
     end.
 
 %% jump_info(V, Cix) ->
-%%    varc:clause_info(V, Cix, jump).
+%%    varp_nif:clause_info(V, Cix, jump).
 jump_info(Bs, {Len,Clause}) ->
     Qj = lists:sort(fun({_Qa,Aj},{_Qb,Bj}) -> Aj > Bj end,
-		    [{Q,varc:implication_level(Bs#bs.vp,Q)} ||
+		    [{Q,varp_nif:implication_level(Bs#bs.vp,Q)} ||
 			Q <- Clause]),
     %% io:format("Qj = ~w\n", [Qj]),
     case Qj of
@@ -300,11 +300,11 @@ move_to_gamma(_Bs, []) ->
     ok.
 
 move_to_gamma(Bs, 1, Clause=[L])  ->
-    true = varc:bind(Bs#bs.vp,L,?TOP_LEVEL),
+    true = varp_nif:bind(Bs#bs.vp,L,?TOP_LEVEL),
     varp_formula:proof_output(Bs,$a,Clause),
     counters:add(Bs#bs.clen, 1, 1);
 move_to_gamma(Bs, Len, Clause=[_,_|_]) ->
-    %%io:format("Move CLAUSE ~w to gamma\n", [varc:get_clause(Bs#bs.vp, Aix)]),
+    %%io:format("Move CLAUSE ~w to gamma\n", [varp_nif:get_clause(Bs#bs.vp, Aix)]),
     Gix = varp_formula:add_clause(Bs, Clause, ?GAMMA),
     varp_formula:proof_output(Bs,$a,Gix),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
@@ -370,7 +370,7 @@ reorder(Bs,Param) ->
     end.
 
 next(Bs,Param,Level,MaxLearned,MR,Stack) ->
-    case varc:next_unbound(Bs#bs.vp) of
+    case varp_nif:next_unbound(Bs#bs.vp) of
 	false ->
 	    N = MR#m.n + 1,
 	    Model = varp:output_model(Bs,false,N),
@@ -401,8 +401,8 @@ next(Bs,Param,Level,MaxLearned,MR,Stack) ->
 	Xj ->
 	    NextLevel = Level+1,
 	    %% io:format("next=~w\n", [Xj]),
-	    varc:set_level(Bs#bs.vp,NextLevel),
-	    true = varc:decide(Bs#bs.vp,Xj),
+	    varp_nif:set_level(Bs#bs.vp,NextLevel),
+	    true = varp_nif:decide(Bs#bs.vp,Xj),
 	    timeout_or_cancel(Bs,Param,NextLevel,MaxLearned,MR,
 			      [{Xj,NextLevel}|Stack])
     end.
@@ -416,9 +416,9 @@ return(What, MR, Bs) ->
     end.
 
 need_purge(Bs, _Param, MaxLearned) ->
-    case varc:clauseset_offset(Bs#bs.vp, ?GAMMA) > 0 of
+    case varp_nif:clauseset_offset(Bs#bs.vp, ?GAMMA) > 0 of
 	true ->
-	    Learned = varc:clauseset_size(Bs#bs.vp, ?GAMMA),
+	    Learned = varp_nif:clauseset_size(Bs#bs.vp, ?GAMMA),
 	    Learned > MaxLearned;
 	false ->
 	    false
@@ -433,7 +433,7 @@ restart_by_timeout(Bs, Param) ->
     receive 
 	{timeout,_Timer,restart} ->
 	    start_restart_timer(Param),
-	    Bound0 = varc:get_number_of_bindings(Bs#bs.vp, 0),
+	    Bound0 = varp_nif:get_number_of_bindings(Bs#bs.vp, 0),
 	    PrevBound0 = get_bound0(Bs),
 	    set_bound0(Bs, Bound0),
 	    PrevBound0 =:= Bound0   %% no units since last restart
@@ -478,11 +478,11 @@ set_bcp_counter(Bs, Value) ->
     counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, Value).
     
 undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
-    ?dbg("~s~s\n", [indentd(Level),varp_formula:format_lit(Bs,varc:get_decision(Bs#bs.vp, Level))]),
-    varc:undo_level(Bs#bs.vp, Level),
+    ?dbg("~s~s\n", [indentd(Level),varp_formula:format_lit(Bs,varp_nif:get_decision(Bs#bs.vp, Level))]),
+    varp_nif:undo_level(Bs#bs.vp, Level),
     undo_until(Bs, Level-1, NewLevel);
 undo_until(Bs, Level, Level) ->
-    varc:set_level(Bs#bs.vp, Level),
+    varp_nif:set_level(Bs#bs.vp, Level),
     Bs.
 
 pop_until(Bs,[{_Xk,Level}|Stack],JLevel) when Level > JLevel ->
@@ -541,7 +541,7 @@ keep_size(Bs, Param, MaxLearned) ->
 		  true ->
 		       0
 	       end,
-    varc:clauseset_offset(Bs#bs.vp, ?GAMMA, KeepSize),  %% sets gamma offset
+    varp_nif:clauseset_offset(Bs#bs.vp, ?GAMMA, KeepSize),  %% sets gamma offset
     case maps:get(display, Param) of
 	true ->
 	    io:format("keep: KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
@@ -551,7 +551,7 @@ keep_size(Bs, Param, MaxLearned) ->
     KeepSize.
 
 max_learned(Bs,Param) ->
-    Permanent = varc:clauseset_size(Bs#bs.vp, ?DELTA),
+    Permanent = varp_nif:clauseset_size(Bs#bs.vp, ?DELTA),
     MaxLearnedClauses = maps:get(max_learned,Param),
     MaxLearnedFactor = maps:get(max_learned_factor,Param),
     case maps:get(display, Param) of

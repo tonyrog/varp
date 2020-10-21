@@ -1496,33 +1496,33 @@ read_timer(TRef) when is_reference(TRef) ->
 %% This is the negation of the decision variables blocking the
 %% current model.
 block_clause(Bs) ->
-    Level = varc:info(Bs#bs.vp, level),
+    Level = varp_nif:info(Bs#bs.vp, level),
     block_clause_(Bs, Level, []).
 
 block_clause_(_Bs, 0, Clause) ->
     Clause;
 block_clause_(Bs, Level, Clause) ->
-    Xi = varc:get_decision(Bs#bs.vp, Level),
+    Xi = varp_nif:get_decision(Bs#bs.vp, Level),
     block_clause_(Bs, Level-1, [-Xi|Clause]).
 
 %% Decision clause, use for proof output
 decision_clause(Bs) ->
-    Level = varc:info(Bs#bs.vp, level),
+    Level = varp_nif:info(Bs#bs.vp, level),
     decision_clause(Bs, Level).
 
 decision_clause(_Bs, 0) ->
     [];
 decision_clause(Bs, Level) ->
-    case varc:get_undo_state(Bs#bs.vp, Level) of
+    case varp_nif:get_undo_state(Bs#bs.vp, Level) of
 	done -> decision_clause(Bs,Level-1);
 	undefined -> error(bad_level);
 	_ -> %% set or toggle
-	    Xi = varc:get_decision(Bs#bs.vp, Level),
+	    Xi = varp_nif:get_decision(Bs#bs.vp, Level),
 	    [-Xi|decision_clause__(Bs,Level-1)]
     end.
 
 decision_clause__(_Bs, 0) ->
     [];
 decision_clause__(Bs, Level) ->
-    Xi = varc:get_decision(Bs#bs.vp, Level),
+    Xi = varp_nif:get_decision(Bs#bs.vp, Level),
     [-Xi|decision_clause__(Bs, Level-1)].

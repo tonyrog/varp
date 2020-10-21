@@ -15,20 +15,20 @@
 -include("varp.hrl").
 
 analyze_alpha(Bs, Level, Bump, Minimize) ->
-    N = varc:info(Bs#bs.vp, number_of_conflicting_clauses),
+    N = varp_nif:info(Bs#bs.vp, number_of_conflicting_clauses),
     analyze_alpha_(Bs, Level, Bump, Minimize, 0, N).
 
 analyze_alpha_(_Bs, _Level, _Bump, _Minimize, N, N) ->
     [];
 analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
-    case varc:conflict(Bs#bs.vp, Level, Bump, I) of
+    case varp_nif:conflict(Bs#bs.vp, Level, Bump, I) of
 	undefined ->  %% duplicate
 	    %% io:format("clause duplicate\n"),
 	    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
 	Cix when is_integer(Cix) ->
 	    case Minimize of
 		true ->
-		    case varc:minimize(Bs#bs.vp, Cix) of
+		    case varp_nif:minimize(Bs#bs.vp, Cix) of
 			undefined ->
 			    %%io:format("clause duplicate after minimize\n"),
 			    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
@@ -37,7 +37,7 @@ analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
 			     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
 		    end;
 		false ->
-		    Len = varc:clause_info(Bs#bs.vp, Cix, length),
+		    Len = varp_nif:clause_info(Bs#bs.vp, Cix, length),
 		    [{Len, Cix}|
 		     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
 	    end
@@ -45,7 +45,7 @@ analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
 
 analyze(Bs, Level, Bump, Minimize) ->
     Trail = get_trail(Bs#bs.vp, Level),
-    N = varc:info(Bs#bs.vp, number_of_conflicting_clauses),
+    N = varp_nif:info(Bs#bs.vp, number_of_conflicting_clauses),
     [ begin
 	  Clause = analyze_clause_(Bs#bs.vp, Trail, I, Level, Bump),
 	  if Minimize -> 
@@ -60,12 +60,12 @@ analyze_clause(V, Level, Bump, I) ->
     analyze_clause_(V, get_trail(V, Level), I, Level, Bump).
 
 analyze_clause_(V,Trail, I, Level, Bump) ->
-    analyze_conflict_(V,Trail,varc:conflicting_clause(V,I),Level,Bump).
+    analyze_conflict_(V,Trail,varp_nif:conflicting_clause(V,I),Level,Bump).
 
 analyze_conflict_(V,Trail,Cix,Level,Bump) ->
-    Conflicting = varc:get_clause(V,Cix,undefined),
+    Conflicting = varp_nif:get_clause(V,Cix,undefined),
     ?dbg("trail: decision=~w,clause=~w,trail=~w\n", 
-	  [varc:get_decision(V, Level),Conflicting,Trail]),
+	  [varp_nif:get_decision(V, Level),Conflicting,Trail]),
     analyze_reason(V,Conflicting,Trail,Level,Bump,#{},0,[]).
 
 analyze_reason(V,[Q|Qs],Trail,Level,Bump,Seen,C,CL) ->
@@ -74,10 +74,10 @@ analyze_reason(V,[Q|Qs],Trail,Level,Bump,Seen,C,CL) ->
 	    ?dbg("~w: seen\n", [Q]),
 	    analyze_reason(V,Qs,Trail,Level,Bump,Seen,C,CL);
 	false ->
-	    QLevel = varc:implication_level(V,Q),
+	    QLevel = varp_nif:implication_level(V,Q),
 	    ?dbg("~w: level ~w\n", [Q, QLevel]),
 	    if QLevel > ?TOP_LEVEL ->
-		    varc:bump(V, Q, Bump),
+		    varp_nif:bump(V, Q, Bump),
 		    Seen1 = set_seen(Q, Seen),
 		    if QLevel >= Level ->
 			    analyze_reason(V,Qs,Trail,Level,Bump,Seen1,C+1,CL);
@@ -110,18 +110,18 @@ drop_not_seen(Trail=[P|Trail1], Seen) ->
     end.
 		    
 reason(V,L) ->
-    case varc:implication_clause(V,L) of
+    case varp_nif:implication_clause(V,L) of
 	-1 -> [];
 	Cix ->
-	    Reason = varc:get_clause(V,Cix,L),
+	    Reason = varp_nif:get_clause(V,Cix,L),
 	    ?dbg("~w: implication ~w = ~w\n", 
 		  [L,varp_formula:cix(Cix),Reason]),
-	    varc:use_clause(V, Cix),
+	    varp_nif:use_clause(V, Cix),
 	    Reason
     end.
 
 get_trail(V, Level) ->
-    varc:get_bindings_trail(V, Level).
+    varp_nif:get_bindings_trail(V, Level).
 
 %% maps implementing set
 set_seen(Q, VarSet) ->

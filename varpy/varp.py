@@ -1,13 +1,13 @@
-# using varc
+# using varp_nif
 
-import varc
+import varp_nif
 import time
 
-print("loaded varpy version " + varc.info(varc.new({}), 'version'))
+print("loaded varpy version " + varp_nif.info(varp_nif.new({}), 'version'))
         
 def bt(vp):
-    while not varc.nbcp(vp):
-        if varc.undo(vp) == False:
+    while not varp_nif.nbcp(vp):
+        if varp_nif.undo(vp) == False:
             return False # contradiction
     return True # model
 
@@ -27,7 +27,7 @@ def bt_done(count, limit):
 def bt_all(vp, limit=None):
     t0 = time.time_ns()  # >= 3.7
     count = 0
-    if varc.next_unbound(vp) == False:
+    if varp_nif.next_unbound(vp) == False:
         print(model(vp))
         count += 1
     else:
@@ -35,7 +35,7 @@ def bt_all(vp, limit=None):
         if b:
             print(model(vp))
             count += 1
-            while b and varc.undo(vp) and not bt_done(count, limit):
+            while b and varp_nif.undo(vp) and not bt_done(count, limit):
                 b = bt(vp)
                 if b:
                     print(model(vp))
@@ -45,13 +45,13 @@ def bt_all(vp, limit=None):
     return count
 
 def model(vp):
-    s = varc.first_symbol(vp)
+    s = varp_nif.first_symbol(vp)
     m = []
     while s != False:
-        l = varc.find_symbol(vp, s)
-        if varc.value(vp, l):
+        l = varp_nif.find_symbol(vp, s)
+        if varp_nif.value(vp, l):
             m.append(symbol_str(s))
-        s = varc.next_symbol(vp, s)
+        s = varp_nif.next_symbol(vp, s)
     return m
         
 # convert atomic formula tuple into a string
@@ -72,19 +72,19 @@ def sym_str(x):
 
 # find symbol (string) from literal
 def symbol(vp, x):
-    s = varc.variable_info(vp, x, 'symbol')
+    s = varp_nif.variable_info(vp, x, 'symbol')
     if s == []: return "x("+str(x)+")"
     else: return symbol_str((s[0])[0])
     
 def get_bindings_list(vp, level, clauseinfo=False, trail=False):
-    return varc.get_bindings(vp, level, clauseinfo, trail, False)
+    return varp_nif.get_bindings(vp, level, clauseinfo, trail, False)
 
 def num_unbound(vp):
-     return varc.info(vp,'number_of_unbound_variables')
+     return varp_nif.info(vp,'number_of_unbound_variables')
 
 def i(vp=False):
     if vp == False:
-        vp = varc.new({})
+        vp = varp_nif.new({})
         il(vp,
            ['version','literal_size','literal_integer',
 	    'value_packing','xref','hash',
@@ -105,7 +105,7 @@ def i(vp=False):
         
 def il(vp, keylist):
     for key in keylist:
-        print(key + ": " + str(varc.info(vp, key)))        
+        print(key + ": " + str(varp_nif.info(vp, key)))        
 
 def ic(vp):
     i_clauseset(vp, 'delta')
@@ -114,9 +114,9 @@ def ic(vp):
     i_clauseset(vp, 'beta')
 
 def i_clauseset(vp, s):
-    i = varc.clauseset_first(vp,s)
+    i = varp_nif.clauseset_first(vp,s)
     if not isinstance(i, bool): print("clause set " + s)
     while not isinstance(i, bool):
-        c = varc.get_clause(vp, i)
+        c = varp_nif.get_clause(vp, i)
         print(str(i)+": "+str(c))
-        i = varc.clauseset_next(vp,i)
+        i = varp_nif.clauseset_next(vp,i)

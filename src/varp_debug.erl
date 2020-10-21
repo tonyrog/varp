@@ -29,8 +29,8 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 
 %% enable xref and calculate rank (via xref)
 show_rank(Bs) ->
-    varc:config(Bs#bs.vp, xref, true),
-    N = varc:get_number_of_variables(Bs#bs.vp),
+    varp_nif:config(Bs#bs.vp, xref, true),
+    N = varp_nif:get_number_of_variables(Bs#bs.vp),
     DMap = degree_map(Bs#bs.vp, 1, N, #{}),
     DList = maps:to_list(DMap),
     SList = lists:reverse(lists:keysort(2, DList)),
@@ -42,8 +42,8 @@ show_rank(Bs) ->
 
 
 degree_map(Vp, I, N, Map) when I =< N ->
-    D0 = varc:literal_info(Vp, -I, degree),
-    D1 = varc:literal_info(Vp, I, degree),
+    D0 = varp_nif:literal_info(Vp, -I, degree),
+    D1 = varp_nif:literal_info(Vp, I, degree),
     degree_map(Vp, I+1, N, Map#{ I => D1, -I => D0 });
 degree_map(_Vp, _I, _N, Map) ->
     Map.

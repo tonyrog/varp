@@ -1258,7 +1258,7 @@ run(Bs, Param) ->
 	spawn_monitor(
 	  fun() ->
 		  ?dbg("varp_wx monitor ~p started\n", [self()]),
-		  ok = varc:subscribe(Bs#bs.vp, Info),
+		  ok = varp_nif:subscribe(Bs#bs.vp, Info),
 		  Mon = monitor(process, SELF),
 		  SELF ! {ack,Ref},
 		  wx:set_env(maps:get(env, Param)),
@@ -1407,21 +1407,21 @@ minfo([], _Src, Dst) ->
 	
 get_info(Bs) ->
     #{ number_of_variables =>
-	   varc:info(Bs#bs.vp, number_of_variables),
+	   varp_nif:info(Bs#bs.vp, number_of_variables),
        number_of_bound_variables => 
-	   varc:info(Bs#bs.vp, number_of_bound_variables),
+	   varp_nif:info(Bs#bs.vp, number_of_bound_variables),
        number_of_subst_variables => 
-	   varc:info(Bs#bs.vp, number_of_subst_variables),
+	   varp_nif:info(Bs#bs.vp, number_of_subst_variables),
        number_of_clauses =>
-	   varc:info(Bs#bs.vp, number_of_clauses),
+	   varp_nif:info(Bs#bs.vp, number_of_clauses),
        number_of_dead_clauses =>
-	   varc:info(Bs#bs.vp, number_of_dead_clauses),
+	   varp_nif:info(Bs#bs.vp, number_of_dead_clauses),
        number_of_bcp =>
-	   varc:info(Bs#bs.vp,bcp_counter),
+	   varp_nif:info(Bs#bs.vp,bcp_counter),
        max_level =>
-	   varc:info(Bs#bs.vp,max_level),
+	   varp_nif:info(Bs#bs.vp,max_level),
        min_level =>
-	   varc:info(Bs#bs.vp,min_level)
+	   varp_nif:info(Bs#bs.vp,min_level)
      }.
        
 call(undefined, _Request) ->

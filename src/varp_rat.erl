@@ -45,7 +45,7 @@ run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
     end.
 
 rat(Bs,N,Type) ->
-    case varc:next_unbound(Bs#bs.vp) of
+    case varp_nif:next_unbound(Bs#bs.vp) of
 	false -> {?CONTINUE,[],Bs};
 	Xi -> rat(Bs,Xi,N,Type)
     end.
@@ -54,7 +54,7 @@ rat(Bs,_X,0,_Type) ->
     {?CONTINUE,[],Bs};
 rat(Bs,X,N,Type) ->
     Bs1 = rat_var(Bs,X,Type),
-    case varc:next_unbound(Bs1#bs.vp,X) of
+    case varp_nif:next_unbound(Bs1#bs.vp,X) of
 	false -> {?CONTINUE,[],Bs1};
 	Y -> rat(Bs1,Y,N-1,Type)
     end.
@@ -104,17 +104,17 @@ rat_lit(Bs,L,Is) ->
 	      Js = get_delta_clauses(Bs,-L),
 	      Cs = clauses(Bs,Js,-L,[]),
 	      %% io:format("rat_test l=~w, d=~w, cs=~w\n", [L,D,Cs]),
-	      varc:set_level(Bs#bs.vp, 1),
-	      true = varc:bind(Bs#bs.vp,-L),
+	      varp_nif:set_level(Bs#bs.vp, 1),
+	      true = varp_nif:bind(Bs#bs.vp,-L),
 	      true = neg_bind_all(Bs,D),
 	      case rat_test(Bs,Cs) of
 		  true ->
-		      varc:undo_level(Bs#bs.vp,1),
+		      varp_nif:undo_level(Bs#bs.vp,1),
 		      io:format("remove clause ~w = ~w\n", [I,[L|D]]),
-		      varc:set_level(Bs#bs.vp,0), %% must be done at level=0!
+		      varp_nif:set_level(Bs#bs.vp,0), %% must be done at level=0!
 		      varp_formula:del_clause(Bs, I);
 		  false ->
-		      varc:undo_level(Bs#bs.vp,1),
+		      varp_nif:undo_level(Bs#bs.vp,1),
 		      ok
 	      end
       end, Ds),
@@ -122,18 +122,18 @@ rat_lit(Bs,L,Is) ->
 
 rat_test(Bs, [{_Cix,C}|Cs]) ->
     Level = 2,
-    varc:set_level(Bs#bs.vp,Level),
+    varp_nif:set_level(Bs#bs.vp,Level),
     case neg_bind_all(Bs,C) of
 	false ->
-	    varc:undo_level(Bs#bs.vp,Level),
+	    varp_nif:undo_level(Bs#bs.vp,Level),
 	    false;
 	true ->
-	    case varc:bcp(Bs#bs.vp) of
+	    case varp_nif:bcp(Bs#bs.vp) of
 		false ->
-		    varc:undo_level(Bs#bs.vp,Level),
+		    varp_nif:undo_level(Bs#bs.vp,Level),
 		    false;
 		true ->
-		    varc:undo_level(Bs#bs.vp,Level),
+		    varp_nif:undo_level(Bs#bs.vp,Level),
 		    rat_test(Bs, Cs)
 	    end
     end;
@@ -142,7 +142,7 @@ rat_test(_Bs, []) ->
 
 %% bind -Xi
 neg_bind_all(Bs, [Xi|Xs]) ->
-    case varc:bind(Bs#bs.vp,-Xi) of
+    case varp_nif:bind(Bs#bs.vp,-Xi) of
 	false -> false;
 	true -> neg_bind_all(Bs,Xs)
     end;
@@ -161,12 +161,12 @@ clauses(_Bs, [], _L, Acc) ->
     Acc.
 
 get_clause(Bs, I, Skip) ->
-    varc:get_clause(Bs#bs.vp, I, Skip).
+    varp_nif:get_clause(Bs#bs.vp, I, Skip).
 
 %% only extract clauses in Delta (fixme remove dead clauses)
 get_delta_clauses(Bs, L) ->
-    get_delta_clauses(Bs, L, varc:clauseset_size(Bs#bs.vp, 0)).
+    get_delta_clauses(Bs, L, varp_nif:clauseset_size(Bs#bs.vp, 0)).
 
 get_delta_clauses(Bs, L, CMax) ->
-    CLs = varc:get_clauses(Bs#bs.vp,L,literal),
+    CLs = varp_nif:get_clauses(Bs#bs.vp,L,literal),
     [I || I <- CLs, I < CMax].

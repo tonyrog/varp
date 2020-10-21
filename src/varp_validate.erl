@@ -79,17 +79,17 @@ validate_loop(Fd,Type,Bs, I) ->
 	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
 	    %% io:format("add clause ~w\n", [Clause]),
-	    varc:set_level(Bs#bs.vp,1),
+	    varp_nif:set_level(Bs#bs.vp,1),
 	    Res = eval_neg_literal_list(Bs, Clause),
-	    varc:undo_level(Bs#bs.vp,1),
+	    varp_nif:undo_level(Bs#bs.vp,1),
 	    case Res of
 		false -> %% ok valid
-		    varc:set_level(Bs#bs.vp,0),
-		    case varc:add_clause(Bs#bs.vp, Clause, gamma) of
+		    varp_nif:set_level(Bs#bs.vp,0),
+		    case varp_nif:add_clause(Bs#bs.vp, Clause, gamma) of
 			true -> ok;
 			{true,_} -> ok
 		    end,
-		    case varc:bcp(Bs#bs.vp) of
+		    case varp_nif:bcp(Bs#bs.vp) of
 			false ->
 			    case read_clause(Fd,Type,Bs) of
 				{a,[]} ->
@@ -110,22 +110,22 @@ validate_loop(Fd,Type,Bs, I) ->
 	{d,Clause} ->
 	    %% what tests must be done?
 	    %% io:format("DELETE ~w\n", [Clause]),
-	    CIX = varc:find_clause(Bs#bs.vp, Clause),
+	    CIX = varp_nif:find_clause(Bs#bs.vp, Clause),
 	    %% io:format("  INDEX: ~w:~w\n", [(_CIX bsr 30),
 	    %%            (CIX band 16#3fffffff)]),
-	    ok = varc:del_clause(Bs#bs.vp, CIX),
+	    ok = varp_nif:del_clause(Bs#bs.vp, CIX),
 	    validate_loop(Fd,Type,Bs,I1);
 	{c,_Comment} ->
 	    validate_loop(Fd,Type,Bs,I1)
     end.
 
 eval_neg_literal_list(Bs, [Li|Ls]) ->
-    case varc:bind(Bs#bs.vp,-Li) of
+    case varp_nif:bind(Bs#bs.vp,-Li) of
 	false -> false;
 	true -> eval_neg_literal_list(Bs, Ls)
     end;
 eval_neg_literal_list(Bs, []) ->
-    varc:bcp(Bs#bs.vp).
+    varp_nif:bcp(Bs#bs.vp).
 
 read_clause(_Fd, binary,_Bs) ->
     %% read compressed clause

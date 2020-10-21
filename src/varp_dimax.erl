@@ -47,7 +47,7 @@ load_nc_file(Cmd, Vp) ->
 
 
 load_stream(undefined, Line, LineFun) ->
-    load_stream_header(varc:new(#{}), Line, LineFun);
+    load_stream_header(varp_nif:new(#{}), Line, LineFun);
 load_stream(Vp, Line, LineFun) ->
     load_stream_header(Vp, Line, LineFun).
 
@@ -62,7 +62,7 @@ load_stream_header(Vp, Line, LineFun) ->
 		[NVars,NClauses] ->
 		    io:format("loading: ~w variables, ~w clauses\n",
 			      [NVars, NClauses]),
-		    {1,NVars} = varc:add_variables(Vp, NVars),
+		    {1,NVars} = varp_nif:add_variables(Vp, NVars),
 		    io:format("loading clauses\n"),
 		    load_stream_clauses(Vp, Line+1, NClauses, LineFun);
 		_ ->
@@ -89,7 +89,7 @@ load_stream_clauses(Vp, Line, Count, LineFun) ->
 		    ok
 	    end,
 	    Clause = dimacs_line(Data),
-	    varc:add_clause(Vp, Clause),
+	    varp_nif:add_clause(Vp, Clause),
 	    load_stream_clauses(Vp, Line+1, Count-1, LineFun)
     end.
 

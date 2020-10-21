@@ -50,7 +50,7 @@ run(Bs, Param) ->
     end.
 
 red(Bs,N,CMax,Type) ->
-    case varc:next_unbound(Bs#bs.vp) of
+    case varp_nif:next_unbound(Bs#bs.vp) of
 	false -> {?CONTINUE,[],Bs};
 	Xi -> red(Bs,Xi,N,CMax,Type)
     end.
@@ -166,7 +166,7 @@ emit_def(Bs, Yj, Cs) ->
     
 %% return list on form [{Y,[Xi]}]
 clauses(Bs,[I|Cs],L,Acc) ->
-    case varc:clause_info(Bs#bs.vp,I,status) of
+    case varp_nif:clause_info(Bs#bs.vp,I,status) of
 	dead ->
 	    clauses(Bs, Cs, L, Acc);
 	_ ->
@@ -178,7 +178,7 @@ clauses(Bs, [], _L, Acc) ->
     {Acc,Bs}.
 
 get_clause(Bs, I, Skip) ->
-    varc:get_clause(Bs#bs.vp, I, Skip).
+    varp_nif:get_clause(Bs#bs.vp, I, Skip).
 
 %% Return clauses in Delta
 get_delta_clauses(Bs, L, CMax) ->

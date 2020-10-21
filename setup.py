@@ -23,9 +23,9 @@ setup(name = 'varpy',
       packages = ['varpy'],
       package_data={'varpy': ['varp.lark']},
       ext_modules = [
-          Extension(name = 'varc',
+          Extension(name = 'varp_nif',
                     define_macros = [("PYNIF",None),
-                                     ("PYNIFNAME","varc"),
+                                     ("PYNIFNAME","varp_nif"),
                                      ("STATIC_ERLANG_DRIVER", None)],
                     include_dirs = [erlpath()+"/usr/include"],
-                    sources = ['c_src/varc_nif.c','c_src/pynif.c'])])
+                    sources = ['c_src/varp_nif.c','c_src/pynif.c'])])
