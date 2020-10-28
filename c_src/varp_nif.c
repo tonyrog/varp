@@ -8222,9 +8222,9 @@ static ERL_NIF_TERM varp_get_undo_state(ErlNifEnv* env, int argc,
     if (!enif_get_int(env, argv[1], &level) || (level<0) || (level > vp->level))
 	return enif_make_badarg(env);
     switch(vp->undo[level].t) {
-    case uSET:   return ATOM(set);
-    case uTOGGLE: return ATOM(toggle);
-    case uDONE: return ATOM(done);
+    case uSET:   return enif_make_string(env, "set", ERL_NIF_LATIN1);
+    case uTOGGLE: return enif_make_string(env, "toggle", ERL_NIF_LATIN1);
+    case uDONE: return enif_make_string(env, "done", ERL_NIF_LATIN1);
     case uUNDEF:
     default:
 	return ATOM(undefined);

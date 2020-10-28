@@ -308,7 +308,7 @@ If literals __x1__..__xn__ are given they are checked for
 is a part of are true regardless of the value of xi.
 If 'all' is true then all xi's must be true for the
 rule to hold. If turbo rule is successful then 
-varpy.__turbo__ is returned.
+'turbo' is returned.
 
 __[EXPERIMENTAL]__
 
@@ -493,10 +493,10 @@ __DEBUG__
 
 Return the undo state on level __l__
 
-* varpy.__set__
-* varpy.__toggle__
-* varpy.__done__
-* varpy.__undef__
+* 'set'
+* 'toggle'
+* 'done'
+* 'undef'
 
 ``` python
 varpy.get_bindings(vp, l, clauseinfo, as_trail, as_tuple)
@@ -553,7 +553,7 @@ all clauses. The rank for literal x is defined as the
 sum of 1/|ci| for all clauses ci where x is a member.
 * 'user'
  Sort literals according to a user value, that can be set by
-using the varpy.__set\_user\_cunt__(vp, x, unsigned)
+using the varpy.set\_user\_cunt(vp, x, unsigned)
 
 If the sort key is prefixed with a '+' then sorting is
 ascending. If prefix is '-' then the sort is descending, wich
