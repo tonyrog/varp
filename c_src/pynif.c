@@ -292,8 +292,8 @@ static int  make_atom(ErlNifEnv* env, const char* name, int existing,
 	    env->atom_table_size = new_size;
 	}
 	atm = Integer_FromLong(env->atom_index);
-	if (PyModule_Check(env->self))
-	    PyModule_AddObject(env->self, name, atm);
+	// if (PyModule_Check(env->self))
+	//   PyModule_AddObject(env->self, name, atm);
 	obj = String_FromString(name);
 	env->atom_table[env->atom_index++] = obj;
 	PyDict_SetItemString(env->atoms, name, atm);
@@ -2983,12 +2983,12 @@ MODTYPE MODNAME(void)
     nif_env.atom_table = PyMem_Malloc(INITIAL_ATOM_TABLE_SIZE*sizeof(PyObject*));
 
     obj_false = Integer_FromLong(0);
-    PyModule_AddObject(m, "false", obj_false);
+    // PyModule_AddObject(m, "false", obj_false);
     PyDict_SetItemString(nif_env.atoms, "false", obj_false);
     nif_env.atom_table[0] = Py_False;
 
     obj_true = Integer_FromLong(1);
-    PyModule_AddObject(m, "true", obj_true);
+    // PyModule_AddObject(m, "true", obj_true);
     PyDict_SetItemString(nif_env.atoms, "true", obj_true);
     nif_env.atom_table[1] = Py_True;
 

@@ -1,10 +1,15 @@
-- fix STACK OVERFLOW
+- Add dictionaries/maps into varp langauge
 
-Running some large formulas the qtype=recursive can recurse to
-deep on the runtime stack. bcp1 is called over and over.
-This can partly be improved by checking for short cut instead of
-doing a recursion. (work around use qype=lifo|fifo)
-
+  { 1: 100, 2: 200, ... }
+  
+  define Foo { 1:100,2:200, 3:300 };
+  
+  [A x=1..3] P(Foo(x+1))
+  
+  While at it change bit vector syntax
+  
+  << A, B, C ... >>
+  
 
 - add predicate info
 

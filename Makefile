@@ -6,6 +6,14 @@ APPL = Varp
 VSN = $(shell git describe --abbrev=0)
 MACHINE = $(shell uname -m)
 
+all:
+	(cd src && $(MAKE) all)
+	(cd c_src && $(MAKE) all)
+
+clean:
+	(cd src && $(MAKE) clean)
+	(cd c_src && $(MAKE) clean)
+
 appimage:
 	erl -wx -noshell -s varp_wx -s servator make_appimage $(APP) -s erlang halt
 	strip $(APP).AppDir/bin/beam.smp
@@ -38,6 +46,3 @@ osxapp:
 
 appimage_nw:
 	erl -noshell -s $(APP) start0 -s servator make_appimage $(APP)
-
-xref:
-	rebar xref

@@ -773,6 +773,7 @@ DECL_ATOM(size);
 DECL_ATOM(status);
 DECL_ATOM(symbol);
 DECL_ATOM(system_limit);
+DECL_ATOM(memory_limit);
 DECL_ATOM(toggle);
 DECL_ATOM(true);
 DECL_ATOM(turbo);
@@ -2876,8 +2877,10 @@ static cix_t clause_insert(varp_t* vp, int si, clause_t* cp, uint32_t hvalue)
 
     vp->cnum[si]++;
     set_clause(vp, cix, cp);
-    if ((si != ALPHA) && vp->opt.hash) // alphas are not hashed
-	clause_hash_insert(vp, cp);
+    if ((si != ALPHA) && vp->opt.hash) { // alphas are not hashed
+	if (clause_hash_insert(vp, cp) < 0)
+	    return CLAUSE_NONE;
+    }
     return cix;
 }
 
@@ -3451,7 +3454,8 @@ static int sref_add(varp_t* vp, lit_t l, symbol_t* sp, int pos)
 
     if (lp->sref == NULL)
 	lp->sref = dynarray_empty(vp, sizeof(sref_t));
-    sr = dynarray_add(lp->sref);
+    if ((sr = dynarray_add(lp->sref)) == NULL)
+	return -1;
     sr->sp = sp;
     sr->pos = pos;
     return 0;
@@ -3713,9 +3717,9 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     if (dynvar_size(vp->var_map) >= VLIMIT)
 	return enif_raise_exception(env, ATOM(system_limit));
 
-    if ((i = add_variables(vp, 1)) < 0)
-	return enif_make_badarg(env);
-
+    if ((i = add_variables(vp, 1)) < 0) {
+	return enif_raise_exception(env, ATOM(memory_limit));
+    }
     vp->var_map[i]->is_atom = is_atom;
 
     return enif_make_int(env, i);
@@ -3744,8 +3748,9 @@ static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
     if (dynvar_size(vp->var_map)+(n-1) >= VLIMIT)
 	return enif_raise_exception(env, ATOM(system_limit));
 
-    if ((i = add_variables(vp, n)) < 0)
-	return enif_make_badarg(env);
+    if ((i = add_variables(vp, n)) < 0) {
+	return enif_raise_exception(env, ATOM(memory_limit));
+    }
     j = i;
     while(n--) {
 	vp->var_map[j++]->is_atom = is_atom;
@@ -3792,8 +3797,9 @@ static ERL_NIF_TERM add_symbol(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM sym,
 	return enif_make_badarg(env);
 
     for (i = 0; i < (int)n; i++) {
-	if (sref_add(vp, lit[i], sp, i) < 0)
-	    return enif_make_badarg(env);
+	if (sref_add(vp, lit[i], sp, i) < 0) {
+	    return enif_raise_exception(env, ATOM(memory_limit));
+	}
     }
     return enif_make_ok(env);
 }
@@ -5295,16 +5301,18 @@ static int clause_watch(varp_t* vp, clause_t* cp)
 
 // la[0] >= la[1] >= la[2]
 
-static void xref_add(varp_t* vp, clause_t* cp, pos_t p)
+static int xref_add(varp_t* vp, clause_t* cp, pos_t p)
 {
     literal_t* lp = l2ll(vp, cp->lit[p]);
     xref_t* xp;
 
     if (lp->xref == NULL)
 	lp->xref = dynarray_empty(vp, sizeof(xref_t));
-    xp = dynarray_add(lp->xref);
+    if ((xp = dynarray_add(lp->xref)) == NULL)
+	return -1;
     xp->cix  = cp->cix;
     xp->p    = p;
+    return 0;
 }
 
 // locate and remove xref link
@@ -5327,14 +5335,17 @@ static inline void xref_del(varp_t* vp, clause_t* cp, pos_t p)
     }
 }
 
-static void xref_add_clause(varp_t* vp, clause_t* cp)
+static int xref_add_clause(varp_t* vp, clause_t* cp)
 {
     if (cp != NULL) { // since clauseset may temporary have holes!
 	long n = (long)cp->size;
 	long p;
-	for (p = 0; p < n; p++)
-	    xref_add(vp, cp, p);
+	for (p = 0; p < n; p++) {
+	    if (xref_add(vp, cp, p) < 0)
+		return -1;
+	}
     }
+    return 0;
 }
 
 static void xref_del_clause(varp_t* vp, clause_t* cp)
@@ -5349,8 +5360,10 @@ static void xref_del_clause(varp_t* vp, clause_t* cp)
 
 static int clause_link(varp_t* vp, clause_t* cp)
 {
-    if (vp->opt.xref)
-	xref_add_clause(vp, cp);
+    if (vp->opt.xref) {
+	if (xref_add_clause(vp, cp) < 0)
+	    return -1;
+    }
     return clause_watch(vp, cp);
 }
 
@@ -5473,8 +5486,9 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 		int i;
 		symbol_insert(vp, copy);
 		for (i = 0; i < (int)n; i++) {
-		    if (sref_add(vp, copy->lit[i], copy, i) < 0)
-			return enif_make_badarg(env);
+		    if (sref_add(vp, copy->lit[i], copy, i) < 0) {
+			return enif_raise_exception(env, ATOM(memory_limit));
+		    }
 		}
 		sp = dlist_next(sp);
 	    }
@@ -5522,7 +5536,8 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	    for (i = 0; i < (int)n; i++) {
 		clause_t* cp = clause_copy(vp, vp0->clauseset[si][i]);
 		if (cp != NULL) {
-		    clause_insert(vp, si, cp, cp->hvalue);
+		    if (clause_insert(vp, si, cp, cp->hvalue) == CLAUSE_NONE)
+			goto error;
 		    // FIXME clone watch points! if opt.queue!
 		    clause_install(vp, cp);
 		}
@@ -6659,8 +6674,11 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->opt.xref = true;
 	    for (si = 0; si < NUM_CSET; si++) {
 		size_t n = dynvec_size(vp->clauseset, si);
-		for (i = 0; i < (int)n; i++)
-		    xref_add_clause(vp, vp->clauseset[si][i]);
+		for (i = 0; i < (int)n; i++) {
+		    if (xref_add_clause(vp, vp->clauseset[si][i]) < 0) {
+			return enif_raise_exception(env, ATOM(memory_limit));
+		    }
+		}
 	    }
 	}
 	else if (!enable && vp->opt.xref) { // teardown xref
@@ -6881,7 +6899,6 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 			      size_t size, bool_t put_unit)
 {
     clause_t* cp;
-    cix_t cix;
     uint32_t hvalue;
     
     size = sort_clause_array(vp, lit, size, false);
@@ -6897,15 +6914,11 @@ static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 	    return CLAUSE_TRUE;
 	}
     }
-
     if ((cp = clause_alloc(vp, size)) == NULL)
 	return CLAUSE_NONE;
-    
     hvalue = literal_array_hash(vp, lit, size);
     memcpy(cp->lit, lit, sizeof(lit_t)*size);
-    if ((cix = clause_insert(vp, si, cp, hvalue)) == CLAUSE_NONE)
-	return CLAUSE_NONE;
-    return cix;
+    return clause_insert(vp, si, cp, hvalue);
 }
 
 //
@@ -6939,7 +6952,7 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     vp->caller_env = env;
     if ((cix = add_clause_array(vp,si,vp->tlit,len,true)) == CLAUSE_NONE)
-	ret = enif_make_badarg(env);
+	ret = enif_raise_exception(env, ATOM(memory_limit));
     else if (cix == CLAUSE_TRUE)
 	ret = enif_make_boolean(env, true);
     else if (cix == CLAUSE_FALSE)
@@ -7378,7 +7391,6 @@ static void validate_twl(varp_t* vp)
 #endif
 
 // delete a clause by index or literal list
-// may only delete clauses on level 0!
 static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
@@ -7414,9 +7426,6 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 		return r;
 	}
     }
-
-//    if (vp->level != 0)
-//	return enif_raise_exception(env, ATOM(level));
 
     si = GET_SI(cix);
     ix = GET_IX(cix);
@@ -8772,6 +8781,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(status);
     LOAD_ATOM(symbol);
     LOAD_ATOM(system_limit);
+    LOAD_ATOM(memory_limit);    
     LOAD_ATOM(toggle);
     LOAD_ATOM(true);
     LOAD_ATOM(turbo);
