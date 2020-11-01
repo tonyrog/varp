@@ -41,9 +41,145 @@
 -export([make_psym/2]).
 -export([format_error/1]).
 
+%% varp_nif api
+-export([new/1]).
+-export([clone/1]).
+-export([clone/2]).
+-export([info/2]).
+-export([config/3]).
+-export([add_variable/1]).
+-export([add_variable/2]).
+-export([add_variable/3]).
+-export([add_variables/2]).
+-export([add_variables/3]).
+-export([add_variables/4]).
+-export([del_variable/2]).
+-export([add_symbol/3]).
+-export([del_symbol/2]).
+-export([get_symbol/2]).
+-export([find_symbol/2]).
+-export([first_symbol/1]).
+-export([next_symbol/2]).
+-export([variable_info/3]).
+-export([literal_info/3]).
+-export([value/2]).
+-export([bound/2]).
+-export([bind/2, bind/3]).
+-export([decide/2, decide/3]).
+-export([subst/3]).
+-export([implication_clause/2]).
+-export([implication_level/2]).
+-export([implication_pos/2]).
+-export([conflicting_clause/1]).
+-export([conflicting_clause/2]).
+-export([conflict/4]).
+-export([minimize/2]).
+-export([is_variable/2]).
+-export([is_bound/2]).
+-export([is_equal/3]).
+-export([isused/2, isused/3]).
+-export([isatom/2, isatom/3]).
+-export([set_level/2]).
+-export([undo_level/2]).
+-export([keep_level/2]).
+-export([move_level/3]).
+-export([undo/1]).
+-export([bcp/1, bcp/2, bcp/3]).
+-export([nbcp/1]).
+-export([add_clause/2]).
+-export([add_clause/3]).
+-export([find_clause/2]).
+-export([get_clause/2]).
+-export([get_clause/3]).
+-export([get_clause/4]).
+-export([del_clause/2]).
+-export([move_clause/3]).
+-export([compress_clause/2]).
+-export([clean_clause/2]).
+-export([get_clauses/2]).
+-export([get_clauses/3]).
+-export([use_clause/2]).
+-export([clause_info/2,clause_info/3]).
+-export([get_undo_state/2]).
+-export([get_nbindings/2, get_nbindings/3]).
+-export([get_nbindings/4, get_nbindings/5]). 
+-export([get_bindings/2, get_bindings/3]).
+-export([get_bindings/4, get_bindings/5]).
+-export([get_number_of_bindings/2]).
+-export([get_queue/1]).
+-export([queue_first/1]).
+-export([queue_next/2]).
+-export([queue_clear/1]).
+-export([get_decision/2]).
+-export([order_sort/2, order_sort/3]).
+-export([order_first/2, order_last/2]).
+-export([order_sort/4]).
+-export([next_unbound/1, next_unbound/2]).
+-export([bump/3]).
+-export([subscribe/2]).
+-export([clauseset_size/2]).
+-export([clauseset_offset/2, clauseset_offset/3]).
+-export([clauseset_sort/2]).
+-export([clauseset_first/1, clauseset_first/2]).
+-export([clauseset_next/2]).
+-export([set_user_count/3]).
+-export([unmark/1]).
+-export([mark/2, mark/3]).
+-export([intersect_marks/2]).
+-export([intersect_var/4]).
+-export([get_marked/2]).
+
+%% variants
+-export([new/0]).
+-export([memory/0, memory/1]).
+-export([version/0]).
+-export([i/0]).
+-export([i/1]).
+-export([info/1]).
+-export([info_keys/0]).
+-export([variable_info/2, variable_info_keys/0]).
+-export([literal_info/2,  literal_info_keys/0]).
+-export([get_latest_binding/1]).
+-export([get_bindings_list/2, get_bindings_list/3, get_bindings_list/4]).
+-export([get_bindings_trail/2]).
+-export([get_all_bindings/1]).
+
+-export([get_max_clause_length/1]).
+-export([get_number_of_variables/1]).
+-export([get_number_of_clauses/1]).
+-export([get_number_of_dead_clauses/1]).
+-export([get_number_of_conflicting_clauses/1]).
+-export([get_number_of_bound_variables/1]).
+-export([get_number_of_unbound_variables/1]).
+-export([get_clause_bcp_counter/1]).
+-export([get_clause_bcp_counter/2]).
+-export([get_bcp_counter/1]).
+-export([get_conflict_counter/1]).
+
+%% utils
+-export([vec_create/3]).
+-export([vec_step/2]).
+-export([vec_extend/3]).
+-export([vec_extend_rand/3]).
+-export([vec_extend_friend/4]).
+-export([vec_is_bound/2]).
+-export([vec_value/2]).
+-export([vec_bind/2]).
+-export([intersect/1, intersect/2]).
+-export([install_bindings/2, install_bindings/3]).
+-export([vec_sat/6, vec_sat/5, vec_sat/2]).
+-export([vec_sat_lap/5]).
+
+-export([get_marked/1]).
+-export([intersect_var/3]).
+-export([intersect_var0/4]).
+-export([make_friend_map/1]).
+-export([order_all/1, phase_all/1]).
+
+-define(BINDING_AS_TUPLE, true).
+
 -include_lib("stdlib/include/zip.hrl").
 
-%% -define(DEBUG, true).
 -include("varp.hrl").
 
 -record(stat,
@@ -326,32 +462,18 @@ start0() ->
     ok.
 
 main(Args) ->
-    %% ?dbg1("main: arguments = ~p\n", [Args]),
     application:ensure_all_started(varp),
-
     Plugins = load_plugins(),
-    %% ?dbg1("main: plugins = ~p\n", [Plugins]),
-
     GlobalOptionSpec = global_option_spec(),
     GOpts0 = default_options(),
-
-    %% ?dbg1("options0 = ~p\n", [GOpts0]),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
-    %% ?dbg1("main: options1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
-
     {Do1,Files,GOpts2,Bound0} =
 	process_args(Args, Plugins, [], [], GlobalOptionSpec, GOpts1, []),
     Bound = maps:from_list(Bound0),
-
     Do = if Do1 =/= [] -> Do1;
 	    true -> Do0
 	 end,
-    %% io:format("main: do = ~p\n", [Do]),
-    %% io:format("files = ~p\n", [Files]),
-    %% io:format("options2 = ~p\n", [GOpts2]),
-    %% io:format("bound = ~p\n", [Bound]),
-
     {ReadIn,{Sections0,Formula0}} =
 	try load_formulas(maps:get(formula,GOpts2,[]), undefined, 'and',
 			  GOpts2) of
@@ -360,7 +482,6 @@ main(Args) ->
 	catch
 	    ?EXCEPTION(error,Error0,_Trace0) ->
 		io:format("~s\n", [format_error(Error0)]),
-		?dbg("~p\n", [?GET_STACK(_Trace0)]),
 		halt(1)
 	end,
 
@@ -383,7 +504,6 @@ main(Args) ->
 		    catch
 			?EXCEPTION(error,Error1,_Trace1) ->
 			    io:format("~s\n", [format_error(Error1)]),
-			    ?dbg("~p\n", [?GET_STACK(_Trace1)]),
 			    halt(1)
 		    end;
 		_Error ->
@@ -401,7 +521,6 @@ main(Args) ->
 		    catch
 			?EXCEPTION(error,Error2,_Trace2) ->
 			    io:format("~s\n", [format_error(Error2)]),
-			    ?dbg("~p\n", [?GET_STACK(_Trace2)]),
 			    halt(1)
 		    end;
 		Type -> %% with formula?
@@ -417,7 +536,6 @@ main(Args) ->
 	    catch
 		?EXCEPTION(error,Error3,_Trace3) ->
 		    io:format("~s\n", [format_error(Error3)]),
-		    ?dbg("~p\n", [?GET_STACK(_Trace3)]),
 		    halt(1)
 	    end
     end,
@@ -484,7 +602,6 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 	    OptMap1 =
 		lists:foldl(
 		  fun({Key,Value}, Mi) ->
-			  ?dbg("setopt(~p, ~p)\n", [Key,Value]),
 			  varp_option:setopt(Key,Value,Mi,OptionSpec)
 		  end, OptMap, OptionList),
 	    parse_do_(Ps, PluginMap, [{Mod, OptMap1}|Acc])
@@ -559,7 +676,6 @@ varp_run(Do, Formula, GOpts) ->
     case R of
 	{'EXIT',{Error, _Where}} ->
 	    io:format("~s\n", [format_error(Error)]),
-	    ?dbg("~p\n", [_Where]),
 	    stop_cprof(GOpts, false),
 	    stop_fprof(GOpts, false),
 	    ok;
@@ -1526,3 +1642,783 @@ decision_clause__(_Bs, 0) ->
 decision_clause__(Bs, Level) ->
     Xi = varp_nif:get_decision(Bs#bs.vp, Level),
     [-Xi|decision_clause__(Bs, Level-1)].
+
+%% nif calls and lowlevel utils
+variable_info(Vp, Index) ->
+    [{What,varp_nif:variable_info(Vp, Index, What)} || 
+	What <-variable_info_keys()].
+
+variable_info_keys() ->
+    [implication, implication_clause, implication_pos,
+     level, phase, degree, is_atom, is_used, symbol].
+
+literal_info(Vp,Index) ->
+    [{What,varp_nif:literal_info(Vp,Index,What)} ||
+	What <- literal_info_keys()].
+
+literal_info_keys() ->
+    [degree, user, xref, symbol].
+
+%% VARP_NIF wrapper
+
+new(Options) -> varp_nif:new(Options).
+clone(Vp,Opts) -> varp_nif:clone(Vp,Opts).
+info(Vp, Key) -> varp_nif:info(Vp, Key).
+config(Vp,Item,Value) -> varp_nif:config(Vp,Item,Value).
+add_variable(Vp) -> varp_nif:add_variable(Vp).
+add_variable(Vp,IsAtom) -> varp_nif:add_variable(Vp,IsAtom).
+add_variable(Vp,IsAtom,IsUsed) -> varp_nif:add_variable(Vp,IsAtom,IsUsed).
+add_variables(Vp,Num) -> varp_nif:add_variables(Vp,Num).
+add_variables(Vp,Num,IsAtom) -> varp_nif:add_variables(Vp,Num,IsAtom).
+add_variables(Vp,Num,IsAtom,IsUsed) -> varp_nif:add_variables(Vp,Num,IsAtom,IsUsed).
+del_variable(Vp, Index) -> varp_nif:del_variable(Vp, Index).
+add_symbol(Vp,Lit, Name) -> varp_nif:add_symbol(Vp,Lit, Name).
+del_symbol(Vp,Name) -> varp_nif:del_symbol(Vp,Name).
+get_symbol(Vp,Lit) -> varp_nif:get_symbol(Vp,Lit).
+find_symbol(Vp,Name) -> varp_nif:find_symbol(Vp,Name).
+first_symbol(Vp) -> varp_nif:first_symbol(Vp).
+next_symbol(Vp,Symbol) -> varp_nif:next_symbol(Vp,Symbol).
+variable_info(Vp,Index,What) -> varp_nif:variable_info(Vp,Index,What).
+literal_info(Vp,Index,What) -> varp_nif:literal_info(Vp,Index,What).
+value(Vp,Lit) -> varp_nif:value(Vp,Lit).
+bound(Vp,Lit) -> varp_nif:bound(Vp,Lit).
+bind(Vp, X) -> varp_nif:bind(Vp, X).
+bind(Vp,X,Level) -> varp_nif:bind(Vp,X,Level).
+decide(Vp,X) -> varp_nif:decide(Vp,X).
+decide(Vp,X,Level) -> varp_nif:decide(Vp,X,Level).
+subst(Vp,X,Y) -> varp_nif:subst(Vp,X,Y).
+implication_clause(Vp, Lit) -> varp_nif:implication_clause(Vp, Lit).
+implication_level(Vp, Lit) -> varp_nif:implication_level(Vp, Lit).
+implication_pos(Vp, Lit) -> varp_nif:implication_pos(Vp, Lit).
+conflicting_clause(Vp) -> varp_nif:conflicting_clause(Vp).
+conflicting_clause(Vp, Index) -> varp_nif:conflicting_clause(Vp, Index).
+conflict(Vp,Level, Bump, Index) -> varp_nif:conflict(Vp,Level, Bump, Index).
+minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
+is_variable(Vp,Lit) -> varp_nif:is_variable(Vp,Lit).
+is_bound(Vp,Lit) -> varp_nif:is_bound(Vp,Lit).
+is_equal(Vp,LitA,LitB) -> varp_nif:is_equal(Vp,LitA,LitB).
+isused(Vp,Var) -> varp_nif:isused(Vp,Var).
+isused(Vp,Var,Status) -> varp_nif:isused(Vp,Var,Status).
+isatom(Vp,Var) -> varp_nif:isatom(Vp,Var).
+isatom(Vp,Var,Status) -> varp_nif:isatom(Vp,Var,Status).
+set_level(Vp,Level) -> varp_nif:set_level(Vp,Level).
+keep_level(Vp,Level) -> varp_nif:keep_level(Vp,Level).
+move_level(Vp,From,To) -> varp_nif:move_level(Vp,From,To).
+undo_level(Vp,Level) -> varp_nif:undo_level(Vp,Level).
+undo(Vp) -> varp_nif:undo(Vp).
+bcp(Vp) -> varp_nif:bcp(Vp).
+bcp(Vp,TurboLiteralList) -> varp_nif:bcp(Vp,TurboLiteralList).
+bcp(Vp,TurboLiteralList,TurboAll) -> varp_nif:bcp(Vp,TurboLiteralList,TurboAll).
+nbcp(Vp) -> varp_nif:nbcp(Vp).
+clauseset_size(Vp, Si) -> varp_nif:clauseset_size(Vp, Si).
+add_clause(Vp,Ls) -> varp_nif:add_clause(Vp,Ls).
+add_clause(Vp,Ls,Si) -> varp_nif:add_clause(Vp,Ls,Si).
+find_clause(Vp,Ls) -> varp_nif:find_clause(Vp,Ls).
+get_clause(Vp,Index) -> varp_nif:get_clause(Vp,Index).
+get_clause(Vp,Index,Skip) -> varp_nif:get_clause(Vp,Index,Skip).
+get_clause(Vp,Index,SkipLiteral,Raw) ->
+    varp_nif:get_clause(Vp,Index,SkipLiteral,Raw).
+compress_clause(Vp,Index) -> varp_nif:compress_clause(Vp,Index).
+use_clause(Vp,Index) -> varp_nif:use_clause(Vp,Index).
+bump(Vp,Lit,Bump) -> varp_nif:bump(Vp,Lit,Bump).
+subscribe(Vp,Event) -> varp_nif:subscribe(Vp,Event).
+clause_info(Vp,Index,What) -> varp_nif:clause_info(Vp,Index,What).
+clause_info(Vp,Index) -> varp_nif:clause_info(Vp,Index).
+del_clause(Vp,Index) -> varp_nif:del_clause(Vp,Index).
+move_clause(Vp,Index,Si) -> varp_nif:move_clause(Vp,Index,Si).
+clean_clause(Vp,Index) -> varp_nif:clean_clause(Vp,Index).
+get_clauses(Vp,Var,How) -> varp_nif:get_clauses(Vp,Var,How).
+queue_first(Vp) -> varp_nif:queue_first(Vp).
+queue_next(Vp, Lit) -> varp_nif:queue_next(Vp, Lit).
+queue_clear(Vp) -> varp_nif:queue_clear(Vp).
+get_decision(Vp, Level) -> varp_nif:get_decision(Vp, Level).
+get_undo_state(Vp, Level) -> varp_nif:get_undo_state(Vp, Level).
+get_nbindings(Vp,Count) -> varp_nif:get_nbindings(Vp,Count).
+get_nbindings(Vp,Count,ClauseInfo) ->
+    varp_nif:get_nbindings(Vp,Count,ClauseInfo).
+get_nbindings(Vp,Count,ClauseInfo,AsTrail) -> varp_nif:get_nbindings(Vp,Count,ClauseInfo,AsTrail).
+get_nbindings(Vp,Count,ClauseInfo,AsTrail,AsTuple) -> varp_nif:get_nbindings(Vp,Count,ClauseInfo,AsTrail,AsTuple).
+get_bindings(Vp, Level) -> varp_nif:get_bindings(Vp, Level).
+get_bindings(Vp, Level, ClauseInfo) -> varp_nif:get_bindings(Vp, Level, ClauseInfo).
+get_bindings(Vp, Level, ClauseInfo, Trail) -> varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail).
+get_bindings(Vp, Level, ClauseInfo, Trail, AsTuple) -> varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail, AsTuple).
+get_number_of_bindings(Vp, Level) -> varp_nif:get_number_of_bindings(Vp, Level).
+order_first(Vp, VarList) -> varp_nif:order_first(Vp, VarList).
+order_last(Vp, List) -> varp_nif:order_last(Vp, List).
+order_sort(Vp, Key1, Key2, Arg) -> varp_nif:order_sort(Vp, Key1, Key2, Arg).
+clauseset_offset(Vp, Si) -> varp_nif:clauseset_offset(Vp, Si).
+clauseset_offset(Vp, Si, Offset) -> varp_nif:clauseset_offset(Vp, Si, Offset).
+clauseset_sort(Vp, Si) -> varp_nif:clauseset_sort(Vp, Si).
+clauseset_first(Vp, Si) -> varp_nif:clauseset_first(Vp, Si).
+clauseset_next(Vp, Ix) -> varp_nif:clauseset_next(Vp, Ix).
+set_user_count(Vp, Lit, Value) -> varp_nif:set_user_count(Vp, Lit, Value).
+next_unbound(Vp) -> varp_nif:next_unbound(Vp).
+next_unbound(Vp, Previous) -> varp_nif:next_unbound(Vp, Previous).
+unmark(Vp) -> varp_nif:unmark(Vp).
+mark(Vp, Bs) -> varp_nif:mark(Vp, Bs).
+mark(Vp, Bs, Clear) -> varp_nif:mark(Vp, Bs, Clear).
+intersect_marks(Vp, Bs) -> varp_nif:intersect_marks(Vp, Bs).
+intersect_var(Vp, _Var, Bs0, AsTuple) -> varp_nif:intersect_var(Vp, _Var, Bs0, AsTuple).
+get_marked(Vp, Tuple) -> varp_nif:get_marked(Vp, Tuple).
+
+%% return index to first clause | false
+clauseset_first(Vp) ->
+    clauseset_first(Vp, ?DELTA).
+
+%% Get all clauses in queue
+get_queue(Vp) ->
+    case queue_first(Vp) of
+	false -> [];
+	I ->
+	    get_queue_(Vp,I,[I])
+    end.
+
+get_queue_(Vp,I,Acc) ->
+    case queue_next(Vp,I) of
+	false -> lists:reverse(Acc);
+	J -> get_queue_(Vp,J,[J|Acc])
+    end.
+
+-spec order_sort(Vp::varp(), Key1::sort_key()) -> integer().
+			
+order_sort(Vp, Key1) ->
+    order_sort(Vp, Key1, 0).
+
+-spec order_sort(Vp::varp(), Key1::sort_key(), Key2::sort_key()) -> integer().
+
+order_sort(Vp, Key1, Key2) ->
+    varp_nif:order_sort(Vp, Key1, Key2, 0).
+
+get_clauses(Vp,Var) ->
+    get_clauses(Vp,Var,literal).
+
+clone(Vp) ->
+    clone(Vp, #{}).
+
+-spec new() -> varp_nif:varp().
+	  
+new() ->
+    varp_nif:new(#{}).
+
+version() ->
+    varp_nif:info(new(), version).
+
+i() ->
+    Vt = new(),
+    _ = [ io:format("~w: ~p\n", [Key,varp_nif:info(Vt, Key)]) || 
+	    Key <- 
+		[version,
+		 literal_size,
+		 literal_integer,
+		 value_packing,
+		 xref,
+		 hash,
+		 init_phase,
+		 use_phase]],
+    ok.
+
+i(Vp) ->
+    _ = [ io:format("~w: ~w\n", [Key,varp_nif:info(Vp, Key)]) ||
+	    Key <- info_keys()],
+    ok.
+
+info(Vp) ->
+    [ {Key,varp_nif:info(Vp, Key)} || Key <- info_keys()].
+
+info_keys() ->
+    [
+     number_of_clauses,
+     number_of_dead_clauses,
+     number_of_conflicting_clauses,
+     number_of_variables,
+     number_of_bound_variables,
+     number_of_unbound_variables,
+     bcp_counter,
+     conflict_counter,
+     clause_n_counter,
+     clause_2_counter,
+     clause_3_counter,
+     clause_d_counter,
+     size,
+     level,
+     version,
+     literal_size,     %% 8,16,32,64 (sizeof literal)
+     literal_integer,  %% true,false (integer or pointer)
+     value_packing,    %% 1,4,undefined (variable value packing)
+     xref,             %% xref is used (need for saturate with substitution)
+     hash,             %% hash is used
+     init_phase,       %% initial phase value
+     use_phase,        %% used saved phase value
+     memory_literal_size,
+     memory_variable_size,
+     memory_clause_size,
+     memory_symbol_size,
+     memory_size
+    ].
+
+memory() ->
+    memory(new()).
+
+memory(Vp) ->
+    Keys = [number_of_variables,
+	    number_of_clauses,
+	    memory_literal_size,
+	    memory_variable_size,
+	    memory_clause_size,
+	    memory_symbol_size,
+	    memory_size],
+    [ {Key,varp_nif:info(Vp, Key)} || Key <- Keys].
+    
+
+get_number_of_variables(Vp) ->
+    varp_nif:info(Vp, number_of_variables).
+
+get_number_of_bound_variables(Vp) ->
+    varp_nif:info(Vp, number_of_bound_variables).
+
+get_number_of_unbound_variables(Vp) ->
+    varp_nif:info(Vp, number_of_unbound_variables).
+
+get_number_of_clauses(Vp) ->
+    varp_nif:info(Vp, number_of_clauses).
+
+get_number_of_dead_clauses(Vp) ->
+    varp_nif:info(Vp, number_of_dead_clauses).
+
+get_number_of_conflicting_clauses(Vp) ->
+    varp_nif:info(Vp, number_of_conflicting_clauses).
+
+get_max_clause_length(Vp) ->
+    varp_nif:info(Vp, max_clause_length).
+
+get_clause_bcp_counter(Vp) ->
+    varp_nif:info(Vp, clause_bcp_counter).
+
+get_clause_bcp_counter(Vp,n) ->
+    varp_nif:info(Vp, clause_n_counter);
+get_clause_bcp_counter(Vp,2) ->
+    varp_nif:info(Vp, clause_2_counter);
+get_clause_bcp_counter(Vp,3) ->
+    varp_nif:info(Vp, clause_3_counter);
+get_clause_bcp_counter(Vp,dead) ->
+    varp_nif:info(Vp, clause_d_counter).
+
+get_bcp_counter(Vp) ->
+    varp_nif:info(Vp, bcp_counter).
+
+get_conflict_counter(Vp) ->
+    varp_nif:info(Vp, conflict_counter).
+
+%% get the very latest binding
+-spec get_latest_binding(Vp::varp_nif:varp()) ->
+	  {Var::integer(),Value::integer()}|false.
+
+get_latest_binding(Vp) ->
+    case get_nbindings(Vp,1,false) of
+	[B={Var,_Val}|_] when is_integer(Var) -> B;
+	_ -> false
+    end.
+
+get_all_bindings(V) ->
+    Level = varp_nif:info(V, level),
+    [{L,varp_nif:get_decision(V,L),varp_nif:get_bindings(V, L)} ||
+	L <- lists:seq(Level,0,-1)].
+
+get_bindings_list(Vp, Level, ClauseInfo, Trail) ->
+    varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail, false).
+
+get_bindings_list(Vp, Level, ClauseInfo) ->
+    varp_nif:get_bindings(Vp, Level, ClauseInfo, false, false).
+
+get_bindings_list(Vp, Level) ->
+    varp_nif:get_bindings(Vp, Level, false, false, false).
+
+get_bindings_trail(Vp, Level) ->
+    varp_nif:get_bindings(Vp, Level, false, true, false).
+
+
+%% bcp over vector [X1,X2,...]
+%% example X1,X2,X3
+%% -X1 -X2 -X3  = E0
+%% -X1 -X2  X3  = E1
+%% -X1  X2 -X3  = E2
+%% -X1  X2  X3  = E3
+%%  X1 -X2 -X3  = E4
+%%  X1 -X2  X3  = E5
+%%  X1  X2 -X3  = E6
+%%  X1  X2  X3  = E7
+%% 
+%%  Y10 = intersect(E0,E1,E2,E3)
+%%  Y11 = intersect(E4,E5,E6,E7)
+%%
+%%  Y20 = intersect(E2,E3,E6,E7)
+%%  Y21 = intersect(E0,E1,E4,E5)
+%% 
+%%  Y30 = intersect(E1,E3,E5,E7)
+%%  Y31 = intersect(E0,E2,E4,E6)
+%%
+%%  intersect_var(X1, Y10, Y11)
+%%  intersect_var(X2, Y20, Y21)
+%%  intersect_var(X3, Y30, Y31)
+%%
+vec_sat_lap(V,K,Q,F,R) ->
+    case vec_create(V, varp_nif:next_unbound(V), K) of
+	[] -> true;
+	Vec0 -> vec_sat_lap_(V,Vec0,Q,F,R)
+    end.
+
+%% FIXME? if a vector
+%% contain a constant, we should probably update the
+%% vector to speed up things (a bit)?
+vec_sat_lap_(V,Vec0,Q,F,R) ->
+    vec_sat_lap_(V,Vec0,Q,F,R,undefined).
+
+vec_sat_lap_(V,Vec0,Q,F,R,FriendMap) ->
+    case vec_sat(V,Vec0,Q,F,R,FriendMap) of
+	false -> false;
+	true ->
+	    case vec_step(V, Vec0) of
+		false -> true;
+		Vec1 -> 
+		    vec_sat_lap_(V,Vec1,Q,F,R,FriendMap)
+	    end
+    end.
+
+vec_sat(V,V0,Q,F,R) ->
+    vec_sat(V,V0,Q,F,R,undefined).
+
+vec_sat(V,V0,Q,F,R,FriendMap) ->
+    V1 = vec_extend(V, V0, Q),
+    V2 = vec_extend_friend(V, V1, F, FriendMap),
+    V3 = vec_extend_rand(V, V2, R),
+    vec_sat(V, V3).
+
+vec_sat(V, Vec) when is_list(Vec) ->
+    varp_nif:set_level(V, 1),
+    case satv_(V,list_to_tuple(Vec)) of
+	false ->
+	    false;
+	[] ->
+	    true;
+	Bs ->
+	    varp_nif:set_level(V, 0),
+	    case install_bindings0(V, Bs) of
+		true ->
+		    varp_nif:bcp(V);
+		false ->
+		    false
+	    end
+    end.
+
+satv_(V, Vt) when is_tuple(Vt) ->
+    %% io:format("satv ~w\n", [Vt]),
+    N = tuple_size(Vt),
+    Bt = bcpv_(V,(1 bsl N)-1, Vt, []),
+    satvar_(V, 0, N, Vt, Bt, []).
+
+%% eval for variable I 
+satvar_(V, I, N, Vt, Bt, Bs) when I < N ->
+    Js = lists:seq(0, (1 bsl N)-1),
+    B1 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =/= 0]),
+    B0 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =:= 0]),
+    %% io:format("satvar_ Vt = ~w, B0 = ~w, B1 = ~w\n", [Vt, B0, B1]),
+    if B0 =:= false, B1 =:= false -> false;
+       B0 =:= false, B1 =:= {} -> satvar_(V, I+1, N, Vt, Bt, Bs);
+       B1 =:= false, B0 =:= {} -> satvar_(V, I+1, N, Vt, Bt, Bs);
+       B0 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B1|Bs]);
+       B1 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B0|Bs]);
+       true ->
+	    case intersect_bindings(V, element(I+1,Vt), B0, B1) of
+		{} ->
+		    satvar_(V, I+1, N, Vt, Bt, Bs);
+		B2 ->
+		    satvar_(V, I+1, N, Vt, Bt, [B2|Bs])
+	    end
+    end;
+satvar_(_V, N, N, _Vt, _Bt, Bs) ->
+    %% io:format("  Bs = ~w\n", [Bs]),
+    Bs.
+
+%% interv0(_V, As) ->
+%%    intersect(As).
+
+interv(_V, []) -> false;
+interv(V, [false|As]) -> interv(V, As);
+interv(V, [A|As]) -> varp_nif:mark(V, A), interv_(V, As).
+
+interv_(V, [false|As]) -> interv_(V, As);
+interv_(V, [A|As]) -> varp_nif:mark(V, A), interv_(V, As);
+interv_(V, []) -> varp_nif:get_marked(V, true).
+
+%% eval all 2^N combinations of Vt
+bcpv_(_V,-1, _Vt, Acc) ->
+    list_to_tuple(Acc);
+bcpv_(V,I, Vt, Acc) ->
+    %% io:format("bcpv I=~w\n", [I]),
+    varp_nif:set_level(V, 1),
+    case bindv(V, I, Vt) of
+	false ->
+	    varp_nif:queue_clear(V),
+	    varp_nif:undo_level(V, 1),
+	    bcpv_(V,I-1, Vt, [false|Acc]);
+	true ->
+	    varp_nif:set_level(V, 2),
+	    Ei = case varp_nif:bcp(V) of
+		     false -> false;
+		     true -> varp_nif:get_bindings(V, 2)
+		 end,
+	    varp_nif:undo_level(V, 2),
+	    varp_nif:undo_level(V, 1),
+	    bcpv_(V,I-1, Vt, [Ei|Acc])
+    end.
+
+%% given number I set vars in Vt according to bit
+bindv(V, I, Vt) ->
+    bindv(V, tuple_size(Vt), I, Vt).
+    
+bindv(_V, 0, _I, _Vt) ->
+    true;
+bindv(V, J, I, Vt) ->
+    Xj = if I band (1 bsl (J-1)) =/= 0 -> element(J,Vt); 
+	    true -> -element(J,Vt)
+	 end,
+    %% io:format("bindv J=~w Xj=~w\n", [J, Xj]),
+    varp_nif:bind(V,Xj) andalso bindv(V,J-1,I,Vt).
+
+
+intersect_var(Vp, Var, Bs0) ->
+    varp_nif:intersect_var(Vp, Var, Bs0, ?BINDING_AS_TUPLE).
+
+intersect_bindings(Vp, Var, Bs0, Bs1) ->
+    varp_nif:mark(Vp, Bs1),
+    varp_nif:intersect_var(Vp, Var, Bs0, true).
+
+get_marked(Vp) ->
+    varp_nif:get_marked(Vp, ?BINDING_AS_TUPLE).
+
+intersect_var0(_Vp, Var, Bs0, Bs1) ->
+    intersect_var0_(Var, Bs0, bindings_to_map(Bs1)).
+
+intersect_var0_(Var, [X|Bs0], Map) ->
+    case maps:find(X, Map) of
+	{ok,true} ->
+	    %% !Var => X,  Var => X  
+	    [X | intersect_var0_(Var, Bs0, Map)];
+	error ->
+	    case maps:find(-X, Map) of
+		{ok,true} ->
+		    %% !Var => X  Var => !X
+		    [{Var,-X} | intersect_var0_(Var, Bs0, Map)];
+		error ->
+		    intersect_var0_(Var, Bs0, Map)
+	    end
+    end;
+intersect_var0_(_Var, [], _Map) ->
+    [].
+
+%% intersect a list of list of bindings - return bindings
+intersect([]) -> false;
+intersect([A]) -> A;
+intersect([A,B]) -> intersect_(A,B);
+intersect([false|Bs]) -> intersect(Bs);
+intersect([A|Bs]) -> intersect__(Bs, bindings_to_map(A)).
+
+intersect__([false|Bs], Map) -> intersect__(Bs, Map);
+intersect__([B|Bs], Map) -> intersect__(Bs, inter_map(B, Map));
+intersect__([], Map) -> map_to_bindings(Map).
+
+%% intersect two binding lists
+intersect(As, Bs) -> intersect_(As, Bs).
+
+intersect_(false, Bs) -> Bs;
+intersect_(As, false) -> As;
+intersect_(As, Bs) -> inter_values(Bs, bindings_to_map(As)).
+
+inter_map(Bs, Map) ->
+    inter_map_(Bs, Map, #{}).
+
+inter_map_([B|Bs], Map, Dst) ->
+    case maps:find(B, Map) of
+	{ok,true} -> inter_map_(Bs, Map, Dst#{ B => true });
+	_ -> inter_map_(Bs, Map, Dst)
+    end;
+inter_map_([], _Map, Dst) ->
+    Dst.
+
+inter_values([B|Bs], Map) ->
+    case maps:find(B, Map) of
+	{ok,true} -> [B | inter_values(Bs, Map)];
+	_ -> inter_values(Bs, Map)
+    end;
+inter_values([], _Map) ->
+    [].
+
+%% make map of bindings into list of bindings
+map_to_bindings(Map) ->
+    [ X || {X,true} <- maps:to_list(Map)].
+
+%% make a set of bindings
+bindings_to_map(As) ->
+    bindings_to_map(As, #{}).
+bindings_to_map([A|As], Map) ->
+    bindings_to_map(As, Map#{ A => true });
+bindings_to_map([],Map) ->
+    Map.
+
+install_bindings0(V,[B|Bs]) when is_tuple(B) ->
+    case install_tuple_bindings_(V, 0, 1, B) of
+	true -> install_bindings0(V, Bs);
+	false -> false
+    end;
+install_bindings0(V,[B|Bs]) when is_list(B) ->
+    case install_list_bindings_(V, 0, B) of
+	true -> install_bindings0(V, Bs);
+	false -> false
+    end;
+install_bindings0(_V,[]) ->
+    true.
+
+
+install_bindings(V,Bs) when is_list(Bs) ->
+    install_list_bindings_(V, varp_nif:info(V, level), Bs);
+install_bindings(V,Bt) when is_tuple(Bt) ->
+    install_tuple_bindings_(V, varp_nif:info(V, level), 1, Bt).
+
+install_bindings(V,Level,Bs) when is_list(Bs) ->
+    install_list_bindings_(V, Level, Bs);
+install_bindings(V,Level,Bt) when is_tuple(Bt) ->
+    install_tuple_bindings_(V, Level, 1, Bt).
+
+install_tuple_bindings_(_V, _Level, I, Bt) when I > tuple_size(Bt) ->
+    true;
+install_tuple_bindings_(V, Level, I, Bt) when I =< tuple_size(Bt) ->
+    case element(I,Bt) of
+	X when is_integer(X) ->
+	    true = varp_nif:bind(V, X),
+	    install_tuple_bindings_(V,Level,I+1,Bt);	    
+	{X,Y} when Level =:= 0 ->
+	    Xa = varp_nif:variable_info(V, X, is_atom),
+	    Ya = varp_nif:variable_info(V, Y, is_atom),
+	    if Ya, not Xa ->
+		    varp_nif:subst(V, Y, X);
+	       true ->
+		    varp_nif:subst(V, X, Y)
+	    end,
+	    install_tuple_bindings_(V,Level,I+1,Bt);
+	{X,t} ->
+	    true = varp_nif:bind(V, X),
+	    install_tuple_bindings_(V,Level,I+1,Bt);
+	{X,f} ->
+	    true = varp_nif:bind(V, -X),
+	    install_tuple_bindings_(V,Level,I+1,Bt)
+    end.
+
+install_list_bindings_(_V,_Level,[]) ->
+    true;
+install_list_bindings_(V,Level,[B|Bs]) ->
+    case B of
+	X when is_integer(X) ->
+	    true = varp_nif:bind(V, X),
+	    install_list_bindings_(V,Level,Bs);
+	{X,X} ->
+	    install_list_bindings_(V,Level,Bs);
+	{X,t} ->
+	    true = varp_nif:bind(V, X),
+	    install_list_bindings_(V,Level,Bs);
+	{X,f} ->
+	    true = varp_nif:bind(V, -X),
+	    install_list_bindings_(V,Level,Bs);
+	{X,Y} when Level =:= 0 ->
+	    Xa = varp_nif:variable_info(V, X, is_atom),
+	    Ya = varp_nif:variable_info(V, Y, is_atom),
+	    if Ya, not Xa ->
+		    varp_nif:subst(V, Y, X);
+	       true ->
+		    varp_nif:subst(V, X, Y)
+	    end,
+	    install_list_bindings_(V,Level,Bs)
+    end.
+
+%%
+vec_value(V, Vec) ->
+    [case varp_nif:value(V, Xi) of
+	 undefined -> u;
+	 Vi -> Vi
+     end || Xi <- Vec].
+
+vec_bind(_V, []) ->
+    true;
+vec_bind(V, [Xi|Vec]) ->
+    varp_nif:bind(V, Xi) andalso vec_bind(V, Vec).
+
+%% read "vector" of unbound variables starting from Var (must be unbound)
+%% assume there are at least K unbound variables (FIXME)
+vec_create(_V, false, _K) ->
+    [];
+vec_create(V, Vi, K) ->
+    vec_create_(V, Vi, K-1, [Vi]).
+
+vec_create_(_V, _Vi, 0, Vec) -> 
+    Vec;
+vec_create_(V, Vi, I, Vec) ->
+    case varp_nif:next_unbound(V, Vi) of
+	false ->
+	    case varp_nif:next_unbound(V) of
+		false -> Vec;
+		Vj -> vec_create_(V, Vj, I-1, [Vj|Vec])
+	    end;
+	Vj ->
+	    vec_create_(V, Vj, I-1, [Vj|Vec])
+    end.
+
+%% add (at most) Q "next" elements to Vec (not already in Vec)
+vec_extend(V, Vec, Q) ->
+    vec_extend_(V, Vec, Q).
+
+vec_extend_(_V, Vec, 0) -> Vec;
+vec_extend_(V, Vec, I) -> 
+    case next_unbound_skip(V, hd(Vec), Vec) of
+	false -> Vec;
+	V1 -> vec_extend_(V, [V1|Vec], I-1)
+    end.
+
+vec_extend_friend(V, Vec, P, undefined) ->
+    vec_extend(V, Vec, P);
+vec_extend_friend(_V, Vec=[Xi|_], P, FriendMap) ->
+    %% pick friends from -Xi
+    W = maps:get(-Xi, FriendMap, []) -- Vec,
+    Vec ++ lists:sublist(W, P).
+
+%%
+%% do a saturation run and build a reverse map
+%% X -> Y1 Y2 Y3 ...  then 
+%% friend(Y1, X)
+%% friend(Y2, X)
+%% friend(Y3, X)
+%%
+make_friend_map(V) ->
+    make_friend_map_(V, varp_nif:next_unbound(V), #{}).
+
+make_friend_map_(_V, false, Map) -> 
+    Map;
+make_friend_map_(V, Xi, Map0) ->
+    Map1 = add_lit_friends(V, Xi, Map0),
+    Map2 = add_lit_friends(V, -Xi, Map1),
+    make_friend_map_(V, varp_nif:next_unbound(V, Xi), Map2).
+
+add_lit_friends(V, Xi, Map) ->
+    varp_nif:set_level(V, 1),
+    case varp_nif:bind(V, Xi) of
+	false ->
+	    varp_nif:queue_clear(V),
+	    varp_nif:undo_level(V, 1),
+	    Map;
+	true ->
+	    varp_nif:set_level(V, 2),
+	    case varp_nif:bcp(V) of
+		false ->
+		    varp_nif:undo_level(V, 2),
+		    varp_nif:undo_level(V, 1),
+		    Map;
+		true ->
+		    Map1 = add_friends(get_bindings_list(V, 2), Xi, Map),
+		    varp_nif:undo_level(V, 2),
+		    varp_nif:undo_level(V, 1),
+		    Map1
+	    end
+    end.
+
+add_friends([Yi|Ys], X, Map) ->
+    Fs = maps:get(Yi, Map, []),
+    case lists:member(X, Fs) of
+	true ->
+	    add_friends(Ys, X, Map);
+	false ->
+	    add_friends(Ys, X, maps:put(Yi, [X|Fs], Map))
+    end;
+add_friends([], _X, Map) ->
+    Map.
+
+%% FIXME: add depth info for all friends?
+%% depth(V, Yi, DepthMap) ->
+%%    Cix = varp_nif:implication_clause(V, Yi),
+%%    Clause = varp_nif:get_clause(V, Cix, Yi),
+%%    Depth = lists:max([maps:get(-Li, DepthMap) || Li <- Clause])+1,
+%%    {Depth, DepthMap#{ Yi => Depth }}.
+    
+%% add (at most) R random elements to Vec (not already in Vec)
+vec_extend_rand(V, Vec, R) ->
+    N = get_number_of_variables(V),
+    M = get_number_of_unbound_variables(V) - length(Vec),
+    vec_extend_rand_(V, Vec, N, M, R).
+
+vec_extend_rand_(_V, Vec, _N, _M, 0) -> Vec;
+vec_extend_rand_(_V, Vec, _N, M, _I) when M =< 0 -> Vec;
+vec_extend_rand_(V, Vec, N, M, I) ->
+    V1 = next_rand_unbound_skip(V, N, Vec),
+    vec_extend_rand_(V, [V1|Vec], N, M-1, I-1).
+
+vec_is_bound(_V, []) ->
+    false;
+vec_is_bound(V, [Xi|Vec]) ->
+    case varp_nif:is_bound(V, Xi) of
+	true -> true;
+	false -> vec_is_bound(V, Vec)
+    end.
+
+%% step vector (list) over variables
+vec_step(V, Vec) ->
+    vec_step(V, Vec, []).
+
+vec_step(_V, [], _Skip) ->
+    false;
+vec_step(V, [Vi|Vec], Skip) ->
+    case next_unbound_skip(V, Vi, Skip) of
+	false ->
+	    case vec_step(V, Vec, [Vi|Skip]) of
+		false -> false;
+		Vec1 = [Vj|_] ->
+		    case next_unbound_skip(V, Vj, Skip) of
+			false -> false;
+			Vk -> [Vk|Vec1]
+		    end
+	    end;
+	Vj -> [Vj|Vec]
+    end.
+
+next_unbound_skip(V, Vi, Skip) ->
+    case varp_nif:next_unbound(V, Vi) of
+	false -> false;
+	Vj ->
+	    case lists:member(Vj, Skip) of
+		true -> next_unbound_skip(V, Vj, Skip);
+		false -> Vj
+	    end
+    end.
+
+%% Select a random variables, that is not member of Skip, among
+%% variables in range 1..N
+%% FIXME: this may loop too long if few unbound variables are available!
+next_rand_unbound_skip(V, N, Skip) when N > 0 ->
+    J = rand:uniform(N),
+    case varp_nif:next_unbound(V, J) of
+	false ->
+	    next_rand_unbound_skip(V, N, Skip);
+	V1 ->
+	    case lists:member(V1, Skip) of
+		true -> next_rand_unbound_skip(V, N, Skip);
+		false -> V1
+	    end
+    end.
+
+%% utility to get a list of unbound literals
+order_all(Vp) ->
+    order_all_(Vp,varp_nif:next_unbound(Vp),[]).
+
+order_all_(_Vp,false,Acc) ->
+    lists:reverse(Acc);
+order_all_(Vp,Xi,Acc) ->
+    order_all_(Vp,varp_nif:next_unbound(Vp, Xi), [Xi|Acc]).
+
+phase_all(Vp) ->
+    [varp_nif:variable_info(Vp,Vi,phase) || Vi <- order_all(Vp)].

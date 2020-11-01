@@ -54,6 +54,7 @@ Get varp information
 
 * version
 * 'bcp\_counter'
+* 'level'
 * 'conflict\_counter'
 * 'max\_conflicting'
 * 'num\_conflicting'
@@ -109,7 +110,7 @@ Set configurable items in varp
 	
 
 ``` python
-varpy.add_variable(vp [,is_atom])
+varpy.add_variable(vp [,is_atom [, is_used])
 ```
 
 Create a new variable. The variable is return as an index to the
@@ -121,7 +122,7 @@ exception: system_limit (too many variables)
 
 
 ``` python
-varpy.add_variables(vp, num, [,is_atom])
+varpy.add_variables(vp, num, [,is_atom [,is_used])
 ```
 
 Create __num__ new variables. The variables are return as a tuple
@@ -514,10 +515,14 @@ variable is bound to __False__ a positive literal means that the
 variable is bound to __True__.
 
 ``` python
-varpy.get_nbindings(vp, count, clauseinfo)
+varpy.get_nbindings(vp, count, clauseinfo, as_trail, as_tuple)
 ```
 
-Return a maximum of __count__ bindings with the latest binding first.
+Return a maximum of __count__ bindings.
+Return them in order of when binding where made, if __as_trail__ 
+is __True__, otherwise the bidnings are returned as latest binding first.
+if __as_tuple__ is __True__ then bindings are returned as a tuple 
+otherwise a list is returned.
 
 if clauseinfo is __True__ then a list of
 tuples (literal, pos, implication\_clause) are returned otherwise
@@ -670,10 +675,10 @@ Either bump value __n__ is one of
 * 'log10', bump value is calculated to log10(__'number-of-variables'__)
 * 'rank',  bump value is set to the length of the implication clause.
 
-Or the __n__ is a floating point ration between zero and one that will
-give the the number of steps to move, 0.1 means move 10% in number of
-variables.
-Or the value is an integer that gives an absolute number of steps to move.
+if __n__ is a floating point value between 0 and 1 then the
+bump value will be computed to the relative to the number of variables.
+For example a value of, 0.1 means move 10% in number of variables.
+If __n__ is an integer then x is moved that exact number of steps.
 
 ``` python
 varpy.subscribe(vp, flag|[flag])

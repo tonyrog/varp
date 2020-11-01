@@ -121,7 +121,7 @@ reason(V,L) ->
     end.
 
 get_trail(V, Level) ->
-    varp_nif:get_bindings_trail(V, Level).
+    varp:get_bindings_trail(V, Level).
 
 %% maps implementing set
 set_seen(Q, VarSet) ->

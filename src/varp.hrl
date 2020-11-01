@@ -82,7 +82,13 @@
 -endif.
 -define(warn(F,A), io:format((F),(A))).
 
--type literal() :: integer().
+
+-type variable() :: varp_nif:variable().
+-type literal() :: varp_nif:literal().
+-type symbol() :: varp_nif:symbol().
+-type varp() :: varp_nif:varp().
+-type sort_key() :: varp_nif:sort_key().
+
 -type vtype() :: 'int' | 'uint' | 'bit'.
 -type ptype() :: vtype() | 'bool'.
 -type psize() :: pos_integer().

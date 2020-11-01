@@ -450,7 +450,7 @@ config(Bs, Item, Value) ->
     varp_nif:config(Bs#bs.vp, Item, Value).
 
 info(Bs) ->
-    varp_nif:info(Bs#bs.vp).
+    varp:info(Bs#bs.vp).
 
 info(Bs, Key) ->
     varp_nif:info(Bs#bs.vp, Key).
@@ -471,31 +471,31 @@ getopt(Bs,Key) ->
     ?GETOPT_BS(Bs, Key).
 
 number_of_variables(Bs) ->
-    varp_nif:get_number_of_variables(Bs#bs.vp).
+    varp:get_number_of_variables(Bs#bs.vp).
 
 number_of_clauses(Bs) ->
-    varp_nif:get_number_of_clauses(Bs#bs.vp).
+    varp:get_number_of_clauses(Bs#bs.vp).
 
 number_of_dead_clauses(Bs) ->
-    varp_nif:get_number_of_dead_clauses(Bs#bs.vp).
+    varp:get_number_of_dead_clauses(Bs#bs.vp).
 
 number_of_bound(Bs) ->
-    varp_nif:get_number_of_bound_variables(Bs#bs.vp).
+    varp:get_number_of_bound_variables(Bs#bs.vp).
 
 number_of_unbound(Bs) ->
-    varp_nif:get_number_of_unbound_variables(Bs#bs.vp).
+    varp:get_number_of_unbound_variables(Bs#bs.vp).
 
 clause_bcp_counter(Bs) ->
-    varp_nif:get_clause_bcp_counter(Bs#bs.vp).
+    varp:get_clause_bcp_counter(Bs#bs.vp).
 
 clause_bcp_counter(Bs,N) ->
-    varp_nif:get_clause_bcp_counter(Bs#bs.vp,N).
+    varp:get_clause_bcp_counter(Bs#bs.vp,N).
 
 bcp_counter(Bs) ->
-    varp_nif:get_bcp_counter(Bs#bs.vp).
+    varp:get_bcp_counter(Bs#bs.vp).
 
 conflict_counter(Bs) ->
-    varp_nif:get_conflict_counter(Bs#bs.vp).
+    varp:get_conflict_counter(Bs#bs.vp).
 
 next_unbound(Bs) ->
     varp_nif:next_unbound(Bs#bs.vp).
@@ -2924,7 +2924,7 @@ model(Vp, Vs) ->
 collect_model(Vp,Vs) ->
     case maps:size(Vs) of
 	0 -> %% fixme mixed model! CNF with is declarations
-	    N = varp_nif:get_number_of_variables(Vp),
+	    N = varp:get_number_of_variables(Vp),
 	    lists:foldr(
 	      fun(I,Acc) ->
 		      case varp_nif:value(Vp,I) of
