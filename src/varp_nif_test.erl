@@ -1557,12 +1557,33 @@ clause_learn_a1() ->
     %% dump(V, false),
     ok.
 
+%% invert graph (all arrow point backwards)
+invert_graph(G) ->
+    maps:fold(
+      fun(V, Ws, Gi) ->
+	      lists:foldl(
+		fun(W, Gii) ->
+			Rs = maps:get(W,Gii,[]),
+			Gii#{ W => [V|Rs] }
+		end, Gi, Ws)
+      end, #{}, G).
+
+%% build clauses from reverse implicatin graph
+implication_clauses(Vp, G) ->
+    maps:fold(
+      fun(W,Rs,_Acc) ->
+	      Ds = [-Di || Di <- Rs],
+	      {true,Ci} = varp_nif:add_clause(Vp, Ds++[W]),
+	      io:format("add ~w = ~p\n", [Ci, get_sym_clause(Vp, Ci)])
+      end, ok, G).
+
 %% build conflict clause from graph!
 clause_learn_g1() ->
     Vp = varp_nif:new(#{ qtype => fifo }),
     [A,B,C,D,E,F,G,H,I,J] = [var(Vp, Name) || 
 				Name <- ["A","B","C","D","E",
 					 "F","G","H","I","J"]],
+    %% implication graph
     Graph = #{A => [E],
 	      B => [F],
 	      C => [F,G],
@@ -1573,24 +1594,11 @@ clause_learn_g1() ->
 	      H => [J],
 	      I => [-J]
 	     },
-    %% reversed graph (all arrow point backwards)
-    RGraph = maps:fold(
-	       fun(V, Ws, Gi) ->
-		       lists:foldl(
-			 fun(W, Gii) ->
-				 Rs = maps:get(W,Gii,[]),
-				 Gii#{ W => [V|Rs] }
-			 end, Gi, Ws)
-	       end, #{}, Graph),
+    RGraph = invert_graph(Graph),
     io:format("Graph=~w\n", [Graph]),
     io:format("RGraph=~w\n", [RGraph]),
-    %% build implication graph
-    maps:fold(
-      fun(W,Rs,_Acc) ->
-	      Ds = [-Di || Di <- Rs],
-	      {true,Ci} = varp_nif:add_clause(Vp, Ds++[W]),
-	      io:format("add ~w = ~p\n", [Ci, get_sym_clause(Vp, Ci)])
-      end, ok, RGraph),
+    %% build clauses from implication graph
+    implication_clauses(Vp, RGraph),
     %% trigger leaf nodes A,B,C,D in this graph
     varp_nif:set_level(Vp, 1),
     true = varp_nif:bind(Vp, A),
@@ -1611,6 +1619,60 @@ clause_learn_g1() ->
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     ok.
+
+%% example from conflict driven learning
+%% V7,V9,V14,15  and level=4 are not used
+clause_learn_g2() ->
+    Vp = varp_nif:new(#{ qtype => fifo }),
+    [V1,V2,V3,V4,V5,V6,V8,V10,V11,V12,V13,V16,V17,V18,V19] =
+	[var(Vp, Name) || 
+	    Name <- ["V1","V2","V3","V4","V5","V6","V8","V10",
+		     "V11","V12","V13","V16","V17","V18","V19"]],
+    %% implication graph
+    Graph = #{V1 => [V18],
+	      -V2 => [-V10],
+	      V3 => [V18,-V18],
+	      V4 => [-V10],
+	      -V5 => [V18],
+	      -V6 => [-V12],
+	      V8 => [V1],
+	      -V10 => [V1,V3,-V5],
+	      V11 => [-V12,V16],
+	      -V12 => [-V2],
+	      -V13 => [V16],
+	      V16 => [-V2],
+	      -V17 => [V18],
+	      V19 => [-V18]
+	     },
+    RGraph = invert_graph(Graph),
+    implication_clauses(Vp, RGraph),
+
+    %% trigger leaf nodes A,B,C,D in this graph
+    varp_nif:set_level(Vp, 1),
+    true = varp_nif:bind(Vp, -V6),
+    true = varp_nif:bind(Vp, -V17),
+    true = varp_nif:bcp(Vp),
+    varp_nif:set_level(Vp, 2),
+    true = varp_nif:bind(Vp, V8),
+    true = varp_nif:bind(Vp, -V13),
+    true = varp_nif:bcp(Vp),
+    varp_nif:set_level(Vp, 3),
+    true = varp_nif:bind(Vp, V4),
+    true = varp_nif:bind(Vp, V19),
+    true = varp_nif:bcp(Vp),
+    %% level 4 is not used!
+    varp_nif:set_level(Vp, 5),
+    true = varp_nif:bind(Vp, V11),
+    false = varp_nif:bcp(Vp),
+    
+    Dix = varp_nif:conflicting_clause(Vp, 0),
+    io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
+    Cix = varp_nif:conflict(Vp, 5, 1, 0),
+    io:format("learned clause ~w = ~p\n", 
+	      [Cix, get_sym_clause(Vp, Cix)]),
+    ok.
+    
+
 
 implication_depth() ->
     V = varp_nif:new(#{}),
