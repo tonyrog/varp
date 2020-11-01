@@ -458,7 +458,6 @@ typedef struct _variable_t     // :cdlink_t in cdlist_t
     literal_t lit[2];          // literal containers LIT_POS=0 LIT_NEG=1
 } variable_t;
 
-
 // FIXME: use list of vlink for bound list and mark list
 typedef struct _vlink_t  // :slink_t in slist_t
 {
@@ -470,8 +469,10 @@ typedef struct _symbol_t // :dlink - dlist
 {
     dlink_t link;
     uint32_t hvalue;          // symbol hash
-    bool_t is_term;           // either name is a term or name is binary string
-    bool_t is_scalar;         // if simple variable
+    struct {
+	unsigned is_term:1;   // either name is a term or name is binary string
+	unsigned is_scalar:1; // if simple variable
+    };
     uint8_t* data;            // raw data
     size_t   size;            // raw len
     dynvar(lit_t*, lit);      // array of literals
@@ -522,6 +523,7 @@ typedef struct _clause_segment_t  // :slink_t in slist
     uint32_t nallocated;  // number of clauses stored
     uint32_t ndeleted;    // number of delete marked clauses
     uint32_t size;        // number of bytes allocated in data
+    int      si;          // segment index = DELTA/GAMMA/BETA/ALPHA
     uint8_t* ptr;         // allocation point
     uint8_t* end;         // end of data point
     uint8_t  data[];      // clause data storage
@@ -614,8 +616,8 @@ typedef struct _varp_t {
     varp_config_t opt;        // varp configs
     uint32_t cnum[NUM_CSET];  // number of clauses (not counting holes)
     uint32_t coffs[NUM_CSET]; // offset for clause iterator
-
-    uint32_t cdead;           // number of dead clauses (level=0)
+    uint32_t cfree[NUM_CSET]; // number of clauses marked as free
+    uint32_t cdead[NUM_CSET]; // number of dead clauses (level=0)
 
     int num_conflicting;      // number of conflicting clauses saved
     int max_conflicting;      // max number of conflicting <= MAX_CONFLICTING
@@ -2169,6 +2171,7 @@ static inline void push_variable(varp_t* vp, variable_t* var, int level)
     vp->undo[level].bs = var;
     vp->undo[level].size++;
     vp->num_bound++;
+    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;
 }
 
 static ERL_NIF_TERM make_cix(ErlNifEnv* env,cix_t cix)
@@ -2232,8 +2235,11 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 	values[1] = enif_make_int(env, vp->num_bound);
     if (flags & SUB_FLAG_NUM_CLAUSES)
 	values[2] = enif_make_int(env, get_number_of_clauses(vp));
-    if (flags & SUB_FLAG_NUM_DEAD)
-	values[3] = enif_make_int(env, vp->cdead);
+    if (flags & SUB_FLAG_NUM_DEAD) {
+	int n = vp->cdead[DELTA]+vp->cdead[GAMMA]+
+	    vp->cdead[BETA]+vp->cdead[ALPHA];
+	values[3] = enif_make_int(env, n);
+    }
     if (flags & SUB_FLAG_MAX_LEVEL) {
 	values[4] = enif_make_int(env, vp->max_level);
 	vp->max_level = 0;  // and reset
@@ -2440,8 +2446,8 @@ static void kill_clauses(varp_t* vp, literal_t* xp)
     while(len--) {
 	clause_t* cp = get_clause(vp, xptr->cix);
 	if (cp && !cp->dead) { // not already dead
-	    vp->cdead++;
 	    cp->dead = 1;
+	    vp->cdead[GET_SI(cp->cix)]++;
 	    schedule_unwatch_clause(vp, cp);
 	}
 	xptr++;
@@ -2509,38 +2515,41 @@ static int undo_set_size(varp_t* vp, size_t size)
     int i;
     if (dynvar_resize(vp->undo, size) < 0)
 	return -1;
-    // clear added levels
     for (i = (int)n; i < (int)size; i++)
 	init_level(vp, i);
     return 0;
 }
+
+#ifdef DEBUG
+// check that all levels above 'level' are clean
+static void check_clean_levels(varp_t* vp, int level)
+{
+    int n = (int)dynvar_size(vp->undo);
+    int i;
+    for (i = level+1; i < n; i++) {
+	if ((vp->undo[i].bs != NULL) || (vp->undo[i].size != 0))
+	    enif_fprintf(stderr, "set_level: level %d not empty\r\n", i);
+	if (vp->undo[i].t != uUNDEF)
+	    enif_fprintf(stderr, "set_level: level %d not undef\r\n", i);
+    }
+}
+#endif
 
 // set current bindings level
 static int set_level(varp_t* vp, int level)
 {
     if (level >= (int)dynvar_size(vp->undo))
 	undo_set_size(vp, level+1);
+#ifdef DEBUG
+    if (level > vp->level) check_clean_levels(vp, level);
+#endif
     vp->level = level;
-    if (level > vp->max_level)
-	vp->max_level = level;
+    if (level > vp->max_level) vp->max_level = level;
+    if (level < vp->min_level) vp->min_level = level;
     DBG("%sSet_level: @%d, t=%d, decision=%s\r\n",
 	indent(level), level, vp->undo[level].t,
 	format_lit(vp, vp->undo[level].decision));
-#ifdef DEBUG
-    // check that levels above level are clean    
-    {
-	int n = (int)dynvar_size(vp->undo);
-	int i;
-	for (i = level+1; i < n; i++) {
-	    if ((vp->undo[i].bs != NULL) ||
-		(vp->undo[i].size != 0))
-		enif_fprintf(stderr, "set_level: level %d not empty\r\n", i);
-	    if (vp->undo[i].t != uUNDEF)
-		enif_fprintf(stderr, "set_level: level %d not undef\r\n", i);
-	}
-    }
-#endif
-    return 0;
+    return level;
 }
 
 static void unbind_level(varp_t* vp, int level)
@@ -2734,7 +2743,8 @@ static void scan_seg_clauses(varp_t* vp, clause_segment_t* seg)
     }
 }
 
-static clause_segment_t* new_clause_segment(varp_t* vp, size_t segment_size)
+static clause_segment_t* new_clause_segment(varp_t* vp, int si,
+					    size_t segment_size)
 {
     clause_segment_t* seg;
 
@@ -2745,6 +2755,7 @@ static clause_segment_t* new_clause_segment(varp_t* vp, size_t segment_size)
 	seg->next = NULL;
 	seg->nallocated = 0;
 	seg->ndeleted = 0;
+	seg->si = si;
 	seg->size = segment_size;
 	seg->ptr = seg->data;
 	seg->end = seg->data + segment_size; // outside!
@@ -2760,10 +2771,10 @@ static clause_t* clause_seg_alloc(varp_t* vp, int si, int size)
     uint8_t* ptr;
 
     if ((segp = vp->clauseseg[si]) == NULL)
-	segp = vp->clauseseg[si] = new_clause_segment(vp, DEF_SEGMENT_SIZE);
+	segp = vp->clauseseg[si] = new_clause_segment(vp, si, DEF_SEGMENT_SIZE);
     if (segp->ptr + nbytes + CLAUSE_ALIGNMENT > segp->end) {
 	clause_segment_t* segp1;
-	segp1 = new_clause_segment(vp, DEF_SEGMENT_SIZE);
+	segp1 = new_clause_segment(vp, si, DEF_SEGMENT_SIZE);
 	segp1->next = segp;
 	vp->clauseseg[si] = segp1;
 	segp = segp1;
@@ -2850,6 +2861,8 @@ static void clause_free(varp_t* vp, clause_t* cp)
 		((uint8_t*)cp) - (cp->offset + sizeof(clause_segment_t));
 	    cp->delete = 1;    // marked for deletion
 	    segp->ndeleted++;
+	    ASSERT(si == segp->si);
+	    vp->cfree[si]++;
 	    // if (ndeleted == nallocted) reset block
 	    // if (clause was last allocated) back poinrt
 	    // if (ndeleted > 0.5*nallocated) collect
@@ -3649,12 +3662,12 @@ static int setup(varp_t* vp, varp_config_t* config)
 	vp->clauseseg[i] = NULL;
 	vp->cnum[i]  = 0;
 	vp->coffs[i] = 0;
+	vp->cfree[i] = 0;
+	vp->cdead[i] = 0;
     }
 
     if (dynvar_init(vp->tlit, 0) < 0)
 	goto error;
-
-    vp->cdead = 0;
 
     if (dynvar_init(vp->unwatch, 0) < 0)
 	goto error;
@@ -5086,8 +5099,10 @@ static int set_lit(ErlNifEnv* env, varp_t* vp, lit_t xp, ival_t val, int level)
 	return 1;
     }
     vp->caller_env = env;
-    vp->undo[level].decision = xp;
-    vp->undo[level].t = uSET;
+    if (level > 0) {
+	vp->undo[level].decision = xp;
+	vp->undo[level].t = uSET;
+    }
     put_l(vp, xp, val, -1, CLAUSE_NONE, level);
     vp->caller_env = NULL;
     return 1;
@@ -5797,7 +5812,7 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 	    // FIXME: swap away TRUE? (may not be a problem since dead)
 	    if (!cp->dead) {
 		cp->dead = 1;
-		vp->cdead++;
+		vp->cdead[GET_SI(cp->cix)]++;
 	    }
 	}
 	yptr++;
@@ -5844,6 +5859,7 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 
     vp->num_subst++;
     vp->num_bound++;
+    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;    
     log_permanent(vp, xp, yp, 0);
 
     subst_ll(vp, xl, yl);
@@ -6123,8 +6139,7 @@ static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
 	    case I_TRUE:
 		return EV_DEAD;
 	    case I_UNDEF: // found a wp
-		DBG_BCP("%sMovewp: %s %d=>%ld\r\n",
-			indent(vp->level),
+		DBG_BCP("%sMovewp: %s %d=>%ld\r\n", indent(vp->level),
 			format_lit(vp, cp->lit[wl0->p]), wl0->p, p);
 		*wlp = wl0->next;
 		wlink_set(wl0, p, l2ll(vp, cp->lit[p]));
@@ -6265,8 +6280,8 @@ restart:
 		break;
 	    case ev_DEAD:
 		if (vp->level == 0) {
-		    vp->cdead++;
 		    cp->dead = 1;
+		    vp->cdead[GET_SI(cp->cix)]++;
 		    schedule_unwatch_clause(vp, cp);
 		}
 		break;
@@ -6274,8 +6289,8 @@ restart:
 		break;
 	    default:
 		if (vp->level == 0) {
-		    vp->cdead++;
 		    cp->dead = 1;
+		    vp->cdead[GET_SI(cp->cix)]++;
 		    schedule_unwatch_clause(vp, cp);
 		}
 		if (vp->opt.qtype == recursive) {
@@ -6315,13 +6330,14 @@ conflict:
 static int bcp(varp_t* vp)
 {
     literal_t* lp;
+    int r = 0;
     DBG_BCP("%sBcp: %s\r\n",
 	    indent(vp->level), format_literal(vp, slist_first(&vp->q)));
     while((lp = lqueue_deq(vp)) != NULL) {
-	if (bcp_clauses(vp, lp) < 0)
-	    return -1;
+	if ((r = bcp_clauses(vp, lp)) < 0)
+	    break;
     }
-    return 0;
+    return r;
 }
 
 // run unwatch, remove clauses that are dead (level=0)
@@ -6359,14 +6375,8 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
     vp->num_conflicting = 0;
     bcp(vp);
     vp->caller_env = NULL;
-
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
-
-    if (vp->level > vp->max_level)     vp->max_level = vp->level;
-    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;
-
     if (vp->num_conflicting) {
-	if (vp->level < vp->min_level) vp->min_level = vp->level;
 	vp->conflict_counter++;
 	lqueue_clear(vp);
 	DBG("num conflicts = %d\r\n", vp->num_conflicting);
@@ -6387,6 +6397,7 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 		return enif_make_badarg(env);
 	}
 
+	// FIXME: use vif_get_lit_list ...
 	while (enif_get_list_cell(env, list, &head, &tail)) {
 	    lit_t xp;
 	    if (!vif_get_lit(env, vp, head, &xp))
@@ -6447,7 +6458,7 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 	}
 	if (level == 1)
 	    break;
-	vp->level--;
+	set_level(vp, level-1);
     }
     return enif_make_boolean(env, false);
 }
@@ -6521,9 +6532,6 @@ bcp:
     vp->bcp_counter++;
     bcp(vp);
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
-    if (vp->level > vp->max_level) vp->max_level = vp->level;
-    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;
-
     if (vp->num_conflicting == 0) {
 	x = next_unbound(vp);
 	DBG_ORDER("%sNbcp: step x=%d\r\n", indent(level), x);
@@ -6531,14 +6539,12 @@ bcp:
 	    vp->caller_env = NULL;
 	    return enif_make_boolean(env, true);  // model
 	}
-	set_level(vp, level+1);
-	level = vp->level;
+	level = set_level(vp, level+1);
 	goto next;
     }
     DBG_NBCP("%sContradiction\r\n", indent(level));
     // conflict found
     vp->caller_env = NULL;
-    if (vp->level < vp->min_level) vp->min_level = vp->level;
     vp->conflict_counter++;
     lqueue_clear(vp);
     DBG("num conflicts = %d\n", vp->num_conflicting);
@@ -6618,7 +6624,9 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, get_number_of_clauses(vp));
     }
     if (EQUAL_KEY(env, number_of_dead_clauses, argv[1])) {
-	return enif_make_int(env, vp->cdead);
+	int n = vp->cdead[DELTA]+vp->cdead[GAMMA]+
+	    vp->cdead[BETA]+vp->cdead[ALPHA];
+	return enif_make_int(env, n);
     }
     if (EQUAL_KEY(env, number_of_learnt_clauses, argv[1])) {
 	return enif_make_int(env, vp->cnum[1]);
@@ -7474,21 +7482,13 @@ static ERL_NIF_TERM varp_move_clause(ErlNifEnv* env, int argc,
 
     if (cp->size == 1) {
 	lit_t xp = cp->lit[0];
-
+	
 	clause_free(vp, cp);
 	clauseset_plug_hole(vp, si0, GET_IX(cix0));
 
-	switch(get_l(vp, xp)) {
-	case I_TRUE:  return enif_make_boolean(env, true);
-	case I_FALSE: return enif_make_boolean(env, false);
-	case I_BOUND: return enif_make_badarg(env);
-	case I_UNDEF:
-	default:
-	    vp->caller_env = env;
-	    put_l(vp, xp, I_TRUE, -1, CLAUSE_NONE, 0);
-	    vp->caller_env = NULL;
-	    return enif_make_boolean(env, true);
-	}
+	if (!set_lit(env, vp, xp, I_TRUE, 0))
+	    enif_make_boolean(env, false);
+	return enif_make_boolean(env, true);
     }
 
     cix = clause_insert(vp, si, cp, cp->hvalue);
