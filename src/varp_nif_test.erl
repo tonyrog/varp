@@ -95,13 +95,13 @@ bindings1() ->
 
     clause(V, [-X1, X3]),
     clause(V, [-X1,-X2]),
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     varp_nif:bind(V, X1),
     true = varp_nif:bcp(V),
 
     clause(V, [X4, -X6]),
     clause(V, [X4, X5]),
-    varp_nif:set_level(V, 2),
+    varp_nif:push(V),
     varp_nif:bind(V, -X4),
     true = varp_nif:bcp(V),
 
@@ -213,7 +213,7 @@ test3() ->
     ?verbose("X7 clauses = ~p\n", [varp:get_clauses(V, X7)]),
 
     true = varp_nif:bcp(V),
-    true = varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     true = varp_nif:bind(V, X2),
     true = varp_nif:bind(V, X3),
     {varp:get_bindings_list(V, 1), varp:get_number_of_clauses(V)}.
@@ -344,7 +344,7 @@ bcp_turbo1() ->
     clause(V, [Y, Z2, Y2]),
     clause(V, [Y, Z3, Y3]),
 
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     varp_nif:bind(V, X),  %% X=1
     turbo = varp_nif:bcp(V, [X]),
     turbo = varp_nif:bcp(V, [Y]),
@@ -356,11 +356,10 @@ bcp_add() ->
     X = var(V, <<"X">>),
     Y = var(V, <<"Y">>),
     Z = var(V, <<"Z">>),
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     varp_nif:bind(V, -Y),
     Cix1 = clause(V, [X, Y, Z]),
-    varp_nif:undo_level(V, 1),
-    varp_nif:set_level(V, 0),
+    varp_nif:pop(V),
     0 = varp_nif:clause_info(V, Cix1, watch0),
     2 = varp_nif:clause_info(V, Cix1, watch1),
     varp_nif:bind(V, -X),
@@ -416,7 +415,7 @@ saturate_lap(Vp, X) ->
 install_bindings(_Vp, {}) ->
     ok;
 install_bindings(Vp, Bs) ->
-    varp_nif:set_level(Vp, 0),
+    varp_nif:pop(Vp, 0),
     lists:foreach(
       fun(A) when is_integer(A) ->
 	      io:format("bind ~w\n", [A]),
@@ -460,18 +459,18 @@ saturate_var(Vp, X) ->
     end.
 
 l_eval(Vp, X) ->
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     case varp_nif:bind(Vp, X) of
 	true ->
-	    varp_nif:set_level(Vp, 2),
+	    varp_nif:push(Vp),
 	    varp_nif:bcp(Vp);
 	false ->
 	    false
     end.
 
 l_undo(Vp) ->
-    varp_nif:undo_level(Vp, 2),
-    varp_nif:undo_level(Vp, 1).
+    varp_nif:pop(Vp),
+    varp_nif:pop(Vp).
 	      
 	      
 
@@ -488,7 +487,7 @@ clause_bcp() ->
     undefined = varp_nif:value(V, X3),
     undefined = varp_nif:value(V, X4),
 
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     _C0 = clause(V, [X1, ?F, ?F]),
     _C1 = clause(V, [X2, ?T, ?T, ?T]),
     _C2 = clause(V, [-X3, ?F, ?F, ?F]),
@@ -522,7 +521,7 @@ or_bcp_bindings() ->
     X3 = var(V),
     X4 = var(V),
 
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     clause(V, [-X1, -X2, -X3]),
     clause(V, [-X1, -X2,  X4]),
     clause(V, [-X1,  X2, -X3]),
@@ -539,7 +538,7 @@ or_bcp_bindings() ->
     ?verbose("watched = ~w\n", [get_watched(V)]),
     %% print_clauses(V),
 
-    varp_nif:set_level(V, 2),
+    varp_nif:push(V),
     clause(V, [-X1,  X2,  X3, -X4]),
     ?verbose("watched = ~w\n", [get_watched(V)]),
     ?verbose("3/1\n", []),
@@ -552,7 +551,7 @@ or_bcp_bindings() ->
     %% print_clauses(V),
 
     ?verbose("undo 2\n", []),
-    varp_nif:undo_level(V, 2),
+    varp_nif:pop(V, 2),
     ?verbose("bindings@2 = ~w\n", [varp_nif:get_bindings(V,2)]),
     ?verbose("bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
     ?verbose("bindings@0 = ~w\n", [varp_nif:get_bindings(V,0)]),
@@ -560,7 +559,7 @@ or_bcp_bindings() ->
     %% print_clauses(V),
 
     ?verbose("undo 1\n", []),
-    varp_nif:undo_level(V, 1),
+    varp_nif:pop(V, 1),
     ?verbose("bindings@2 = ~w\n", [varp_nif:get_bindings(V,2)]),
     ?verbose("bindings@1 = ~w\n", [varp_nif:get_bindings(V,1)]),
     ?verbose("bindings@0 = ~w\n", [varp_nif:get_bindings(V,0)]),
@@ -630,7 +629,7 @@ p4() ->
 
 nbcp_p3() ->
     P3 = p3(),
-    varp_nif:set_level(P3, 1),
+    varp_nif:push(P3),
     false = varp_nif:nbcp(P3),
     _Bn1 = varp:get_all_bindings(P3),
     ?verbose("bindings = ~w\n", [_Bn1]),
@@ -658,7 +657,7 @@ nbcp_p4() ->
 			     <<"P(3,1)">>,
 			     <<"P(3,3)">>,
 			     <<"P(4,2)">>]),
-    varp_nif:set_level(P4, 1),
+    varp_nif:push(P4),
     nbcp_loop(P4).
 
 symlist_sort_first(V, SymList) ->
@@ -842,14 +841,14 @@ uorder_bump() ->
     varp_nif:bump(Vp, 5, 13),  %% test more bumps than needed
     [5,1,2,3,4,6,7,8,9,10] = unbound(Vp),
     %%
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     varp_nif:bind(Vp, 5),
     varp_nif:bind(Vp, 1),
     varp_nif:bump(Vp, 8, 'next'),  %% 8 should be next
     [8,2,3,4,6,7,9,10] = unbound(Vp),
 
-    varp_nif:undo_level(Vp, 1),
-    varp_nif:set_level(Vp, 0),
+    varp_nif:pop(Vp, 1),
+    varp_nif:pop(Vp),
     [8,5,1,2,3,4,6,7,9,10] = unbound(Vp),
 
     varp_nif:bump(Vp, 4, 'none'),
@@ -861,7 +860,7 @@ uorder_bump() ->
     varp_nif:bump(Vp, 6, 'log10'),
     [8,5,4,1,2,6,3,7,9,10] = unbound(Vp),
 
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     varp_nif:bind(Vp, 5),
     varp_nif:bind(Vp, 1),
     varp_nif:bind(Vp, 3),
@@ -869,7 +868,7 @@ uorder_bump() ->
     true = varp_nif:bcp(Vp),
     true = varp_nif:value(Vp, 9),
     varp_nif:bump(Vp, 9, "rank"),
-    varp_nif:undo_level(Vp, 1),
+    varp_nif:pop(Vp),
     [8,5,4,1,9,2,6,3,7,10] = unbound(Vp),    
 
     ok.
@@ -881,26 +880,26 @@ uorder_bt() ->
     varp_nif:add_clause(Vp, lists:seq(1,10)),  %% all variables are used!
     [1,2,3,4,5,6,7,8,9,10] = unbound(Vp),
     1 = varp_nif:next_unbound(Vp),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     varp_nif:bind(Vp, 1), varp_nif:bind(Vp, 3), varp_nif:bind(Vp, 5),
     2 = varp_nif:next_unbound(Vp),
-    varp_nif:set_level(Vp, 2),
+    varp_nif:push(Vp),
     varp_nif:bind(Vp, 2), varp_nif:bind(Vp, 4), varp_nif:bind(Vp, 6),
     7 = varp_nif:next_unbound(Vp),
-    varp_nif:set_level(Vp, 3),
+    varp_nif:push(Vp),
     varp_nif:bind(Vp, 7), varp_nif:bind(Vp, 8), varp_nif:bind(Vp, 9),
     10 = varp_nif:next_unbound(Vp),
-    varp_nif:set_level(Vp, 4),
+    varp_nif:push(Vp),
     varp_nif:bind(Vp, 10),
     false = varp_nif:next_unbound(Vp),
     %% no undo and check
-    varp_nif:undo_level(Vp, 4),
+    varp_nif:pop(Vp),
     10 = varp_nif:next_unbound(Vp),
-    varp_nif:undo_level(Vp, 3),
+    varp_nif:pop(Vp),
     7 = varp_nif:next_unbound(Vp),
-    varp_nif:undo_level(Vp, 2),
+    varp_nif:pop(Vp),
     2 = varp_nif:next_unbound(Vp),
-    varp_nif:undo_level(Vp, 1),
+    varp_nif:pop(Vp),
     1 = varp_nif:next_unbound(Vp),
     ok.
 
@@ -1200,7 +1199,7 @@ intersect_var2() ->
     X6 = var(V),
     %% X1 -> {-X2,X3,X4,-X5}
     varp_nif:mark(V, {-X2,X3,X4,-X5}),
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     %% -X1 -> {-X2,X3,-X4,X5,X6}
     _ = [begin true = varp_nif:bind(V,Xi) end || Xi <- [-X2,X3,-X4,X5,X6]],
     Di = {-X2,X3,{X1,X4},{X1,-X5}},
@@ -1224,7 +1223,7 @@ watch1() ->
     1 = varp_nif:clause_info(V, C1, watch1),
 
     %% bind X4, move wp 0
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     varp_nif:bind(V, -X4),
     true = varp_nif:bcp(V),
 
@@ -1232,21 +1231,21 @@ watch1() ->
     1 = varp_nif:clause_info(V, C1, watch1),
 
     %% bind -X3, not watched, watch points should stay the same
-    varp_nif:set_level(V, 2),
+    varp_nif:push(V),
     varp_nif:bind(V, -X3),
     true = varp_nif:bcp(V),
 
     0 = varp_nif:clause_info(V, C1, watch0),
     1 = varp_nif:clause_info(V, C1, watch1),
 
-    varp_nif:set_level(V, 3),
+    varp_nif:push(V),
     varp_nif:bind(V, -X1),
     true = varp_nif:bcp(V),
 
     4 = varp_nif:clause_info(V, C1, watch0),
     1 = varp_nif:clause_info(V, C1, watch1),
 
-    varp_nif:set_level(V, 4),
+    varp_nif:push(V),
     varp_nif:bind(V, -X5),
     true = varp_nif:bcp(V),
 
@@ -1295,7 +1294,7 @@ clone1() ->
     clause(V, [-X2, -X6]),
     clause(V, [-X4, -X6]),
 
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     false = varp_nif:nbcp(V),
 
     %% print_clauses(V),
@@ -1303,7 +1302,7 @@ clone1() ->
 
     W = varp_nif:clone(V),
 
-    varp_nif:set_level(W, 1),
+    varp_nif:push(W),
     false = varp_nif:nbcp(W),
 
     %% print_clauses(W),
@@ -1319,7 +1318,7 @@ decide1() ->
     varp_nif:add_clause(V, [X1,X2]),
     varp_nif:add_clause(V, [-X2,X3]),
     varp_nif:add_clause(V, [-X3,-X4]),
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     true = varp_nif:bind(V, -X1),
     true = varp_nif:bcp(V),
     ?F = varp_nif:value(V, X1),
@@ -1451,10 +1450,10 @@ clause_learn_d1() ->
     %% dump(V, false),
 
     %% bind A/1 B/1 C/1 X/1
-    true = bind_and_bcp(V, 1, A),
-    true = bind_and_bcp(V, 2, B),
-    true = bind_and_bcp(V, 3, C),
-    false = bind_and_bcp(V, 4, X),
+    true = push_bind_and_bcp(V, A),
+    true = push_bind_and_bcp(V, B),
+    true = push_bind_and_bcp(V, C),
+    false = push_bind_and_bcp(V, X),
 
     _Dix = varp_nif:conflicting_clause(V, 0),
     %% ?verbose("conflicting_clause1: ~w: ~w\n",[Dix,varp_nif:get_clause(V,_Dix)]),
@@ -1462,7 +1461,7 @@ clause_learn_d1() ->
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
 
-    undo_until(V, 4, 1),
+    varp_nif:pop(V, 1),
 
     %% ?verbose("DUMP2\n"),
     %% dump(V, false),
@@ -1481,8 +1480,7 @@ clause_learn_d1() ->
     Learnt2 = varp_conflict:analyze_clause(V, 1, 1.0, 0),
     ?verbose("learnt_clause: ~w\n", [Learnt2]),
     true = ([-1] == abs_sort(Learnt2)),
-    varp_nif:undo_level(V,1),
-    varp_nif:set_level(V, 0),
+    varp_nif:pop(V,0),
     true = clause(V, Learnt2, gamma),
     
     true = varp_nif:bcp(V),
@@ -1512,19 +1510,20 @@ clause_learn_a1() ->
     %% dump(V, false),
 
     %% bind A/1 B/1 C/1 X/1
-    true = bind_and_bcp(V, 1, A),
-    true = bind_and_bcp(V, 2, B),
-    true = bind_and_bcp(V, 3, C),
-    false = bind_and_bcp(V, 4, X),
+    true = push_bind_and_bcp(V, A),
+    true = push_bind_and_bcp(V, B),
+    true = push_bind_and_bcp(V, C),
+    false = push_bind_and_bcp(V, X),
 
-    Aix1 = varp_nif:conflict(V, 4, 1.0, 0),
+    Level = varp_nif:level(V),
+    Aix1 = varp_nif:conflict(V, Level, 1.0, 0),
     Learnt1 = varp_nif:get_clause(V,Aix1),
     ?verbose("conflicting_clause1: ~w: ~w\n",
 	      [split_cix(Aix1),Learnt1]),
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
 
-    undo_until(V, 4, 1),
+    varp_nif:pop(V, 1),
 
     %% ?verbose("DUMP2\n",[]),
     %% dump(V, false),
@@ -1536,7 +1535,8 @@ clause_learn_a1() ->
     %% dump(V, false),
 
     false = varp_nif:bcp(V),
-    Aix2 = varp_nif:conflict(V, 1, 1.0, 0),
+    Level1 = varp_nif:level(V),
+    Aix2 = varp_nif:conflict(V, Level1, 1.0, 0),
     Learnt2 = varp_nif:get_clause(V,Aix2),
     ?verbose("conflicting_clause2: ~w: ~w\n",
 	      [split_cix(Aix2),Learnt2]),
@@ -1546,7 +1546,7 @@ clause_learn_a1() ->
     %% ?verbose("DUMP4\n",[]),
     %% dump(V, false),
 
-    undo_until(V, 1, 0),
+    varp_nif:pop(V, 0),
     true = varp_nif:move_clause(V, Aix2, gamma),
     
     true = varp_nif:bcp(V),
@@ -1600,22 +1600,23 @@ clause_learn_g1() ->
     %% build clauses from implication graph
     implication_clauses(Vp, RGraph),
     %% trigger leaf nodes A,B,C,D in this graph
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, A),
     true = varp_nif:bcp(Vp),
-    varp_nif:set_level(Vp, 2),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, B),
     true = varp_nif:bcp(Vp),
-    varp_nif:set_level(Vp, 3),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, C),
     true = varp_nif:bcp(Vp),
-    varp_nif:set_level(Vp, 4),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, D),
     false = varp_nif:bcp(Vp),
 
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Cix = varp_nif:conflict(Vp, 4, 1, 0),
+    Level = varp_nif:level(Vp),
+    Cix = varp_nif:conflict(Vp, Level, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     ok.
@@ -1648,31 +1649,116 @@ clause_learn_g2() ->
     implication_clauses(Vp, RGraph),
 
     %% trigger leaf nodes A,B,C,D in this graph
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, -V6),
     true = varp_nif:bind(Vp, -V17),
     true = varp_nif:bcp(Vp),
-    varp_nif:set_level(Vp, 2),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, V8),
     true = varp_nif:bind(Vp, -V13),
     true = varp_nif:bcp(Vp),
-    varp_nif:set_level(Vp, 3),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, V4),
     true = varp_nif:bind(Vp, V19),
     true = varp_nif:bcp(Vp),
-    %% level 4 is not used!
-    varp_nif:set_level(Vp, 5),
+    varp_nif:push(Vp),
     true = varp_nif:bind(Vp, V11),
     false = varp_nif:bcp(Vp),
     
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Cix = varp_nif:conflict(Vp, 5, 1, 0),
+    Level = varp_nif:level(Vp),
+    Cix = varp_nif:conflict(Vp, Level, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     ok.
-    
 
+%% Example from Sorensson & Bier paper
+%% Graph:
+%%  A => D
+%%  B => E
+%%  C => D
+%%  D => [E, G, T]
+%%  E => [H]
+%%  F => [G]
+%%  G => [H, T]
+%%  H => [I, Y]
+%%  I => [Y]
+%%  K => [L]
+%%  L => [S]
+%%  R => [S]
+%%  S => [T,X]
+%%  T => [Y]
+%%  X => [Z]
+%%  Y => [V]
+%%  Z => [-V]
+
+clause_learn_g3() ->
+    Vp = varp_nif:new(#{ qtype => fifo }),
+    [A,B,C,D,E,F,G,H,I,K,L,R,S,T,X,Y,Z,CONFLICT] =
+	[var(Vp, Name) || 
+	    Name <- ["A","B","C","D","E",
+		     "F","G","H","I",
+		     "K","L",
+		     "R","S","T",
+		     "X","Y","Z",
+		     "CONFLICT"]],
+    %% implication graph
+    Graph = 
+	#{ A => [D],
+	   B => [E],
+	   C => [D],
+	   D => [E, G, T],
+	   E => [H],
+	   F => [G],
+	   G => [H, T],
+	   H => [I, Y],
+	   I => [Y],
+	   K => [L],
+	   L => [S],
+	   R => [S],
+	   S => [T,X],
+	   T => [Y],
+	   X => [Z],
+	   Y => [CONFLICT],
+	   Z => [-CONFLICT] },
+    RGraph = invert_graph(Graph),
+    implication_clauses(Vp, RGraph),
+
+    %% bind A and B on level 0
+    true = varp_nif:bind(Vp, A),
+    true = varp_nif:bind(Vp, B),
+    %% decide C on level 1 
+    0 = varp_nif:push(Vp),  %% push return previous level!!
+    true = varp_nif:bind(Vp, C),
+    true = varp_nif:bcp(Vp),
+    %% decide F on level 2
+    1 = varp_nif:push(Vp),
+    true = varp_nif:bind(Vp, F),
+    true = varp_nif:bcp(Vp),
+    %% decide K on level 3
+    2 = varp_nif:push(Vp),
+    true = varp_nif:bind(Vp, K),
+    true = varp_nif:bcp(Vp),
+    %% decide R on level 4
+    3 = varp_nif:push(Vp),
+    true = varp_nif:bind(Vp, R),
+    false = varp_nif:bcp(Vp),
+    %% CONFLICT should be the conflict
+    Dix = varp_nif:conflicting_clause(Vp, 0),
+    io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
+    Level = varp_nif:level(Vp),
+    Cix = varp_nif:conflict(Vp, Level, 1, 0),
+    io:format("learned clause ~w = ~p\n", 
+	      [Cix, get_sym_clause(Vp, Cix)]),
+    Len1 = varp_nif:minimize(Vp, Cix, local),
+    io:format("locally minimize clause ~w[len=~w] = ~p\n", 
+	      [Cix, Len1, get_sym_clause(Vp, Cix)]),
+    Len2 = varp_nif:minimize(Vp, Cix, recursive),
+    io:format("recursive minimize clause ~w[len=~w] = ~p\n", 
+	      [Cix, Len2, get_sym_clause(Vp, Cix)]),
+    ok.
+    
 
 implication_depth() ->
     V = varp_nif:new(#{}),
@@ -1689,7 +1775,7 @@ implication_depth() ->
     clause(V, [-X,-Y2,Y4]),
     clause(V, [-X,-Y3,Y5]),
     clause(V, [-Y4,-Y5,Y6]),
-    true = bind_and_bcp(V, 1, X),
+    true = push_bind_and_bcp(V, X),
     ?T = varp_nif:value(V, Y1),
     ?T = varp_nif:value(V, Y2),
     ?T = varp_nif:value(V, Y3),
@@ -1726,10 +1812,13 @@ get_sym_literal(Vp, Li) ->
 
 %% 
 %% bcp 999 clauses
-%% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 45477
 %% {literal_integer,false},{literal_size,64},{value_packing,1} => 34047
 %% {literal_integer,false},{literal_size,64},{value_packing,no} => 35276
-%% 
+%%
+%% OLD VALUE:
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412
+%%
 bench() ->
     bench(20000).
 
@@ -1755,10 +1844,10 @@ bench(N) ->
 bench_(V, _X0, 0) ->
     varp_nif:info(V, bcp_counter);
 bench_(V, X0, I) ->
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     true = varp_nif:bind(V, X0),
     true = varp_nif:bcp(V),
-    varp_nif:undo_level(V, 1),
+    varp_nif:pop(V),
     bench_(V, X0, I-1).
 
 bench_cnf_build() ->
@@ -1908,26 +1997,19 @@ make_clause(N, Ls, V, Vs) ->
 
 
 
-bind_and_bcp(V, Level, X) ->
-    varp_nif:set_level(V, Level),
+push_bind_and_bcp(V, X) ->
+    varp_nif:push(V),
     varp_nif:bind(V, X) andalso varp_nif:bcp(V).
-
-undo_until(V, From, To) when From > To ->
-    varp_nif:undo_level(V, From),
-    undo_until(V, From-1, To);
-undo_until(V, _From, To) ->
-    varp_nif:set_level(V, To),
-    To.
 
 %% multi bind and eval
 eval_bindings(V, Xs) ->
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     _ = [(true = varp_nif:bind(V, X)) || X <- Xs ],
-    varp_nif:set_level(V, 2),
+    varp_nif:push(V),
     true = varp_nif:bcp(V),
     R = varp:get_bindings_list(V, 2),
-    varp_nif:undo_level(V, 2),
-    varp_nif:undo_level(V, 1),
+    varp_nif:pop(V),
+    varp_nif:pop(V),
     R.
 
 %% will have the effect that clause 1 have stamp T1 and clause N have stamp Tn
@@ -2118,7 +2200,7 @@ dump(V, Verb) ->
     lists:foreach(
       fun(L) ->
 	      io:format("~w: ~p\n", [L, varp_nif:get_bindings(V, L)])
-      end, lists:seq(0, varp_nif:info(V,level))),
+      end, lists:seq(0, varp_nif:level(V))),
     ok.
 
 print_clauses(V) ->  print_clauses(V, true).

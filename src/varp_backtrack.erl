@@ -16,7 +16,6 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
--define(LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 %% stack element
@@ -24,7 +23,6 @@
 	{
 	 lit = 0 :: literal(),   %% current literal
 	 ls      :: [literal()], %% literal list [] | [Xi] | [Xi,-Xi]
-	 level   :: integer(), %% backtrack level
 	 turbo   :: boolean()  %% true if turbo rule may be used
 	}).
 
@@ -102,36 +100,37 @@ init(Bs,UseTurbo) ->
 	    ?dbg("no variables unbound\n", []),
 	    {model,[]};
 	Xi ->
-	    ?dbg("~sinit ~w @~w\n", [indent(?LEVEL),Xi,?LEVEL]),
-	    {true,[#e{ls=[Xi,-Xi],level=?LEVEL,turbo=UseTurbo}]}
+	    {true,[#e{ls=[Xi,-Xi],turbo=UseTurbo}]}
     end.
 
 next([#e{ls=[]}|Stack1],Bs,UseTurbo) ->
-    undo(Bs,Stack1),
+    varp_nif:pop(Bs#bs.vp),
     next(Stack1,Bs,UseTurbo);
-next([#e{ls=[Xi|Xs],level=Level,turbo=Turbo}|Stack],Bs,UseTurbo) ->
-    varp_nif:set_level(Bs#bs.vp,Level),
-    case eqv(Bs,Xi,Level,Turbo) of
+next([E0=#e{ls=[Xi|Xs],turbo=Turbo}|Stack],Bs,UseTurbo) ->
+    TurboList = if Turbo -> [Xi]; true -> [] end,
+    varp_nif:push(Bs#bs.vp),
+    ?dbg("~s: decide ~w\n", [indent(level(Bs)), Xi]),
+    case varp_nif:decide(Bs#bs.vp, Xi) andalso 
+	varp_nif:bcp(Bs#bs.vp,TurboList) of
 	false ->
-	    Stack1 = [#e{lit=Xi,ls=Xs,level=Level,turbo=Turbo}|Stack],
+	    Stack1 = [E0#e{lit=Xi, ls=Xs}|Stack],
 	    proof_output(Bs, Stack1),
-	    undo_level(Bs,Level),
+	    varp:pop(Bs#bs.vp),
 	    next(Stack1,Bs,UseTurbo);
 	turbo -> %% turbo can only be used on one side right now
 	    io:format("TURBO\n"),
-	    Stack1 = [#e{lit=Xi,ls=Xs,level=Level,turbo=false}|Stack],
+	    Stack1 = [E0#e{lit=Xi,ls=Xs,turbo=false}|Stack],
 	    proof_output(Bs, Stack1),
-	    undo_level(Bs,Level),
+	    varp:pop(Bs#bs.vp),
 	    next(Stack1,Bs,UseTurbo);
 	true ->
 	    case varp_nif:next_unbound(Bs#bs.vp) of
 		false ->
-		    {model,[#e{lit=Xi,ls=Xs,level=Level,turbo=Turbo}|Stack]};
+		    {model,[E0#e{lit=Xi,ls=Xs}|Stack]};
 		Xj ->
-		    ?dbg("~snext ~w @~w\n", [indent(Level),Xi,Level]),
 		    {true,
-		     [#e{ls=[Xj,-Xj],level=Level+1,turbo=UseTurbo},
-		      #e{lit=Xi,ls=Xs,level=Level,turbo=Turbo}|Stack]}
+		     [#e{ls=[Xj,-Xj],turbo=UseTurbo},
+		      E0#e{lit=Xi, ls=Xs} | Stack]}
 	    end
     end;
 next([],_Bs,_UseTurbo) ->
@@ -153,7 +152,7 @@ loop_(Stack,Func,I,Count,Acc,Bs,UseTurbo) ->
 	    Count1 = Count+1,
 	    case Func(Count1,Acc,Bs) of
 		{true,Acc1} ->
-		    undo(Bs,Stack1),
+		    varp_nif:pop(Bs#bs.vp),
 		    loop(Stack1,Func,I+1,Count1,Acc1,Bs,UseTurbo);
 		{false,Acc1} ->
 		    {?CONTINUE,Acc1,Bs}
@@ -168,21 +167,12 @@ loop_(Stack,Func,I,Count,Acc,Bs,UseTurbo) ->
 	    end
     end.
 	
-undo(Bs,[#e{level=Level}|_]) ->
-    undo_level(Bs,Level);
-undo(_Bs,[]) ->
-    ok.
-
-undo_all(Bs,[#e{level=Level}|Stack]) ->
-    undo_level(Bs,Level),
+undo_all(Bs,[_|Stack]) ->
+    varp_nif:pop(Bs#bs.vp),
     undo_all(Bs, Stack);
 undo_all(_Bs, []) ->
     ok.
 
-undo_level(Bs, Level) ->
-    ?dbg("~sundo@~w\n", [indent(Level),Level]),
-    varp_nif:undo_level(Bs#bs.vp,Level).
-    
 %% Xi is the current decision, that failed,
 %% Stack contains the negated previous decisions
 proof_output(Bs, Stack) ->
@@ -195,20 +185,7 @@ proof_output(Bs, Stack) ->
 	    varp_formula:proof_output(Bs,$a,Clause)
     end.
 
-eqv(Bs,L,_Level,Turbo) ->
-    ?dbg("~sdecide+bcp ~s/~w turbo=~w\n",
-	 [indent(_Level),varp_formula:format_lit(Bs,L),
-	  varp_nif:info(Bs#bs.vp, phase),Turbo]),
-    case varp_nif:decide(Bs#bs.vp,L) of
-	false -> false;
-	true ->
-	    if Turbo ->
-		    varp_nif:bcp(Bs#bs.vp,[L]);
-	       true ->
-		    varp_nif:bcp(Bs#bs.vp)
-	    end
-    end.
-
 -ifdef(DEBUG).
+level(Bs) -> varp_nif:level(Bs#bs.vp).
 indent(D) -> lists:duplicate(D, $>).
 -endif.

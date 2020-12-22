@@ -79,12 +79,11 @@ validate_loop(Fd,Type,Bs, I) ->
 	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
 	    %% io:format("add clause ~w\n", [Clause]),
-	    varp_nif:set_level(Bs#bs.vp,1),
+	    0 = varp_nif:push(Bs#bs.vp),
 	    Res = eval_neg_literal_list(Bs, Clause),
-	    varp_nif:undo_level(Bs#bs.vp,1),
+	    varp_nif:pop(Bs#bs.vp),
 	    case Res of
 		false -> %% ok valid
-		    varp_nif:set_level(Bs#bs.vp,0),
 		    case varp_nif:add_clause(Bs#bs.vp, Clause, gamma) of
 			true -> ok;
 			{true,_} -> ok
@@ -119,6 +118,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    validate_loop(Fd,Type,Bs,I1)
     end.
 
+%% moveto varp:vec_neg_bind?
 eval_neg_literal_list(Bs, [Li|Ls]) ->
     case varp_nif:bind(Bs#bs.vp,-Li) of
 	false -> false;

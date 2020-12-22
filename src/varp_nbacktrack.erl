@@ -16,7 +16,6 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
--define(ROOT_LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 options() ->
@@ -42,7 +41,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     varp_formula:config(Bs, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
-    varp_nif:set_level(Bs#bs.vp, ?ROOT_LEVEL),
+    0 = varp_nif:push(Bs#bs.vp), %% assert, may be relaxed
     case varp_formula:getopt(Bs1,method) of
 	collect -> collect(Bs1, 0, N, []);
 	count   -> count(Bs1, 0, N)
@@ -135,14 +134,8 @@ count_(Bs, Count, N) when N =:= 0; Count < N ->
 
 %% undo all levels (except 0) and set level = 0
 undo_all(Bs) ->
-    Level = varp_nif:info(Bs#bs.vp, level),
-    undo_all_levels(Bs, Level).
+    varp_nif:pop(Bs#bs.vp, 0).
 
-undo_all_levels(Bs, 0) ->
-    varp_nif:set_level(Bs#bs.vp, 0);
-undo_all_levels(Bs, I) ->
-    varp_nif:undo_level(Bs#bs.vp,I),
-    undo_all_levels(Bs, I-1).
 
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions

@@ -8,7 +8,7 @@ CC=gcc
 CSOURCES=varp_nif.c xnif_funcs.c
 OBJS=$(CSOURCES:%.c=%.o)
 
-CFLAGS+= -std=c99 -fomit-frame-pointer -O3 -Werror -Wno-incompatible-pointer-types -Wno-unused-result
+CFLAGS+= -std=c99 -fomit-frame-pointer -O3 -Wno-incompatible-pointer-types -Wno-unused-result -Wunused
 
 VARP_DIR=$(realpath ..)
 VERSION=$(shell git describe --always --tags)

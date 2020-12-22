@@ -132,6 +132,12 @@ are marked as atom.
 exception: system_limit (too many variables)
 
 ``` python
+varpy.level(vp)
+```
+
+Return current binding level.
+
+``` python
 varpy.value(vp, x)
 ```
 
@@ -262,30 +268,25 @@ or set using is\_atom(vp, x, True)
 exception: variable (x is not a variable)
 
 ``` python
-varpy.set_level(vp, l)
+varpy.push(vp)
 ```
 
-Set current level to __l__. Note that level 0 is treated
-as constant level. So be careful when setting level to 0.
+Push binding level stack and move on to the next,
+return the level number before the push.
+
+``` python
+varpy.pop(vp)
+```
+
+Undo all bindings on current level and move to the
+previous level. Return the level number after pop.
 
 
 ``` python
-varpy.keep_level(vp, l)
+varpy.pop(vp, l)
 ```
 
-Keep all bindings on level __l__ by removing the undo information.
-
-``` python
-varpy.move_level(vp, src, dst)
-```
-
-Move bindings from level __src__ to level __dst__.
-
-``` python
-varpy.undo_level(vp, l)
-```
-
-Undo all bindings on level __l__.
+Undo and pop all bindings until level l, but NOT including level l.
 
 ``` python
 varpy.undo(vp)
@@ -293,7 +294,6 @@ varpy.undo(vp)
 
 Undo bindings typically after an nbind. Undo will undo all bindings
 until a decision and flip the variable if not already flipped.
-
 
 ``` python
 varpy.bcp(vp [,[x1,..,xn] [,all]])
@@ -500,7 +500,7 @@ Return the undo state on level __l__
 * 'undef'
 
 ``` python
-varpy.get_bindings(vp, l, clauseinfo, as_trail, as_tuple)
+varpy.get_bindings(vp, [l, [clauseinfo, [as_trail, [as_tuple]]]])
 ```
 
 Return all bindings on level __l__. Return them in order of when
@@ -515,7 +515,7 @@ variable is bound to __False__ a positive literal means that the
 variable is bound to __True__.
 
 ``` python
-varpy.get_nbindings(vp, count, clauseinfo, as_trail, as_tuple)
+varpy.get_nbindings(vp, count [, clauseinfo, [as_trail, [as_tuple]]])
 ```
 
 Return a maximum of __count__ bindings.

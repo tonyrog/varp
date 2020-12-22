@@ -527,7 +527,7 @@ test_gate(Gate) ->
     X = var(Vp, "X"),
     C = gate(Vp,Gate,X,A,B),
     varp_nif:bind(Vp, C),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 test_or() ->
@@ -556,7 +556,7 @@ test_any() ->
     D = var(Vp, "D"),
     E = any(Vp, [A,B,C,D]),
     varp_nif:bind(Vp, E),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 test_all() ->
@@ -567,7 +567,7 @@ test_all() ->
     D = var(Vp, "D"),
     E = all(Vp, [A,B,C,D]),
     varp_nif:bind(Vp, E),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 test_none() ->
@@ -578,7 +578,7 @@ test_none() ->
     D = var(Vp, "D"),
     E = none(Vp, [A,B,C,D]),
     varp_nif:bind(Vp, E),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 
@@ -590,7 +590,7 @@ test_eq1() ->
     D = var(Vp, "D"),
     E = one(Vp, [A,B,C,D]),
     varp_nif:bind(Vp, E),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 test_eq1_2() ->
@@ -601,7 +601,7 @@ test_eq1_2() ->
     D = false,
     E = one(Vp, [A,B,C,D]),
     varp_nif:bind(Vp, E),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 test_half_adder1() ->
@@ -642,7 +642,7 @@ test_add(N) ->
     varp_nif:add_symbol(Vp, Xs, "X"),
     set_status(Vp, Ci, false),
     %% set_overflow(Vp, uint, Ci, Cj, false),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 
@@ -665,7 +665,7 @@ test_sub(N) ->
     varp_nif:add_symbol(Vp, Xs, "X"),
     set_status(Vp, -Ci, false),
     %% set_overflow(Vp, uint, Ci, Cj, false),
-    varp_nif:set_level(Vp, 1),
+    varp_nif:push(Vp),
     bt_all(Vp).
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)

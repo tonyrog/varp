@@ -63,6 +63,7 @@
 -export([variable_info/3]).
 -export([literal_info/3]).
 -export([value/2]).
+-export([level/1]).
 -export([bound/2]).
 -export([bind/2, bind/3]).
 -export([decide/2, decide/3]).
@@ -79,10 +80,8 @@
 -export([is_equal/3]).
 -export([isused/2, isused/3]).
 -export([isatom/2, isatom/3]).
--export([set_level/2]).
--export([undo_level/2]).
--export([keep_level/2]).
--export([move_level/3]).
+-export([push/1]).
+-export([pop/1, pop/2]).
 -export([undo/1]).
 -export([bcp/1, bcp/2, bcp/3]).
 -export([nbcp/1]).
@@ -103,7 +102,7 @@
 -export([get_undo_state/2]).
 -export([get_nbindings/2, get_nbindings/3]).
 -export([get_nbindings/4, get_nbindings/5]). 
--export([get_bindings/2, get_bindings/3]).
+-export([get_bindings/1, get_bindings/2, get_bindings/3]).
 -export([get_bindings/4, get_bindings/5]).
 -export([get_number_of_bindings/2]).
 -export([get_queue/1]).
@@ -1612,7 +1611,7 @@ read_timer(TRef) when is_reference(TRef) ->
 %% This is the negation of the decision variables blocking the
 %% current model.
 block_clause(Bs) ->
-    Level = varp_nif:info(Bs#bs.vp, level),
+    Level = varp_nif:level(Bs#bs.vp),
     block_clause_(Bs, Level, []).
 
 block_clause_(_Bs, 0, Clause) ->
@@ -1623,7 +1622,7 @@ block_clause_(Bs, Level, Clause) ->
 
 %% Decision clause, use for proof output
 decision_clause(Bs) ->
-    Level = varp_nif:info(Bs#bs.vp, level),
+    Level = varp_nif:level(Bs#bs.vp),
     decision_clause(Bs, Level).
 
 decision_clause(_Bs, 0) ->
@@ -1680,6 +1679,7 @@ first_symbol(Vp) -> varp_nif:first_symbol(Vp).
 next_symbol(Vp,Symbol) -> varp_nif:next_symbol(Vp,Symbol).
 variable_info(Vp,Index,What) -> varp_nif:variable_info(Vp,Index,What).
 literal_info(Vp,Index,What) -> varp_nif:literal_info(Vp,Index,What).
+level(Vp) -> varp_nif:level(Vp).
 value(Vp,Lit) -> varp_nif:value(Vp,Lit).
 bound(Vp,Lit) -> varp_nif:bound(Vp,Lit).
 bind(Vp, X) -> varp_nif:bind(Vp, X).
@@ -1701,10 +1701,9 @@ isused(Vp,Var) -> varp_nif:isused(Vp,Var).
 isused(Vp,Var,Status) -> varp_nif:isused(Vp,Var,Status).
 isatom(Vp,Var) -> varp_nif:isatom(Vp,Var).
 isatom(Vp,Var,Status) -> varp_nif:isatom(Vp,Var,Status).
-set_level(Vp,Level) -> varp_nif:set_level(Vp,Level).
-keep_level(Vp,Level) -> varp_nif:keep_level(Vp,Level).
-move_level(Vp,From,To) -> varp_nif:move_level(Vp,From,To).
-undo_level(Vp,Level) -> varp_nif:undo_level(Vp,Level).
+pop(Vp) -> varp_nif:pop(Vp).
+pop(Vp,Level) -> varp_nif:pop(Vp,Level).
+push(Vp) -> varp_nif:push(Vp).
 undo(Vp) -> varp_nif:undo(Vp).
 bcp(Vp) -> varp_nif:bcp(Vp).
 bcp(Vp,TurboLiteralList) -> varp_nif:bcp(Vp,TurboLiteralList).
@@ -1738,6 +1737,7 @@ get_nbindings(Vp,Count,ClauseInfo) ->
     varp_nif:get_nbindings(Vp,Count,ClauseInfo).
 get_nbindings(Vp,Count,ClauseInfo,AsTrail) -> varp_nif:get_nbindings(Vp,Count,ClauseInfo,AsTrail).
 get_nbindings(Vp,Count,ClauseInfo,AsTrail,AsTuple) -> varp_nif:get_nbindings(Vp,Count,ClauseInfo,AsTrail,AsTuple).
+get_bindings(Vp) -> varp_nif:get_bindings(Vp).
 get_bindings(Vp, Level) -> varp_nif:get_bindings(Vp, Level).
 get_bindings(Vp, Level, ClauseInfo) -> varp_nif:get_bindings(Vp, Level, ClauseInfo).
 get_bindings(Vp, Level, ClauseInfo, Trail) -> varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail).
@@ -1920,7 +1920,7 @@ get_latest_binding(Vp) ->
     end.
 
 get_all_bindings(V) ->
-    Level = varp_nif:info(V, level),
+    Level = varp_nif:level(V),
     [{L,varp_nif:get_decision(V,L),varp_nif:get_bindings(V, L)} ||
 	L <- lists:seq(Level,0,-1)].
 
@@ -1994,14 +1994,15 @@ vec_sat(V,V0,Q,F,R,FriendMap) ->
     vec_sat(V, V3).
 
 vec_sat(V, Vec) when is_list(Vec) ->
-    varp_nif:set_level(V, 1),
-    case satv_(V,list_to_tuple(Vec)) of
+    0 = varp_nif:push(V),
+    Res = satv_(V,list_to_tuple(Vec)),
+    varp_nif:pop(V, 0),
+    case Res of
 	false ->
 	    false;
 	[] ->
 	    true;
 	Bs ->
-	    varp_nif:set_level(V, 0),
 	    case install_bindings0(V, Bs) of
 		true ->
 		    varp_nif:bcp(V);
@@ -2055,20 +2056,20 @@ bcpv_(_V,-1, _Vt, Acc) ->
     list_to_tuple(Acc);
 bcpv_(V,I, Vt, Acc) ->
     %% io:format("bcpv I=~w\n", [I]),
-    varp_nif:set_level(V, 1),
+    varp_nif:push(V),
     case bindv(V, I, Vt) of
 	false ->
 	    varp_nif:queue_clear(V),
-	    varp_nif:undo_level(V, 1),
+	    varp_nif:pop(V),
 	    bcpv_(V,I-1, Vt, [false|Acc]);
 	true ->
-	    varp_nif:set_level(V, 2),
+	    varp_nif:push(V),
 	    Ei = case varp_nif:bcp(V) of
 		     false -> false;
 		     true -> varp_nif:get_bindings(V, 2)
 		 end,
-	    varp_nif:undo_level(V, 2),
-	    varp_nif:undo_level(V, 1),
+	    varp_nif:pop(V),
+	    varp_nif:pop(V),
 	    bcpv_(V,I-1, Vt, [Ei|Acc])
     end.
 
@@ -2180,9 +2181,9 @@ install_bindings0(_V,[]) ->
 
 
 install_bindings(V,Bs) when is_list(Bs) ->
-    install_list_bindings_(V, varp_nif:info(V, level), Bs);
+    install_list_bindings_(V, varp_nif:level(V), Bs);
 install_bindings(V,Bt) when is_tuple(Bt) ->
-    install_tuple_bindings_(V, varp_nif:info(V, level), 1, Bt).
+    install_tuple_bindings_(V, varp_nif:level(V), 1, Bt).
 
 install_bindings(V,Level,Bs) when is_list(Bs) ->
     install_list_bindings_(V, Level, Bs);
@@ -2307,23 +2308,21 @@ make_friend_map_(V, Xi, Map0) ->
     make_friend_map_(V, varp_nif:next_unbound(V, Xi), Map2).
 
 add_lit_friends(V, Xi, Map) ->
-    varp_nif:set_level(V, 1),
+    L = varp_nif:push(V),
     case varp_nif:bind(V, Xi) of
 	false ->
 	    varp_nif:queue_clear(V),
-	    varp_nif:undo_level(V, 1),
+	    varp_nif:pop(V, L),
 	    Map;
 	true ->
-	    varp_nif:set_level(V, 2),
+	    varp_nif:push(V),
 	    case varp_nif:bcp(V) of
 		false ->
-		    varp_nif:undo_level(V, 2),
-		    varp_nif:undo_level(V, 1),
+		    varp_nif:pop(V, L),
 		    Map;
 		true ->
 		    Map1 = add_friends(get_bindings_list(V, 2), Xi, Map),
-		    varp_nif:undo_level(V, 2),
-		    varp_nif:undo_level(V, 1),
+		    varp_nif:pop(V, L),
 		    Map1
 	    end
     end.

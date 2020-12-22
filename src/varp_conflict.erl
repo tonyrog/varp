@@ -27,19 +27,19 @@ analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
 	    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
 	Cix when is_integer(Cix) ->
 	    case Minimize of
-		true ->
-		    case varp_nif:minimize(Bs#bs.vp, Cix) of
+		none ->
+		    Len = varp_nif:clause_info(Bs#bs.vp, Cix, length),
+		    [{Len, Cix}|
+		     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)];
+		Type -> %% local/recursive
+		    case varp_nif:minimize(Bs#bs.vp, Cix, Type) of
 			undefined ->
 			    %%io:format("clause duplicate after minimize\n"),
 			    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
 			Len ->
 			    [{Len, Cix}|
 			     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
-		    end;
-		false ->
-		    Len = varp_nif:clause_info(Bs#bs.vp, Cix, length),
-		    [{Len, Cix}|
-		     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
+		    end
 	    end
     end.
 

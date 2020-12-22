@@ -30,7 +30,6 @@ run(Bs, Param)  when is_record(Bs,bs), is_map(Param) ->
 		    {?CONTINUE,[],Bs}
 	    end;
 	Main ->
-	    varp_nif:set_level(Bs#bs.vp,?TOP_LEVEL),
 	    case varp_nif:bind(Bs#bs.vp, Main) of
 		false -> 
 		    {?INCONSISTENT,[],Bs};

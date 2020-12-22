@@ -28,6 +28,7 @@
 -export([next_symbol/2]).
 -export([variable_info/3]).
 -export([literal_info/3]).
+-export([level/1]).
 -export([value/2]).
 -export([bound/2]).
 -export([bind/2, bind/3]).
@@ -40,15 +41,14 @@
 -export([conflicting_clause/2]).
 -export([conflict/4]).
 -export([minimize/2]).
+-export([minimize/3]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
 -export([isused/2, isused/3]).
 -export([isatom/2, isatom/3]).
--export([set_level/2]).
--export([undo_level/2]).
--export([keep_level/2]).
--export([move_level/3]).
+-export([push/1]).
+-export([pop/1, pop/2]).
 -export([undo/1]).
 -export([bcp/1, bcp/2, bcp/3]).
 -export([nbcp/1]).
@@ -69,7 +69,7 @@
 -export([get_undo_state/2]).
 -export([get_nbindings/2, get_nbindings/3]).
 -export([get_nbindings/4, get_nbindings/5]). 
--export([get_bindings/2, get_bindings/3]).
+-export([get_bindings/1, get_bindings/2, get_bindings/3]).
 -export([get_bindings/4, get_bindings/5]).
 -export([get_number_of_bindings/2]).
 -export([queue_first/1]).
@@ -252,6 +252,12 @@ literal_info(_Vp,Index,_What)
   when is_integer(Index), Index >= 0 ->
     ?nif_stub().
 
+%% Get current level
+-spec level(Vp::varp()) -> integer().
+
+level(_Vp) ->
+    ?nif_stub().    
+
 %% Get literal value 
 -spec value(Vp::varp(), Lit::literal()) -> true | false | undefined.
 
@@ -270,7 +276,6 @@ bound(_Vp, Lit) when is_integer(Lit) ->
 
 bind(_Vp, X) when is_integer(X) ->
     ?nif_stub().
-
 
 %% bind literal at level
 -spec bind(Vp::varp(), X::literal(), Level::level()) -> boolean().
@@ -325,11 +330,17 @@ conflicting_clause(_Vp, _Index) ->
 -spec conflict(Vp::varp(), Level::level(), Bump::number(),
 	       ConflictNum::integer()) -> ClauseIndex::integer() | undefined.
 conflict(_Vp, _Level, _Bump, _Index) ->
-    ?nif_stub().    
+    ?nif_stub().
 
 -spec minimize(Vp::varp(), ClauseIndex::integer()) -> integer() | undefined.
 %% minimize the clause and return number of literals removed
 minimize(_Vp, _CluseIndex) ->
+    ?nif_stub().
+
+-spec minimize(Vp::varp(), ClauseIndex::integer(), Style::local|recursive) ->
+	  integer() | undefined.
+%% minimize the clause and return number of literals removed
+minimize(_Vp, _CluseIndex, _Style) ->
     ?nif_stub().    
 
 -spec is_variable(Vp::varp(), Lit::literal()) -> boolean().
@@ -361,26 +372,32 @@ isatom(_Vp, Var) when is_integer(Var) ->
 isatom(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
     ?nif_stub().
 
--spec set_level(Vp::varp(), Level::level()) -> ok.
-
-set_level(_Vp, Level) when is_integer(Level), Level >= 0 ->
+%% push binding level and return the level before push
+%% This allows code like:
+%%    Level = push()
+%%    try various_varp_code() of
+%%        R -> R
+%%    after
+%%       pop(Level)
+%%    end
+%%
+-spec push(Vp::varp()) -> Level::integer().
+push(_Vp) ->
     ?nif_stub().
 
--spec keep_level(Vp::varp(), Level::level()) -> ok.
-
-keep_level(_Vp,_Level) ->
+%% pop and undo bindings on current level and return current level
+-spec pop(Vp::varp()) -> Level::integer().
+pop(_Vp) ->
     ?nif_stub().
 
--spec move_level(Vp::varp(), From::level(), To::level()) -> ok.
-
-move_level(_Vp,_From,_To) ->
+%% pop and undo until level but not including
+%% for example pop(Vp, 0) will pop to top.
+%% Pop will return the target Level 
+-spec pop(Vp::varp(), Level::integer()) -> Level::integer().
+pop(_Vp, _Level) ->
     ?nif_stub().
 
--spec undo_level(Vp::varp(), Level::level()) -> ok.
-
-undo_level(_Vp,_Level) ->
-    ?nif_stub().
-
+-spec undo(Vp::varp()) -> ok.
 undo(_Vp) ->
     ?nif_stub().
 
@@ -539,6 +556,13 @@ get_nbindings(_Vp,Count,_ClauseInfo,_AsTrail,_AsTuple)
   when is_integer(Count), Count>= 0 ->
     ?nif_stub().
 
+
+-spec get_bindings(Vp::varp()) -> 
+	  bindings().
+
+%% get bindings, as list, on the current 'Level' 
+get_bindings(_Vp) ->
+    ?nif_stub().
 
 -spec get_bindings(Vp::varp(), Level::level()) -> 
 	  bindings().

@@ -14,7 +14,6 @@
 %% -define(DEBUG, true).
 -include("varp.hrl").
 
--define(ROOT_LEVEL, 1).
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
 %% -compile(export_all).
@@ -56,8 +55,10 @@ options() ->
      #{ long => "minimize",
 	short => "z",
 	key => minimize,
-	spec => {enum,[?BOOL]},
-	default => true,
+	spec => {enum,[{"none",none},
+		       {"local",local},
+		       {"recursive",recursive}]},
+	default => none,
 	description => "Use conflict clause minimization."
       },
 
@@ -177,7 +178,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     init(Bs1, Param, MaxLearned, M0).
 
 init(Bs, Param, MaxLearned, MR) ->
-    varp_nif:set_level(Bs#bs.vp, ?TOP_LEVEL),
+    0 = varp_nif:level(Bs#bs.vp),
     timeout_or_cancel(Bs, Param, MaxLearned, MR).
 
 timeout_or_cancel(Bs, Param, MaxLearned, MR) ->
@@ -186,14 +187,14 @@ timeout_or_cancel(Bs, Param, MaxLearned, MR) ->
 	false ->
 	    main(Bs,Param,MaxLearned,MR);
 	{true, What} ->
-	    undo_until(Bs, ?TOP_LEVEL),
+	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    return(What, MR, Bs)
     end.
 
 main(Bs,Param,MaxLearned,MR) ->
     case varp_nif:nbcp(Bs#bs.vp) of
 	false ->  %% contradiction
-	    Level = varp_nif:info(Bs#bs.vp, level),
+	    Level = varp_nif:level(Bs#bs.vp),
 	    case Level of
 		0 when MR#m.n =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
@@ -205,7 +206,7 @@ main(Bs,Param,MaxLearned,MR) ->
 		    conflict(Bs,Param,Level,MaxLearned,MR)
 	    end;
 	true ->  %% model
-	    Level = varp_nif:info(Bs#bs.vp, level),
+	    Level = varp_nif:level(Bs#bs.vp),
 	    N = MR#m.n + 1,
 	    Model = varp:output_model(Bs,false,N),
 	    if N >= MR#m.max, MR#m.max > 0; Level =:= 0 -> %%?
@@ -221,7 +222,7 @@ main(Bs,Param,MaxLearned,MR) ->
 		    Block = varp:block_clause(Bs),
 		    %% FIXME: minimize Block clause and find
 		    %% a working jump level (maybe just one up?)
-		    undo_until(Bs, ?TOP_LEVEL),
+		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 		    %% FIXME: DELTA is maybe not the correct place!?
 		    varp_formula:add_clause(Bs, Block, ?DELTA),
 		    %% we start with simple restart
@@ -244,7 +245,7 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
 					    maps:get(minimize,Param)),
     case lists:keysort(1, LClauses1) of
 	LClauses2 = [{1,_}|_] -> %% has unit! jump to top-level and install
-	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    move_to_gamma(Bs, LClauses2),
 	    main_bcp(Bs,Param,?TOP_LEVEL,MaxLearned,MR);
 
@@ -255,7 +256,7 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
 	    K = maps:get(olle,Param),
 	    M = maps:get(stumble_olle,Param),
 	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
-	    undo_until(Bs, Level, JLevel),
+	    varp_nif:pop(Bs#bs.vp, JLevel),
 	    move_to_gamma(Bs,ALen,Aix),
 	    main_bcp(Bs,Param,JLevel,MaxLearned,MR);
 
@@ -285,7 +286,7 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
 	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    %% FIXME if JLevel = J3 then we SHOULD select
 	    %% corresponding literal for -L2/-L3 as next unbound
-	    undo_until(Bs, Level, JLevel),
+	    varp_nif:pop(Bs#bs.vp, JLevel),
 	    move_to_gamma(Bs, LClauses5),
 	    %% install the conflict clause
 	    move_to_gamma(Bs,ALen,Aix),
@@ -334,15 +335,15 @@ main_bcp(Bs,Param,Level,MaxLearned,MR) ->
 		    conflict(Bs,Param,Level,MaxLearned,MR)
 	    end;
 	true ->
-	    restart(Bs,Param,Level,MaxLearned,MR)
+	    restart(Bs,Param,MaxLearned,MR)
     end.
 
-restart(Bs,Param,Level,MaxLearned,MR) ->
+restart(Bs,Param,MaxLearned,MR) ->
     RestartByTimeout = restart_by_timeout(Bs, Param), %% also restart!!
     RestartByCount = restart_by_counter(Bs, Param),
     case need_purge(Bs, Param, MaxLearned) of
 	true ->
-	    undo_until(Bs, Level, ?TOP_LEVEL),
+	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
 	    ?dbg0("purge\n",[]),
 	    varp_formula:del_unused_clauses(Bs),
@@ -352,12 +353,12 @@ restart(Bs,Param,Level,MaxLearned,MR) ->
 	false ->
 	    if RestartByCount ->
 		    varp_formula:proof_output(Bs,$c,"counter limit"),
-		    undo_until(Bs, Level, ?TOP_LEVEL),
+		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 		    %% reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       RestartByTimeout ->
 		    varp_formula:proof_output(Bs,$c,"timeout"),
-		    undo_until(Bs, Level, ?TOP_LEVEL),
+		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 		    reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       true ->
@@ -460,37 +461,6 @@ get_bcp_counter(Bs) ->
 
 set_bcp_counter(Bs, Value) ->
     counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, Value).
-
-%% simulated bcp - test
-nbcp(V) ->
-    nbcp_(V, varp_nif:info(V, level)).
-
-nbcp_(V, Level) ->
-    case varp_nif:bcp(V) of
-	true ->
-	    case varp_nif:next_unbound(V) of
-		false -> true;  %% model
-		Xj ->
-		    NextLevel = Level+1,
-		    varp_nif:set_level(V, NextLevel),
-		    varp_nif:decide(V, Xj),
-		    nbcp_(V, NextLevel)
-	    end;
-	false ->
-	    false
-    end.
-
-
-undo_until(Bs, NewLevel) ->
-    Level = varp_nif:info(Bs#bs.vp, level),
-    undo_until(Bs, Level, NewLevel).
-
-undo_until(Bs, Level, NewLevel) when Level > NewLevel ->
-    varp_nif:undo_level(Bs#bs.vp, Level),
-    undo_until(Bs, Level-1, NewLevel);
-undo_until(Bs, Level, Level) ->
-    varp_nif:set_level(Bs#bs.vp, Level),
-    Bs.
 
 %% J2 is backjump level, J3 is backstumble level
 %% D2 is level to backjump delta, D3 is backjump to two free literal level

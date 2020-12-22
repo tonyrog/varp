@@ -217,6 +217,6 @@ test(Text) ->
 	    io:format("0 models found\n", []),
 	    0;
 	true ->
-	    varp_nif:set_level(Vp, 1),
+	    varp_nif:push(Vp),
 	    varp_circuit:bt_all(Vp)
     end.

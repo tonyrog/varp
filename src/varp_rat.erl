@@ -104,36 +104,34 @@ rat_lit(Bs,L,Is) ->
 	      Js = get_delta_clauses(Bs,-L),
 	      Cs = clauses(Bs,Js,-L,[]),
 	      %% io:format("rat_test l=~w, d=~w, cs=~w\n", [L,D,Cs]),
-	      varp_nif:set_level(Bs#bs.vp, 1),
+	      varp_nif:push(Bs#bs.vp),
 	      true = varp_nif:bind(Bs#bs.vp,-L),
 	      true = neg_bind_all(Bs,D),
 	      case rat_test(Bs,Cs) of
 		  true ->
-		      varp_nif:undo_level(Bs#bs.vp,1),
+		      varp_nif:pop(Bs#bs.vp,0),
 		      io:format("remove clause ~w = ~w\n", [I,[L|D]]),
-		      varp_nif:set_level(Bs#bs.vp,0), %% must be done at level=0!
 		      varp_formula:del_clause(Bs, I);
 		  false ->
-		      varp_nif:undo_level(Bs#bs.vp,1),
+		      varp_nif:pop(Bs#bs.vp,0),
 		      ok
 	      end
       end, Ds),
     Bs.
 
 rat_test(Bs, [{_Cix,C}|Cs]) ->
-    Level = 2,
-    varp_nif:set_level(Bs#bs.vp,Level),
+    varp_nif:push(Bs#bs.vp),
     case neg_bind_all(Bs,C) of
 	false ->
-	    varp_nif:undo_level(Bs#bs.vp,Level),
+	    varp_nif:pop(Bs#bs.vp),
 	    false;
 	true ->
 	    case varp_nif:bcp(Bs#bs.vp) of
 		false ->
-		    varp_nif:undo_level(Bs#bs.vp,Level),
+		    varp_nif:pop(Bs#bs.vp),
 		    false;
 		true ->
-		    varp_nif:undo_level(Bs#bs.vp,Level),
+		    varp_nif:pop(Bs#bs.vp),
 		    rat_test(Bs, Cs)
 	    end
     end;
