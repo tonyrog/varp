@@ -217,9 +217,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "level",               1,  varp_level)	\
     NIF( "bound",               2,  varp_bound )	\
     NIF( "bind",                2,  varp_bind )		\
-    NIF( "bind",                3,  varp_bind )		\
     NIF( "decide",              2,  varp_decide )	\
-    NIF( "decide",              3,  varp_decide )       \
     NIF( "subst",               3,  varp_subst )	      \
     NIF( "implication_clause",  2,  varp_implication_clause ) \
     NIF( "implication_level",   2,  varp_implication_level )  \
@@ -511,6 +509,7 @@ typedef struct _clause_t
 	unsigned conflict:1;  // conflict list
 	unsigned unwatch:1;   // clause is scheduled to be unwatched
 	unsigned delete:1;    // marked for deletion
+	unsigned dynamic:1;   // not in a segment
     };
     uint64_t stamp;          // last used time (bcp_counter clock)
     lit_t lit[];             // literal array
@@ -554,7 +553,6 @@ typedef struct _undo_t
     int    size;               // number of bindings from offset
 } undo_t;
 
-#define undo_bnd0(vp) ((vp)->bnd_map + (vp)->undo[(vp)->level].offs)
 #define undo_bnd_at(vp,level) ((vp)->bnd_map + (vp)->undo[level].offs)
 #define undo_bnd(vp,up) (vp->bnd_map + (up)->offs)
 
@@ -598,7 +596,7 @@ typedef struct _varp_config_t
     bool_t   vsids;      // variable state independent decaying sum
     bool_t   use_phase;  // use saved phase
     bool_t   all_used;   // all variables are used
-    ival_t   init_phase; // initial phase selection    
+    ival_t   init_phase; // initial phase selection (TRUE|FALSE|UNDEF)
     size_t   vsize;
     size_t   csize;
 } varp_config_t;
@@ -651,6 +649,7 @@ typedef struct _varp_t {
     size_t       hnum;          // number of clauses in clause hashtab
     dynvar(slist_t*,hashtab);   // clause hash table (of hlink_t*)
     dynvec(clause_t**,clauseset,NUM_CSET); // array of clausesets, entries may be null
+    size_t num_segs;
     clause_segment_t* clauseseg[NUM_CSET];  // allocation sets
     cdlist_t     order_list;    // doubly linked order list
     variable_t*  top;           // first unbound variable
@@ -673,7 +672,8 @@ typedef struct _varp_t {
     variable_t constant;
 
     arc4_stream_t as;              // random stream
-
+    uint8_t asb;                   // random byte for init_phase=UNDEF
+    int phase_shift;               // shift counter
     dlist_t subs;                  // list of subscriptions
 
     ErlNifEnv*      msg_env;       // message environment
@@ -1164,6 +1164,104 @@ static int obj_pre_alloc(allocator_t* ap, size_t n)
 }
 
 
+static void arc4_init(arc4_stream_t *as)
+{
+    int n;
+
+    for (n = 0; n < 256; n++)
+	as->s[n] = n;
+    as->i = 0;
+    as->j = 0;
+}
+
+static void arc4_add_random(arc4_stream_t* as, uint8_t* dat, int datlen)
+{
+    int     n;
+    uint8_t si;
+
+    as->i--;
+    for (n = 0; n < 256; n++) {
+	as->i = (as->i + 1);
+	si = as->s[as->i];
+	as->j = (as->j + si + dat[n % datlen]);
+	as->s[as->i] = as->s[as->j];
+	as->s[as->j] = si;
+    }
+}
+
+static inline uint8_t arc4_getbyte(arc4_stream_t* as)
+{
+    uint8_t si, sj;
+
+    as->i = (as->i + 1);
+    si = as->s[as->i];
+    as->j = (as->j + si);
+    sj = as->s[as->j];
+    as->s[as->i] = sj;
+    as->s[as->j] = si;
+    return as->s[(si + sj) & 0xff];
+}
+
+static uint32_t arc4_random(arc4_stream_t* as)
+{
+    uint32_t val;
+
+    val = arc4_getbyte(as) << 24;
+    val |= arc4_getbyte(as) << 16;
+    val |= arc4_getbyte(as) << 8;
+    val |= arc4_getbyte(as);
+    return val;
+}
+
+static void arc4_stir(arc4_stream_t* as)
+{
+    int i;
+    struct {
+	time_t t;
+	uint8_t rnd[128 - sizeof(time_t)];
+    } rdat;
+
+    memset(&rdat, 0, sizeof(rdat));
+
+    rdat.t = time(0);
+
+#if defined(__WIN32__) || defined(_WIN32)
+    for (i = 0; i < (int) sizeof(rdat.rnd); i++)
+	rdat.rnd[i] = i;
+#else
+    {
+	FILE* f;
+	if ((f = fopen(RANDOMDEV, "r")) != NULL) {
+	    int r = fread(rdat.rnd, 1, sizeof(rdat.rnd), f);
+	    (void) r;
+	    fclose(f);
+	}
+    }
+#endif
+    arc4_add_random(as, (void *) &rdat, sizeof(rdat));
+    for (i = 0; i < 1024; i++)
+	arc4_getbyte(as);
+}
+
+static uint32_t arc4_random_uniform(arc4_stream_t* as, uint32_t upper_bound)
+{
+    uint32_t r, min;
+
+    if (upper_bound < 2)
+	return 0;
+    if (upper_bound > 0x80000000)
+	min = 1 + ~upper_bound;	// 2**32 - upper_bound
+    else
+	// (2**32 - (x * 2)) % x == 2**32 % x when x <= 2**31
+	min = ((0xffffffff - (upper_bound * 2)) + 1) % upper_bound;
+    while(1) {
+	r = arc4_random(as);
+	if (r >= min)
+	    break;
+    }
+    return r % upper_bound;
+}
+
 static int equal_string(ErlNifEnv* env, ERL_NIF_TERM atm, ERL_NIF_TERM arg)
 {
     char buf[256];
@@ -1632,11 +1730,24 @@ static inline int phase_export(variable_t* var)
 static inline ival_t decide_phase(varp_t* vp, lit_t xp)
 {
     literal_t* lp = l2ll(vp, xp);
-    if (vp->opt.use_phase) {
+    ival_t v;
+    if (vp->opt.use_phase) { // use "saved" phase
 	variable_t* var = ll2v(lp);
-	return var->phase;
+	v = var->phase;
     }
-    return vp->opt.init_phase;
+    else
+	v = vp->opt.init_phase;
+    if (v == I_UNDEF) {
+	uint8_t asb = vp->asb;
+	int shr = vp->phase_shift;
+	if (shr >= 8) {
+	    vp->asb = asb = arc4_getbyte(&vp->as);
+	    shr = 0;
+	}
+	v = ((asb >> shr) & 1) ? I_TRUE : I_FALSE;
+	vp->phase_shift = shr+1;
+    }
+    return v;
 }
 
 static inline int variable_is_bound(varp_t* vp, variable_t* var)
@@ -1660,7 +1771,6 @@ static inline int variable_is_unused(varp_t* vp, variable_t* var)
 {
     return !variable_is_used(vp, var);
 }
-
 
 static inline int literal_is_bound(varp_t* vp, literal_t* lp)
 {
@@ -1991,103 +2101,6 @@ void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
     enif_fprintf(stdout, "\r\n");
 }
 
-static void arc4_init(arc4_stream_t *as)
-{
-    int n;
-
-    for (n = 0; n < 256; n++)
-	as->s[n] = n;
-    as->i = 0;
-    as->j = 0;
-}
-
-static void arc4_add_random(arc4_stream_t* as, uint8_t* dat, int datlen)
-{
-    int     n;
-    uint8_t si;
-
-    as->i--;
-    for (n = 0; n < 256; n++) {
-	as->i = (as->i + 1);
-	si = as->s[as->i];
-	as->j = (as->j + si + dat[n % datlen]);
-	as->s[as->i] = as->s[as->j];
-	as->s[as->j] = si;
-    }
-}
-
-static inline uint8_t arc4_getbyte(arc4_stream_t* as)
-{
-    uint8_t si, sj;
-
-    as->i = (as->i + 1);
-    si = as->s[as->i];
-    as->j = (as->j + si);
-    sj = as->s[as->j];
-    as->s[as->i] = sj;
-    as->s[as->j] = si;
-    return as->s[(si + sj) & 0xff];
-}
-
-static uint32_t arc4_random(arc4_stream_t* as)
-{
-    uint32_t val;
-
-    val = arc4_getbyte(as) << 24;
-    val |= arc4_getbyte(as) << 16;
-    val |= arc4_getbyte(as) << 8;
-    val |= arc4_getbyte(as);
-    return val;
-}
-
-static void arc4_stir(arc4_stream_t* as)
-{
-    int i;
-    struct {
-	time_t t;
-	uint8_t rnd[128 - sizeof(time_t)];
-    } rdat;
-
-    memset(&rdat, 0, sizeof(rdat));
-
-    rdat.t = time(0);
-
-#if defined(__WIN32__) || defined(_WIN32)
-    for (i = 0; i < (int) sizeof(rdat.rnd); i++)
-	rdat.rnd[i] = i;
-#else
-    {
-	FILE* f;
-	if ((f = fopen(RANDOMDEV, "r")) != NULL) {
-	    int r = fread(rdat.rnd, 1, sizeof(rdat.rnd), f);
-	    (void) r;
-	    fclose(f);
-	}
-    }
-#endif
-    arc4_add_random(as, (void *) &rdat, sizeof(rdat));
-    for (i = 0; i < 1024; i++)
-	arc4_getbyte(as);
-}
-
-static uint32_t arc4_random_uniform(arc4_stream_t* as, uint32_t upper_bound)
-{
-    uint32_t r, min;
-
-    if (upper_bound < 2)
-	return 0;
-    if (upper_bound > 0x80000000)
-	min = 1 + ~upper_bound;	// 2**32 - upper_bound
-    else
-	// (2**32 - (x * 2)) % x == 2**32 % x when x <= 2**31
-	min = ((0xffffffff - (upper_bound * 2)) + 1) % upper_bound;
-    while(1) {
-	r = arc4_random(as);
-	if (r >= min)
-	    break;
-    }
-    return r % upper_bound;
-}
 
 static inline void wlink_clear(wlink_t* wlp)
 {
@@ -2549,7 +2562,7 @@ static void check_clean_levels(varp_t* vp, int level)
     int n = (int)dynvar_size(vp->undo);
     int i;
     for (i = level+1; i < n; i++) {
-	if ((vp->undo[i].bs != NULL) || (vp->undo[i].size != 0))
+	if (vp->undo[i].size != 0)
 	    enif_fprintf(stderr, "set_level: level %d not empty\r\n", i);
 	if (vp->undo[i].t != uUNDEF)
 	    enif_fprintf(stderr, "set_level: level %d not undef\r\n", i);
@@ -2768,6 +2781,8 @@ static clause_segment_t* new_clause_segment(varp_t* vp, int si,
 	seg->size = segment_size;
 	seg->ptr = seg->data;
 	seg->end = seg->data + segment_size; // outside!
+	vp->num_segs++;
+	printf("num_segs = %ld\r\n", vp->num_segs);
     }
     return seg;
 }
@@ -2791,6 +2806,7 @@ static clause_t* clause_seg_alloc(varp_t* vp, int si, int size)
     ptr = (uint8_t*) ALIGN(segp->ptr, CLAUSE_ALIGNMENT);
     cp  = (clause_t*) ptr;
     cp->offset = ptr - segp->data;
+    cp->dynamic = 0;
     segp->ptr = ptr + nbytes;
     segp->nallocated++;
     return cp;
@@ -2810,7 +2826,8 @@ static clause_t* clause_dyn_alloc(varp_t* vp, int size)
 	return NULL;
     }
 #endif
-    cp->offset = MAX_CLAUSE_OFFSET;
+    cp->dynamic = 1;
+    cp->offset = 0;
     return cp;
 }
 
@@ -2858,7 +2875,7 @@ static void clause_free(varp_t* vp, clause_t* cp)
 	    hash_unlink(vp, cp);
 	set_clause(vp, cix, NULL);
 	vp->cnum[si]--;
-	if (cp->offset == MAX_CLAUSE_OFFSET) {
+	if (cp->dynamic) {
 #if defined(__WIN32__) || defined(_WIN32)
 	    _aligned_free(cp);
 #else
@@ -3244,6 +3261,7 @@ static void cleanup(varp_t* vp)
     vp->opt.hash = false; // avoid unlink in clause_free
 
     for (si = 0; si < NUM_CSET; si++) {
+	clause_segment_t* seg;
 	if (vp->clauseset[si] != NULL) {
 	    clause_t** cm = vp->clauseset[si];
 	    size_t n = dynvec_size(vp->clauseset,si);
@@ -3255,6 +3273,14 @@ static void cleanup(varp_t* vp)
 	}
 	dynarray_clear(&vp->clauseset_dyn_[si]);
 	vp->clauseset[si] = NULL;
+	seg = vp->clauseseg[si];
+	while(seg != NULL) {
+	    clause_segment_t* seg_next = seg->next;
+	    ASSERT(seg->nallocated == seg->ndeleted);
+	    VARP_FREE(seg);
+	    seg = seg_next;
+	}
+	vp->clauseseg[si] = NULL;
     }
 
     dynvar_clear(vp->undo);
@@ -3339,6 +3365,9 @@ static int vif_config(ErlNifEnv* env,
     else if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
 	opt->init_phase = I_FALSE;
     }
+    else if (EQUAL_KEY(env, init_phase, key) && enif_is_undefined(env, value)) {
+	opt->init_phase = I_UNDEF;
+    } 
     else
 	return 0;
     return 1;
@@ -3645,6 +3674,7 @@ static int setup(varp_t* vp, varp_config_t* config)
     dynvec_init(vp->clauseset,BETA,  0);
     dynvec_init(vp->clauseset,ALPHA, 0);
 
+    vp->num_segs = 0;
     for (i = 0; i < NUM_CSET; i++) {
 	vp->clauseseg[i] = NULL;
 	vp->cnum[i]  = 0;
@@ -3699,6 +3729,8 @@ static int setup(varp_t* vp, varp_config_t* config)
     set_vv(vp, &vp->constant, I_TRUE);
 
     arc4_init(&vp->as);
+    vp->asb = 0;
+    vp->phase_shift = 8;
 
     vp->msg_env = enif_alloc_env();
     vp->caller_env = NULL;
@@ -5125,12 +5157,6 @@ static ERL_NIF_TERM varp_decide(ErlNifEnv* env, int argc,
     if (!vif_get_lit(env, vp, argv[1], &xp))
 	return enif_raise_exception(env, ATOM(literal));
     level = vp->level;    
-    // fixme assert xp is positive decide_phase does the work
-    if (argc == 3) {
-	if (!enif_get_int(env, argv[2], &level) || (level < 0) ||
-	    (level >= (int)dynvar_size(vp->undo)))
-	    return enif_make_badarg(env);
-    }
     if (!set_lit(env, vp, xp, decide_phase(vp, xp), level))
 	return enif_make_boolean(env, false);
     return enif_make_boolean(env, true);
@@ -5149,11 +5175,6 @@ static ERL_NIF_TERM varp_bind(ErlNifEnv* env, int argc,
     if (!vif_get_lit(env, vp, argv[1], &xp))
 	return enif_raise_exception(env, ATOM(literal));
     level = vp->level;
-    if (argc == 3) {
-	if (!enif_get_int(env, argv[2], &level) || (level < 0) ||
-	    (level >= (int)dynvar_size(vp->undo)))
-	    return enif_make_badarg(env);
-    }
     if (!set_lit(env, vp, xp, I_TRUE, level))
 	return enif_make_boolean(env, false);
     return enif_make_boolean(env, true);
@@ -5276,7 +5297,6 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 			lit_t nl = ll2l(vp, lp);
 			clause_t* dp = get_clause(vp, var->implication_clause);
 			if (is_clause_marked(vp, dp, nl)) {
-			    //printf("MARK %s\r\n", format_literal(vp, nlp));
 			    nlp->mark = 1;
 			}
 		    }
@@ -6673,6 +6693,7 @@ bcp:
 }
 
 // Count total size of memory used by literals used by clauseset
+// FIXME: cound all memory used by segments
 static size_t clauseset_memory_size(varp_t* vp, int si)
 {
     size_t size = dynvec_size(vp->clauseset,si)*sizeof(clause_t);
@@ -6825,7 +6846,12 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_boolean(env, vp->opt.hash);
     }
     if (EQUAL_KEY(env, init_phase, argv[1])) {
-	return enif_make_boolean(env, (vp->opt.init_phase == I_TRUE));
+	switch(vp->opt.init_phase) {
+	case I_TRUE: return enif_make_boolean(env, 1);
+	case I_FALSE: return enif_make_boolean(env, 0);
+	case I_UNDEF: return enif_make_undefined(env);
+	default: return enif_make_badarg(env); // internal?
+	}
     }
     if (EQUAL_KEY(env, use_phase, argv[1])) {
 	return enif_make_boolean(env, vp->opt.use_phase);
@@ -7004,7 +7030,11 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
     }
     if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
 	vp->opt.init_phase = I_FALSE;
-	return enif_make_ok(env);	
+	return enif_make_ok(env);
+    }
+    else if (EQUAL_KEY(env, init_phase, key) && enif_is_undefined(env, value)) {
+	vp->opt.init_phase = I_UNDEF;
+	return enif_make_ok(env);
     }
     return enif_make_badarg(env);
 }

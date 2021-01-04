@@ -4,8 +4,8 @@ import varpy
 from .pigeon import *
 
 def bj(vp):
+    varpy.push(vp)
     varpy.config(vp, 'max_conflicting', 1)
-    varpy.set_level(vp, 0)
     r = varpy.nbcp(vp)
     l = varpy.info(vp, 'level')
     while not r and (l > 0):
@@ -23,24 +23,21 @@ def bj(vp):
                 if clause == True:
                     pass
                 else:
-                    undo_until(vp, l, 0)
+                    varpy.pop(vp, 0)
                     return False
             elif len(clause) == 1:
-                undo_until(vp, l, 0)
+                varpy.pop(vp, 0)
                 varpy.bind(vp, clause[0])
             elif len(clause) > 1:
                 j = jump(vp, clause)
-                undo_until(vp, l, j)
+                varpy.pop(vp, j)
                 varpy.move_clause(vp, cix, 'gamma')
         r = varpy.nbcp(vp)
         l = varpy.info(vp, 'level')
     return r
            
-def undo_until(vp, level, new_level):
-    while level > new_level:
-        varpy.undo_level(vp, level)
-        level -= 1
-    varpy.set_level(vp, level)
+def undo_until(vp, new_level):
+    varpy.pop(vp, new_level)
 
 def jump(vp, clause):
     # print("conflict clause = " + str(clause))

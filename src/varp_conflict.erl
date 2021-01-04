@@ -26,10 +26,10 @@ analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
 	    %% io:format("clause duplicate\n"),
 	    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
 	Cix when is_integer(Cix) ->
+	    Len0 = varp_nif:clause_info(Bs#bs.vp, Cix, length),
 	    case Minimize of
 		none ->
-		    Len = varp_nif:clause_info(Bs#bs.vp, Cix, length),
-		    [{Len, Cix}|
+		    [{Len0, Cix}|
 		     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)];
 		Type -> %% local/recursive
 		    case varp_nif:minimize(Bs#bs.vp, Cix, Type) of
@@ -37,6 +37,10 @@ analyze_alpha_(Bs, Level, Bump, Minimize, I, N) ->
 			    %%io:format("clause duplicate after minimize\n"),
 			    analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N);
 			Len ->
+			    %% io:format("Minimize ~s removed ~w literals\n", [Type,Len0-Len]),
+			    counters:add(Bs#bs.counters,
+					 ?COUNTER_MINIMIZE_COUNT,
+					 Len0-Len),
 			    [{Len, Cix}|
 			     analyze_alpha_(Bs, Level, Bump, Minimize, I+1, N)]
 		    end

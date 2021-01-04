@@ -75,6 +75,7 @@
 -export([conflicting_clause/2]).
 -export([conflict/4]).
 -export([minimize/2]).
+-export([minimize/3]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -198,9 +199,11 @@ global_options() ->
     [
      #{ long => "phase",
 	key => phase,
-	spec => {enum,[?BOOL]},
+	spec => {enum,[{"undefined",undefined},{"undef",undefined},
+		       {"true", true},{"1",true},
+		       {"false",false},{"0",false}]},
 	default => true,
-	description => "Fixed phase selection."
+	description => "Inital phase selection."
       },
      #{ long => "use-phase",
 	key => use_phase,
@@ -398,6 +401,12 @@ global_options() ->
 	spec =>  {enum,[?BOOL]},
 	default => false,
 	description => "Use Time Profiling"
+      },
+     #{ long => "statistics",
+	key => statistics,
+	spec =>  {enum,[?BOOL]},
+	default => false,
+	description => "Show counter statistics"
       },
       #{ long => "help",
 	 short => "h", 
@@ -1694,6 +1703,7 @@ conflicting_clause(Vp) -> varp_nif:conflicting_clause(Vp).
 conflicting_clause(Vp, Index) -> varp_nif:conflicting_clause(Vp, Index).
 conflict(Vp,Level, Bump, Index) -> varp_nif:conflict(Vp,Level, Bump, Index).
 minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
+minimize(Vp,CluseIndex,Style) -> varp_nif:minimize(Vp,CluseIndex,Style).
 is_variable(Vp,Lit) -> varp_nif:is_variable(Vp,Lit).
 is_bound(Vp,Lit) -> varp_nif:is_bound(Vp,Lit).
 is_equal(Vp,LitA,LitB) -> varp_nif:is_equal(Vp,LitA,LitB).
@@ -1814,7 +1824,13 @@ i() ->
 		 xref,
 		 hash,
 		 init_phase,
-		 use_phase]],
+		 use_phase,
+		 memory_literal_size,
+		 memory_variable_size,
+		 memory_clause_size,
+		 memory_symbol_size,
+		 memory_size
+		]],
     ok.
 
 i(Vp) ->

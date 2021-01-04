@@ -272,9 +272,9 @@ match_val_(float01, Val) ->
 match_val_(string, Val) ->
     {ok,Val};
 match_val_({enum,List}, Val) when is_list(List) ->
-    case proplists:get_value(Val,List) of
-	undefined -> false;
-	Enum -> {ok,Enum}
+    case lists:keyfind(Val, 1, List) of
+	false -> false;
+	{_, Enum} -> {ok,Enum}
     end;
 match_val_({list,variable},Val) ->
     %% trick

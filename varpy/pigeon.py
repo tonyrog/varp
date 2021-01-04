@@ -5,6 +5,7 @@ import varpy
 # helper to install variable and symbol
 def var(vp, Name):
     x = varpy.add_variable(vp)
+    varpy.isused(vp, x, True)
     varpy.add_symbol(vp, x, Name)
     return x
 
@@ -49,13 +50,14 @@ def p4(vp) :
     clause(vp, [-X9,-X12])
     return vp
 
-# general pigeon formula for n pigeons and n-1 hols
+# general pigeon hole clauses for n pigeons and n-1 hols
 def p(vp, n):
     ph = {}
     # create all variables and store them in dictionary
     for p in range(n):
         for h in range(n-1):
             ph[p,h] = varpy.add_variable(vp)
+            varpy.isused(vp, ph[p,h], True) 
             varpy.add_symbol(vp, ph[p,h], ("P",[p,h]))
     # for a pigeons p the exist a hole h
     for p in range(n):
@@ -65,12 +67,11 @@ def p(vp, n):
             for q in range(n):
                 if p < q:
                     varpy.add_clause(vp, [-ph[p,h], -ph[q,h]])
-    vp
+    return vp
 
 def run(n):
     vp = varpy.new({ 'xref' : True })
     p(vp,n)
-    varpy.set_level(vp, 1)
     return varpy.bt_one(vp)
 
 def run_p4():

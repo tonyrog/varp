@@ -952,7 +952,7 @@ order(Ascend, Ord) ->
 read_backjump_params(S,I) ->
     [
      %% {display,    true},
-     {minimize,           read_param(?BJK(I,minimize), S, true)},
+     {minimize,           read_param(?BJK(I,minimize), S, none)},
      {iorder,             read_param(?BJK(I,iorder), S, 0)},
      {stumble,            read_param(?BJK(I,stumble), S, 0)},
      {olle,               read_param(?BJK(I,olle), S, 0)},

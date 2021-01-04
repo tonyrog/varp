@@ -6,7 +6,6 @@ def formula1():
     tree = varpy.parser.text("A or B")
     vp = varpy.new({})
     f = varpy.ast.build(vp, tree)
-    varpy.set_level(vp, 0)
     varpy.bind(vp, f)
     varpy.bt_all(vp)
 
@@ -15,6 +14,5 @@ def formula2():
     tree = varpy.parser.text("(A and B) xor (A or B)")
     vp = varpy.new({})
     f = varpy.ast.build(vp, tree)
-    varpy.set_level(vp, 0)
     varpy.bind(vp, f)
     varpy.bt_all(vp)

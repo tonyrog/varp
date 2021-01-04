@@ -1912,6 +1912,42 @@ bench_clauses(Xs, Ys, T) ->
 -define(MAX_LEN, 50).
 -define(KEEP, 0.25).
 
+%% benchmark clause install
+bench_install() ->
+    bench_install(10, #{}).
+
+bench_install(Opts) when is_map(Opts) ->
+    bench_install(10, Opts).
+    
+bench_install(Loop, Opts) ->
+    bench_install_(Loop, Opts).
+
+bench_install_(0, _Opts) ->
+    ok;
+bench_install_(I, Opts) ->
+    Vp = varp_nif:new(#{xref=>maps:get(xref,Opts,false),
+			hash=>maps:get(hash,Opts,false)}),
+    N = maps:get(nclauses, Opts, ?NCLAUSES),
+    V = maps:get(nvars,Opts,?NVARS(N)),
+    {1,V} = varp_nif:add_variables(Vp, V),
+    N = maps:get(nclauses, Opts, ?NCLAUSES),
+    MinLen = maps:get(min_clause_len, Opts, ?MIN_LEN),
+    MaxLen = maps:get(max_clause_len, Opts, ?MAX_LEN),
+    rand:seed(exsss, 1347),
+    Clauses = 
+	[make_random_clause(MinLen, MaxLen, V) ||
+	    _ <- lists:seq(1, N)],
+    T0 = erlang:monotonic_time(),
+    lists:foreach(
+	fun(Clause) ->
+		{true,_Ci} = varp_nif:add_clause(Vp, Clause, 'gamma')
+	end, Clauses),
+    T1 = erlang:monotonic_time(),    
+    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
+    io:format("installed ~w clauses in time=~.2fs\n", [N, Time/1000000]),
+    bench_install_(I-1, Opts).
+
+
 bench_purge() ->
     bench_purge(10, #{}).
 

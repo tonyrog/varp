@@ -24,20 +24,19 @@ def saturate_var(vp, x):
             l_undo(vp)
             return bs
         else:
-            l_undo(vp)            
+            l_undo(vp)
             return False
 
 def l_eval(vp, x):
-    varpy.set_level(vp, 1)
+    varpy.push(vp)
     if varpy.bind(vp, x):
-        varpy.set_level(vp, 2)
+        varpy.push(vp)
         return varpy.bcp(vp)
     else:
         return False
 
 def l_undo(vp):
-    varpy.undo_level(vp, 2)
-    varpy.undo_level(vp, 1)
+    varpy.pop(vp, 0)
 
 def test():
     vp = varpy.new({'xref':True})

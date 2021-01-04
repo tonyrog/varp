@@ -347,7 +347,6 @@ def test(text, vs={}):
     vp = varpy.new({})
     x = build(vp, f, vs)
     if varpy.bind(vp, x) and varpy.bcp(vp):
-        varpy.set_level(vp, 1)
         return varpy.bt_all(vp)
     else:
         print("0 models found")

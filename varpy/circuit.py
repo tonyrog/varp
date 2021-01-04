@@ -291,7 +291,6 @@ def test_gate(gate):
         print("0 models found")
         return 0
     else:
-        varpy.set_level(vp, 1)
         return varpy.bt_all(vp)
 
 def test_or():
@@ -331,7 +330,6 @@ def test_eq1():
     d = atom(vp, "d")
     e = eq1(vp, [a,b,c,d])
     varpy.bind(vp, e)
-    varpy.set_level(vp, 1)
     return varpy.bt_all(vp)
 
 def test_half_adder1():

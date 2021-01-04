@@ -428,8 +428,14 @@ varp_layout(I) when is_integer(I) ->
 	  {space, ?HSPACE},
 
 	  {vertical, #{},
-	   [{checkbox,#{ label => "Minimize", 
-			  name=>[profile,I,options,backjump,minimize] }},
+	   [
+	    {radiobox,
+	     #{ label => "Minimize",
+		name => [profile,I,options,backjump,minimize],
+		options => [{majorDim,1},{style,vertical}]},
+	     [{"None", none},
+	      {"Local", local},
+	      {"Recursive", recursive}]},
 	    {space, ?VSPACE},
 	    {vertical, #{ label => "Max clause length" },
 	     [

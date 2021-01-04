@@ -158,21 +158,16 @@ if x is bound to literal y then y is returned.
 exception: literal (x is not a literal)
 
 ``` python
-varpy.bind(vp, x, [,l])
+varpy.bind(vp, x)
 ```
 
-Bind variable x to True. If level __l__ is given then that level 
-is used to the variable is bound on that level else the
-variable is bound on the current level as set with varpy.set\_level.
+Bind variable x to True.
 
 ``` python
-varpy.decide(vp, x [,l])
+varpy.decide(vp, x)
 ```
 
 Bind variable x to True and mark x as a decision variable.
-If level __l__ is given then that level 
-is used to the variable is bound on that level else the
-variable is bound on the current level as set with varpy.set\_level.
 
 ``` python
 varpy.subst(vp, x, y)
@@ -754,7 +749,7 @@ existing clause.
 
 
 ``` python
-varpy.minimize(vp, cix)
+varpy.minimize(vp, cix [, 'local'|'recursive'])
 ```
 
 Minimize clause, may be called after varpy.conflict and requires
