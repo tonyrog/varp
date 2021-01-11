@@ -19,8 +19,7 @@
 %% -compile(export_all).
 
 -define(ORDER_OPT(Ord,Ord2),
-	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
-		{seed,-1}]}).
+	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},{seed,0}]}).
 
 -define(REORDER_0,
 	[
@@ -373,7 +372,7 @@ reorder(Bs, Param) ->
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
 	    ?dbg1("Reorder: ~p\n", [Opts]),
-	    Seed = proplists:get_value(seed, Opts, -1),
+	    Seed = proplists:get_value(seed, Opts, 0),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
 		[Key1] ->

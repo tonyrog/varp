@@ -110,9 +110,7 @@ typedef enum {
 #define CLAUSE_2      1
 #define CLAUSE_3      2
 #define CLAUSE_D      3
-#define EDGE_2        4
-#define EDGE_D        5
-#define NUM_COUNTERS  6
+#define NUM_COUNTERS  4
 
 // use LSB bit to signal negation, this makes it easy
 // to use cantor pair encoding since literals have as
@@ -294,7 +292,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "mark",                3,  varp_mark ) \
     NIF( "intersect_marks",     2,  varp_intersect_marks ) \
     NIF( "intersect_var",       4,  varp_intersect_var ) \
-    NIF( "get_marked",          2,  varp_get_marked)
+    NIF( "get_marked",          2,  varp_get_marked) \
+    NIF( "rand",                1,  varp_rand)
 
 // Declare all nif functions
 #ifdef NIF_TRACE
@@ -599,6 +598,7 @@ typedef struct _varp_config_t
     ival_t   init_phase; // initial phase selection (TRUE|FALSE|UNDEF)
     size_t   vsize;
     size_t   csize;
+    uint64_t seed;
 } varp_config_t;
 
 typedef struct _varp_new_opt_t {
@@ -825,6 +825,7 @@ DECL_ATOM(log2);
 DECL_ATOM(log10);
 DECL_ATOM(next);
 DECL_ATOM(version);
+DECL_ATOM(seed);
 // sort
 DECL_ATOM(identity);
 DECL_ATOM(p_identity);
@@ -1260,6 +1261,17 @@ static uint32_t arc4_random_uniform(arc4_stream_t* as, uint32_t upper_bound)
 	    break;
     }
     return r % upper_bound;
+}
+
+static void varp_set_seed(varp_t* vp, uint64_t seed)
+{
+    vp->opt.seed = seed;
+    if (!seed)
+	arc4_stir(&vp->as);
+    else {
+	arc4_init(&vp->as);
+	arc4_add_random(&vp->as, (uint8_t*)&seed, sizeof(seed));
+    }
 }
 
 static int equal_string(ErlNifEnv* env, ERL_NIF_TERM atm, ERL_NIF_TERM arg)
@@ -2509,7 +2521,8 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
     var->literal_pos = li;
     var->level = level;
     // save for use with phase restore, if not a decision
-    if (cix != CLAUSE_NONE) var->phase = ivalue;
+    //  && (vp->conflict_counter==0) ?
+    if ((cix != CLAUSE_NONE)) var->phase = ivalue;
     log_permanent(vp, lp, NULL, level);
 }
 
@@ -3305,6 +3318,7 @@ static void default_config(varp_config_t* conf)
     conf->all_used  = false;
     conf->vsize  = DEFAULT_MAP_SIZE;
     conf->csize  = DEFAULT_MAP_SIZE;
+    conf->seed   = 0;
 }
 
 static int vif_config(ErlNifEnv* env,
@@ -3367,7 +3381,13 @@ static int vif_config(ErlNifEnv* env,
     }
     else if (EQUAL_KEY(env, init_phase, key) && enif_is_undefined(env, value)) {
 	opt->init_phase = I_UNDEF;
-    } 
+    }
+    else if (EQUAL_KEY(env, seed, key)) {
+	uint64_t seed;
+	if (!enif_get_uint64(env, value, &seed))
+	    return 0;
+	opt->seed = seed;
+    }     
     else
 	return 0;
     return 1;
@@ -3424,7 +3444,6 @@ static int vif_clone_config(ErlNifEnv* env,
     }
     return 0;
 }
-
 
 static int parse_new_opts(ErlNifEnv* env,ERL_NIF_TERM map,varp_new_opt_t* opt)
 {
@@ -3721,14 +3740,13 @@ static int setup(varp_t* vp, varp_config_t* config)
     vp->counter[CLAUSE_2] = 0;   // 2-clause
     vp->counter[CLAUSE_3] = 0;   // 3-clause
     vp->counter[CLAUSE_D] = 0;   // dead clause counter
-    vp->counter[EDGE_2] = 0;     // trigger list
-    vp->counter[EDGE_D] = 0;     // "dead" rules
 
     var_init(vp, &vp->constant, 0);
     vp->var_map[0] = &vp->constant;
     set_vv(vp, &vp->constant, I_TRUE);
 
     arc4_init(&vp->as);
+    varp_set_seed(vp, vp->opt.seed);
     vp->asb = 0;
     vp->phase_shift = 8;
 
@@ -4715,31 +4733,25 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int arg = 0;
+    uint64_t arg = 0;
     int i, m, n;
     int order[2];
     int r = 0;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-
     if (!vif_get_order(env, argv[1], &order[0]))
 	return enif_make_badarg(env);
     if (!vif_get_order(env, argv[2], &order[1]))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[3], &arg))
+    if (!enif_get_uint64(env, argv[3], &arg))
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_raise_exception(env, ATOM(level));
 
     if (((order[0] & 0x0f) == ORDER_RANDOM) ||
 	((order[1] & 0x0f) == ORDER_RANDOM)) {
-	if (!arg)
-	    arc4_stir(&vp->as);
-	else {
-	    arc4_init(&vp->as);
-	    arc4_add_random(&vp->as, (uint8_t*)&arg, sizeof(arg));
-	}
+	varp_set_seed(vp, arg);
     }
 
     n = (int)dynvar_size(vp->var_map);
@@ -6752,7 +6764,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, conflict_counter, argv[1]) ) {
 	return enif_make_uint64(env, vp->conflict_counter);
     }
-    if (EQUAL_KEY(env, conflict_counter, argv[1])) {
+    if (EQUAL_KEY(env, max_conflicting, argv[1])) {
 	return enif_make_int(env, vp->max_conflicting);
     }
     if (EQUAL_KEY(env, number_of_conflicting_clauses, argv[1])) {
@@ -6862,7 +6874,9 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (EQUAL_KEY(env, version, argv[1])) {
 	return enif_make_string(env, VARP_VSN, ERL_NIF_LATIN1);
     }
-
+    if (EQUAL_KEY(env, seed, argv[1])) {
+	return enif_make_uint64(env, vp->opt.seed);
+    }
     // MEMORY stats
     if (EQUAL_KEY(env, memory_literal_size, argv[1])) {
 	return enif_make_uint(env, sizeof(literal_t));
@@ -7036,6 +7050,13 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	vp->opt.init_phase = I_UNDEF;
 	return enif_make_ok(env);
     }
+    else if (EQUAL_KEY(env, seed, key)) {
+	uint64_t seed;
+	if (!enif_get_uint64(env, value, &seed))
+	    return enif_make_badarg(env);
+	varp_set_seed(vp, seed);
+	return enif_make_ok(env);
+    }    
     return enif_make_badarg(env);
 }
 
@@ -9039,6 +9060,19 @@ static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 }
 
+// return a 32 bit random number 
+static ERL_NIF_TERM varp_rand(ErlNifEnv* env, int argc,
+			      const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);    
+    return enif_make_uint64(env, arc4_random(&vp->as));
+}
+
+
 // create all tracing NIFs
 #ifdef NIF_TRACE
 
@@ -9162,6 +9196,7 @@ static void load_atoms(ErlNifEnv* env)
     // LOAD_ATOM(rank);
     LOAD_ATOM(next);
     LOAD_ATOM(version);
+    LOAD_ATOM(seed);
     LOAD_ATOM_STRING(exclamation_mark, "!");
     LOAD_ATOM(identity);
     LOAD_ATOM_STRING(p_identity, "+identity");

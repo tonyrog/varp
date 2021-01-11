@@ -91,6 +91,7 @@
 -export([intersect_marks/2]).
 -export([intersect_var/4]).
 -export([get_marked/2]).
+-export([rand/1]).   %% debug!
 %% -define(DEBUG, true).
 
 -ifdef(DEBUG).
@@ -676,6 +677,9 @@ intersect_var(_Vp, _Var, _Bs0, _AsTuple) ->
     ?nif_stub().
 
 -spec get_marked(Vp::varp(), AsTuple::boolean()) -> bindings().
-
 get_marked(_Vp, _Tuple) ->
+    ?nif_stub().
+
+-spec rand(Vp::varp()) -> unsigned().
+rand(_Vp) ->
     ?nif_stub().

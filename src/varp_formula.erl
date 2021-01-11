@@ -109,7 +109,8 @@ new(OptMap) when is_map(OptMap) ->
 		 xref       => maps:get(xref,OptMap),
 		 hash       => maps:get(hash,OptMap),
 		 init_phase => maps:get(phase,OptMap),
-		 use_phase  => maps:get(use_phase,OptMap)
+		 use_phase  => maps:get(use_phase,OptMap),
+		 seed       => maps:get(seed,OptMap)
 	       },
     %% io:format("new(~w)\n", [NewOpts]),
     Vp  = varp_nif:new(NewOpts),

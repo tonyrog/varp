@@ -282,7 +282,7 @@ global_options() ->
       #{ long => "seed",
 	 key => seed,
 	 spec => integer,
-	 default => -1,
+	 default => 0,
 	 description => "Random seed."
        },
       #{ long => "assoc",
@@ -1825,6 +1825,7 @@ i() ->
 		 hash,
 		 init_phase,
 		 use_phase,
+		 seed,
 		 memory_literal_size,
 		 memory_variable_size,
 		 memory_clause_size,
@@ -1865,6 +1866,7 @@ info_keys() ->
      hash,             %% hash is used
      init_phase,       %% initial phase value
      use_phase,        %% used saved phase value
+     seed,
      memory_literal_size,
      memory_variable_size,
      memory_clause_size,

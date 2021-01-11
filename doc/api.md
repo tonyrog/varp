@@ -8,27 +8,29 @@ varpy.new(options)
 ```
 Create a new varp instance from a dict of options
 
-* {'size': size}
-  Initial variable table size 
-* {'qtype': 'lifo'|'fifo'|'recursive'}
+* {'size': size | 'default'}
+  Initial variable table size  ( default 1024 )
+* {'qtype': 'lifo'|'fifo'|'recursive'}  ( default = __recursive__ )
   Use lifo/fifo strategy in bcp
-* {'xref': x}
+* {'xref': x}  ( default = __False__ )
   Use cross references if x is __True__
-* {'vsids': x}
+* {'vsids': x}  ( default = __True__ )
   Use variable decaying sum variable selection ifg x is __True__
-* {'init\_phase': x}
-  The initial phase to start with, x is boolean.
-* {'use\_phase': x}
+* {'init\_phase': x}  ( default = __True__ )
+  The initial phase to start with, x is boolean. Set to __None__ if
+  random value is requested.
+* {'use\_phase': x}  ( default = __False__ )
   Use saved phase in decide iff x is __True__
-* {'all\_used': x}
+* {'all\_used': x}  ( default = __False__ )
   All variables are "used" if 'all\_used' is __True__,
   that is all variables created are backtracked
   and turn up in calls to next_unbound. If all_\used is __False__ then
   varpy.isused and literal degree controls when variabels are used.
-* {'hash': x}
+* {'hash': x} ( default = __False__ )
   use hash table for clauses iff x is __True__
-* {'edge': x}
-  use edge tables for 2-clauses iff x is __True__
+* {'seed': x}  ( default = 0 )
+  random seed used (64-bit unsigned number). Use seed = 0 when a, 
+  kind of non deterministc, number is wanted as seed.
 
 ``` python
 varpy.clone(vp, options)
@@ -71,8 +73,6 @@ Get varp information
 * 'clause\_2\_counter'
 * 'clause\_3\_counter'
 * 'clause\_d\_counter'
-* 'edge\_2\_counter'
-* 'edge\_d\_counter'
 * 'size'
 * 'qtype'
 * 'max\_level'
@@ -86,7 +86,7 @@ Get varp information
 * 'hash'
 * 'init\_phase'
 * 'use\_phase'
-
+* 'seed'
 
 ``` python
 varpy.config(vp, item, value)
@@ -107,7 +107,9 @@ Set configurable items in varp
  set style of literal queueing in bcp
  where value is one of 
  'lifo' | 'fifo' | 'recursive'
-	
+* 'seed'
+  random seed used (64-bit unsigned number). Use seed = 0 when a, 
+  kind of non deterministc, number is wanted as seed.
 
 ``` python
 varpy.add_variable(vp [,is_atom [, is_used])
@@ -167,7 +169,12 @@ Bind variable x to True.
 varpy.decide(vp, x)
 ```
 
-Bind variable x to True and mark x as a decision variable.
+Use the decision parameters to decide and bind variable x 
+also mark x as a decision variable.
+The value used for x is initially the value of 'init\_phase' as
+setup in varpy.new. If 'use\_phase' is true the last propagated
+value is used as next initial decision value.
+
 
 ``` python
 varpy.subst(vp, x, y)
@@ -535,8 +542,10 @@ Return number of bindings on level __l__.
 varpy.order_sort(vp, key1, key2, arg)
 ```
 
-Order variables according to __key1__ and then __key2__, an optional
-__arg__ may be supplied when needed by sorting.
+Order variables according to __key1__ and then __key2__, an optional 
+unsigned integer __arg__ may be supplied when needed by sorting.
+In the case of 'random' sort the __arg__ is the random seed 
+(use __arg__ = 0 to set an arbitrary seed )
 
 The sort keys available are:
 * 'identity'
