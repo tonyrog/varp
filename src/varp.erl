@@ -199,7 +199,7 @@ global_options() ->
     [
      #{ long => "phase",
 	key => phase,
-	spec => {enum,[{"undefined",undefined},{"undef",undefined},
+	spec => {enum,[{"undefined",undefined},
 		       {"true", true},{"1",true},
 		       {"false",false},{"0",false}]},
 	default => true,

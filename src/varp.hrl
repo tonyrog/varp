@@ -187,18 +187,12 @@
 	{"=user",    ?ORDER_USER bor ?ORDER_INTERLEAVE}
        ).
 
--define(BUMP_RANK,  -4).  %% bump implication clause number of steps
--define(BUMP_LOG10, -3).  %% bump value = log10(<number-of-variables>)
--define(BUMP_LOG2,  -2).  %% bump value = log2(<number-of-variables>)
--define(BUMP_NEXT,  -1).
--define(BUMP_NONE,   0).
-
 -define(BUMP,
-	{"none", ?BUMP_NONE},
-	{"next", ?BUMP_NEXT},
-	{"log2", ?BUMP_LOG2},
-	{"log10", ?BUMP_LOG10},
-	{"rank", ?BUMP_RANK}
+	{"none", none},
+	{"next", next},
+	{"log2", log2},
+	{"log10", log10},
+	{"rank",  rank}
        ).
 
 -ifdef(OTP_RELEASE). %% this implies 21 or higher

@@ -512,12 +512,12 @@ varp_layout(I) when is_integer(I) ->
 	    {vertical,#{ label => "Bump" },
 	     [
 	      {combobox, #{ choices =>
-				[{"none", ?BUMP_NONE},
+				[{"none", none},
 				 {"1", 1},{"2", 2},{"3", 3},{"4", 4},{"5", 5},
-				 {"next", ?BUMP_NEXT},
-				 {"log2", ?BUMP_LOG2},
-				 {"log10", ?BUMP_LOG10},
-				 {"rank", ?BUMP_RANK},
+				 {"next", next},
+				 {"log2", log2},
+				 {"log10", log10},
+				 {"rank", rank},
 				 {"0.3", 0.3},{"0.5", 0.5},{"0.8", 0.8},
 				 {"10", 10}, {"15", 15}, {"20", 20}, {"50", 50},
 				 {"100", 100}],

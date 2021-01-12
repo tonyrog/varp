@@ -43,7 +43,7 @@
 
 #define DYN_SYMTAB_INIT  8
 #define DYN_HASHTAB_INIT 8
-#define DYN_UNDO_INIT    8
+#define DYN_UNDO_INIT    7
 
 //
 // configurations
@@ -61,16 +61,16 @@
 // LIT_VALUE          store literal values instead of variable value
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
 //
-// #define NIF_TRACE
+//#define NIF_TRACE
 #define TWL_BACKWARD
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
 // #define ASSERTIONS
-// #define DEBUG
-// #define DEBUG_BCP
-// #define DEBUG_NBCP
-// #define DEBUG_ORDER
+//#define DEBUG
+//#define DEBUG_BCP
+//#define DEBUG_NBCP
+//#define DEBUG_ORDER
 // #define DEBUG_MEM
 // #define FENCE_MEM
 // #define VALIDATE_TWL
@@ -542,18 +542,19 @@ typedef enum {
     uSET     = 1,
     uTOGGLE  = 2,
     uDONE    = 3
-} undo_state_t;
+} bnd_state_t;
 
 typedef struct _undo_t
 {
     lit_t decision;            // decision literal or L_FALSE
-    undo_state_t t;            // used by undo
+    ival_t value;              // decision value
+    bnd_state_t t;             // used by undo
     int    offs;               // start offset in vp->bnd_map
     int    size;               // number of bindings from offset
 } undo_t;
 
-#define undo_bnd_at(vp,level) ((vp)->bnd_map + (vp)->undo[level].offs)
-#define undo_bnd(vp,up) (vp->bnd_map + (up)->offs)
+#define bindings_at(vp,level) ((vp)->bnd_map + (vp)->undo[level].offs)
+#define bindings(vp,up) (vp->bnd_map + (up)->offs)
 
 typedef struct arc4_stream_t {
     uint8_t i;
@@ -656,7 +657,7 @@ typedef struct _varp_t {
 
     dynvar(clause_t**, unwatch); // clauses to unwatch (check after bcp) 
     dynvar(undo_t*,undo);       // array of undo block, one for each level
-    size_t       num_bound;     // #bound variables
+    size_t       num_bound;     // #bound variables (not current level)
     size_t       num_subst;     // #substitions < #bound
     size_t       max_bound;     // max bound variables since last check
     int32_t      level;         // current undo level
@@ -712,6 +713,13 @@ static cix_t add_clause_array(varp_t* vp, int si,
 
 void print_clause(varp_t* vp, char* label, clause_t* cp);
 void print_lit_array(char* label, lit_t* lit, size_t size);
+
+static char* bnd_state_name[] = {
+    [uUNDEF]  = "undef",
+    [uSET]    = "set",
+    [uTOGGLE] = "toggle",
+    [uDONE]   = "done"
+};
 
 
 #ifdef NIF_TRACE
@@ -2210,15 +2218,64 @@ static void lqueue_clear(varp_t* vp)
     slist_init(&vp->q);
 }
 
+// since level size is not included in num_bound we
+// must add number of bindings on current level
+//
+static inline size_t get_num_bound(varp_t* vp)
+{
+    undo_t* up = &vp->undo[vp->level];
+    return vp->num_bound + up->size;
+}
+
+static inline void set_max_bound(varp_t* vp)
+{
+    size_t n = get_num_bound(vp);
+    if (n > vp->max_bound)
+	vp->max_bound = n;
+}
+
+static inline size_t get_and_reset_max_bound(varp_t* vp)
+{
+    size_t n = vp->max_bound;
+    vp->max_bound = 0;
+    return n;
+}
+
+static inline void set_max_level(varp_t* vp)
+{
+    if (vp->level > vp->max_level)
+	vp->max_level = vp->level;
+}
+
+// Get max level reset and return
+static inline int32_t get_and_reset_max_level(varp_t* vp)
+{
+    int32_t level = vp->max_level;
+    vp->max_level = 0;
+    return level;
+}
+
+static inline void set_min_level(varp_t* vp)
+{
+    if (vp->level < vp->min_level)
+	vp->min_level = vp->level;
+}
+
+// Get min level reset and return
+static inline int32_t get_and_reset_min_level(varp_t* vp)
+{
+    int32_t level = vp->min_level;
+    vp->min_level = MAX_INT32;  // yes max!
+    return level;
+}
+
 static inline void push_variable(varp_t* vp, variable_t* var, int level)
 {
     undo_t* up;
     ASSERT(get_vv(vp, var) == I_UNDEF);
 
     up = &vp->undo[level];
-    undo_bnd(vp, up)[up->size++] = var;
-    vp->num_bound++;
-    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;
+    bindings(vp, up)[up->size++] = var;
 }
 
 static ERL_NIF_TERM make_cix(ErlNifEnv* env,cix_t cix)
@@ -2279,7 +2336,7 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
     if (flags & SUB_FLAG_NUM_VARS)
 	values[0] = enif_make_int(env, dynvar_size(vp->var_map)-1);
     if (flags & SUB_FLAG_NUM_BOUND)
-	values[1] = enif_make_int(env, vp->num_bound);
+	values[1] = enif_make_int(env, get_num_bound(vp));
     if (flags & SUB_FLAG_NUM_CLAUSES)
 	values[2] = enif_make_int(env, get_number_of_clauses(vp));
     if (flags & SUB_FLAG_NUM_DEAD) {
@@ -2288,21 +2345,21 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 	values[3] = enif_make_int(env, n);
     }
     if (flags & SUB_FLAG_MAX_LEVEL) {
-	values[4] = enif_make_int(env, vp->max_level);
-	vp->max_level = 0;  // and reset
+	int val = get_and_reset_max_level(vp);
+	values[4] = enif_make_int(env, val);
     }
     if (flags & SUB_FLAG_MAX_BOUND) {
-	values[5] = enif_make_int(env, vp->max_bound);
-	vp->max_bound = 0;  // and reset
+	size_t val = get_and_reset_max_bound(vp);
+	values[5] = enif_make_int(env, val);
     }
     if (flags & SUB_FLAG_NUM_SUBST)
 	values[6] = enif_make_int(env, vp->num_subst);
     if (flags & SUB_FLAG_MIN_LEVEL) {
-	if (vp->min_level == MAX_INT32)
-	    values[7] = enif_make_int(env, 0);
+	int32_t val = get_and_reset_min_level(vp);
+	if (val == MAX_INT32)
+	    values[7] = ATOM(undefined);
 	else
-	    values[7] = enif_make_int(env, vp->min_level);
-	vp->min_level = MAX_INT32;  // and reset
+	    values[7] = enif_make_int(env, val);
     }
     return enif_make_map_from_arrays(env, sub_info_keys, values, 8, info);
 
@@ -2520,9 +2577,6 @@ static void put_nq_ll(varp_t* vp, literal_t* lp, ival_t ivalue,
     var->implication_clause = cix;
     var->literal_pos = li;
     var->level = level;
-    // save for use with phase restore, if not a decision
-    //  && (vp->conflict_counter==0) ?
-    if ((cix != CLAUSE_NONE)) var->phase = ivalue;
     log_permanent(vp, lp, NULL, level);
 }
 
@@ -2551,64 +2605,67 @@ static inline void put_l(varp_t* vp,lit_t l,ival_t ivalue,
 static void init_level(varp_t* vp, int level)
 {
     ASSERT(level < (int)dynvar_size(vp->undo));
+
+    DBG_ORDER("%sInit_level @%d\r\n", indent(level), level);
     vp->undo[level].decision = L_FALSE(vp);
     vp->undo[level].t  = uUNDEF;
     vp->undo[level].offs = 0;
     vp->undo[level].size = 0;
 }
 
-static int undo_set_size(varp_t* vp, size_t size)
+// resize binding stack to include 'level'
+static int resize_levels(varp_t* vp, size_t level)
 {
     size_t n = dynvar_size(vp->undo);
     int i;
-    if (dynvar_resize(vp->undo, size) < 0)
+    if (dynvar_resize(vp->undo, level+1) < 0)
 	return -1;
-    for (i = (int)n; i < (int)size; i++)
+    for (i = (int)n; i <= (int)level; i++)
 	init_level(vp, i);
     return 0;
 }
 
-#ifdef DEBUG
-// check that all levels above 'level' are clean
-static void check_clean_levels(varp_t* vp, int level)
-{
-    int n = (int)dynvar_size(vp->undo);
-    int i;
-    for (i = level+1; i < n; i++) {
-	if (vp->undo[i].size != 0)
-	    enif_fprintf(stderr, "set_level: level %d not empty\r\n", i);
-	if (vp->undo[i].t != uUNDEF)
-	    enif_fprintf(stderr, "set_level: level %d not undef\r\n", i);
-    }
-}
-#endif
-
-// set current bindings level
-static int set_level(varp_t* vp, int level)
+// pop level
+static int pop_level(varp_t* vp)
 {
     int cur = vp->level;
-    if (level >= (int)dynvar_size(vp->undo))
-	undo_set_size(vp, level+1);
-#ifdef DEBUG
-    if (level > cur) check_clean_levels(vp, level);
-#endif
-    if (level > cur) // push
-	vp->undo[level].offs = vp->undo[cur].offs + vp->undo[cur].size;
-    vp->level = level;
-    if (level > vp->max_level) vp->max_level = level;
-    if (level < vp->min_level) vp->min_level = level;
+    int level = cur-1;
     
-    DBG("%sSet_level: @%d, t=%d, decision=%s\r\n",
-	indent(level), level, vp->undo[level].t,
-	format_lit(vp, vp->undo[level].decision));
+    if (level >= 0) {
+	vp->num_bound -= vp->undo[level].size;
+	vp->level = level;
+	set_min_level(vp);
+	DBG("%sPop_level: @%d, t=%s, decision=%s\r\n",
+	    indent(level), level, bnd_state_name[vp->undo[level].t],
+	    format_lit(vp, vp->undo[level].decision));
+    }
     return level;
+}
+
+// push level, return the starting level
+static int push_level(varp_t* vp)
+{
+    int cur = vp->level;
+    int level = cur+1;
+    
+    if (level >= (int)dynvar_size(vp->undo))
+	resize_levels(vp, level);
+    vp->undo[level].offs = vp->undo[cur].offs + vp->undo[cur].size;
+    vp->num_bound += vp->undo[cur].size;
+    vp->level = level;
+    set_max_level(vp);
+
+    DBG("%sPush_level: @%d, t=%s, decision=%s\r\n",
+	indent(level), level, bnd_state_name[vp->undo[level].t],
+	format_lit(vp, vp->undo[level].decision));
+    return cur;
 }
 
 static void unbind_level(varp_t* vp, int level)
 {
     undo_t* up = &vp->undo[level];
     int size = up->size;
-    variable_t** bpv = undo_bnd(vp, up);
+    variable_t** bpv = bindings(vp, up);
     int i;
     
     DBG_ORDER("%sUnbind_level @%d\r\n", indent(level), level);
@@ -2618,30 +2675,16 @@ static void unbind_level(varp_t* vp, int level)
 	variable_t* bp = bpv[i];
 	ASSERT(bp->bound == NULL);
 	DBG_BCP("%sUnbind %s\r\n",indent(level),format_variable(bp));
+	// remember phase, but skip decision
+	// (may have to check that bvp[0] really is a decision)
+	if ( i>0 ) bp->phase = get_vv(vp, bp);
 	order_unbind(vp, bp);
 	bp->implication_clause = CLAUSE_NONE;
 	bp->literal_pos = -1;
 	bp->level = -1;
     }
-    vp->num_bound -= size;
     vp->undo[level].size = 0;
 }
-
-static void undo_level(varp_t* vp, int level)
-{
-    DBG_ORDER("%sUndo_level @%d\r\n", indent(level), level);
-    unbind_level(vp, level);
-    init_level(vp, level);
-}
-
-#if 0
-// clear but do not undo a level (keep the bindings)
-static void keep_level(varp_t* vp, int level)
-{
-    vp->undo[level].offs = 0;
-    vp->undo[level].size = 0;
-}
-#endif
 
 static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
 {
@@ -3722,7 +3765,7 @@ static int setup(varp_t* vp, varp_config_t* config)
     slist_init(&vp->q);
 
     dynvar_init(vp->undo, 0);
-    undo_set_size(vp, DYN_UNDO_INIT);
+    resize_levels(vp, DYN_UNDO_INIT);
 
     vp->num_bound = 0;
     dlist_init(&vp->subs);
@@ -4190,8 +4233,13 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, var->literal_pos);
     if (EQUAL_KEY(env, level, argv[2]))
 	return enif_make_int(env, var->level);
-    if (EQUAL_KEY(env, phase, argv[2]))
-	return enif_make_int(env, (var->phase == I_TRUE) ? 1 : -1);
+    if (EQUAL_KEY(env, phase, argv[2])) {
+	switch(var->phase) {
+	case I_TRUE: return enif_make_int(env, 1);
+	case I_FALSE: return enif_make_int(env, -1);
+	default: return enif_make_undefined(env);
+	}
+    }
     if (EQUAL_KEY(env, is_atom, argv[2]))
 	return enif_make_boolean(env, var->is_atom);
     if (EQUAL_KEY(env, is_used, argv[2]))
@@ -4301,8 +4349,8 @@ void dump_order(char* label, varp_t* vp)
 
     enif_fprintf(stdout, "dump_order %s: |order-list|=%d,#num=%d,#bound=%d,#subst=%d,#unbound=%d\r\n",
 		 label, cdlist_length(&vp->order_list),
-		 vn-1, vp->num_bound, vp->num_subst,
-		 (vn-1) - vp->num_bound);
+		 vn-1, get_num_bound(vp), vp->num_subst,
+		 (vn-1) - get_num_bound(vp));
     var = cdlist_first(&vp->order_list);
     while(var != NULL) {
 	char* nmark = (var == vp->top) ? "*" : "";
@@ -4327,7 +4375,7 @@ static bool_t valid_order(varp_t* vp)
 
     if (vp->top != NULL) {
 	if (variable_is_bound(vp, vp->top)) {
-	    if ((dynvar_size(vp->var_map)-1) !=  vp->num_bound)
+	    if ((dynvar_size(vp->var_map)-1) !=  get_num_bound(vp))
 		enif_fprintf(stdout, "TOP is BOUND\r\n");
 	}
     }
@@ -5149,6 +5197,7 @@ static int set_lit(ErlNifEnv* env, varp_t* vp, lit_t xp, ival_t val, int level)
     vp->caller_env = env;
     if (level > 0) {
 	vp->undo[level].decision = xp;
+	vp->undo[level].value = val;
 	vp->undo[level].t = uSET;
     }
     put_l(vp, xp, val, -1, CLAUSE_NONE, level);
@@ -5297,7 +5346,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     if (recursive) {
 	// forward version of recursive mark
 	for (i = 1; i < vp->level; i++) {
-	    variable_t** bpv = undo_bnd_at(vp, i);
+	    variable_t** bpv = bindings_at(vp, i);
 	    int bsz = vp->undo[i].size;
 	    int j;
 	    for (j = 0; j < bsz; j++) {
@@ -5341,7 +5390,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     }
     if (recursive) { // clear all recursive marks
 	for (i = 1; i < vp->level; i++) {
-	    variable_t** bpv = undo_bnd_at(vp, i);
+	    variable_t** bpv = bindings_at(vp, i);
 	    int bsz = vp->undo[i].size;
 	    int j;
 	    for (j = 0; j < bsz; j++) {
@@ -5719,12 +5768,12 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     }
 
     if (opt.level >= (int)dynvar_size(vp->undo))
-	undo_set_size(vp, dynvar_size(vp0->undo));
+	resize_levels(vp, dynvar_size(vp0->undo));
 
     for (i = 0; i <= opt.level; i++) {  // clone undo structure
 	int m = vp0->undo[i].size;
-	variable_t** srcv = undo_bnd(vp0, &vp0->undo[i]);
-	variable_t** dstv = undo_bnd(vp, &vp->undo[i]);
+	variable_t** srcv = bindings(vp0, &vp0->undo[i]);
+	variable_t** dstv = bindings(vp, &vp->undo[i]);
 	int li = export_l(vp0->undo[i].decision);
 	int j;
 	vp->undo[i].decision = vindex_l(vp, li);
@@ -5936,7 +5985,7 @@ static void subst(varp_t* vp, lit_t xl, lit_t yl)
 
     vp->num_subst++;
     vp->num_bound++;
-    if (vp->num_bound > vp->max_bound) vp->max_bound = vp->num_bound;    
+    set_max_bound(vp);
     log_permanent(vp, xp, yp, 0);
 
     subst_ll(vp, xl, yl);
@@ -5998,65 +6047,6 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     }
 }
 
-#if 0
-static ERL_NIF_TERM varp_set_level(ErlNifEnv* env, int argc,
-				   const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    int level;
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &level) || (level < 0))
-	return enif_make_badarg(env);
-    set_level(vp, level);
-    return enif_make_boolean(env, true);
-}
-#endif
-
-#if 0
-//
-// Undo bindings on a level
-//
-static ERL_NIF_TERM varp_undo_level(ErlNifEnv* env, int argc,
-				    const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    int level;
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &level) || (level < 0))
-	return enif_make_badarg(env);
-    if (level < (int)dynvar_size(vp->undo))
-	undo_level(vp, level);
-    return enif_make_ok(env);
-}
-#endif
-
-#if 0
-//
-// keep bindings on a level remove undo information
-//
-static ERL_NIF_TERM varp_keep_level(ErlNifEnv* env, int argc,
-				    const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    int level;
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &level) || (level < 0))
-	return enif_make_badarg(env);
-    if (level < (int)dynvar_size(vp->undo))
-	keep_level(vp, level);
-    return enif_make_ok(env);
-}
-#endif
-
 // return level before the call
 static ERL_NIF_TERM varp_push_level(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
@@ -6067,8 +6057,7 @@ static ERL_NIF_TERM varp_push_level(ErlNifEnv* env, int argc,
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    level = vp->level;
-    set_level(vp, level+1);
+    level = push_level(vp);
     return enif_make_int(vp, level);
 }
 
@@ -6092,66 +6081,13 @@ static ERL_NIF_TERM varp_pop_level(ErlNifEnv* env, int argc,
 	if (target > level)
 	    return enif_make_badarg(env);
     }
-    for (l = level; l > target; l--)
-	undo_level(vp, l);
-    vp->level = target;
+    for (l = level; l > target; l--) {
+	pop_level(vp);
+	unbind_level(vp, l);
+	init_level(vp, l);
+    }
     return enif_make_int(env, vp->level);
 }
-
-#ifdef not_used
-//
-// move bindings from one level to an other
-//
-
-
-//
-// move bindings from src level to dst level
-// the bindings are moved last into dst level
-//
-static void move_level(varp_t* vp, int src, int dst)
-{
-    size_t size = vp->undo[src].size;
-    if (size) {
-	int i;
-	variable_t** srcv = vp->undo[src].bs;
-	undo_t* up = &vp->undo[dst];
-	
-	for (i = 0; i < (int)size; i++) {
-	    variable_t* var = srcv[i];
-	    var->level = dst;
-	    log_permanent(vp, var_literal(vp,var), NULL, dst);
-	    up->bs[up->size++] = var;
-	}
-	init_level(vp, src);
-    }
-}
-
-static ERL_NIF_TERM varp_move_level(ErlNifEnv* env, int argc,
-				    const ERL_NIF_TERM argv[])
-{
-    UNUSED(argc);
-    varp_t* vp;
-    int src, dst;
-
-    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &src) ||
-	(src < 0) || (src >= (int)dynvar_size(vp->undo)))
-	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[2], &dst) ||
-	(dst < 0) || (src >= (int)dynvar_size(vp->undo)))
-	return enif_make_badarg(env);
-
-    if (src != dst) {
-	// dst should be less to make sense - but goahead anyway!
-	if (dst > src) printf("warning move_level to higher level!\r\n");
-	vp->caller_env = env;
-	move_level(vp, src, dst);
-	vp->caller_env = NULL;
-    }
-    return enif_make_ok(env);
-}
-#endif
 
 // use 2-lower bits on 0 pointer to signal cases
 #define ev_LITERAL  0
@@ -6487,6 +6423,7 @@ static int bcp(varp_t* vp)
 	if ((r = bcp_clauses(vp, lp)) < 0)
 	    break;
     }
+    set_max_bound(vp);
     return r;
 }
 
@@ -6598,19 +6535,19 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 	    vp->undo[level].t = uTOGGLE;
 	    return enif_make_boolean(env, true);
 	case uTOGGLE:
-	    printf("fixme: undo uTOGGLE\r\n");
+	    DBG("fixme: undo uTOGGLE\r\n");
 	    return enif_make_boolean(env, false);
 	case uDONE:
 	    init_level(vp, level);
 	    break;
 	case uUNDEF:
 	default:
-	    printf("fixme: undo uUNDEF\r\n");
+	    DBG("fixme: undo uUNDEF\r\n");
 	    return enif_make_boolean(env, false);
 	}
 	if (level == 1)
 	    break;
-	set_level(vp, level-1);
+	pop_level(vp);
     }
     return enif_make_boolean(env, false);
 }
@@ -6625,7 +6562,6 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    // int i;
     int x;
     int32_t level;
     lit_t xp;
@@ -6637,8 +6573,8 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     vp->num_conflicting = 0;
     vp->caller_env = env;
 
-    DBG("nbcp: level=%d, t=%d, decision=%s\r\n",
-	level, vp->undo[level].t,
+    DBG("nbcp: level=%d, t=%s, decision=%s\r\n",
+	level, bnd_state_name[vp->undo[level].t],
 	format_lit(vp, vp->undo[level].decision));
 
     switch(vp->undo[level].t) {
@@ -6654,20 +6590,20 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	DBG_ORDER("%sNbcp: t=uSET\r\n", indent(level));
 	goto bcp;
     case uTOGGLE:
-	// note xp is already toggled by undo!
+	// NOTE! xp is already toggled by undo!
 	xp = vp->undo[level].decision;
-	put_l(vp, xp, decide_phase(vp, xp),-1, CLAUSE_NONE, level);
+	put_l(vp, xp, vp->undo[level].value, -1, CLAUSE_NONE, level);
 	vp->undo[level].t = uDONE;
 	DBG_ORDER("%sNbcp: t=uTOGGLE decision=%s\r\n",
 		  indent(level), format_lit(vp, xp));
 	goto bcp;
 
     case uDONE:
-	printf("try to bcp t=uDONE state\r\n");
+	DBG("try to bcp t=uDONE state\r\n");
 	vp->caller_env = NULL;
 	return enif_make_badarg(env);
     default:
-	printf("unknown bcp state\r\n");
+	DBG("unknown bcp state\r\n");
 	vp->caller_env = NULL;
 	return enif_make_badarg(env);
     }
@@ -6677,7 +6613,8 @@ next:
     xp = vindex_l(vp, x);
     vp->undo[level].decision = xp;
     vp->undo[level].t = uSET;
-    put_l(vp, xp, decide_phase(vp, xp), -1, CLAUSE_NONE, level);
+    vp->undo[level].value = decide_phase(vp, xp);    
+    put_l(vp, xp, vp->undo[level].value, -1, CLAUSE_NONE, level);
     DBG_ORDER("%sNbcp: next decision=%s\r\n",
 	      indent(level), format_lit(vp, xp));
 bcp:
@@ -6691,7 +6628,8 @@ bcp:
 	    vp->caller_env = NULL;
 	    return enif_make_boolean(env, true);  // model
 	}
-	level = set_level(vp, level+1);
+	push_level(vp);
+	level++;
 	goto next;
     }
     DBG_NBCP("%sContradiction\r\n", indent(level));
@@ -6785,13 +6723,14 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->cnum[1]);
     }
     if (EQUAL_KEY(env, number_of_bound_variables, argv[1])) {
-	return enif_make_int(env, vp->num_bound);
+	return enif_make_int(env, get_num_bound(vp));
     }
     if (EQUAL_KEY(env, number_of_subst_variables, argv[1])) {
 	return enif_make_int(env, vp->num_subst);
     }
     if (EQUAL_KEY(env, number_of_unbound_variables, argv[1])) {
-	return enif_make_int(env, (dynvar_size(vp->var_map)-1) - vp->num_bound);
+	int n = (dynvar_size(vp->var_map)-1) - get_num_bound(vp);
+	return enif_make_int(env, n);
     }
     if (EQUAL_KEY(env, clause_n_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[CLAUSE_N]);
@@ -6817,19 +6756,16 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	}
     }
     if (EQUAL_KEY(env, max_level, argv[1])) {
-	int level = vp->max_level;
-	vp->max_level = 0; // and reset
-	return enif_make_int(env, level);
+	int val = get_and_reset_max_level(vp);
+	return enif_make_int(env, val);
     }
     if (EQUAL_KEY(env, min_level, argv[1])) {
-	int level = vp->min_level == MAX_INT32 ? 0 : vp->min_level;
-	vp->min_level = MAX_INT32; // and reset
-	return enif_make_int(env, level);
+	int val = get_and_reset_min_level(vp);
+	return enif_make_int(env, val);
     }
     if (EQUAL_KEY(env, max_bound, argv[1])) {
-	int bound = vp->max_bound;
-	vp->max_bound = 0;
-	return enif_make_int(env, bound);
+	size_t val = get_and_reset_max_bound(vp);
+	return enif_make_ulong(env, (unsigned long)val);
     }
     if (EQUAL_KEY(env, literal_size, argv[1])) {
 	return enif_make_uint(env, 8*sizeof(lit_t));
@@ -7528,17 +7464,24 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[1], &level) || (level<0) || (level > vp->level))
+    if (!enif_get_int(env, argv[1], &level) || (level<0) || (level > vp->level)) {
+	// printf("level=%d current-level=%d\r\n", level, vp->level);
 	return enif_make_badarg(env);
-    if (!get_bump(env, vp, argv[2], &bump))
+    }
+    if (!get_bump(env, vp, argv[2], &bump)) {
+	// printf("bump=%d\r\n", bump);
 	return enif_make_badarg(env);
-    if (!enif_get_int(env, argv[3], &i)||(i < 0)||(i >= vp->num_conflicting))
+    }
+    if (!enif_get_int(env, argv[3], &i)||(i < 0)||(i >= vp->num_conflicting)) {
+	// printf("i=%d, num=%d\r\n", i, vp->num_conflicting);
 	return enif_make_badarg(env);
-    
-    if ((pos = vp->undo[level].size) == 0)
+    }
+    if ((pos = vp->undo[level].size) == 0) {
+	// printf("pos=%d\r\n", pos);
 	return enif_make_badarg(env);
+    }
     pos--;
-    trail_vec = undo_bnd(vp, &vp->undo[level]);
+    trail_vec = bindings(vp, &vp->undo[level]);
 
     unmark_all(vp);  // must clear before use!
 
@@ -7551,8 +7494,8 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	// printf("step=%d, cix=%d\r\n", step, cix);
 	if ((cix == CLAUSE_NONE) ||
 	    ((cp = get_clause(vp, cix)) == NULL)) {
-	        unmark_all(vp);
-		return enif_make_badarg(env);
+	    unmark_all(vp);
+	    return enif_make_badarg(env);
 	}
 	// printf("cp->size=%d\r\n", cp->size);
 	cp->stamp = vp->bcp_counter;  // mark clause as used in conflict
@@ -8549,14 +8492,8 @@ static ERL_NIF_TERM varp_get_undo_state(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!enif_get_int(env, argv[1], &level) || (level<0) || (level > vp->level))
 	return enif_make_badarg(env);
-    switch(vp->undo[level].t) {
-    case uSET:   return enif_make_string(env, "set", ERL_NIF_LATIN1);
-    case uTOGGLE: return enif_make_string(env, "toggle", ERL_NIF_LATIN1);
-    case uDONE: return enif_make_string(env, "done", ERL_NIF_LATIN1);
-    case uUNDEF:
-    default:
-	return ATOM(undefined);
-    }
+    return enif_make_string(env, bnd_state_name[vp->undo[level].t],
+			    ERL_NIF_LATIN1);
 }
 
 //
@@ -8596,7 +8533,7 @@ static ERL_NIF_TERM varp_get_bindings(ErlNifEnv* env, int argc,
 
     if (level <= vp->level) {
 	int size    = vp->undo[level].size;
-	variable_t** bpv = undo_bnd_at(vp, level);
+	variable_t** bpv = bindings_at(vp, level);
 	ERL_NIF_TERM r;
 	STK_BEGIN(ERL_NIF_TERM,element,size) {
 	    int i = as_trail ? 0 : size-1;
@@ -8662,7 +8599,7 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
 	    int remain = count;
 	    level = 0;
 	    while((level <= vp->level) && (remain > 0)) {
-		variable_t** bpv = undo_bnd_at(vp,level);
+		variable_t** bpv = bindings_at(vp,level);
 		int n = vp->undo[level].size;
 		int i = 0;
 		while(remain-- && (i < n)) {
@@ -8678,7 +8615,7 @@ static ERL_NIF_TERM varp_get_nbindings(ErlNifEnv* env, int argc,
 	    int remain = count;
 	    level = vp->level;
 	    while((level >= 0) && (remain > 0)) {
-		variable_t** bpv = undo_bnd_at(vp, level);
+		variable_t** bpv = bindings_at(vp, level);
 		int n = vp->undo[level].size;
 		int i = n;
 		while(remain-- && (i >= 0)) {
@@ -8774,7 +8711,7 @@ static ERL_NIF_TERM varp_mark(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	else {
 	    size_t size = vp->undo[level].size;
-	    variable_t** bpv = undo_bnd_at(vp, level);
+	    variable_t** bpv = bindings_at(vp, level);
 	    int i;
 	    for (i = 0; i < (int)size; i++) {
 		literal_t* lp = var_literal(vp, bpv[i]);
@@ -8853,7 +8790,7 @@ static ERL_NIF_TERM varp_intersect_marks(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	else {
 	    size_t size = vp->undo[level].size;
-	    variable_t** bpv = undo_bnd_at(vp, level);
+	    variable_t** bpv = bindings_at(vp, level);
 	    int i;
 	    for (i = 0; i < (int)size; i++) {
 		literal_t* lp = var_literal(vp, bpv[i]);
@@ -8983,7 +8920,7 @@ static ERL_NIF_TERM varp_intersect_var(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	else {
 	    size_t n = vp->undo[level].size;
-	    variable_t** bpv = undo_bnd_at(vp, level);
+	    variable_t** bpv = bindings_at(vp, level);
 	    int size = 0;
 	    ERL_NIF_TERM r;
 

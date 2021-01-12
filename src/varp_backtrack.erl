@@ -18,14 +18,6 @@
 
 -define(CHECK_INTERVAL, 1000).  %% 1000ms 
 
-%% stack element
--record(e, 
-	{
-	 lit = 0 :: literal(),   %% current literal
-	 ls      :: [literal()], %% literal list [] | [Xi] | [Xi,-Xi]
-	 turbo   :: boolean()  %% true if turbo rule may be used
-	}).
-
 options() ->
     [#{ long  => "timeout",
 	short => "t",
@@ -33,12 +25,6 @@ options() ->
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
 	default => infinity,
 	description => "Max time to run backtrack in seconds"
-      },
-     #{ long  => "turbo",
-	key   => turbo,
-	spec  => {enum,[?BOOL]},
-	default => false,
-	description => "Use turbo bcp"
       },
      #{ long => "max",
 	short => "n",
@@ -51,141 +37,121 @@ options() ->
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     N = maps:get(max, Param),
-    Print = varp_formula:getopt(Bs,print),
+    %% Print = varp_formula:getopt(Bs,print),
     Timeout = maps:get(timeout, Param, infinity),
-    UseTurbo = maps:get(turbo, Param, false),
     varp_formula:config(Bs, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
+    0 = varp_nif:push(Bs#bs.vp), %% assert, may be relaxed
     case varp_formula:getopt(Bs1,method) of
-	collect ->
-	    bt(Bs1, fun(Count,Acc,Bs2) ->
-			    Model = varp:output_model(Bs2,false,Count),
-			    Continue = (N =:= 0) orelse (Count < N),
-			    {Continue,[Model|Acc]}
-		    end, [], UseTurbo);
-	count ->
-	    bt(Bs1, fun(Count,_Acc,Bs2) ->
-			    if Print =:= false -> ok;
-			       true -> varp:output_model(Bs2,false,Count)
-			    end,
-			    if Count rem 1000 =:= 0 ->
-				    io:format("~w\n", [Count]); %% option?
-			       true -> 
-				    ok
-			    end,
-			    Continue = (N =:= 0) orelse (Count < N),
-			    {Continue,Count}
-		    end, 0, UseTurbo)
+	collect -> collect(Bs1, 0, N, []);
+	count   -> count(Bs1, 0, N)
     end.
 
-%%
-%% Explicit recursion version, allow timed backtracking
-%% mix algorithms etc.
-%%
-bt(Bs,Func,Acc,UseTurbo) ->
-    case init(Bs,UseTurbo) of
-	{model,_Stack} ->
-	    {_,Acc1} = Func(1,Acc,Bs), 
-	    {?DONE, Acc1, Bs};  %% no more models!
-	{true,Stack} ->
-	    loop(Stack,Func,0,0,Acc,Bs,UseTurbo);
-	false ->
-	    {?INCONSISTENT, Acc, Bs}
-    end.
-
-%% initalise backtrack stack
-init(Bs,UseTurbo) ->
-    case varp_nif:next_unbound(Bs#bs.vp) of
-	false ->
-	    ?dbg("no variables unbound\n", []),
-	    {model,[]};
-	Xi ->
-	    {true,[#e{ls=[Xi,-Xi],turbo=UseTurbo}]}
-    end.
-
-next([#e{ls=[]}|Stack1],Bs,UseTurbo) ->
-    varp_nif:pop(Bs#bs.vp),
-    next(Stack1,Bs,UseTurbo);
-next([E0=#e{ls=[Xi|Xs],turbo=Turbo}|Stack],Bs,UseTurbo) ->
-    TurboList = if Turbo -> [Xi]; true -> [] end,
-    varp_nif:push(Bs#bs.vp),
-    ?dbg("~s: decide ~w\n", [indent(level(Bs)), Xi]),
-    case varp_nif:decide(Bs#bs.vp, Xi) andalso 
-	varp_nif:bcp(Bs#bs.vp,TurboList) of
-	false ->
-	    Stack1 = [E0#e{lit=Xi, ls=Xs}|Stack],
-	    proof_output(Bs, Stack1),
-	    varp:pop(Bs#bs.vp),
-	    next(Stack1,Bs,UseTurbo);
-	turbo -> %% turbo can only be used on one side right now
-	    io:format("TURBO\n"),
-	    Stack1 = [E0#e{lit=Xi,ls=Xs,turbo=false}|Stack],
-	    proof_output(Bs, Stack1),
-	    varp:pop(Bs#bs.vp),
-	    next(Stack1,Bs,UseTurbo);
-	true ->
-	    case varp_nif:next_unbound(Bs#bs.vp) of
-		false ->
-		    {model,[E0#e{lit=Xi,ls=Xs}|Stack]};
-		Xj ->
-		    {true,
-		     [#e{ls=[Xj,-Xj],turbo=UseTurbo},
-		      E0#e{lit=Xi, ls=Xs} | Stack]}
-	    end
-    end;
-next([],_Bs,_UseTurbo) ->
-    false.
-
-loop(Stack,Func,I,Count,Acc,Bs,UseTurbo) ->
+collect(Bs, Count, N, Acc) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
-	    loop_(Stack,Func,I,Count,Acc,Bs,UseTurbo);
+	    if N =:= 0; Count < N ->
+		    collect_(Bs,Count,N,Acc);
+	       true ->
+		    undo_all(Bs),
+		    {?CONTINUE,Acc,Bs}
+	    end;
 	{true, Why} ->
-	    undo_all(Bs, Stack), %% make environment useful
+	    undo_all(Bs),
 	    {Why,Acc,Bs}
     end.
 
-loop_(Stack,Func,I,Count,Acc,Bs,UseTurbo) ->
-    case next(Stack,Bs,UseTurbo) of
-	{model,Stack1} ->
-	    Count1 = Count+1,
-	    case Func(Count1,Acc,Bs) of
-		{true,Acc1} ->
-		    varp_nif:pop(Bs#bs.vp),
-		    loop(Stack1,Func,I+1,Count1,Acc1,Bs,UseTurbo);
-		{false,Acc1} ->
-		    {?CONTINUE,Acc1,Bs}
+collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
+    case varp_nif:nbcp(Bs#bs.vp) of
+	true ->
+	    %% io:format("model: ~p\n", [varp_nif:get_all_bindings(Bs#bs.vp)]),
+	    Model = varp:output_model(Bs,false,Count+1),
+	    case varp_nif:undo(Bs#bs.vp) of
+		true ->
+		    collect(Bs, Count+1, N, [Model|Acc]);
+		false ->
+		    {?DONE, [Model|Acc], Bs}
 	    end;
-	{true,Stack1} ->
-	    loop(Stack1,Func,I+1,Count,Acc,Bs,UseTurbo);
 	false ->
-	    if Count =:= 0 ->
-		    {?INCONSISTENT,Acc,Bs};
-	       true ->
-		    {?DONE,Acc,Bs}
+	    %% io:format("contradiction: ~p\n", [varp_nif:get_all_bindings(Bs#bs.vp)]),
+	    proof_output(Bs),
+	    case varp_nif:undo(Bs#bs.vp) of
+		true ->
+		    collect(Bs, Count, N, Acc);
+		false ->
+		    if Count =:= 0 ->
+			    %% proof_end(Bs),
+			    {?INCONSISTENT,[],Bs};
+		       true ->
+			    {?DONE,Acc,Bs}
+		    end
 	    end
     end.
-	
-undo_all(Bs,[_|Stack]) ->
-    varp_nif:pop(Bs#bs.vp),
-    undo_all(Bs, Stack);
-undo_all(_Bs, []) ->
-    ok.
 
-%% Xi is the current decision, that failed,
+count(Bs, Count, N) ->
+    case varp:check_timeout_or_cancel(Bs,?COUNTER_BT_BCP_COUNTER,
+				      ?CHECK_INTERVAL) of
+	false ->
+	    if N =:= 0; Count < N ->
+		    count_(Bs,Count,N);
+	       true ->
+		    undo_all(Bs),
+		    {?CONTINUE,Count,Bs}
+	    end;
+	{true, Why} ->
+	    undo_all(Bs),
+	    {Why,Count,Bs}
+    end.
+
+count_(Bs, Count, N) when N =:= 0; Count < N ->
+    case varp_nif:nbcp(Bs#bs.vp) of
+	true ->
+	    case varp_formula:getopt(Bs,print) of
+		false -> ok;
+		_ -> varp:output_model(Bs,false,Count+1)
+	    end,
+	    case varp_nif:undo(Bs#bs.vp) of
+		true ->
+		    count(Bs, Count+1, N);
+		false ->
+		    {?DONE, Count+1, Bs}
+	    end;
+	false ->
+	    proof_output(Bs),
+	    case varp_nif:undo(Bs#bs.vp) of
+		true ->
+		    count(Bs, Count, N);
+		false ->
+		    if Count =:= 0 ->
+			    %% proof_end(Bs),
+			    {?INCONSISTENT,0,Bs};
+		       true ->
+			    {?DONE,Count,Bs}
+		    end
+	    end
+    end.
+
+%% undo all levels (except 0) and set level = 0
+undo_all(Bs) ->
+    varp_nif:pop(Bs#bs.vp, 0).
+
+
+%% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
-proof_output(Bs, Stack) ->
+proof_output(Bs) ->
     case ?GETOPT_BS(Bs, proof_output) of
 	none ->
 	    ok;
 	_ ->
-	    Stack1 = lists:dropwhile(fun(#e{ls=Xs}) -> Xs =:= [] end, Stack),
-	    Clause = [-(E#e.lit) || E <- Stack1], %% decision clause
+	    Clause = varp:decision_clause(Bs),
 	    varp_formula:proof_output(Bs,$a,Clause)
     end.
 
--ifdef(DEBUG).
-level(Bs) -> varp_nif:level(Bs#bs.vp).
-indent(D) -> lists:duplicate(D, $>).
--endif.
+%% proof_end(Bs) ->
+%%    case ?GETOPT_BS(Bs, proof_output) of
+%%	none ->
+%%	    ok;
+%%	_ ->
+%%	    varp_formula:proof_output(Bs,$a,[])
+%%    end.    

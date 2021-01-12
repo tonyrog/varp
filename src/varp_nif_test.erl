@@ -786,17 +786,16 @@ order_random() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
     ok = varp_nif:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1001),
-    %% Rand1001 = [X1,X6,-X3,X5,-X4,X2],
-    [X1,X6,X3,X5,X4,X2] = varp:order_all(V),
-    [1,1,-1,1,-1,1] = varp:phase_all(V),
+    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
+    [-1,-1,-1,1,1,1] = varp:phase_all(V),
     
     %% ?verbose("random,1001, Vs = ~p\n", [Sort1]),
 
     ok = varp_nif:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
 			 ?ORDER_UNDEFINED, 1003),
     %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
-    [X1,X4,X6,X2,X3,X5] = varp:order_all(V),
-    [-1,1,-1,-1,1,1] = varp:phase_all(V),
+    [X1,X2,X3,X6,X4,X5] = varp:order_all(V),
+    [1,-1,1,-1,1,1] = varp:phase_all(V),
     %% ?verbose("random,1003, Vs = ~p\n", [Sort2]),
     ok.
 
@@ -1310,7 +1309,9 @@ clone1() ->
     ok.
 
 decide1() ->
-    V = varp_nif:new(#{ xref => true, use_phase => true }),
+    V = varp_nif:new(#{ xref => true,
+			init_phase => undefined,
+			use_phase => true }),
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
@@ -1325,7 +1326,9 @@ decide1() ->
     ?T = varp_nif:value(V, X2),
     ?T = varp_nif:value(V, X3),
     ?F = varp_nif:value(V, X4),
-    
+    varp_nif:pop(V),
+
+    undefined = varp_nif:variable_info(V, X1, phase),
     1 = varp_nif:variable_info(V, X2, phase),
     1 = varp_nif:variable_info(V, X3, phase),
     -1 = varp_nif:variable_info(V, X4, phase),

@@ -1,7 +1,7 @@
 %%% @author Tony Rogvall <tony@rogvall.se>
 %%% @copyright (C) 2018, Tony Rogvall
 %%% @doc
-%%%    Implement the main loop with backjump
+%%%    Implement the main loop with backjump (new multi bcp version)
 %%% @end
 %%% Created : 23 Apr 2018 by Tony Rogvall <tony@rogvall.se>
 
@@ -19,8 +19,9 @@
 %% -compile(export_all).
 
 -define(ORDER_OPT(Ord,Ord2),
-	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
-		{seed,-1}]}).
+	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},{seed,0}]}).
+
+-define(REORDER_NONE, []).
 
 -define(REORDER_0,
 	[
@@ -31,8 +32,8 @@
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
-	 {1,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	 {0,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)}
+%%	 {1,{saturate,[{level,1},{laps,1}]}}
 	]).
 
 options() ->
@@ -49,17 +50,17 @@ options() ->
 	key => max,
 	spec => unsigned,
 	default => 1,
-	description => "Max number of models to count or collect, 0=all"
+	description => "Max number of models to count or collect, 0=all."
       },
      
      #{ long => "minimize",
 	short => "z",
 	key => minimize,
-	spec => {enum,[{"none",none},
-		       {"local",local},
-		       {"recursive",recursive}]},
+	spec => {enum,[{"0", none}, {"none",none},
+		       {"1", local}, {"local",local},
+		       {"2", recursive}, {"recursive",recursive}]},
 	default => none,
-	description => "Use conflict clause minimization"
+	description => "Use conflict clause minimization."
       },
 
      #{ long => "iorder",
@@ -72,19 +73,19 @@ options() ->
 	key => stumble,
 	spec => unsigned,
 	default => 0,
-	description => "Extra backjump level"},
+	description => "extra backjump level"},
 
      #{ long => "olle",
 	key => olle,
 	spec => float,
 	default => 0,
-	description => "Extra backjump factor"},
+	description => "extra backjump factor"},
      
      #{ long => "stumble-olle",
 	key => stumble_olle,
 	spec =>  {enum,[?BOOL]},
 	default => false,
-	description => "Both backjump and factor"},
+	description => "both backjump and factor"},
 
      #{ long => "max-conflicts",
 	key => max_conflicts,
@@ -126,7 +127,7 @@ options() ->
 	key => restart_counter,
 	spec =>  unsigned,
 	default => 0,
-	description => "Number of counts/eval until restart"},
+	description => "Number of counts/bcp until restart"},
 
      #{ long => "restart-interval",
 	key => restart_interval,
@@ -152,7 +153,7 @@ options() ->
      #{ key => reorder,
 	spec => {list,
 		 {integer,{atom,{list,term}}}},
-	default => ?REORDER_1,
+	default => ?REORDER_NONE,
 	description => "Internal reorder list"}
     ].
      
@@ -166,7 +167,8 @@ options() ->
 	 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     MaxConflicting = maps:get(max_conflicts,Param),
-    varp_formula:config(Bs, max_conflicting, MaxConflicting),
+    varp:config(Bs#bs.vp, max_conflicting, MaxConflicting),
+    varp:config(Bs#bs.vp, xref, false), %% not while building clauses
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     _KeepSize  = keep_size(Bs, Param, MaxLearned),
@@ -178,148 +180,167 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     init(Bs1, Param, MaxLearned, M0).
 
 init(Bs, Param, MaxLearned, MR) ->
-    ?TOP_LEVEL = varp_nif:level(Bs#bs.vp),
-    timeout_or_cancel(Bs,Param,MaxLearned,MR,[]).
+    0 = varp_nif:level(Bs#bs.vp),
+    timeout_or_cancel(Bs, Param, MaxLearned, MR).
 
-timeout_or_cancel(Bs,Param,MaxLearned,MR,Stack) ->
+timeout_or_cancel(Bs, Param, MaxLearned, MR) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	false ->
-	    main(Bs,Param,MaxLearned,MR,Stack);
+	    main(Bs,Param,MaxLearned,MR);
 	{true, What} ->
-	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL), %% all the way
+	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    return(What, MR, Bs)
     end.
 
-main(Bs,Param,MaxLearned,MR,Stack) ->
-    case varp_nif:bcp(Bs#bs.vp) of
-	false ->
-	    case varp_nif:level(Bs#bs.vp) of
+main(Bs,Param,MaxLearned,MR) ->
+    case varp_nif:nbcp(Bs#bs.vp) of
+	false ->  %% contradiction
+	    Level = varp_nif:level(Bs#bs.vp),
+	    case Level of
 		0 when MR#m.n =:= 0 ->
 		    varp_formula:proof_output(Bs,$a,[]),
 		    display_stat(Bs,Param),
 		    return(?INCONSISTENT,MR,Bs);
 		0 ->
-		    return(?CONTINUE,MR,Bs);
-		Level ->
-		    conflict(Bs,Param,Level,MaxLearned,MR,Stack)
+		    return(?DONE,MR,Bs);
+		_ ->
+		    conflict(Bs,Param,Level,MaxLearned,MR)
 	    end;
-	true ->
-	    restart(Bs,Param,MaxLearned,MR,Stack)
+	true ->  %% model
+	    Level = varp_nif:level(Bs#bs.vp),
+	    N = MR#m.n + 1,
+	    Model = varp:output_model(Bs,false,N),
+	    if N >= MR#m.max, MR#m.max > 0; Level =:= 0 -> %%?
+		    display_stat(Bs,Param),
+		    R = if Level =:= 0 -> ?DONE; true -> ?CONTINUE end,
+		    case MR#m.method of
+			collect ->
+			    {R,[Model|MR#m.ms],Bs};
+			count ->
+			    {R,N,Bs}
+		    end;
+	       true ->
+		    Block = varp:block_clause(Bs),
+		    %% FIXME: minimize Block clause and find
+		    %% a working jump level (maybe just one up?)
+		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
+		    %% FIXME: DELTA is maybe not the correct place!?
+		    varp_formula:add_clause(Bs, Block, ?DELTA),
+		    %% we start with simple restart
+		    case MR#m.method of
+			collect ->
+			    MR1 = MR#m { n=N, ms = [Model|MR#m.ms] },
+			    init(Bs,Param,MaxLearned,MR1);
+			count ->
+			    MR1 = MR#m { n=N },
+			    init(Bs,Param,MaxLearned,MR1)
+		    end
+	    end
     end.
 
-conflict(Bs,Param,Level,MaxLearned,MR,Stack) ->
-    LClauses1 = varp_conflict:analyze(Bs,Level,
-				      maps:get(bump,Param),
-				      maps:get(minimize,Param)),
+conflict(Bs,Param,Level,MaxLearned,MR) ->
+    %% LClauseList = [{ClauseLength, ClauseIndex}] 
+    %% ClauseLength may be 1 !
+    LClauses1 = varp_conflict:analyze_alpha(Bs,Level,
+					    maps:get(bump,Param),
+					    maps:get(minimize,Param)),
     case lists:keysort(1, LClauses1) of
 	LClauses2 = [{1,_}|_] -> %% has unit! jump to top-level and install
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-	    Stack1 = unwind(Bs,Stack,?TOP_LEVEL),
 	    move_to_gamma(Bs, LClauses2),
-	    main(Bs,Param,MaxLearned,MR,Stack1);
+	    main_bcp(Bs,Param,?TOP_LEVEL,MaxLearned,MR);
 
-	[LClause={Len,Clause}] -> %% one clause only
-	    {_Len,D1,D2,J2,J3,Lj,_Clause} = jump_info(Bs,LClause),
+	[{_Len,Aix}] -> %% one clause only
+	    {ALen,D1,D2,J2,J3,_Clause} = jump_info(Bs#bs.vp, Aix),
 	    do_stat(Bs,D1,D2),
 	    L = maps:get(stumble,Param),
 	    K = maps:get(olle,Param),
 	    M = maps:get(stumble_olle,Param),
-	    {JType,JLevel} = do_jump(Bs,L,K,M,D1,D2,J2,J3),
+	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    varp_nif:pop(Bs#bs.vp, JLevel),
-	    Stack1 = unwind(Bs,Stack, JLevel),
-	    move_to_gamma(Bs,Len,Clause),
-	    if JType =:= olle ->
-		    io:format("olle=~w\n", [Lj]),
-		    undefined = varp_nif:value(Bs#bs.vp, Lj),
-		    varp_nif:order_first(Bs#bs.vp, [Lj]);
-	       true ->
-		    ok
-	    end,
-	    main(Bs,Param,MaxLearned,MR,Stack1);
-	
-	LClauses2 ->
-	    JClauses1 = [jump_info(Bs,LClause) || LClause <- LClauses2],
+	    move_to_gamma(Bs,ALen,Aix),
+	    main_bcp(Bs,Param,JLevel,MaxLearned,MR);
+
+	LClauses2 -> %% no units determine level
+	    %% io:format("conflict clauses = ~p\n", [LClauses2]),
+	    JClauses1 = [jump_info(Bs#bs.vp, Aix) || {_Len,Aix} <- LClauses2],
+	    %% io:format("JClauses1 = ~w\n", [JClauses1]),
+	    %% jump_info = {L,D1,D2,J2,J3,Aix}
 	    JClauses2 =
-		lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Lja,_Clausea},
-			       {Lb,D1b,_D2b,_J2b,_J3b,_Ljb,_Clauseb}) ->
+		lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Clausea},
+			       {Lb,D1b,_D2b,_J2b,_J3b,_Clauseb}) ->
 				   if D1a =:= D1b -> La < Lb;
 				      true -> D1a > D1b
 				   end
 			   end, JClauses1),
 	    [JClause|JClauses3] = JClauses2,
 	    LClauses4 = [{L,Clause} ||
-			    {L,_D1,_D2,_J2,_J3,_Lj,Clause} <- JClauses3],
+			    {L,_D1,_D2,_J2,_J3,Clause} <- JClauses3],
 	    LClauses5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
 				   LClauses4),
 	    L = maps:get(stumble,Param),
 	    K = maps:get(olle,Param),
 	    M = maps:get(stumble_olle,Param),
 
-	    {ALen,D1,D2,J2,J3,Lj,Aix} = JClause,
+	    {ALen,D1,D2,J2,J3,Aix} = JClause,
 	    do_stat(Bs,D1,D2),
-	    {JType,JLevel} = do_jump(Bs,L,K,M,D1,D2,J2,J3),
+	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    %% FIXME if JLevel = J3 then we SHOULD select
 	    %% corresponding literal for -L2/-L3 as next unbound
 	    varp_nif:pop(Bs#bs.vp, JLevel),
-	    Stack1 = unwind(Bs,Stack, JLevel),
 	    move_to_gamma(Bs, LClauses5),
 	    %% install the conflict clause
 	    move_to_gamma(Bs,ALen,Aix),
-	    if JType =:= olle ->
-		    undefined = varp_nif:value(Bs#bs.vp, Lj),
-		    varp_nif:order_first(Bs#bs.vp, [Lj]);
-	       true ->
-		    ok
-	    end,
-	    main(Bs,Param,MaxLearned,MR,Stack1)
-    end.
-
-%% jump_info(V, Cix) ->
-%%    varp_nif:clause_info(V, Cix, jump).
-jump_info(Bs, {Len,Clause}) ->
-    Qj = lists:sort(fun({_Qa,Aj},{_Qb,Bj}) -> Aj > Bj end,
-		    [{Q,varp_nif:implication_level(Bs#bs.vp,Q)} ||
-			Q <- Clause]),
-    %% io:format("Qj = ~w\n", [Qj]),
-    case Qj of
-	[{_Q1,J1},{Q2,J2},{_Q3,J3}|_] ->
-	    D1 = J1 - J2,
-	    D2 = J2 - J3,
-	    {Len,D1,D2,J2,J3,-Q2,Clause};
-	[{_Q1,J1},{Q2,J2}] ->
-	    J3 = ?TOP_LEVEL,
-	    D1 = J1 - J2,
-	    D2 = J2 - J3,
-	    {Len,D1,D2,J2,J3,-Q2,Clause}
+	    main_bcp(Bs,Param,JLevel,MaxLearned,MR)
     end.
 
 
-%% move_to_gamma wrapper install clauses
-move_to_gamma(Bs, [{Len,Clause}|LCs]) ->
-    move_to_gamma(Bs, Len, Clause),
+jump_info(V, Cix) ->
+    varp_nif:clause_info(V, Cix, jump).
+
+%% Move a list of clauses from alpha to gamma (install them)
+move_to_gamma(Bs, [{Len,Aix}|LCs]) ->
+    move_to_gamma(Bs, Len, Aix),
     move_to_gamma(Bs, LCs);
 move_to_gamma(_Bs, []) ->
     ok.
 
-move_to_gamma(Bs, 1, Clause=[L])  ->
-    true = varp_nif:bind(Bs#bs.vp,L,?TOP_LEVEL),
-    varp_formula:proof_output(Bs,$a,Clause),
+move_to_gamma(Bs, 1, Aix) ->
+    %% io:format("Move UNIT ~w to gamma\n", [varp_nif:get_clause(Bs#bs.vp, Aix)]),
+    varp_formula:proof_output(Bs,$a,Aix),
+    true = varp_nif:move_clause(Bs#bs.vp, Aix, gamma),
     counters:add(Bs#bs.clen, 1, 1);
-move_to_gamma(Bs, Len, Clause=[_,_|_]) ->
-    %%io:format("Move CLAUSE ~w to gamma\n", [varp_nif:get_clause(Bs#bs.vp, Aix)]),
-    Gix = varp_formula:add_clause(Bs, Clause, ?GAMMA),
+move_to_gamma(Bs, Len, Aix) ->
+    %% io:format("Move CLAUSE ~w to gamma\n", [varp_nif:get_clause(Bs#bs.vp, Aix)]),
+    {true,Gix} = varp_nif:move_clause(Bs#bs.vp, Aix, gamma),
     varp_formula:proof_output(Bs,$a,Gix),
-    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES,1),
-    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS,Len),
     if Len >= 1023 ->
 	    counters:add(Bs#bs.clen, 1024, 1);
        true ->
 	    counters:add(Bs#bs.clen, Len, 1)
     end.
 
+%% after conflict clause generation we need to run bcp and
+%% check result.
+main_bcp(Bs,Param,Level,MaxLearned,MR) ->
+    case varp_nif:bcp(Bs#bs.vp) of
+	false ->
+	    case Level of
+		0 when MR#m.n =:= 0 ->
+		    varp_formula:proof_output(Bs,$a,[]),
+		    display_stat(Bs,Param),
+		    return(?INCONSISTENT,MR,Bs);
+		0 ->
+		    return(?DONE,MR,Bs);
+		_ ->
+		    conflict(Bs,Param,Level,MaxLearned,MR)
+	    end;
+	true ->
+	    restart(Bs,Param,MaxLearned,MR)
+    end.
 
-restart(Bs,Param,MaxLearned,MR,Stack) ->
+restart(Bs,Param,MaxLearned,MR) ->
     RestartByTimeout = restart_by_timeout(Bs, Param), %% also restart!!
     RestartByCount = restart_by_counter(Bs, Param),
     case need_purge(Bs, Param, MaxLearned) of
@@ -329,7 +350,6 @@ restart(Bs,Param,MaxLearned,MR,Stack) ->
 	    ?dbg0("purge\n",[]),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
-	    ?dbg("MaxLearned = ~w => ~w\n", [MaxLearned,MaxLearned1]),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
 	    init(Bs, Param, MaxLearned1, MR);
 	false ->
@@ -341,21 +361,26 @@ restart(Bs,Param,MaxLearned,MR,Stack) ->
 	       RestartByTimeout ->
 		    varp_formula:proof_output(Bs,$c,"timeout"),
 		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-		    %% reorder(Bs, Param),
+		    reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       true ->
-		    next(Bs,Param,MaxLearned,MR,Stack)
+		    timeout_or_cancel(Bs,Param,MaxLearned,MR)
 	    end
     end.
 
-reorder(Bs,Param) ->
+reorder(Bs, Param) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    ReorderMap = maps:from_list(maps:get(reorder,Param)),
+    reorder_(Bs, N, maps:get(reorder,Param)).
+
+reorder_(_Bs, _N, []) ->
+    ok;
+reorder_(Bs,  N, Reorder) ->
+    ReorderMap = maps:from_list(Reorder),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
 	{ok,{order,Opts}} ->
-	    ?dbg0("Reorder: ~p\n", [Opts]),
-	    Seed = proplists:get_value(seed, Opts, -1),
+	    ?dbg1("Reorder: ~p\n", [Opts]),
+	    Seed = proplists:get_value(seed, Opts, 0),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
 		[Key1] ->
@@ -364,50 +389,15 @@ reorder(Bs,Param) ->
 		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
 	    end;
 	{ok,{saturate,Opts}} ->
+	    ?dbg1("Saturate: ~p\n", [Opts]),
 	    Laps = proplists:get_value(laps,Opts,0),
 	    Timeout = proplists:get_value(timeout,Opts,infinity),
-	    varp_saturate:saturate(Bs,1,Timeout,{{Laps},{Laps}}, 0);
+	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
 	_ ->
 	    Seed = varp_formula:getopt(Bs,seed),
 	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
     end.
 
-next(Bs,Param,MaxLearned,MR,Stack) ->
-    case varp_nif:next_unbound(Bs#bs.vp) of
-	false ->
-	    N = MR#m.n + 1,
-	    Model = varp:output_model(Bs,false,N),
-	    if N >= MR#m.max, MR#m.max > 0; Stack =:= [] ->
-		    display_stat(Bs,Param),
-		    case MR#m.method of
-			collect ->
-			    {?CONTINUE,[Model|MR#m.ms],Bs};
-			count ->
-			    {?CONTINUE,N,Bs}
-		    end;
-	       true ->
-		    Block = varp:block_clause(Bs),
-		    %% Block = block_model(Stack),
-		    %% FIXME: minimize Block clause and find
-		    %% a working jump level (maybe just one up?)
-		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-		    varp_formula:add_clause(Bs, Block, ?DELTA),
-		    %% we start with simple restart
-		    case MR#m.method of
-			collect ->
-			    MR1 = MR#m { n=N, ms = [Model|MR#m.ms] },
-			    init(Bs,Param,MaxLearned,MR1);
-			count ->
-			    MR1 = MR#m { n=N },
-			    init(Bs,Param,MaxLearned,MR1)
-		    end
-	    end;
-	Xj ->
-	    NextLevel = varp_nif:push(Bs#bs.vp),
-	    true = varp_nif:decide(Bs#bs.vp,Xj),
-	    timeout_or_cancel(Bs,Param,MaxLearned,MR,
-			      [{Xj,NextLevel}|Stack])
-    end.
 
 return(What, MR, Bs) ->
     case MR#m.method of
@@ -443,12 +433,6 @@ restart_by_timeout(Bs, Param) ->
 	    false
     end.
 
-get_bound0(Bs) ->
-    counters:get(Bs#bs.counters, ?COUNTER_BJR_BOUND0).
-
-set_bound0(Bs, Value) ->
-    counters:put(Bs#bs.counters,?COUNTER_BJR_BOUND0, Value).
-
 start_restart_timer(Param) ->
     case maps:get(restart_interval,Param) of
 	infinity -> undefined;
@@ -457,6 +441,12 @@ start_restart_timer(Param) ->
 	    IVal1 = max(0.1, IVal),
 	    erlang:start_timer(trunc(1000*IVal1), self(), restart)
     end.
+
+get_bound0(Bs) ->
+    counters:get(Bs#bs.counters, ?COUNTER_BJR_BOUND0).
+
+set_bound0(Bs, Value) ->
+    counters:put(Bs#bs.counters,?COUNTER_BJR_BOUND0, Value).
 
 %% Restart using bcp counter
 restart_by_counter(Bs, Param) ->	
@@ -478,14 +468,6 @@ get_bcp_counter(Bs) ->
 
 set_bcp_counter(Bs, Value) ->
     counters:put(Bs#bs.counters,?COUNTER_BJR_BCP_COUNTER, Value).
-    
-unwind(Bs,[{_Xk,Level}|Stack],JLevel) when Level > JLevel ->
-    unwind(Bs,Stack,JLevel);
-unwind(_Bs,Stack=[{_Xk,Level}|_],JLevel) when Level =:= JLevel ->
-    ?dbg("backjump[~w]: ~s\n", [JLevel, varp_formula:format_lit(_Bs,_Xk)]),
-    Stack;
-unwind(_Bs,[],_JLevel) ->
-    [].
 
 %% J2 is backjump level, J3 is backstumble level
 %% D2 is level to backjump delta, D3 is backjump to two free literal level
@@ -493,15 +475,15 @@ unwind(_Bs,[],_JLevel) ->
 do_jump(Bs,L,K,M,D1,D2,J2,J3) ->
     if  M, L > 0, D2 >= L, K > 0, D2 > 0, D1 >= K*D2 ->
 	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_OLLE_COUNT, 1),
-	    {olle,J3};
-	L > 0, D2 >= L ->
+	    J3;
+	L > 0, D2 >= L -> 
 	    counters:add(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT, 1),
-	    {olle,J3};
+	    J3;
 	K > 0, D2 > 0, D1 >= K*D2 ->
 	    counters:add(Bs#bs.counters, ?COUNTER_OLLE_COUNT, 1),
-	    {olle,J3};
+	    J3;
 	true -> 
-	    {pelle,J2}
+	    J2
     end.
 
 do_stat(Bs, D1, D2) ->
@@ -545,7 +527,7 @@ max_learned(Bs,Param) ->
     MaxLearnedFactor = maps:get(max_learned_factor,Param),
     case maps:get(display, Param) of
 	true ->    
-	    io:format("Permanent=~w,MaxLearnedClause=~w,MaxLearnedFactor=~w\n",
+	    io:format("learned: Permanent=~w,MaxLearnedClause=~w,MaxLearnedFactor=~w\n",
 		      [Permanent, MaxLearnedClauses, MaxLearnedFactor]);
 	false ->
 	    ok
@@ -567,7 +549,7 @@ display_stat(Bs,Param) ->
 		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
 	    io:format("num conflict ilterals: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS)]),
-	    io:format("num ilterals removed: ~w\n",
+	    io:format("num literals removed: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
 	    io:format("compression saved bits: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
@@ -605,9 +587,3 @@ display_stat(Bs,Param) ->
 	false ->
 	    ok
     end.
-
--ifdef(DEBUG).
-indent(L) -> indent(L,$>).
-indentd(L) -> indent(L,$<).
-indent(L,C) -> lists:duplicate(L, C).
--endif.
