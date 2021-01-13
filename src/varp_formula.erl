@@ -860,7 +860,7 @@ build1(F, Bs) ->
 build__(F, Bs) ->
     %% io:format("build__ ~p\n", [F]),
     R={_F1,_Bs1} = build_(F, Bs),
-    %% io:format("build__ => ~p", [_F1]),
+    %% io:format("build__ => ~p\n", [_F1]),
     %% io:format("Bs1 = ~p\n", [_Bs1]),
     R.
 
@@ -2193,12 +2193,12 @@ operation('lte',Y,Z,Bs) ->
     {C,Bs1} = operation_('lt', Z, Y, Bs),
     {negate(C),Bs1};
 operation('gte',Y,Z,Bs) ->
-    operation_('<=',Z,Y,Bs);
+    operation_('lte',Z,Y,Bs);
 
 operation('neq',A={bool,_},B={bool,_},Bs) ->
     operation_('xor',A,B,Bs);
 operation('neq',Y,Z,Bs) ->
-    {C,Bs1} = operation_('==', Y, Z, Bs),
+    {C,Bs1} = operation_('eq', Y, Z, Bs),
     {negate(C),Bs1};
 
 operation('eq',A={bool,_},B={bool,_},Bs) ->

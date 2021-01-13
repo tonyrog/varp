@@ -58,6 +58,7 @@
 -export([get_clause/2]).
 -export([get_clause/3]).
 -export([get_clause/4]).
+-export([get_clause/5]).
 -export([del_clause/2]).
 -export([move_clause/3]).
 -export([compress_clause/2]).
@@ -441,13 +442,14 @@ add_clause(_Vp,Ls,Si) when is_list(Ls), is_integer(Si), Si>=0, Si=<3 ->
 find_clause(_Vp,Ls) when is_list(Ls) ->
     ?nif_stub().
 
--spec get_clause(Vp::varp(), ClauseIndex::integer()) -> [literal()] | true.
+-spec get_clause(Vp::varp(), ClauseIndex::integer()) -> 
+	  [literal()] | true | false.
 
 get_clause(_Vp,_Index) when is_integer(_Index), _Index >= 0 ->
     ?nif_stub().
 
--spec get_clause(Vp::varp(), ClauseIndex::integer(),
-		 SkipLiteral::literal()) -> [literal()] | true.
+-spec get_clause(Vp::varp(),ClauseIndex::integer(),SkipLiteral::literal()) -> 
+	  [literal()] | true | false.
 
 get_clause(_Vp,_Index,_Skip) when
       is_integer(_Index), _Index >= 0 ->
@@ -455,10 +457,22 @@ get_clause(_Vp,_Index,_Skip) when
 
 -spec get_clause(Vp::varp(), ClauseIndex::integer(),
 		 SkipLiteral::literal(),Raw::boolean()) ->
-			[literal()] | true.
+	  [literal()] | true | false.
 
 get_clause(_Vp,Index,_SkipLiteral,_Raw)
   when is_integer(Index), Index >= 0, is_boolean(_Raw) ->
+    ?nif_stub().
+
+-spec get_clause(Vp::varp(), 
+		 ClauseIndex::integer(),
+		 SkipLiteral::literal(),
+		 Raw::boolean(),
+		 AsTuple::boolean() ) ->
+	  {literal()} | [literal()] | true | false.
+
+get_clause(_Vp,Index,_SkipLiteral,_Raw,_AsTuple)
+  when is_integer(Index), Index >= 0, is_boolean(_Raw),
+       is_boolean(_AsTuple) ->
     ?nif_stub().
 
 -spec compress_clause(Vp::varp(), ClauseIndex::integer()) -> binary().

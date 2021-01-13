@@ -1460,7 +1460,8 @@ clause_learn_d1() ->
 
     _Dix = varp_nif:conflicting_clause(V, 0),
     %% ?verbose("conflicting_clause1: ~w: ~w\n",[Dix,varp_nif:get_clause(V,_Dix)]),
-    Learnt1 = varp_conflict:analyze_clause(V, 4, 1.0, 0),
+    Cix1 = varp_nif:conflict(V, 4, 1.0, 0),
+    Learnt1 = varp_nif:get_clause(V, Cix1),
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
 
@@ -1480,7 +1481,8 @@ clause_learn_d1() ->
 	     [_Cix2,varp_nif:get_clause(V,_Cix2)]),
     %% ?verbose("DUMP4\n"),
     %% dump(V, false),
-    Learnt2 = varp_conflict:analyze_clause(V, 1, 1.0, 0),
+    Cix2 = varp_nif:conflict(V, 1, 1.0, 0),
+    Learnt2 = varp_nif:get_clause(V, Cix2),
     ?verbose("learnt_clause: ~w\n", [Learnt2]),
     true = ([-1] == abs_sort(Learnt2)),
     varp_nif:pop(V,0),
@@ -1622,6 +1624,12 @@ clause_learn_g1() ->
     Cix = varp_nif:conflict(Vp, Level, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
+    Len1 = varp_nif:minimize(Vp, Cix, local),
+    io:format("locally minimize clause ~w[len=~w] = ~p\n", 
+	      [Cix, Len1, get_sym_clause(Vp, Cix)]),
+    Len2 = varp_nif:minimize(Vp, Cix, recursive),
+    io:format("recursive minimize clause ~w[len=~w] = ~p\n", 
+	      [Cix, Len2, get_sym_clause(Vp, Cix)]),
     ok.
 
 %% example from conflict driven learning
@@ -1674,7 +1682,14 @@ clause_learn_g2() ->
     Cix = varp_nif:conflict(Vp, Level, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
+    Len1 = varp_nif:minimize(Vp, Cix, local),
+    io:format("locally minimize clause ~w[len=~w] = ~p\n", 
+	      [Cix, Len1, get_sym_clause(Vp, Cix)]),
+    Len2 = varp_nif:minimize(Vp, Cix, recursive),
+    io:format("recursive minimize clause ~w[len=~w] = ~p\n", 
+	      [Cix, Len2, get_sym_clause(Vp, Cix)]),
     ok.
+
 
 %% Example from Sorensson & Bier paper
 %% Graph:
@@ -1808,7 +1823,7 @@ get_sym_literal(Vp, Li) ->
 	[] -> "?";
 	[{S,_}|_] ->
 	    Sym = binary_to_list(S),
-	    if Li < 0 -> [$-|Sym];
+	    if Li < 0 -> [$!|Sym];
 	       true -> Sym
 	    end
     end.

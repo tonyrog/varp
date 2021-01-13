@@ -241,6 +241,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "get_clause",          2,  varp_get_clause ) \
     NIF( "get_clause",          3,  varp_get_clause ) \
     NIF( "get_clause",          4,  varp_get_clause ) \
+    NIF( "get_clause",          5,  varp_get_clause )  \
     NIF( "find_clause",         2,  varp_find_clause ) \
     NIF( "compress_clause",     2,  varp_compress_clause )  \
     NIF( "clause_info",         3,  varp_clause_info )  \
@@ -5366,8 +5367,9 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	}
     }
     
-    // now check if we can remove any literals
-    for (i = 0; i < n; i++) {
+    // now check if we can remove any literals (but NOT UIP in lit[0])
+    dynvar_append(vp->tlit, &cp->lit[0]); // copy UIP
+    for (i = 1; i < n; i++) {
 	lit_t li = cp->lit[i];
 	variable_t* var = var_l(vp, li);
 	if ((cix = var->implication_clause) == CLAUSE_NONE) {
@@ -7447,7 +7449,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int i;
+    int i,j;
     int level;
     int bump;
     literal_t* lp;
@@ -7460,7 +7462,6 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     variable_t** trail_vec;
     variable_t*  var;
     int pos;  // current pos in trail
-    
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -7536,6 +7537,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	if (step <= 1) {
 	    u = neg_l(u);
 	    dynvar_append(vp->tlit, &u);
+	    // printf("UIP = %d (%s)\r\n", export_l(u), format_lit(vp, u));
 	    goto make_clause;
 	}
 	else {
@@ -7560,12 +7562,20 @@ make_clause:
 	    return enif_make_boolean(env, false);
     }
     hvalue = literal_array_hash(vp, vp->tlit, size);
-    // check if this clause alread exist in alpha
+    // check if this clause already exist in alpha
     if ((cix=clauseset_find(vp,vp->tlit,size,ALPHA,hvalue)) != CLAUSE_NONE)
 	return enif_make_undefined(env);  // It is a copy
     if ((cp = clause_alloc(vp, ALPHA, size)) == NULL)
 	return enif_make_badarg(env);
-    memcpy(cp->lit, vp->tlit, sizeof(lit_t)*size);
+
+    // copy clause but swap in lit[0]=UIP
+    j = 0;
+    cp->lit[j++] = u;
+    for (i = 0; i < size; i++) {
+	lit_t v;
+	if ((v = vp->tlit[i]) != u)
+	    cp->lit[j++] = v;
+    }
     if ((cix = clause_insert(vp, ALPHA, cp, hvalue)) == CLAUSE_NONE)
 	return enif_make_badarg(env);
     return make_cix(env, cix);
@@ -8048,7 +8058,11 @@ static ERL_NIF_TERM varp_clauseset_next(ErlNifEnv* env, int argc,
 }
 
 //
-// get_clause(vp,ClauseIndex::integer(),SkipLiteral::literl(),Raw::boolean())->
+// get_clause(Vp::varp()
+//            ClauseIndex::integer(),
+//            SkipLiteral::literl(),
+//            Raw::boolean(),
+//            AsTuple:boolean())->
 //  [literal()] | true | false.
 //
 // returns
@@ -8065,6 +8079,7 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
     int raw = false;
     int skip = false;
     int skipped = false;
+    int as_tuple = false;
     ERL_NIF_TERM skip_lit = ATOM(undefined);
     literal_t* lp;
     cix_t  cix;
@@ -8089,6 +8104,10 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 	if (argc >= 4) {
 	    if (!enif_get_boolean(env, argv[3], &raw))
 		return enif_make_badarg(env);
+	    if (argc >= 5) {
+		if (!enif_get_boolean(env, argv[4], &as_tuple))
+		    return enif_make_badarg(env);
+	    }
 	}
     }
 
@@ -8135,11 +8154,19 @@ static ERL_NIF_TERM varp_get_clause(ErlNifEnv* env, int argc,
 		}
 	    }
 	}
-	if (raw || (size > 0))
-	    r = enif_make_list_from_array(env, element, size);
+	if (raw || (size > 0)) {
+	    if (as_tuple)
+		r = enif_make_tuple_from_array(env, element, size);
+	    else
+		r = enif_make_list_from_array(env, element, size);
+	}
 	else { // size=0 && raw == false
-	    if (skipped)
-		r = enif_make_list(env, 0);
+	    if (skipped) {
+		if (as_tuple)
+		    r = enif_make_tuple(env, 0);
+		else
+		    r = enif_make_list(env, 0);
+	    }
 	    else
 		r = enif_make_boolean(env, false);  // contradictory
 	}

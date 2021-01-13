@@ -14,6 +14,7 @@
 -export([tokens/1]).
 -export([parse/1, parse/2]).
 -export([scan_file/1]).
+-export([read_file/1]).
 -export([file/1, string/1]).
 -export([archive_path/1]).
 -export([output_model/3]).
@@ -199,7 +200,7 @@ global_options() ->
     [
      #{ long => "phase",
 	key => phase,
-	spec => {enum,[{"undefined",undefined},
+	spec => {enum,[{"undefined",undefined},{"u",undefined},
 		       {"true", true},{"1",true},
 		       {"false",false},{"0",false}]},
 	default => true,
@@ -488,8 +489,9 @@ main(Args) ->
 	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
 	    {ok,R0} -> {false,R0}
 	catch
-	    ?EXCEPTION(error,Error0,_Trace0) ->
+	    ?EXCEPTION(error,Error0,Trace0) ->
 		io:format("~s\n", [format_error(Error0)]),
+		io:format("~p\n", [?GET_STACK(Trace0)]),
 		halt(1)
 	end,
 
@@ -510,8 +512,9 @@ main(Args) ->
 			    GOpts4 = section_opts(Sections,GOpts3),
 			    varp_run(Do,Formula1,GOpts4)
 		    catch
-			?EXCEPTION(error,Error1,_Trace1) ->
+			?EXCEPTION(error,Error1,Trace1) ->
 			    io:format("~s\n", [format_error(Error1)]),
+			    io:format("~p\n", [?GET_STACK(Trace1)]),
 			    halt(1)
 		    end;
 		_Error ->
@@ -527,8 +530,9 @@ main(Args) ->
 			_Error ->
 			    halt(1)
 		    catch
-			?EXCEPTION(error,Error2,_Trace2) ->
+			?EXCEPTION(error,Error2,Trace2) ->
 			    io:format("~s\n", [format_error(Error2)]),
+			    io:format("~p\n", [?GET_STACK(Trace2)]),
 			    halt(1)
 		    end;
 		Type -> %% with formula?
@@ -542,8 +546,9 @@ main(Args) ->
 		_Error ->
 		    halt(1)
 	    catch
-		?EXCEPTION(error,Error3,_Trace3) ->
+		?EXCEPTION(error,Error3,Trace3) ->
 		    io:format("~s\n", [format_error(Error3)]),
+		    io:format("~p\n", [?GET_STACK(Trace3)]),
 		    halt(1)
 	    end
     end,
@@ -875,9 +880,9 @@ do([{Plugin,Param}|Do],Acc0,Bs) ->
 		    do(Do, Acc, Bs1)
 	    end
     catch
-	?EXCEPTION(error, Reason, Stacktrace) ->
-	    io:format("~s crashed ~p: ~p\n",
-		      [Plugin, Reason, ?GET_STACK(Stacktrace)]),
+	?EXCEPTION(error, Reason, Trace) ->
+	    io:format("~s crashed ~p\n", [Plugin, Reason]),
+	    io:format("~p\n", [?GET_STACK(Trace)]),
 	    error
     end;
 do([], Acc, Bs) ->

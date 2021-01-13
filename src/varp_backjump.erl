@@ -21,7 +21,14 @@
 -define(ORDER_OPT(Ord,Ord2),
 	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},{seed,0}]}).
 
--define(REORDER_NONE, []).
+-define(REORDER_NONE,
+	[
+	]).
+
+-define(REORDER_SATURATE, 
+	[
+	 {0,{saturate,[{level,1},{laps,1}]}}
+	]).
 
 -define(REORDER_0,
 	[
@@ -33,8 +40,10 @@
 -define(REORDER_1,
 	[
 	 {0,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)}
-%%	 {1,{saturate,[{level,1},{laps,1}]}}
+	 {1,{saturate,[{level,1},{laps,1}]}}
 	]).
+
+-define(REORDER, ?REORDER_NONE).
 
 options() ->
     [#{ long  => "timeout",
@@ -144,7 +153,11 @@ options() ->
      #{ long => "display",
 	short => "d",
 	key => display,
-	spec => {enum,[?BOOL]},
+	spec => {enum,[{"delta",delta},
+		       {"d",delta},
+		       {"histogram",histogram},
+		       {"h",histogram},
+		       ?BOOL]},
 	default => false,
 	description => "Display statistics."
       },
@@ -153,7 +166,7 @@ options() ->
      #{ key => reorder,
 	spec => {list,
 		 {integer,{atom,{list,term}}}},
-	default => ?REORDER_NONE,
+	default => ?REORDER,
 	description => "Internal reorder list"}
     ].
      
@@ -242,16 +255,18 @@ main(Bs,Param,MaxLearned,MR) ->
 conflict(Bs,Param,Level,MaxLearned,MR) ->
     %% LClauseList = [{ClauseLength, ClauseIndex}] 
     %% ClauseLength may be 1 !
-    LClauses1 = varp_conflict:analyze_alpha(Bs,Level,
-					    maps:get(bump,Param),
-					    maps:get(minimize,Param)),
+    LClauses1 = varp_conflict:analyze(Bs#bs.vp,Level,
+				      maps:get(bump,Param),
+				      maps:get(minimize,Param)),
     case lists:keysort(1, LClauses1) of
-	LClauses2 = [{1,_}|_] -> %% has unit! jump to top-level and install
+	LClauses2 = [{1,_Count,_}|_] ->
+	    %% has unit! jump to top-level and install
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    move_to_gamma(Bs, LClauses2),
 	    main_bcp(Bs,Param,?TOP_LEVEL,MaxLearned,MR);
 
-	[{_Len,Aix}] -> %% one clause only
+	[{_Len,Count,Aix}] -> %% one clause only
+	    minimize_count(Bs, Count),
 	    {ALen,D1,D2,J2,J3,_Clause} = jump_info(Bs#bs.vp, Aix),
 	    do_stat(Bs,D1,D2),
 	    L = maps:get(stumble,Param),
@@ -264,26 +279,29 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
 
 	LClauses2 -> %% no units determine level
 	    %% io:format("conflict clauses = ~p\n", [LClauses2]),
-	    JClauses1 = [jump_info(Bs#bs.vp, Aix) || {_Len,Aix} <- LClauses2],
+	    JClauses1 = 
+		[{jump_info(Bs#bs.vp, Aix),Count} ||
+		    {_Len,Count,Aix} <- LClauses2],
 	    %% io:format("JClauses1 = ~w\n", [JClauses1]),
 	    %% jump_info = {L,D1,D2,J2,J3,Aix}
 	    JClauses2 =
-		lists:sort(fun({La,D1a,_D2a,_J2a,_J3a,_Clausea},
-			       {Lb,D1b,_D2b,_J2b,_J3b,_Clauseb}) ->
+		lists:sort(fun({{La,D1a,_D2a,_J2a,_J3a,_Clausea},_Counta},
+			       {{Lb,D1b,_D2b,_J2b,_J3b,_Clauseb},_Countb}) ->
 				   if D1a =:= D1b -> La < Lb;
 				      true -> D1a > D1b
 				   end
 			   end, JClauses1),
 	    [JClause|JClauses3] = JClauses2,
-	    LClauses4 = [{L,Clause} ||
-			    {L,_D1,_D2,_J2,_J3,Clause} <- JClauses3],
-	    LClauses5 = lists:sort(fun({La,_},{Lb,_}) -> La < Lb end,
+	    LClauses4 = [{L,Count,Clause} ||
+			    {{L,_D1,_D2,_J2,_J3,Clause},Count} <- JClauses3],
+	    LClauses5 = lists:sort(fun({La,_Ca,_},{Lb,_Cb_}) -> La < Lb end,
 				   LClauses4),
 	    L = maps:get(stumble,Param),
 	    K = maps:get(olle,Param),
 	    M = maps:get(stumble_olle,Param),
 
-	    {ALen,D1,D2,J2,J3,Aix} = JClause,
+	    {{ALen,D1,D2,J2,J3,Aix},Count} = JClause,
+	    minimize_count(Bs, Count),
 	    do_stat(Bs,D1,D2),
 	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    %% FIXME if JLevel = J3 then we SHOULD select
@@ -295,26 +313,32 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
 	    main_bcp(Bs,Param,JLevel,MaxLearned,MR)
     end.
 
+minimize_count(_Bs, 0) ->
+    ok;
+minimize_count(Bs, Count) ->
+    %% io:format("Minimize removed ~w literals\n", [Count]),
+    counters:add(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT, Count).
 
 jump_info(V, Cix) ->
     varp_nif:clause_info(V, Cix, jump).
 
 %% Move a list of clauses from alpha to gamma (install them)
-move_to_gamma(Bs, [{Len,Aix}|LCs]) ->
+move_to_gamma(Bs, [{Len,Count,Aix}|LCs]) ->
+    minimize_count(Bs, Count),
     move_to_gamma(Bs, Len, Aix),
     move_to_gamma(Bs, LCs);
 move_to_gamma(_Bs, []) ->
     ok.
 
 move_to_gamma(Bs, 1, Aix) ->
-    %% io:format("Move UNIT ~w to gamma\n", [varp_nif:get_clause(Bs#bs.vp, Aix)]),
     varp_formula:proof_output(Bs,$a,Aix),
     true = varp_nif:move_clause(Bs#bs.vp, Aix, gamma),
     counters:add(Bs#bs.clen, 1, 1);
 move_to_gamma(Bs, Len, Aix) ->
-    %% io:format("Move CLAUSE ~w to gamma\n", [varp_nif:get_clause(Bs#bs.vp, Aix)]),
     {true,Gix} = varp_nif:move_clause(Bs#bs.vp, Aix, gamma),
     varp_formula:proof_output(Bs,$a,Gix),
+    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES, 1),
+    counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS, Len),
     if Len >= 1023 ->
 	    counters:add(Bs#bs.clen, 1024, 1);
        true ->
@@ -347,7 +371,8 @@ restart(Bs,Param,MaxLearned,MR) ->
 	true ->
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
-	    ?dbg0("purge\n",[]),
+	    ?dbg1("purge\n",[]),
+	    %% compact(Bs),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
@@ -356,7 +381,7 @@ restart(Bs,Param,MaxLearned,MR) ->
 	    if RestartByCount ->
 		    varp_formula:proof_output(Bs,$c,"counter limit"),
 		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-		    %% reorder(Bs, Param),
+		    reorder(Bs, Param),
 		    init(Bs, Param, MaxLearned, MR);
 	       RestartByTimeout ->
 		    varp_formula:proof_output(Bs,$c,"timeout"),
@@ -368,6 +393,17 @@ restart(Bs,Param,MaxLearned,MR) ->
 	    end
     end.
 
+compact(Bs) ->
+    N0 = varp_formula:number_of_bound(Bs),
+    varp_saturate:saturate(Bs,1,infinity,1,0), %% compact
+    N1 = varp_formula:number_of_bound(Bs),
+    if N0 =:= N1 -> 
+	    ok;
+       true -> 
+	    io:format("compact(saturate) bound ~w\n", [N1-N0])
+    end.
+    
+
 reorder(Bs, Param) ->
     N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
     counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
@@ -378,8 +414,11 @@ reorder_(_Bs, _N, []) ->
 reorder_(Bs,  N, Reorder) ->
     ReorderMap = maps:from_list(Reorder),
     case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
+	{ok,skip} ->
+	    ?dbg0("Skip:\n", []),
+	    ok;
 	{ok,{order,Opts}} ->
-	    ?dbg1("Reorder: ~p\n", [Opts]),
+	    ?dbg0("Reorder: ~p\n", [Opts]),
 	    Seed = proplists:get_value(seed, Opts, 0),
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
@@ -389,7 +428,7 @@ reorder_(Bs,  N, Reorder) ->
 		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
 	    end;
 	{ok,{saturate,Opts}} ->
-	    ?dbg1("Saturate: ~p\n", [Opts]),
+	    ?dbg0("Saturate: ~p\n", [Opts]),
 	    Laps = proplists:get_value(laps,Opts,0),
 	    Timeout = proplists:get_value(timeout,Opts,infinity),
 	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
@@ -517,7 +556,7 @@ keep_size(Bs, Param, MaxLearned) ->
 	true ->
 	    io:format("keep: KeepSize=~w, MaxLearned=~w, KeepFactor=~w, MinKeep=~w\n",
 		      [KeepSize, MaxLearned, KeepFactor, MinKeep]);
-	false -> ok
+	_ -> ok
     end,
     KeepSize.
 
@@ -529,7 +568,7 @@ max_learned(Bs,Param) ->
 	true ->    
 	    io:format("learned: Permanent=~w,MaxLearnedClause=~w,MaxLearnedFactor=~w\n",
 		      [Permanent, MaxLearnedClauses, MaxLearnedFactor]);
-	false ->
+	_ ->
 	    ok
     end,
     if MaxLearnedFactor > 0, MaxLearnedClauses > 0 ->
@@ -544,6 +583,8 @@ max_learned(Bs,Param) ->
 
 display_stat(Bs,Param) ->
     case maps:get(display, Param) of
+	false ->
+	    ok;
 	true ->
 	    io:format("num conflict clauses added: ~w\n", 
 		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
@@ -558,10 +599,8 @@ display_stat(Bs,Param) ->
 	    io:format("usage olle counter: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
 	    io:format("number of reorders: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]),
-
-	    %% delta usage histograms
-	    %% back jump distances
+		      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]);
+	delta ->
 	    io:format("Backjump deltas used\n", []),
 	    lists:foreach(fun(D) ->
 				  case {counters:get(Bs#bs.d1, D+1),
@@ -570,8 +609,9 @@ display_stat(Bs,Param) ->
 				      {N,M} -> 
 					  io:format("~w: d1=~w, d2=~w\n", [D,N,M])
 				  end
-			  end, lists:seq(0,1023)),
-	    io:format("Conflict clauses installed\n", []),
+			  end, lists:seq(0,1023));
+	histogram ->
+	    io:format("Installed clauses lengh histogram\n", []),
 	    lists:foreach(fun(L) ->
 				  case counters:get(Bs#bs.clen, L) of
 				      0 -> ok;
@@ -582,8 +622,5 @@ display_stat(Bs,Param) ->
 						  io:format("~w: ~w\n", [L,N])
 					  end
 				  end
-			  end, lists:seq(1,1024)),
-	    ok;
-	false ->
-	    ok
+			  end, lists:seq(1,1024))
     end.

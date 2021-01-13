@@ -104,7 +104,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
 	    {?INCONSISTENT,[],Bs1};
 	{Reason,Bs1} -> 
 	    varp_nif:config(Bs#bs.vp, xref, false),
-	    ?dbg("saturate limit ~w\n", [Reason]),
+	    ?dbg0("saturate limit ~w\n", [Reason]),
 	    {Reason,[],Bs1#bs{ t_local = undefined }}
     end.
 
@@ -112,7 +112,7 @@ loop(Bs,K,Q,F,R,N,Level,Laps,Threshold,FriendMap) ->
     case lap(Bs,K,Q,F,R,FriendMap) of
 	true ->
 	    N1 = varp_formula:number_of_bound(Bs),
-	    ?dbg1("Laps=~w n=~w\n", [Laps, N]),
+	    ?dbg0("Laps=~w n=~w\n", [Laps, N]),
 	    Laps1 = Laps-1,
 	    if N1 - N =< Threshold ->
 		    loop_done(?THRESHOLD,Laps,Bs);
