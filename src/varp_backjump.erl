@@ -294,7 +294,7 @@ conflict(Bs,Param,Level,MaxLearned,MR) ->
 	    [JClause|JClauses3] = JClauses2,
 	    LClauses4 = [{L,Count,Clause} ||
 			    {{L,_D1,_D2,_J2,_J3,Clause},Count} <- JClauses3],
-	    LClauses5 = lists:sort(fun({La,_Ca,_},{Lb,_Cb_}) -> La < Lb end,
+	    LClauses5 = lists:sort(fun({La,_Ca,_},{Lb,_Cb,_}) -> La < Lb end,
 				   LClauses4),
 	    L = maps:get(stumble,Param),
 	    K = maps:get(olle,Param),
