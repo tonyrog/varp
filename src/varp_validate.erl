@@ -35,8 +35,8 @@ options() ->
     ].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    %% io:format("Decls = ~p\n", [Bs#bs.decls]),
-    %% io:format("Var = ~p\n", [Bs#bs.vs]),
+    ?dbg("Decls = ~p\n", [Bs#bs.decls]),
+    ?dbg("Var = ~p\n", [Bs#bs.vs]),
     T = case maps:get(type, Param) of
 	    undefined -> varp_formula:getopt(Bs, proof_output);
 	    Type -> Type
@@ -78,7 +78,7 @@ validate_loop(Fd,Type,Bs, I) ->
 	    io:format("\nREAD ERROR\n"),
 	    {?ERROR,"read error",Bs};
 	{a,Clause} ->
-	    %% io:format("add clause ~w\n", [Clause]),
+	    ?dbg("add clause ~w\n", [Clause]),
 	    0 = varp_nif:push(Bs#bs.vp),
 	    Res = eval_neg_literal_list(Bs, Clause),
 	    varp_nif:pop(Bs#bs.vp),
@@ -92,7 +92,7 @@ validate_loop(Fd,Type,Bs, I) ->
 			false ->
 			    case read_clause(Fd,Type,Bs) of
 				{a,[]} ->
-				    io:format("\nUNSATISFIABLE\n");
+				    io:format("\nVALIDATED\n");
 				EClause ->
 				    io:format("\nUNSATISFIABLE, INVALID ~w\n",
 					      [EClause])

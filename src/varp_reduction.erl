@@ -36,9 +36,9 @@ options() ->
 
 
 run(Bs, Param) ->
-    N = varp_formula:number_of_unbound(Bs),
+    N = varp:number_of_unbound_variables(Bs#bs.vp),
     varp_formula:config(Bs, permanent, 0),
-    CMax = varp_formula:info(Bs, permanent),
+    CMax = varp:info(Bs#bs.vp, permanent),
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
@@ -59,7 +59,7 @@ red(Bs,_X, 0,_CMax,_Type) ->
     {?CONTINUE,[],Bs};
 red(Bs,X,N,CMax,Type) ->
     Bs1 = add_var(Bs,X,CMax,Type),
-    case varp_formula:next_unbound(Bs1,X) of
+    case varp:next_unbound(Bs1#bs.vp,X) of
 	false -> {?CONTINUE,[],Bs1};
 	X1 -> red(Bs1,X1,N-1,CMax,Type)
     end.
@@ -149,6 +149,8 @@ or_clause(Bs, CL) ->
     %% io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
     varp_formula:or_clause(Bs, CL).
 
+-ifdef(not_used).
+
 emit_def(Bs, Yj, Cs) ->
     io:format("~s == ", [varp_formula:format_lit(Bs,Yj)]),
     lists:foreach(
@@ -163,6 +165,8 @@ emit_def(Bs, Yj, Cs) ->
 	      io:format("}|")
       end, Cs),
     io:format("\n").
+
+-endif.
     
 %% return list on form [{Y,[Xi]}]
 clauses(Bs,[I|Cs],L,Acc) ->
@@ -182,5 +186,5 @@ get_clause(Bs, I, Skip) ->
 
 %% Return clauses in Delta
 get_delta_clauses(Bs, L, CMax) ->
-    CLs = varp_formula:get_clauses(Bs,L,literal),
+    CLs = varp:get_clauses(Bs#bs.vp,L,literal),
     [I || I <- CLs, I < CMax].

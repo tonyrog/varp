@@ -13,6 +13,8 @@
 -export([ilog2/1]).
 -export([signed_size/1]).
 -export([unsigned_size/1]).
+-export([isqrt/1]).
+-export([nroot/2]).
 
 factorial(0) -> 1;
 factorial(N) when N > 0 -> 
@@ -88,7 +90,39 @@ size8_(X, I) ->
        true -> I
     end.
 
-    
-    
-    
-    
+%%
+%% Integer square root
+%%
+%%  Xk+1 = (1/2)(Xk + A/Xk)
+%%  using X0 = A / 2
+%%
+
+isqrt(0) -> 0;
+isqrt(1) -> 1;
+isqrt(A) when is_integer(A), A >= 2 ->
+    X0 = A div 2,
+    isqrt_(A div X0, X0, A).
+
+isqrt_(Ak,Xk,A) when Ak < Xk ->
+    Xk1 = (Xk+Ak) div 2,
+    isqrt_(A div Xk1, Xk1, A);
+isqrt_(_, Xk, _) -> Xk.
+
+%%
+%% integer nth root  A^(1/N)
+%%
+%%    Xk+1 = (1/N)*((N-1)*Xk + A/(Xk^N-1))
+%%
+nroot(0,_N) -> 0;
+nroot(1,_N) -> 1;
+nroot(X,1) -> X;
+nroot(A,2) -> isqrt(A);
+nroot(A,N) when N > 0 ->
+    X0 = A div 2, 
+    nroot(A div pow(X0,N-1), X0, A, N).
+
+nroot(Ak,Xk,A,N) when Ak < Xk ->
+    Xk1 = ((N-1)*Xk+Ak) div N,
+    nroot(A div pow(Xk1, N-1), Xk1, A, N);
+nroot(_, Xk, _A, _N) -> 
+    Xk.

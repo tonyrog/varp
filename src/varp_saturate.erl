@@ -92,7 +92,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
     varp_nif:config(Bs#bs.vp, xref, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     Level = ?TOP_LEVEL,
-    N = varp_formula:number_of_bound(Bs),
+    N = varp:get_number_of_bound_variables(Bs#bs.vp),
     FriendMap = if F =:= 0 ->
 			undefined;  %% not needed
 		   true ->
@@ -111,7 +111,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
 loop(Bs,K,Q,F,R,N,Level,Laps,Threshold,FriendMap) ->
     case lap(Bs,K,Q,F,R,FriendMap) of
 	true ->
-	    N1 = varp_formula:number_of_bound(Bs),
+	    N1 = varp:get_number_of_bound_variables(Bs#bs.vp),
 	    ?dbg0("Laps=~w n=~w\n", [Laps, N]),
 	    Laps1 = Laps-1,
 	    if N1 - N =< Threshold ->

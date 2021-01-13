@@ -72,12 +72,6 @@ options() ->
 	description => "Use conflict clause minimization."
       },
 
-     #{ long => "iorder",
-	key => iorder,
-	spec => unsigned,
-	default => 0,
-	description => "max conflict clause length"},
-
      #{ long => "stumble",
 	key => stumble,
 	spec => unsigned,
@@ -124,7 +118,8 @@ options() ->
 	key => keep_factor,
 	spec =>  float01,
 	default => 0.5,
-	description => "Number of clauses to keep"},
+	description => "Number of clauses to keep,"
+	"in terms of number of learned clauese"},
      
      #{ long => "min-keep-clauses",
 	key => min_keep_clauses,
@@ -136,7 +131,7 @@ options() ->
 	key => restart_counter,
 	spec =>  unsigned,
 	default => 0,
-	description => "Number of counts/bcp until restart"},
+	description => "Number of (bcp)counts until restart"},
 
      #{ long => "restart-interval",
 	key => restart_interval,
@@ -148,7 +143,7 @@ options() ->
 	key => bump,
 	spec => {union,[integer,float01,{enum,[?BUMP]}]},
 	default => 1, %% 0.5?
-	description => "Bump value."},
+	description => "VSIDS bump value"},
 
      #{ long => "display",
 	short => "d",
@@ -185,7 +180,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     _KeepSize  = keep_size(Bs, Param, MaxLearned),
-    set_bcp_counter(Bs, varp_formula:info(Bs, bcp_counter)),
+    set_bcp_counter(Bs, varp:info(Bs#bs.vp, bcp_counter)),
     start_restart_timer(Param),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     M0  = #m { method = varp_formula:getopt(Bs1,method),
@@ -371,7 +366,7 @@ restart(Bs,Param,MaxLearned,MR) ->
 	true ->
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
-	    ?dbg1("purge\n",[]),
+	    ?dbg0("purge\n",[]),
 	    %% compact(Bs),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
@@ -394,9 +389,9 @@ restart(Bs,Param,MaxLearned,MR) ->
     end.
 
 compact(Bs) ->
-    N0 = varp_formula:number_of_bound(Bs),
+    N0 = varp:get_number_of_bound_variables(Bs#bs.vp),
     varp_saturate:saturate(Bs,1,infinity,1,0), %% compact
-    N1 = varp_formula:number_of_bound(Bs),
+    N1 = varp:get_number_of_bound_variables(Bs#bs.vp),
     if N0 =:= N1 -> 
 	    ok;
        true -> 
@@ -492,7 +487,7 @@ restart_by_counter(Bs, Param) ->
     case maps:get(restart_counter,Param) of
 	0 -> false;
 	RestartCounter ->
-	    BcpCounter = varp_formula:info(Bs, bcp_counter),
+	    BcpCounter = varp:info(Bs#bs.vp, bcp_counter),
 	    PrevCounter = get_bcp_counter(Bs),
 	    if (BcpCounter - PrevCounter) >= RestartCounter ->
 		    set_bcp_counter(Bs, BcpCounter),

@@ -51,8 +51,8 @@ loop(Bs, Mon) ->
 		      ]),
 	    loop(Bs, Mon);
 	{varp, X, _Info} ->
-	    io:format("monitor: permanent (~w=1) ~s = ~w\n", 
-		      [X,varp_formula:format_lit(Bs,X), ?T]),
+	    io:format("monitor: permanent ~s\n", 
+		      [varp_formula:format_lit(Bs,X)]),
 	    loop(Bs, Mon);
 	Other ->
 	    io:format("monitor: got ~p\n", [Other]),

@@ -33,7 +33,7 @@ options() ->
       }].
 
 run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
-    N = varp_formula:number_of_unbound(Bs),
+    N = varp:number_of_unbound_variables(Bs#bs.vp),
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->

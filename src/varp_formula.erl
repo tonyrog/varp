@@ -13,8 +13,6 @@
 -export([new/0, new/1]).
 -export([add_variable/1, add_variable/2]).
 -export([variable/2, alias/3]).
--export([value/2]).
--export([info/1, info/2]).
 -export([fmt_var/2, fmt_v/2, fmt_q/2]).
 -export([fmt_var_list/2]).
 -export([fmt_bind/4]).
@@ -50,22 +48,10 @@
 -export([is_bound/2]).
 -export([is_unbound/2]).
 -export([getopt/2]).
--export([number_of_variables/1]).
--export([number_of_clauses/1]).
--export([number_of_dead_clauses/1]).
--export([number_of_bound/1]).
--export([number_of_unbound/1]).
--export([clause_bcp_counter/1]).
--export([clause_bcp_counter/2]).
--export([conflict_counter/1]).
--export([bcp_counter/1]).
 -export([order_sort/2, order_sort/4]).
 -export([order_first/2]).
 -export([order_last/2]).
 -export([model/1, model/2]).
--export([next_unbound/1, next_unbound/2]).
--export([info/3, debug/3]).
--export([get_bindings/2]).
 -export([intersect_bindings/3]).
 -export([install_bindings/3]).
 -export([model_variables/2]).
@@ -74,10 +60,6 @@
 -export([fold_unbound/3]).
 -export([eval_meta/2]).
 -export([vfold_op/4]).
--export([conflicting_clause/1]).
--export([conflicting_clause/2]).
--export([get_clauses/3]).
--export([get_clause_info/2, get_clause_info/3]).
 -export([add_clause/2, add_clause/3]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
@@ -423,17 +405,6 @@ variable_list_(Bs, [V|Vs], Acc) ->
 variable_list_(Bs, [], Acc) ->
     {Acc,Bs}.
 
-%% get_variable_info(Bs, [X|Xs]) ->
-%%     U  = varp_nif:literal_info(Bs#bs.vp, X, user),
-%%     Un = varp_nif:literal_info(Bs#bs.vp, -X, user),
-%%     if U >= Un ->
-%% 	    [{X,U}|get_variable_info(Bs, Xs)];
-%%        true ->
-%% 	    [{-X,Un}|get_variable_info(Bs, Xs)]
-%%     end;
-%% get_variable_info(_Bs, []) ->
-%%     [].
-
 cat([X|Xs], Ys) -> cat(Xs, [X|Ys]);
 cat([], Ys) -> Ys.
 
@@ -444,17 +415,8 @@ order_sort(Bs,Key1,Key2,Arg)
   when is_integer(Key1), is_integer(Key2), is_integer(Arg) ->
     varp_nif:order_sort(Bs#bs.vp,Key1,Key2,Arg).
 
-value(Bs,V) ->
-    varp_nif:value(Bs#bs.vp, V).
-
 config(Bs, Item, Value) ->
     varp_nif:config(Bs#bs.vp, Item, Value).
-
-info(Bs) ->
-    varp:info(Bs#bs.vp).
-
-info(Bs, Key) ->
-    varp_nif:info(Bs#bs.vp, Key).
 
 is_bound(Bs,Lit) ->
     varp_nif:is_bound(Bs#bs.vp,Lit).
@@ -470,62 +432,6 @@ subst(Bs, X, Y) ->
 
 getopt(Bs,Key) ->
     ?GETOPT_BS(Bs, Key).
-
-number_of_variables(Bs) ->
-    varp:get_number_of_variables(Bs#bs.vp).
-
-number_of_clauses(Bs) ->
-    varp:get_number_of_clauses(Bs#bs.vp).
-
-number_of_dead_clauses(Bs) ->
-    varp:get_number_of_dead_clauses(Bs#bs.vp).
-
-number_of_bound(Bs) ->
-    varp:get_number_of_bound_variables(Bs#bs.vp).
-
-number_of_unbound(Bs) ->
-    varp:get_number_of_unbound_variables(Bs#bs.vp).
-
-clause_bcp_counter(Bs) ->
-    varp:get_clause_bcp_counter(Bs#bs.vp).
-
-clause_bcp_counter(Bs,N) ->
-    varp:get_clause_bcp_counter(Bs#bs.vp,N).
-
-bcp_counter(Bs) ->
-    varp:get_bcp_counter(Bs#bs.vp).
-
-conflict_counter(Bs) ->
-    varp:get_conflict_counter(Bs#bs.vp).
-
-next_unbound(Bs) ->
-    varp_nif:next_unbound(Bs#bs.vp).
-
-next_unbound(Bs, X) ->
-    varp_nif:next_unbound(Bs#bs.vp, X).
-
-get_bindings(Bs,Level) when is_integer(Level) ->
-    varp_nif:get_bindings(Bs#bs.vp, Level).
-
-info(Bs,Fmt,As) -> ?info(Bs#bs.option, Fmt, As).
-
-debug(Bs,Fmt,As) ->  ?debug(Bs#bs.option, Fmt, As).
-
-conflicting_clause(Bs) ->
-    conflicting_clause(Bs,0).
-
-conflicting_clause(Bs,I) ->
-    varp_nif:conflicting_clause(Bs#bs.vp,I).
-
-%% How = watch|literal|variable
-get_clauses(Bs, L, How) ->
-    varp_nif:get_clauses(Bs#bs.vp, L, How).
-
-get_clause_info(Bs, I) ->
-    varp_nif:clause_info(Bs#bs.vp, I).
-
-get_clause_info(Bs, I, What) ->
-    varp_nif:clause_info(Bs#bs.vp, I, What).
 
 %% Bs is under the assumption that Var = TRUE
 intersect_bindings(Bs, Var, Bs0) ->
@@ -1414,14 +1320,14 @@ eval_meta({call,F,As},Bs) ->
 	{{id,"factorial"},[N]} -> varp_math:factorial(N);
 	{{id,"binom"},[A,B]} -> varp_math:binom(A,B);
 	{{id,"sqrt"},[A]}    -> math:sqrt(A);
-	{{id,"isqrt"},[A]}   -> imath:isqrt(A);
+	{{id,"isqrt"},[A]}   -> varp_math:isqrt(A);
 	{{id,"sqr"},[A]}     -> A*A;
-	{{id,"nroot"},[A,N]} -> imath:nroot(A,N);
+	{{id,"nroot"},[A,N]} -> varp_math:nroot(A,N);
 	{{id,"ln"},[A]}      -> math:log(A);
 	{{id,"log"},[A,N]}   -> math:log(A)/math:log(N);
 	{{id,"log2"},[A]}    -> math:log(A)/math:log(2);
 	{{id,"log10"},[A]}   -> math:log10(A);
-	{{id,"ilog2"},[A]}   -> imath:ilog2(A);
+	{{id,"ilog2"},[A]}   -> varp_math:ilog2(A);
 	{{id,"isize"},[A]}   -> varp_math:signed_size(A);
 	{{id,"usize"},[A]}   -> varp_math:unsigned_size(A);
 	{{id,"pi"},[]}       -> math:pi();
@@ -2874,22 +2780,22 @@ model_variables(Bs,Ws) ->
     lists:map(fun(W) -> get_var(W,Bs) end, Ws).
 
 each_unbound(Bs, Fun) ->
-    each_unbound_(Bs, Fun, next_unbound(Bs)).
+    each_unbound_(Bs, Fun, varp:next_unbound(Bs#bs.vp)).
 
 each_unbound_(_Bs, _Fun, false) ->
     ok;
 each_unbound_(Bs, Fun, Xi) ->
     Fun(Xi),
-    each_unbound_(Bs, Fun, next_unbound(Bs,Xi)).
+    each_unbound_(Bs, Fun, varp:next_unbound(Bs#bs.vp,Xi)).
 
 fold_unbound(Bs, Fun, Acc) ->
-    fold_unbound_(Bs, Fun, Acc, next_unbound(Bs)).
+    fold_unbound_(Bs, Fun, Acc, varp:next_unbound(Bs#bs.vp)).
 
 fold_unbound_(_Bs, _Fun, Acc, false) ->
     Acc;
 fold_unbound_(Bs, Fun, Acc, Xi) ->
     Acc1 = Fun(Xi, Acc),
-    fold_unbound_(Bs, Fun, Acc1, next_unbound(Bs, Xi)).
+    fold_unbound_(Bs, Fun, Acc1, varp:next_unbound(Bs#bs.vp, Xi)).
 
 each_variable(Bs, Fun) ->
     each_variable_(Bs, Fun, 1, varp_nif:info(Bs#bs.vp, number_of_variables)+1).
@@ -3222,7 +3128,7 @@ format_var(Bs,X,Bound) ->
 format_bnd(_Bs, _X, Var, false) ->
     format_symbol(Var);
 format_bnd(Bs, X, Var, true) ->
-    Value = case value(Bs, X) of
+    Value = case varp:value(Bs#bs.vp, X) of
 		true -> "/1";
 		false -> "/0";
 		_ -> ""
@@ -3230,7 +3136,7 @@ format_bnd(Bs, X, Var, true) ->
     format_symbol(Var) ++ Value;
 format_bnd(Bs, X, Var, level) ->
     L = varp_nif:implication_level(Bs#bs.vp, X), 
-    Value = case value(Bs, X) of
+    Value = case varp:value(Bs#bs.vp, X) of
 		true -> "=1@"++integer_to_list(L);
 		false -> "=0@"++integer_to_list(L);
 		_ -> ""

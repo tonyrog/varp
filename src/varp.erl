@@ -792,10 +792,11 @@ do_run_(Do, Formula, GOpts) ->
     T0 = erlang:monotonic_time(),
     Bs0 = varp_formula:new(GOpts),
     S0 = stat(Bs0),
-    varp_formula:info(Bs0, "pass ~p\n", [build]),
+    ?info(Bs0#bs.option, "pass ~p\n", [build]),
     {Main,Bs} = case varp_formula:build(Formula,Bs0) of
 		    {{bool,Var0},Bs0_1} -> {Var0,Bs0_1};
 		    {{uint,1,[Var0]},Bs0_1} -> {Var0,Bs0_1};
+		    {undefined,Bs0_1} -> {undefined,Bs0_1}; %% validate etc
 		    {{_Type,_N,Vs},Bs0_1} -> 
 			VsB = [{bool,Vi} || Vi <- Vs],
 			{{bool,M0},Bs0_2} = varp_formula:any(VsB,Bs0_1),
@@ -840,7 +841,7 @@ do_run_(Do, Formula, GOpts) ->
 
 do([{Plugin,Param}|Do],Acc0,Bs) ->
     S0 = stat(Bs),
-    varp_formula:info(Bs, "pass ~p\n", [Plugin]),
+    ?info(Bs#bs.option, "pass ~p\n", [Plugin]),
     T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
 	{Result,Acc1,Bs1} ->
@@ -898,7 +899,7 @@ combine_result(Ns,M) when is_list(Ns), is_integer(M) ->
     length(Ns)+M.
 
 show_info(S1, S0, Ts, Bs) ->
-    varp_formula:info(Bs, "    | bcp: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w\n    | #clauses:~w, #dead:~w, #conflict:~w\n | time=~.2fs\n",
+    ?info(Bs#bs.option, "    | bcp: ~w\n    | clause:n:~w,2:~w,3:~w,d:~w\n    | #clauses:~w, #dead:~w, #conflict:~w\n | time=~.2fs\n",
 		      [S1#stat.bcp_count-S0#stat.bcp_count,
 		       S1#stat.clause_n_counter - S0#stat.clause_n_counter,
 		       S1#stat.clause_2_counter - S0#stat.clause_2_counter,
@@ -908,22 +909,22 @@ show_info(S1, S0, Ts, Bs) ->
 		       S1#stat.dead_clauses,
 		       S1#stat.conflict_count-S0#stat.conflict_count,
 		       Ts]),
-    varp_formula:info(Bs,"    | bound: ~w [~w/~w]\n",
-		      [S1#stat.bound-S0#stat.bound,
-		       S1#stat.bound,
-		       varp_formula:number_of_variables(Bs)
-		      ]).
+    ?info(Bs#bs.option,"    | bound: ~w [~w/~w]\n",
+	  [S1#stat.bound-S0#stat.bound,
+	   S1#stat.bound,
+	   get_number_of_variables(Bs#bs.vp)
+	  ]).
 
-stat(Bs) ->
-    #stat { clause_n_counter = varp_formula:clause_bcp_counter(Bs,n),
-	    clause_2_counter = varp_formula:clause_bcp_counter(Bs,2),
-	    clause_3_counter = varp_formula:clause_bcp_counter(Bs,3),
-	    clause_d_counter = varp_formula:clause_bcp_counter(Bs,dead),
-	    bcp_count     = varp_formula:bcp_counter(Bs),
-	    conflict_count = varp_formula:conflict_counter(Bs),
-	    bound          = varp_formula:number_of_bound(Bs),
-	    clauses        = varp_formula:number_of_clauses(Bs),
-	    dead_clauses   = varp_formula:number_of_dead_clauses(Bs)
+stat(#bs{vp=Vp}) ->
+    #stat { clause_n_counter = get_clause_bcp_counter(Vp,n),
+	    clause_2_counter = get_clause_bcp_counter(Vp,2),
+	    clause_3_counter = get_clause_bcp_counter(Vp,3),
+	    clause_d_counter = get_clause_bcp_counter(Vp,dead),
+	    bcp_count        = get_bcp_counter(Vp),
+	    conflict_count   = get_conflict_counter(Vp),
+	    bound            = get_number_of_bound_variables(Vp),
+	    clauses          = get_number_of_clauses(Vp),
+	    dead_clauses     = get_number_of_dead_clauses(Vp)
 	  }.
 
 %% extract "method" form Do list
@@ -979,8 +980,8 @@ display_result(?CONTINUE,_,_Bs) ->
 one_model(Bs) when Bs#bs.main =:= ?F ->
     false;
 one_model(Bs) ->
-    NV = varp_formula:number_of_variables(Bs),
-    NB = varp_formula:number_of_bound(Bs),
+    NV = get_number_of_variables(Bs#bs.vp),
+    NB = get_number_of_bound_variables(Bs#bs.vp),
     if NV =:= NB ->
 	    Model = output_model(Bs,false,1),
 	    case varp_formula:getopt(Bs,method) of
@@ -1840,7 +1841,7 @@ i() ->
     ok.
 
 i(Vp) ->
-    _ = [ io:format("~w: ~w\n", [Key,varp_nif:info(Vp, Key)]) ||
+    _ = [ io:format("~w: ~p\n", [Key,varp_nif:info(Vp, Key)]) ||
 	    Key <- info_keys()],
     ok.
 

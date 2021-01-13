@@ -56,7 +56,7 @@ succ(Bs, Param) ->
 
 succ(Fd, Type, Bs) ->
     N = count_number_of_clauses(Bs),
-    M = varp_formula:info(Bs, number_of_unbound_variables),
+    M = varp:info(Bs#bs.vp, number_of_unbound_variables),
     case Type of
 	cnf ->
 	    io:format(Fd, "p cnf ~w ~w\n", [M, N]);
@@ -91,12 +91,6 @@ succ_(Fd,Type,I,Bs) ->
 			      io:format("~s\n", [lists:reverse(Bi)])
 		      end, Succ)
 	    end,
-
-%%	    Fmt = case Type of
-%%		      cnf -> format_succ_cnf_clause(Bs,Bn); 
-%%		      snf -> format_succ_snf_clause(Bs,Bn)
-%%		  end,
-%%	    io:put_chars(Fd,[Fmt,"\n"]),
 	    succ_(Fd,Type,varp_nif:clauseset_next(Bs#bs.vp,I),Bs)
     end.
 
@@ -179,24 +173,6 @@ clause_bn_(Bs, Xi, CL, Acc) ->
 		 end
 	 end,
     clause_bn_(Bs, varp_nif:next_unbound(Bs#bs.vp, Xi), CL, [Bi | Acc]).
-
-%% get unbound mapped to "bit number"
-get_var_map(Bs) ->
-    get_var_map_(Bs, #{}).
-
-get_var_map_(Bs, Map) ->
-    get_var_map_(Bs, varp_nif:next_unbound(Bs#bs.vp), Map, 1).
-
-get_var_map_(_Bs, false, Map, _N) ->
-    Map;
-get_var_map_(Bs, Xi, Map, J) ->
-    get_var_map_(Bs,varp_nif:next_unbound(Bs,Xi),maps:put(Xi,J,Map), J+1).
-
-format_succ_cnf_clause(_Bs,CL) ->
-    [lists:join(" ", [integer_to_list(L)||L<-CL]), " 0"].
-
-format_succ_snf_clause(Bs,CL) ->
-    [lists:join(" ", [varp_formula:format_lit(Bs,L,false)||L<-CL]), "."].
 
 %% count number of active clauses
 count_number_of_clauses(Bs) ->

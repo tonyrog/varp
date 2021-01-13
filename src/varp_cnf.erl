@@ -79,7 +79,7 @@ emit_fd(Fd, Type, Symbols, Raw, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [NumVars, NumClauses])
     end,
-    cnf_(Fd, Type, Raw, varp_nif:clauseset_first(Bs#bs.vp), VarMap, Bs).
+    cnf_(Fd, Type, Raw, varp:clauseset_first(Bs#bs.vp), VarMap, Bs).
 
 
 cnf_(_Fd,_Type,_Raw,false,_VarMap,Bs) ->
@@ -133,7 +133,7 @@ renumerate_clauses(Bs, Raw) ->
     renumerate_clauses(Bs, Raw, #{}, 0).
 
 renumerate_clauses(Bs, Raw, VarMap, NumClauses) ->
-    renumerate_clauses(Bs, varp_nif:clauseset_first(Bs#bs.vp),
+    renumerate_clauses(Bs, varp:clauseset_first(Bs#bs.vp),
 		       Raw, VarMap, NumClauses).
 
 renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses) ->
@@ -176,7 +176,7 @@ translate_literal(L, VarMap) when L > 0 ->
 -ifdef(unused).
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varp:clauseset_first(Bs#bs.vp), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;

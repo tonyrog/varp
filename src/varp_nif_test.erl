@@ -1254,7 +1254,7 @@ watch1() ->
     ?T = varp_nif:value(V, X2),
 
     C1 = varp_nif:implication_clause(V, X2),
-    1 = varp_nif:implication_pos(V, X2),
+    %% 1 = varp_nif:implication_pos(V, X2),
     4 = varp_nif:implication_level(V, X2),
 
     %% add clauses under the above bindings
@@ -1830,11 +1830,17 @@ get_sym_literal(Vp, Li) ->
 
 %% 
 %% bcp 999 clauses
+%%
+%% 2021-01-13
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 51582
+%%
+%% 2020-11-01?
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 45477
 %% {literal_integer,false},{literal_size,64},{value_packing,1} => 34047
 %% {literal_integer,false},{literal_size,64},{value_packing,no} => 35276
 %%
 %% OLD VALUE:
+%% 2020-06-01?
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412
 %%
 bench() ->
