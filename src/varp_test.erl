@@ -35,7 +35,11 @@ all() ->
 	   shift,
 	   rotate,
 	   equation1,
-	   equation2
+	   equation2,
+	   %% saturations
+	   saturate_a1,
+	   saturate_a2,
+	   saturate_b1
 	  ]),
         if Failed > 0 ->
 	    io:format("~w FAILED CASES\n", [Failed]);
@@ -274,6 +278,206 @@ equation2() ->
 	      [{Xv,16},{Yv,1},{Zv,0}]
 	     ]),
     ok.
+
+saturate_a1() ->
+    Vp = varp_nif:new(#{ xref => true }),
+    X1 = {p,'X1',[]},
+    X2 = {p,'X2',[]},
+    X3 = {p,'X3',[]},
+    X4 = {p,'X4',[]},
+    X5 = {p,'X5',[]},
+    X6 = {p,'X6',[]},
+    X7 = {p,'X7',[]},
+    F = varp_ast:build(
+	  {'ALL',[{imp, X1, X2},
+		  {imp, {'not',X1}, X2},
+		  {imp, X1, {'not',X3}},
+		  {imp, {'not',X1}, {'not',X3}},
+		  {imp, X1, X4},
+		  {imp, {'not',X1}, {'not',X4}},
+		  {imp, X1, {'not',X5}},
+		  {imp, {'not',X1}, X5},
+		  {imp, X1, X6},
+		  {imp, X6, X7}]}, Vp),
+    varp_nif:bind(Vp, F),
+    true = varp_nif:bcp(Vp),
+    varp:vec_sat_lap(Vp,1,0,0,0),
+    Bs = [binding(Vp, Var) || Var <- [X1,X2,X3,X4,X5,X6,X7]], 
+    ?dbg("~p\n", [Bs]),
+    u = proplists:get_value("X1", Bs),
+    t = proplists:get_value("X2", Bs),
+    f = proplists:get_value("X3", Bs),
+    "X1" = proplists:get_value("X4", Bs),
+    "!X1" = proplists:get_value("X5", Bs),
+    u = proplists:get_value("X6", Bs),
+    u = proplists:get_value("X7", Bs),
+    ok.
+    
+saturate_a2() ->
+    Vp = varp_nif:new(#{ xref => true }),
+    X = {p,'X',[]},
+    A = {p,'A',[]},
+    B = {p,'B',[]},
+    C = {p,'C',[]},
+    D = {p,'D',[]},
+    F = varp_ast:build(
+	  {'ALL',[{imp, X, {'ALL',[A,{'not',B},C,{'not',D}]}},
+		  {imp, {'not',X}, {'ALL',[A,{'not',B},{'not',C},D]}}]},
+	  Vp),
+    varp_nif:bind(Vp, F),
+    true = varp_nif:bcp(Vp),
+    varp:vec_sat_lap(Vp,1,0,0,0),
+    Bs = [binding(Vp, Var) || Var <- [X,A,B,C,D]],
+    ?dbg("~p\n", [Bs]),
+    t = proplists:get_value("A", Bs),
+    f = proplists:get_value("B", Bs),
+    "X" = proplists:get_value("C", Bs),
+    "!X" = proplists:get_value("D", Bs),
+    ok.
+    
+saturate_b1() ->
+    Vp = varp_nif:new(#{ xref => true }),
+    X = {p,'X',[]},
+    Y = {p,'Y',[]},
+    A = {p,'A',[]},
+    F = varp_ast:build(
+	  {'ALL',[{imp, {'and',X,Y}, A},
+		  {imp, {'and',X,{'not',Y}}, A},
+		  {imp, {'and',{'not',X},Y}, A},
+		  {imp, {'and',{'not',X},{'not',Y}}, A}
+		 ]},
+	  Vp),
+    ?dbg0("~w\n", [[{A, varp:find_symbol(Vp,varp_ast:var_term(A))},
+		    {X, varp:find_symbol(Vp,varp_ast:var_term(X))},
+		    {Y, varp:find_symbol(Vp,varp_ast:var_term(Y))}]]),
+    varp_nif:bind(Vp, F),
+    true = varp_nif:bcp(Vp),
+
+    varp:vec_sat_lap(Vp,2,0,0,0),
+					
+    Bs = [binding(Vp, Var) || Var <- [X,Y,A]],
+    ?dbg0("~p\n", [Bs]),
+    t = proplists:get_value("A", Bs),
+    u = proplists:get_value("X", Bs),
+    u = proplists:get_value("Y", Bs),
+    ok.
+
+
+saturate_c1() ->
+    Vp = varp_nif:new(#{ xref => true }),
+    X = {p,'X',[]},
+    Y = {p,'Y',[]},
+    Z = {p,'Z',[]},
+    A = {p,'A',[]},
+    F = varp_ast:build(
+	  {'ALL',[
+		  {imp, {'ALL',[{'not',X},{'not',Y},{'not',Z}]}, A},
+		  {imp, {'ALL',[{'not',X},{'not',Y},Z]}, A},
+		  {imp, {'ALL',[{'not',X},Y,{'not',Z}]}, A},
+		  {imp, {'ALL',[{'not',X},Y,Z]}, A},
+		  {imp, {'ALL',[X,{'not',Y},{'not',Z}]}, A},
+		  {imp, {'ALL',[X,{'not',Y},{'not',Z}]}, A},
+		  {imp, {'ALL',[X,{'not',Y},Z]}, A},
+		  {imp, {'ALL',[X,Y,{'not',Z}]}, A},
+		  {imp, {'ALL',[X,Y,Z]}, A}
+		 ]},
+	  Vp),
+    ?dbg0("~w\n", [[{A, varp:find_symbol(Vp,varp_ast:var_term(A))},
+		    {X, varp:find_symbol(Vp,varp_ast:var_term(X))},
+		    {Y, varp:find_symbol(Vp,varp_ast:var_term(Y))},
+		    {Z, varp:find_symbol(Vp,varp_ast:var_term(Z))}]]),
+    varp_nif:bind(Vp, F),
+    true = varp_nif:bcp(Vp),
+    %% varp:vec_sat_lap(Vp,3,0,0,0),
+    Xi = varp:find_symbol(Vp,varp_ast:var_term(X)),
+    Yi = varp:find_symbol(Vp,varp_ast:var_term(Y)),
+    Zi = varp:find_symbol(Vp,varp_ast:var_term(Z)),
+    varp:vec_sat(Vp, [Xi,Yi,Zi]),
+					
+    Bs = [binding(Vp, Var) || Var <- [X,Y,Z,A]],
+    ?dbg0("~p\n", [Bs]),
+    t = proplists:get_value("A", Bs),
+    u = proplists:get_value("X", Bs),
+    u = proplists:get_value("Y", Bs),
+    u = proplists:get_value("Z", Bs),
+    ok.
+
+saturate_c2() ->
+    Vp = varp_nif:new(#{ xref => true }),
+    X = {p,'X',[]},
+    Y = {p,'Y',[]},
+    Z = {p,'Z',[]},
+    A = {p,'A',[]},
+    B = {p,'B',[]},
+    F = varp_ast:build(
+	  {'ALL',[
+		  {imp, {'ALL',[{'not',X},{'not',Y},{'not',Z}]},
+		   {'and',{'not',A},{'not',B}}},
+		  {imp, {'ALL',[{'not',X},{'not',Y},Z]}, 
+		   {'and',{'not',A},{'not',B}}},
+		  {imp, {'ALL',[{'not',X},Y,{'not',Z}]}, 
+		   {'and',{'not',A},B}},
+		  {imp, {'ALL',[{'not',X},Y,Z]},
+		   {'and',{'not',A},B}},
+		  {imp, {'ALL',[X,{'not',Y},{'not',Z}]}, 
+		   {'and',A,{'not',B}}},
+		  {imp, {'ALL',[X,{'not',Y},{'not',Z}]}, 
+		   {'and',A,{'not',B}}},
+		  {imp, {'ALL',[X,{'not',Y},Z]}, 
+		   {'and',A,{'not',B}}},
+		  {imp, {'ALL',[X,Y,{'not',Z}]}, 
+		   {'and',A,B}},
+		  {imp, {'ALL',[X,Y,Z]}, 
+		   {'and',A,B}}
+		 ]},
+	  Vp),
+    Ai = varp:find_symbol(Vp,varp_ast:var_term(A)),
+    Bi = varp:find_symbol(Vp,varp_ast:var_term(B)),
+    Xi = varp:find_symbol(Vp,varp_ast:var_term(X)),
+    Yi = varp:find_symbol(Vp,varp_ast:var_term(Y)),
+    Zi = varp:find_symbol(Vp,varp_ast:var_term(Z)),
+
+    ?dbg0("~w\n", [[{A,Ai},{B,Bi},{X,Xi},{Y,Yi},{Z,Zi}]]),
+    varp_nif:bind(Vp, F),
+    true = varp_nif:bcp(Vp),
+    %% varp:vec_sat_lap(Vp,3,0,0,0),
+
+    varp:vec_sat(Vp, [Xi,Yi,Zi]),
+					
+    Bs = [binding(Vp, Var) || Var <- [X,Y,Z,A,B]],
+    ?dbg0("~p\n", [Bs]),
+    "X" = proplists:get_value("A", Bs),
+    "Y" = proplists:get_value("B", Bs),
+    u = proplists:get_value("X", Bs),
+    u = proplists:get_value("Y", Bs),
+    u = proplists:get_value("Z", Bs),
+    ok.
+    
+binding(Vp, X={p,_,_}) ->
+    XSym = varp_ast:var_term(X),
+    case varp:find_symbol(Vp, XSym) of
+	Xi when is_integer(Xi) ->
+	    XName = format_symbol(false, XSym),
+	    case varp:bound(Vp,Xi) of
+		true -> {XName, t};
+		false -> {XName, f};
+		undefined -> {XName, u};
+		Yi ->
+		    case varp:variable_info(Vp, abs(Yi), symbol) of
+			[{Y,_}] ->
+			    YName = format_symbol(Yi < 0, Y),
+			    {XName, YName}
+		    end
+	    end
+    end.
+
+format_symbol(Sym) ->
+    format_symbol(false, Sym).
+
+format_symbol(false, Sym) ->
+    lists:flatten(varp_formula:format_internal_symbol(Sym));
+format_symbol(true, Sym) ->
+    [$! | lists:flatten(varp_formula:format_internal_symbol(Sym))].
 
 sat(Formula, ExpectedModels) ->
     sat_(Formula, ExpectedModels, backtrack).

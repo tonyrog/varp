@@ -67,7 +67,8 @@ options() ->
 	key => minimize,
 	spec => {enum,[{"0", none}, {"none",none},
 		       {"1", local}, {"local",local},
-		       {"2", recursive}, {"recursive",recursive}]},
+		       {"2", global}, {"global",global},
+		       {"3", recursive}, {"recursive",recursive}]},
 	default => none,
 	description => "Use conflict clause minimization."
       },

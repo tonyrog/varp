@@ -28,8 +28,8 @@
 -export([format_lit/2, format_lit/3]).
 -export([format_literals/2, format_literals/3]).
 -export([format_var/2]).
--export([format_symbol/1]).
 -export([format_binding/1]).
+-export([format_internal_symbol/1]).
 -export([filter_bindings/1]).
 -export([format_clause/2, format_clause/3]).
 -export([log_clause/2]).
@@ -3159,6 +3159,10 @@ format_symbol({bitindex,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol(Var={p,_,_}) ->
     format_p(Var).
+
+%% format varp_nif symbol {Name,[param()]}
+format_internal_symbol({SymName,Params}) ->
+    [SymName | format_params(Params)].
 
 fmt_bind(Bs,X,Y,D) ->
     io_lib:format("~s/~s(~w)", [fmt_v(Bs,X),fmt_v(Bs,Y),D]).

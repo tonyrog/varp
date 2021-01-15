@@ -441,7 +441,7 @@ setopt(Key, Value, OptMap, OptSpec) when is_atom(Key) ->
 		    erlang:error(badarg)
 	    end;
 	_ ->
-	    io:format("key ~p not in ~p\n", [Key,OptSpec]),
+	    ?dbg0("key ~p not in ~p\n", [Key,OptSpec]),
 	    erlang:error(badkey)
     end.
 

@@ -10,6 +10,7 @@
 -include("varp.hrl").
 
 -export([build/1, build/2, build/3]).
+-export([var_term/1]).
 -export([test/1]).
 
 build(Tree) ->

@@ -31,7 +31,9 @@
 -export([default_options/0]).
 -export([read_timer/1]).
 -export([set_local_timeout/2]).
+-export([clear_local_timeout/1]).
 -export([set_global_timeout/2]).
+-export([clear_global_timeout/1]).
 -export([is_local_timeout/1]).
 -export([is_global_timeout/1]).
 -export([is_timeout/1]).
@@ -158,7 +160,7 @@
 -export([get_conflict_counter/1]).
 
 %% utils
--export([vec_create/3]).
+-export([vec_create/2, vec_create/3]).
 -export([vec_step/2]).
 -export([vec_extend/3]).
 -export([vec_extend_rand/3]).
@@ -615,7 +617,17 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 	    OptMap1 =
 		lists:foldl(
 		  fun({Key,Value}, Mi) ->
-			  varp_option:setopt(Key,Value,Mi,OptionSpec)
+			  try varp_option:setopt(Key,Value,Mi,OptionSpec) of
+			      Mj -> Mj
+			  catch
+			      error:badkey ->
+				  io:format("unknown key ~w\n", [Key]),
+				  Mi;
+			      error:badarg ->
+				  io:format("unsupported value ~w for key ~w\n",
+					    [Value, Key]),
+				  Mi
+			  end
 		  end, OptMap, OptionList),
 	    parse_do_(Ps, PluginMap, [{Mod, OptMap1}|Acc])
     end;
@@ -1546,11 +1558,17 @@ remove_line(Cs=[$\n|_]) -> Cs;
 remove_line([_|Cs]) -> remove_line(Cs);
 remove_line([]) -> [].
 
+clear_local_timeout(Bs) ->
+    Bs#bs { t_local = undefined }.
+
 set_local_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
     TRef = erlang:start_timer(trunc(1000*Timeout), undefined, ok),
     Bs#bs { t_local = TRef };
 set_local_timeout(Bs, infinity) ->
     Bs#bs { t_local = undefined }.
+
+clear_global_timeout(Bs) ->
+    Bs#bs { t_global = undefined }.
 
 set_global_timeout(Bs, Timeout) when is_number(Timeout), Timeout > 0 ->
     TRef = erlang:start_timer(trunc(1000*Timeout), undefined, ok),
@@ -1986,7 +2004,7 @@ get_bindings_trail(Vp, Level) ->
 %%  intersect_var(X3, Y30, Y31)
 %%
 vec_sat_lap(V,K,Q,F,R) ->
-    case vec_create(V, varp_nif:next_unbound(V), K) of
+    case vec_create(V, K) of
 	[] -> true;
 	Vec0 -> vec_sat_lap_(V,Vec0,Q,F,R)
     end.
@@ -2015,12 +2033,14 @@ vec_sat(V,V0,Q,F,R,FriendMap) ->
     V1 = vec_extend(V, V0, Q),
     V2 = vec_extend_friend(V, V1, F, FriendMap),
     V3 = vec_extend_rand(V, V2, R),
+    %% io:format("V0=~w, V1=~w, V2=~w, V3=~w\n", [V0,V1,V2,V3]),
     vec_sat(V, V3).
 
 vec_sat(V, Vec) when is_list(Vec) ->
     0 = varp_nif:push(V),
     Res = satv_(V,list_to_tuple(Vec)),
     varp_nif:pop(V, 0),
+    ?dbg0("Vec ~w, Res=~w\n", [Vec, Res]),
     case Res of
 	false ->
 	    false;
@@ -2036,32 +2056,47 @@ vec_sat(V, Vec) when is_list(Vec) ->
     end.
 
 satv_(V, Vt) when is_tuple(Vt) ->
-    %% io:format("satv ~w\n", [Vt]),
     N = tuple_size(Vt),
     Bt = bcpv_(V,(1 bsl N)-1, Vt, []),
     satvar_(V, 0, N, Vt, Bt, []).
 
 %% eval for variable I 
 satvar_(V, I, N, Vt, Bt, Bs) when I < N ->
+    Vi = element(I+1, Vt),
+    ?dbg0("~w: Vi = ~w (Vt=~w)\n", [I,Vi,Vt]),
     Js = lists:seq(0, (1 bsl N)-1),
-    B1 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =/= 0]),
-    B0 = interv(V,[element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =:= 0]),
-    %% io:format("satvar_ Vt = ~w, B0 = ~w, B1 = ~w\n", [Vt, B0, B1]),
-    if B0 =:= false, B1 =:= false -> false;
-       B0 =:= false, B1 =:= {} -> satvar_(V, I+1, N, Vt, Bt, Bs);
-       B1 =:= false, B0 =:= {} -> satvar_(V, I+1, N, Vt, Bt, Bs);
-       B0 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B1|Bs]);
-       B1 =:= false -> satvar_(V, I+1, N, Vt, Bt, [B0|Bs]);
+    B1s = [element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =/= 0],
+    B1 = interv(V,B1s),
+    ?dbg0("~w/1: ~w => ~w\n", [Vi,B1s,B1]),
+    B0s = [element(J+1,Bt) || J <- Js, (J band (1 bsl I)) =:= 0],
+    B0 = interv(V,B0s),
+    ?dbg0("~w/0: ~w =>  ~w\n", [Vi,B0s,B0]),
+    if B0 =:= false, B1 =:= false ->
+	    ?dbg0("  B2 = ~w\n", [false]),
+	    false;
+       B0 =:= false, B1 =:= {} -> 
+	    ?dbg0("  B2 = ~w\n", [{}]),
+	    satvar_(V, I+1, N, Vt, Bt, Bs);
+       B1 =:= false, B0 =:= {} -> 
+	    ?dbg0("  B2 = ~w\n", [{}]),
+	    satvar_(V, I+1, N, Vt, Bt, Bs);
+       B0 =:= false ->
+	    ?dbg0("  B2 = ~w\n", [B1]),
+	    satvar_(V, I+1, N, Vt, Bt, [B1|Bs]);
+       B1 =:= false ->
+	    ?dbg0("  B2 = ~w\n", [B0]),
+	    satvar_(V, I+1, N, Vt, Bt, [B0|Bs]);
        true ->
-	    case intersect_bindings(V, element(I+1,Vt), B0, B1) of
+	    case intersect_bindings(V, Vi, B0, B1) of
 		{} ->
+		    ?dbg0("  B2 = ~w\n", [{}]),
 		    satvar_(V, I+1, N, Vt, Bt, Bs);
 		B2 ->
+		    ?dbg0("  B2 = ~w\n", [B2]),
 		    satvar_(V, I+1, N, Vt, Bt, [B2|Bs])
 	    end
     end;
 satvar_(_V, N, N, _Vt, _Bt, Bs) ->
-    %% io:format("  Bs = ~w\n", [Bs]),
     Bs.
 
 %% interv0(_V, As) ->
@@ -2072,14 +2107,13 @@ interv(V, [false|As]) -> interv(V, As);
 interv(V, [A|As]) -> varp_nif:mark(V, A), interv_(V, As).
 
 interv_(V, [false|As]) -> interv_(V, As);
-interv_(V, [A|As]) -> varp_nif:mark(V, A), interv_(V, As);
+interv_(V, [A|As]) -> varp_nif:intersect_marks(V, A), interv_(V, As);
 interv_(V, []) -> varp_nif:get_marked(V, true).
 
 %% eval all 2^N combinations of Vt
 bcpv_(_V,-1, _Vt, Acc) ->
     list_to_tuple(Acc);
 bcpv_(V,I, Vt, Acc) ->
-    %% io:format("bcpv I=~w\n", [I]),
     varp_nif:push(V),
     case bindv(V, I, Vt) of
 	false ->
@@ -2087,10 +2121,10 @@ bcpv_(V,I, Vt, Acc) ->
 	    varp_nif:pop(V),
 	    bcpv_(V,I-1, Vt, [false|Acc]);
 	true ->
-	    varp_nif:push(V),
+	    L = varp_nif:push(V),
 	    Ei = case varp_nif:bcp(V) of
 		     false -> false;
-		     true -> varp_nif:get_bindings(V, 2)
+		     true -> varp_nif:get_bindings(V, L+1)
 		 end,
 	    varp_nif:pop(V),
 	    varp_nif:pop(V),
@@ -2107,7 +2141,6 @@ bindv(V, J, I, Vt) ->
     Xj = if I band (1 bsl (J-1)) =/= 0 -> element(J,Vt); 
 	    true -> -element(J,Vt)
 	 end,
-    %% io:format("bindv J=~w Xj=~w\n", [J, Xj]),
     varp_nif:bind(V,Xj) andalso bindv(V,J-1,I,Vt).
 
 
@@ -2219,9 +2252,11 @@ install_tuple_bindings_(_V, _Level, I, Bt) when I > tuple_size(Bt) ->
 install_tuple_bindings_(V, Level, I, Bt) when I =< tuple_size(Bt) ->
     case element(I,Bt) of
 	X when is_integer(X) ->
+	    ?dbg0("install ~w = 1\n", [X]),
 	    true = varp_nif:bind(V, X),
 	    install_tuple_bindings_(V,Level,I+1,Bt);	    
 	{X,Y} when Level =:= 0 ->
+	    ?dbg0("install ~w = ~w\n", [X, Y]),
 	    Xa = varp_nif:variable_info(V, X, is_atom),
 	    Ya = varp_nif:variable_info(V, Y, is_atom),
 	    if Ya, not Xa ->
@@ -2231,9 +2266,11 @@ install_tuple_bindings_(V, Level, I, Bt) when I =< tuple_size(Bt) ->
 	    end,
 	    install_tuple_bindings_(V,Level,I+1,Bt);
 	{X,t} ->
+	    ?dbg0("install ~w = t\n", [X]),
 	    true = varp_nif:bind(V, X),
 	    install_tuple_bindings_(V,Level,I+1,Bt);
 	{X,f} ->
+	    ?dbg0("install ~w = f\n", [X]),
 	    true = varp_nif:bind(V, -X),
 	    install_tuple_bindings_(V,Level,I+1,Bt)
     end.
@@ -2276,8 +2313,10 @@ vec_bind(_V, []) ->
 vec_bind(V, [Xi|Vec]) ->
     varp_nif:bind(V, Xi) andalso vec_bind(V, Vec).
 
-%% read "vector" of unbound variables starting from Var (must be unbound)
-%% assume there are at least K unbound variables (FIXME)
+%% read "vector" of unbound variables
+vec_create(V, K) ->
+    vec_create(V, varp_nif:next_unbound(V), K).
+
 vec_create(_V, false, _K) ->
     [];
 vec_create(V, Vi, K) ->

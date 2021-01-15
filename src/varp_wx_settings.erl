@@ -435,17 +435,8 @@ varp_layout(I) when is_integer(I) ->
 		options => [{majorDim,1},{style,vertical}]},
 	     [{"None", none},
 	      {"Local", local},
+	      {"Global", global},
 	      {"Recursive", recursive}]},
-	    {space, ?VSPACE},
-	    {vertical, #{ label => "Max clause length" },
-	     [
-	      expand,
-	      {slider,#{ name => [profile,I,options,backjump,iorder],
-			 value => 3,
-			 min => 0, max => 100,
-			 options => [{style,[sl_horizontal,sl_labels]}]
-		       }}
-	     ]},
 	    {space, ?VSPACE},
 	    {spin,#{ label => "Max conflicts", 
 		     name => [profile,I,options,backjump,max_conflicts],

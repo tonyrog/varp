@@ -82,7 +82,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     Threshold = maps:get(threshold, Param, 0),
     Laps = maps:get(laps, Param, infinity),
-    ?dbg1("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
+    ?dbg0("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
     saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold).
 
 saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
@@ -102,10 +102,10 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
     case loop(Bs1,K,Q,F,R,N,Level,MaxLaps,Threshold,FriendMap) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
-	{Reason,Bs1} -> 
-	    varp_nif:config(Bs#bs.vp, xref, false),
+	{Reason,Bs2} -> 
+	    varp_nif:config(Bs2#bs.vp, xref, false),
 	    ?dbg0("saturate limit ~w\n", [Reason]),
-	    {Reason,[],Bs1#bs{ t_local = undefined }}
+	    {Reason,[],Bs2}
     end.
 
 loop(Bs,K,Q,F,R,N,Level,Laps,Threshold,FriendMap) ->
@@ -141,6 +141,14 @@ lap(Bs,K,Q,F,R,FriendMap) ->
 lap_(Bs,Vec0,Q,F,R,Count,FriendMap) when Count band ?COUNT =:= 0 ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
+	{true,?TIMEOUT} ->
+	    Bs1 = varp:clear_local_timeout(Bs),
+	    case varp:is_local_timeout(Bs) of
+		true ->
+		    {true, Bs1};
+		false ->
+		    {?TIMEOUT, Bs1}
+	    end;
 	{true,What} ->
 	    {What, Bs};
 	false ->
