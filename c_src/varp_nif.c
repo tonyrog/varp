@@ -65,7 +65,7 @@
 // LIT_VALUE          store literal values instead of variable value
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
 //
-//#define NIF_TRACE
+// #define NIF_TRACE
 #define TWL_BACKWARD
 #define LIT_INTEGER 32
 #define LIT_VALUE
@@ -6014,18 +6014,13 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
     UNUSED(argc);
     lit_t xp, yp;
     varp_t* vp;
-
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &xp))
 	return enif_raise_exception(env, ATOM(literal));
-    // enif_fprintf(stdout,"xp=%d value=%s\r\n",
-    //   export_l(xp),format_ival(get_l(vp,xp)));
     if (!vif_get_lit(env, vp, argv[2], &yp))
 	return enif_raise_exception(env, ATOM(literal));
-    // enif_fprintf(stdout,"yp=%d value=%s\r\n",
-    //   export_l(yp),format_ival(get_l(vp,yp)));
-
     if (!vp->opt.xref) // must enable cross reference!
 	return enif_raise_exception(env, ATOM(xref));	
     if (vp->level != 0) // only on level 0!
@@ -6039,14 +6034,16 @@ static ERL_NIF_TERM varp_subst(ErlNifEnv* env, int argc,
 	ival_t x, y;
 
 	y = get_l(vp, yp);
-	if (I_CONST(y)) {  // we may allow binding later...
-	    // enif_fprintf(stdout,"y=%s\r\n", format_ival(y));
-	    return enif_make_badarg(env);
+	if (I_CONST(y)) {
+	    if (!set_lit(env, vp, xp, y, 0))
+		return enif_make_boolean(env, false);
+	    return enif_make_boolean(env, true);
 	}
 	x = get_l(vp, xp);
 	if (I_CONST(x)) {
-	    // enif_fprintf(stdout,"x=%s\r\n", format_ival(x));
-	    return enif_make_badarg(env);
+	    if (!set_lit(env, vp, yp, x, 0))
+		return enif_make_boolean(env, false);
+	    return enif_make_boolean(env, true);	    
 	}
 	vp->caller_env = env;
 	subst(vp, xp, yp);
