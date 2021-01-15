@@ -792,6 +792,7 @@ DECL_ATOM(literal);
 DECL_ATOM(literal_integer);
 DECL_ATOM(literal_size);
 DECL_ATOM(local);
+DECL_ATOM(global);
 DECL_ATOM(mark);
 DECL_ATOM(max_bound);
 DECL_ATOM(max_conflicting);
@@ -5318,7 +5319,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     cix_t  cix;
     clause_t* cp;
     int i,n;
-    int recursive = 0;
+    int method = 0;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
@@ -5326,9 +5327,11 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (argc > 2) {
 	if (EQUAL_KEY(env, local, argv[2]))
-	    recursive = 0;
+	    method = 0;
+	else if (EQUAL_KEY(env, global, argv[2]))
+	    method = 2;	
 	else if (EQUAL_KEY(env, recursive, argv[2]))
-	    recursive = 1;
+	    method = 3;
 	else
 	    return enif_make_badarg(env);
     }
@@ -5348,7 +5351,7 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	literal_t* lp = l2ll(vp, li);
 	lp->mark = 1;
     }
-    if (recursive) {
+    if (method > 0) {
 	// forward version of recursive mark
 	for (i = 1; i < vp->level; i++) {
 	    variable_t** bpv = bindings_at(vp, i);
@@ -9133,6 +9136,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(literal_integer);
     LOAD_ATOM(literal_size);
     LOAD_ATOM(local);
+    LOAD_ATOM(global);
     LOAD_ATOM(mark);
     LOAD_ATOM(max_bound);
     LOAD_ATOM(max_conflicting);
