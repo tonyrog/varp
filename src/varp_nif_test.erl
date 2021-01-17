@@ -109,12 +109,12 @@ bindings1() ->
     Match1a = [X1,-X2,X3],
     Match1a = varp:get_bindings_list(V, 1),
     Match1b = [X3,-X2,X1],
-    Match1b = varp:get_bindings_list(V, 1, false, true),
+    Match1b = varp:get_bindings_list(V, 1, true),
 
     Match2a = [-X4,X5,-X6],
     Match2a = varp:get_bindings_list(V, 2),
     Match2b = [-X6,X5,-X4],
-    Match2b = varp:get_bindings_list(V, 2, false, true),
+    Match2b = varp:get_bindings_list(V, 2, true),
     ok.
 
 test0() ->
@@ -1254,7 +1254,6 @@ watch1() ->
     ?T = varp_nif:value(V, X2),
 
     C1 = varp_nif:implication_clause(V, X2),
-    %% 1 = varp_nif:implication_pos(V, X2),
     4 = varp_nif:implication_level(V, X2),
 
     %% add clauses under the above bindings
@@ -1830,6 +1829,8 @@ get_sym_literal(Vp, Li) ->
 
 %% 
 %% bcp 999 clauses
+%% 2021-01-15
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 54684
 %%
 %% 2021-01-13
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 51582

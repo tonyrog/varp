@@ -73,7 +73,6 @@
 -export([subst/3]).
 -export([implication_clause/2]).
 -export([implication_level/2]).
--export([implication_pos/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/4]).
@@ -104,10 +103,8 @@
 -export([use_clause/2]).
 -export([clause_info/2,clause_info/3]).
 -export([get_undo_state/2]).
--export([get_nbindings/2, get_nbindings/3]).
--export([get_nbindings/4, get_nbindings/5]). 
--export([get_bindings/1, get_bindings/2, get_bindings/3]).
--export([get_bindings/4, get_bindings/5]).
+-export([get_nbindings/2, get_nbindings/3, get_nbindings/4]). 
+-export([get_bindings/1, get_bindings/2, get_bindings/3, get_bindings/4]).
 -export([get_number_of_bindings/2]).
 -export([get_queue/1]).
 -export([queue_first/1]).
@@ -143,7 +140,7 @@
 -export([variable_info/2, variable_info_keys/0]).
 -export([literal_info/2,  literal_info_keys/0]).
 -export([get_latest_binding/1]).
--export([get_bindings_list/2, get_bindings_list/3, get_bindings_list/4]).
+-export([get_bindings_list/2, get_bindings_list/3]).
 -export([get_bindings_trail/2]).
 -export([get_all_bindings/1]).
 
@@ -1681,7 +1678,7 @@ variable_info(Vp, Index) ->
 	What <-variable_info_keys()].
 
 variable_info_keys() ->
-    [implication, implication_clause, implication_pos,
+    [implication, implication_clause,
      level, phase, degree, is_atom, is_used, symbol].
 
 literal_info(Vp,Index) ->
@@ -1722,7 +1719,6 @@ decide(Vp,X,Level) -> varp_nif:decide(Vp,X,Level).
 subst(Vp,X,Y) -> varp_nif:subst(Vp,X,Y).
 implication_clause(Vp, Lit) -> varp_nif:implication_clause(Vp, Lit).
 implication_level(Vp, Lit) -> varp_nif:implication_level(Vp, Lit).
-implication_pos(Vp, Lit) -> varp_nif:implication_pos(Vp, Lit).
 conflicting_clause(Vp) -> varp_nif:conflicting_clause(Vp).
 conflicting_clause(Vp, Index) -> varp_nif:conflicting_clause(Vp, Index).
 conflict(Vp,Level, Bump, Index) -> varp_nif:conflict(Vp,Level, Bump, Index).
@@ -1767,15 +1763,12 @@ queue_clear(Vp) -> varp_nif:queue_clear(Vp).
 get_decision(Vp, Level) -> varp_nif:get_decision(Vp, Level).
 get_undo_state(Vp, Level) -> varp_nif:get_undo_state(Vp, Level).
 get_nbindings(Vp,Count) -> varp_nif:get_nbindings(Vp,Count).
-get_nbindings(Vp,Count,ClauseInfo) ->
-    varp_nif:get_nbindings(Vp,Count,ClauseInfo).
-get_nbindings(Vp,Count,ClauseInfo,AsTrail) -> varp_nif:get_nbindings(Vp,Count,ClauseInfo,AsTrail).
-get_nbindings(Vp,Count,ClauseInfo,AsTrail,AsTuple) -> varp_nif:get_nbindings(Vp,Count,ClauseInfo,AsTrail,AsTuple).
+get_nbindings(Vp,Count,AsTrail) -> varp_nif:get_nbindings(Vp,Count,AsTrail).
+get_nbindings(Vp,Count,AsTrail,AsTuple) -> varp_nif:get_nbindings(Vp,Count,AsTrail,AsTuple).
 get_bindings(Vp) -> varp_nif:get_bindings(Vp).
-get_bindings(Vp, Level) -> varp_nif:get_bindings(Vp, Level).
-get_bindings(Vp, Level, ClauseInfo) -> varp_nif:get_bindings(Vp, Level, ClauseInfo).
-get_bindings(Vp, Level, ClauseInfo, Trail) -> varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail).
-get_bindings(Vp, Level, ClauseInfo, Trail, AsTuple) -> varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail, AsTuple).
+get_bindings(Vp, Level) -> varp_nif:get_bindings(Vp,Level).
+get_bindings(Vp, Level, Trail) -> varp_nif:get_bindings(Vp,Level,Trail).
+get_bindings(Vp, Level, Trail, AsTuple) -> varp_nif:get_bindings(Vp, Level, Trail, AsTuple).
 get_number_of_bindings(Vp, Level) -> varp_nif:get_number_of_bindings(Vp, Level).
 order_first(Vp, VarList) -> varp_nif:order_first(Vp, VarList).
 order_last(Vp, List) -> varp_nif:order_last(Vp, List).
@@ -1966,17 +1959,15 @@ get_all_bindings(V) ->
     [{L,varp_nif:get_decision(V,L),varp_nif:get_bindings(V, L)} ||
 	L <- lists:seq(Level,0,-1)].
 
-get_bindings_list(Vp, Level, ClauseInfo, Trail) ->
-    varp_nif:get_bindings(Vp, Level, ClauseInfo, Trail, false).
-
-get_bindings_list(Vp, Level, ClauseInfo) ->
-    varp_nif:get_bindings(Vp, Level, ClauseInfo, false, false).
-
 get_bindings_list(Vp, Level) ->
-    varp_nif:get_bindings(Vp, Level, false, false, false).
+    varp_nif:get_bindings(Vp, Level, false, false).
+get_bindings_list(Vp, Level, Trail) ->
+    varp_nif:get_bindings(Vp, Level, Trail, false).
+
+
 
 get_bindings_trail(Vp, Level) ->
-    varp_nif:get_bindings(Vp, Level, false, true, false).
+    varp_nif:get_bindings(Vp, Level, true, false).
 
 
 %% bcp over vector [X1,X2,...]

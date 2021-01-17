@@ -36,7 +36,6 @@
 -export([subst/3]).
 -export([implication_clause/2]).
 -export([implication_level/2]).
--export([implication_pos/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/4]).
@@ -68,10 +67,8 @@
 -export([clause_info/2,clause_info/3]).
 -export([get_decision/2]).
 -export([get_undo_state/2]).
--export([get_nbindings/2, get_nbindings/3]).
--export([get_nbindings/4, get_nbindings/5]). 
--export([get_bindings/1, get_bindings/2, get_bindings/3]).
--export([get_bindings/4, get_bindings/5]).
+-export([get_nbindings/2, get_nbindings/3,get_nbindings/4]). 
+-export([get_bindings/1, get_bindings/2, get_bindings/3,get_bindings/4]).
 -export([get_number_of_bindings/2]).
 -export([queue_first/1]).
 -export([queue_next/2]).
@@ -242,8 +239,7 @@ next_symbol(_Vp, _Symbol) ->
     ?nif_stub().
 
 %%
-%% What::implication|implication_clause|implication_pos|
-%%       level|degree|is_atom|symbol
+%% What::implication|implication_clause|level|degree|is_atom|symbol
 %%
 
 variable_info(_Vp,Index,_What)
@@ -314,11 +310,6 @@ implication_clause(_Vp, Lit) when is_integer(Lit) ->
 -spec implication_level(Vp::varp(), Lit::literal()) ->
 	  Level::level().
 implication_level(_Vp, Lit) when is_integer(Lit) ->
-    ?nif_stub().
-
--spec implication_pos(Vp::varp(), Lit::literal()) ->
-			     Pos::integer().
-implication_pos(_Vp, Lit) when is_integer(Lit) ->
     ?nif_stub().
 
 -spec conflicting_clause(Vp::varp()) -> Cix::integer().
@@ -547,27 +538,18 @@ get_undo_state(_Vp, _Level) ->
 get_nbindings(_Vp,Count) when is_integer(Count), Count>= 0 ->
     ?nif_stub().
 
--spec get_nbindings(Vp::varp(), Count::non_neg_integer(),
-		    ClauseInfo::boolean()) ->
+-spec get_nbindings(Vp::varp(),Count::non_neg_integer(),AsTrail::boolean()) ->
 	  bindings().
 
-get_nbindings(_Vp,Count,_ClauseInfo) when is_integer(Count), Count >= 0 ->
-    ?nif_stub().
-
--spec get_nbindings(Vp::varp(), Count::non_neg_integer(), 
-		    ClauseInfo::boolean(), AsTrail::boolean()) ->
-	  bindings().
-
-get_nbindings(_Vp,Count,_ClauseInfo,_AsTrail) when 
+get_nbindings(_Vp,Count,_AsTrail) when 
       is_integer(Count), Count >= 0 ->
     ?nif_stub().
 
 -spec get_nbindings(Vp::varp(), Count::non_neg_integer(),
-		    ClauseInfo::boolean(),
 		    AsTrail::boolean(),AsTuple::boolean()) ->
 	  bindings().
 
-get_nbindings(_Vp,Count,_ClauseInfo,_AsTrail,_AsTuple) 
+get_nbindings(_Vp,Count,_AsTrail,_AsTuple) 
   when is_integer(Count), Count>= 0 ->
     ?nif_stub().
 
@@ -586,34 +568,22 @@ get_bindings(_Vp) ->
 get_bindings(_Vp, Level) when is_integer(Level) ->
     ?nif_stub().
 
--spec get_bindings(Vp::varp(), Level::level(), ClauseInfo::boolean()) ->
-	  bindings().
-
-%% get bindings, as tuple, on level 'Level' with optional clause info
-get_bindings(_Vp, Level, ClauseInfo) when 
-      is_integer(Level),
-      is_boolean(ClauseInfo) ->
-    ?nif_stub().
-
--spec get_bindings(Vp::varp(), Level::level(), 
-		   ClauseInfo::boolean(), Trail::boolean()) ->
+-spec get_bindings(Vp::varp(), Level::level(), Trail::boolean()) ->
 	  bindings().
 
 %% get bindings, as tuple, on level 'Level' with optional clause info
 %% if Trail is true then return bindings in reversed order
-get_bindings(_Vp, Level, ClauseInfo, Trail) when
+get_bindings(_Vp, Level, Trail) when
       is_integer(Level),
-      is_boolean(ClauseInfo),
       is_boolean(Trail) ->
     ?nif_stub().
 
 -spec get_bindings(Vp::varp(), Level::level(), 
-		   ClauseInfo::boolean(), Trail::boolean(),
+		   Trail::boolean(),
 		   AsTuple::boolean()) -> bindings().
 
-get_bindings(_Vp, Level, ClauseInfo, Trail, AsTuple)  
+get_bindings(_Vp, Level, Trail, AsTuple)  
   when is_integer(Level),
-       is_boolean(ClauseInfo),
        is_boolean(Trail),
        is_boolean(AsTuple) ->
     ?nif_stub().
