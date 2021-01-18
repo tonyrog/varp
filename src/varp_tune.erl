@@ -23,7 +23,15 @@
 %% -define(TUNE_TIMEOUT, (60*5)).  %% 5 minutes
 -define(TUNE_TIMEOUT, (10)).  %% 10 seconds
 
+-type range() :: {From::number(), To::number()}.
+-type value() :: number() | atom().
+-type value_range() :: value() | range().
+-type domain() :: value_range() | [value_range()].
+
+-type spec() :: [{Key::atom(), Domain::domain()}].
+
 %% declare range of all parameters that need tuning
+-spec global_spec() -> spec().
 global_spec() ->
     [
      {phase, [false, true, undefined]},  %% init-phase
@@ -31,9 +39,10 @@ global_spec() ->
     ].
 
 %% specifiy parameter range used
+-spec backjump_spec() -> spec().
 backjump_spec() ->
     [
-     {minimize, [none,local,recursive]},
+     {minimize, [none,local,global,recursive]},
      {stumble,  {0,10}},
      {olle,     {0.0, 10.0}},
      {stumble_olle, [false, true]},

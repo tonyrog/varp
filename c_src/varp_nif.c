@@ -63,20 +63,20 @@
 // LIT_VALUE          store literal values instead of variable value
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
 //
-// #define NIF_TRACE
+//#define NIF_TRACE
 #define TWL_BACKWARD
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
-// #define ASSERTIONS
+//#define ASSERTIONS
 //#define DEBUG
 //#define DEBUG_BCP
 //#define DEBUG_NBCP
 //#define DEBUG_ORDER
-// #define DEBUG_MEM
-// #define FENCE_MEM
-// #define VALIDATE_TWL
-// #define VALIDATE_MODEL
+//#define DEBUG_MEM
+//#define FENCE_MEM
+//#define VALIDATE_TWL
+//#define VALIDATE_MODEL
 
 // #define COUNT(vp, cnt)
 #define COUNT(vp, cnt) vp->counter[(cnt)]++
@@ -260,6 +260,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "get_nbindings",       3,  varp_get_nbindings ) \
     NIF( "get_nbindings",       4,  varp_get_nbindings ) \
     NIF( "get_number_of_bindings", 2,  varp_get_number_of_bindings ) \
+    NIF( "order_sort",          2,  varp_order_sort ) \
+    NIF( "order_sort",          3,  varp_order_sort ) \
     NIF( "order_sort",          4,  varp_order_sort ) \
     NIF( "order_first",         2,  varp_order_first ) \
     NIF( "order_last",          2,  varp_order_last ) \
@@ -1786,7 +1788,7 @@ static inline int variable_is_unbound(varp_t* vp, variable_t* var)
 }
 
 // return true iff variable is marked as used or
-// variable does occure in some clause
+// variable does occur in some clause
 static inline int variable_is_used(varp_t* vp, variable_t* var)
 {
     return vp->opt.all_used || var->is_used;
@@ -2661,8 +2663,8 @@ static int pop_level(varp_t* vp)
 	vp->level = level;
 	set_min_level(vp);
 	DBG("%sPop_level: @%d, t=%s, decision=%s\r\n",
-	    indent(level), level, bnd_state_name[vp->undo[level].t],
-	    format_lit(vp, vp->undo[level].decision));
+	    indent(level), level, bnd_state_name[vp->bnd[level].t],
+	    format_lit(vp, vp->bnd[level].decision));
     }
     return level;
 }
@@ -2739,12 +2741,23 @@ static void var_init(varp_t* vp, variable_t* var, int ix)
 }
 
 // return 1 if literal array a is equal to literal array b, return 0 otherwise
-static int clause_is_equal(lit_t* a, lit_t* b, int size)
+// LIT_MARK0
+static int clause_is_equal(varp_t* vp, lit_t* a, lit_t* b, int size)
 {
-    int i = 0;
-    while((i<size) && (a[i] == b[i]))
-	i++;
-    return (i == size);
+    int i;
+    int all_marked = 1;
+// unordered compare
+    for (i = 0; i < size; i++)  // mark all in A
+	lit_mark(vp, a[i], LIT_MARK0);
+    for (i = 0; all_marked && (i < size); i++)
+	all_marked = lit_is_marked(vp, b[i], LIT_MARK0);
+    for (i = 0; i < size; i++)  // mark all in A
+	lit_unmark(vp, a[i], LIT_MARK0);
+    return all_marked;
+// ordered compare
+//    while((i<size) && (a[i] == b[i]))
+//	i++;
+//    return (i == size);
 }
 
 // allocate / resize clause hash table
@@ -2820,7 +2833,7 @@ static hlink_t* hlink_lookup(varp_t* vp,lit_t* lit,size_t size,uint32_t hvalue)
 	    if (hp->hvalue == hvalue) {
 		clause_t* cp = get_clause(vp, hp->cix);
 		ASSERT(cp != NULL);
-		if ((cp->size == size) && clause_is_equal(lit,cp->lit,size))
+		if ((cp->size == size) && clause_is_equal(vp,lit,cp->lit,size))
 		    return hp;
 	    }
 	    slist_iter_next(&iter);
@@ -3000,7 +3013,7 @@ static cix_t clauseset_find(varp_t* vp, lit_t* lit, size_t size,
 	if ((cp != NULL) &&
 	    (cp->size == size) &&
 	    (cp->hvalue == hvalue) &&
-	    clause_is_equal(lit, cp->lit, size)) {
+	    clause_is_equal(vp, lit, cp->lit, size)) {
 	    return cp->cix;
 	}
     }
@@ -3218,7 +3231,7 @@ static int vif_get_cix(ErlNifEnv* env,varp_t* vp,ERL_NIF_TERM term,cix_t* cixp)
 }
 
 // read a clause - list of literals
-int vif_get_lit_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
+static int vif_get_lit_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
 		     int* lenp, lit_t* clause)
 {
     if (clause == NULL) {
@@ -3252,7 +3265,7 @@ int vif_get_lit_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
 }
 
 // read a clause - list of literals
-int vif_get_literal_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
+static int vif_get_literal_list(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM list,
 			 int* lenp, literal_t** clause)
 {
     if (clause == NULL) {
@@ -3289,6 +3302,35 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
 {
     return enif_make_int(env, export_ll(lp));
 }
+
+
+// Read a list or tuple of literals into vp->tlit!
+// return size or -1 on failure
+static int vif_load_literals(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg)
+{
+    unsigned int n;
+    int len;
+    const ERL_NIF_TERM* elem;
+    
+    if (enif_get_list_length(env, arg, &n)) {
+	dynvar_resize(vp->tlit, n);
+	len = n;
+	if (!vif_get_lit_list(env, vp, arg, &len, vp->tlit))
+	    return -1;
+	return len;
+    }
+    else if (enif_get_tuple(env, arg, &len, &elem)) {
+	int i;
+	dynvar_resize(vp->tlit, (size_t) len);
+	for (i = 0; i < len; i++) {
+	    if (!vif_get_lit(env, vp, elem[i], &vp->tlit[i]))
+		return -1;
+	}
+	return len;
+    }
+    return -1;
+}
+
 
 // cleanup symbols elements but leave in place
 static void symtab_slot_cleanup(dlist_t* list)
@@ -3734,6 +3776,7 @@ static int setup(varp_t* vp, varp_config_t* config)
 #ifdef LIT_INTEGER
     if (dynvar_init(vp->lit_mark, 2*vsize) < 0)
 	goto error;
+    memset(vp->lit_mark, 0, 2*vsize);
 #endif
 
 #ifdef PACKED_VALUE
@@ -3907,7 +3950,8 @@ static int add_variables(varp_t* vp, size_t n)
 	    return -1;
 #ifdef LIT_INTEGER
 	if (dynvar_set_capacity(vp->lit_mark, 2*cap) < 0)
-	    return -1;	
+	    return -1;
+	memset(vp->lit_mark+2*k, 0, 2*(cap-k));
 #endif
 #ifdef PACKED_VALUE
 #ifdef LIT_VALUE
@@ -4384,7 +4428,7 @@ void dump_order(char* label, varp_t* vp)
     var = cdlist_first(&vp->order_list);
     while(var != NULL) {
 	char* nmark = (var == vp->top) ? "*" : "";
-	enif_fprintf(stdout, "[o=%e]%s%s=%s ",
+	enif_fprintf(stdout, "[o=%.2f]%s%s=%s ",
 		     var->link.order,
 		     nmark,
 		     format_literal(vp, vindex_ll(vp, phase_export(var))),
@@ -4498,17 +4542,41 @@ static ERL_NIF_TERM varp_next_unbound(ErlNifEnv* env, int argc,
     return enif_make_boolean(env, false);
 }
 
-#define ORDER_UNDEFINED  0x00   // "zero" order
-#define ORDER_IDENTITY   0x01   // "input" order
-#define ORDER_RANDOM     0x02   // "random" order
-#define ORDER_DEGREE     0x03   // order according to occurence
-#define ORDER_RANK       0x04   // 1/n1+...1/nk where ni is size of clause i
-// #define ORDER_ACTIVITY   0x05   // order according to conflict activity
-#define ORDER_USER       0x06   // order according to user count
+typedef enum {
+    ORDER_UNDEFINED = 0,
+    ORDER_IDENTITY  = 1,    // "input" order
+    ORDER_RANDOM    = 2,    // "random" order
+    ORDER_DEGREE    = 3,    // order according to occurence
+    ORDER_RANK      = 4,    // 1/n1+...1/nk where ni is size of clause i
+    ORDER_ACTIVITY   = 5,    // order according to conflict activity
+    ORDER_USER      = 6     // order according to user count
+} order_type_t;
 
-#define ORDER_ASCEND     0x00   // ascending order
-#define ORDER_DESCEND    0x80   // descending order
-#define ORDER_INTERLEAVE 0x40   // interleve order
+static const char* order_name[] = {
+    [ORDER_UNDEFINED] = "undefined",
+    [ORDER_IDENTITY] = "identity",
+    [ORDER_RANDOM] = "random",
+    [ORDER_DEGREE] = "degree",
+    [ORDER_RANK] = "rank",
+    [ORDER_ACTIVITY] = "activity",
+    [ORDER_USER] = "user"
+};
+
+typedef enum {
+    ORDER_ASCEND     = 0,    // ascending order
+    ORDER_DESCEND    = 1,    // descending order
+    ORDER_INTERLEAVE = 2     // interleve order
+} order_dir_t;
+
+static const char order_dir_char[] = {
+    [ORDER_ASCEND] = '+',
+    [ORDER_DESCEND] = '-',
+    [ORDER_INTERLEAVE] = '='
+};
+
+#define order_dir_char(x) \
+    ((x == ORDER_INTERLEAVE) ? '=' : ((x == ORDER_DESCEND) ? '-' : '+'))
+
 
 // setup current degree for all literals in pkey/nkey
 static void order_degree(varp_t* vp, float* pkey, float* nkey, int vn)
@@ -4525,10 +4593,10 @@ static void order_degree(varp_t* vp, float* pkey, float* nkey, int vn)
 	clause_t** cm = vp->clauseset[si];
 	for (i = 0; i < n; i++) {
 	    clause_t* cp = cm[i];
-	    int j;
 	    if (cp != NULL) {
 		int n = cp->size;
 		if (n > 0) {
+		    int j;
 		    for (j = 0; j < n; j++) {
 			int x = export_l(cp->lit[j]);
 			if ((x > 0) && (x < vmax))
@@ -4559,10 +4627,10 @@ static void order_rank(varp_t* vp, float* pkey, float* nkey, int vn)
 	clause_t** cm = vp->clauseset[si];
 	for (i = 0; i < n; i++) {
 	    clause_t* cp = cm[i];
-	    int j;
 	    if (cp != NULL) {
 		int n = cp->size;
 		if (n > 0) {
+		    int j;
 		    float r = 1/(float)n;
 		    for (j = 0; j < n; j++) {
 			int x = export_l(cp->lit[j]);
@@ -4614,8 +4682,8 @@ static void order_user(varp_t* vp, float* pkey, float* nkey, int vn)
     pkey[0] = nkey[0] = 0.0;
     for (i = 1; i < vn; i++) {
 	variable_t* var = vp->var_map[i];
-	pkey[i] = var->lit[LIT_POS].user;
-	nkey[i] = var->lit[LIT_NEG].user;
+	pkey[i] = (float) var->lit[LIT_POS].user;
+	nkey[i] = (float) var->lit[LIT_NEG].user;
     }
 }
 
@@ -4706,101 +4774,112 @@ static int cmp_keys QSORT_ARGS(const void* a, const void* b,void* arg)
 
 
 
-static int vif_get_order(ErlNifEnv* env, ERL_NIF_TERM arg, int* orderp)
+static int vif_get_order(ErlNifEnv* env, ERL_NIF_TERM arg,
+			 order_type_t* orderp, order_dir_t* dirp)
 {
-    int order;
-
-    if (enif_get_int(env, arg, &order)) {
-	if ((order < 0) || (order > 0xff))
-	    return 0;
-	if (((order & 0x3f) > 6) || ((order & 0x3f) == 5))
-	    return 0;
-	*orderp = order;
-	return 1;
-    }
     if (enif_is_undefined(env, arg)) {
 	*orderp = ORDER_UNDEFINED;
+	*dirp   = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, identity, arg)) {
-	*orderp = ORDER_IDENTITY | ORDER_DESCEND;
+	*orderp = ORDER_IDENTITY;
+	*dirp   = ORDER_ASCEND;  // NOTE the default!
 	return 1;
     }
     if (EQUAL_KEY(env, p_identity, arg)) {
-	*orderp = ORDER_IDENTITY | ORDER_ASCEND;
+	*orderp = ORDER_IDENTITY;
+	*dirp = ORDER_ASCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, n_identity, arg)) {
-	*orderp = ORDER_IDENTITY | ORDER_DESCEND;
+	*orderp = ORDER_IDENTITY;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, e_identity, arg)) {
-	*orderp = ORDER_IDENTITY | ORDER_INTERLEAVE;
+	*orderp = ORDER_IDENTITY;
+	*dirp = ORDER_INTERLEAVE;
 	return 1;
     }
     if (EQUAL_KEY(env, random, arg)) {
-	*orderp = ORDER_RANDOM | ORDER_DESCEND;
+	*orderp = ORDER_RANDOM;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, p_random, arg)) {
-	*orderp = ORDER_RANDOM | ORDER_ASCEND;
+	*orderp = ORDER_RANDOM;
+	*dirp =ORDER_ASCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, n_random, arg)) {
-	*orderp = ORDER_RANDOM | ORDER_DESCEND;
+	*orderp = ORDER_RANDOM;
+	*dirp =ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, e_random, arg)) {
-	*orderp = ORDER_RANDOM | ORDER_INTERLEAVE;
+	*orderp = ORDER_RANDOM;
+	*dirp = ORDER_INTERLEAVE;
 	return 1;
     }
     if (EQUAL_KEY(env, degree, arg)) {
-	*orderp = ORDER_DEGREE | ORDER_DESCEND;
+	*orderp = ORDER_DEGREE;
+	*dirp = ORDER_DESCEND;
 	return 1;
-
     }
     if (EQUAL_KEY(env, p_degree, arg)) {
-	*orderp = ORDER_DEGREE | ORDER_ASCEND;
+	*orderp = ORDER_DEGREE;
+	*dirp = ORDER_ASCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, n_degree, arg)) {
-	*orderp = ORDER_DEGREE | ORDER_DESCEND;
+	*orderp = ORDER_DEGREE;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, e_degree, arg)) {
-	*orderp = ORDER_DEGREE | ORDER_INTERLEAVE;
+	*orderp = ORDER_DEGREE;
+	*dirp = ORDER_INTERLEAVE;
 	return 1;
     }
     if (EQUAL_KEY(env, rank, arg)) {
-	*orderp = ORDER_RANK | ORDER_DESCEND;
+	*orderp = ORDER_RANK;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, p_rank, arg)) {
-	*orderp = ORDER_RANK | ORDER_ASCEND;
+	*orderp = ORDER_RANK;
+	*dirp = ORDER_ASCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, n_rank, arg)) {
-	*orderp = ORDER_RANK | ORDER_DESCEND;
+	*orderp = ORDER_RANK;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, e_rank, arg)) {
-	*orderp = ORDER_RANK | ORDER_INTERLEAVE;
+	*orderp = ORDER_RANK;
+	*dirp = ORDER_INTERLEAVE;
 	return 1;
     }
     if (EQUAL_KEY(env, user, arg)) {
-	*orderp = ORDER_USER | ORDER_DESCEND;
+	*orderp = ORDER_USER;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, p_user, arg)) {
-	*orderp = ORDER_USER | ORDER_ASCEND;
+	*orderp = ORDER_USER;
+	*dirp = ORDER_ASCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, n_user, arg)) {
-	*orderp = ORDER_USER | ORDER_DESCEND;
+	*orderp = ORDER_USER;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, e_user, arg)) {
-	*orderp = ORDER_USER | ORDER_INTERLEAVE;
+	*orderp = ORDER_USER;
+	*dirp = ORDER_INTERLEAVE;
 	return 1;
     }
     return 0;
@@ -4813,23 +4892,46 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     varp_t* vp;
     uint64_t arg = 0;
     int i, m, n;
-    int order[2];
+    order_type_t order[2];
+    order_dir_t dir[2];
     int r = 0;
 
+    order[0] = order[1] = ORDER_UNDEFINED;
+    dir[0] = dir[1] = ORDER_DESCEND;
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
-    if (!vif_get_order(env, argv[1], &order[0]))
+    if (!vif_get_order(env, argv[1], &order[0], &dir[0]))
 	return enif_make_badarg(env);
-    if (!vif_get_order(env, argv[2], &order[1]))
-	return enif_make_badarg(env);
-    if (!enif_get_uint64(env, argv[3], &arg))
-	return enif_make_badarg(env);
+    if (argc == 3) { // (key1,key2)  OR (key,arg)
+	if (!vif_get_order(env, argv[2], &order[1], &dir[1])) {
+	    if (!enif_get_uint64(env, argv[2], &arg))
+		return enif_make_badarg(env);
+	}
+    }
+    else if (argc == 4) { // (key1,key2,arg)
+	if (!vif_get_order(env, argv[2], &order[1], &dir[1]))
+	    return enif_make_badarg(env);
+	if (!enif_get_uint64(env, argv[3], &arg))
+	    return enif_make_badarg(env);
+    }
     if (vp->level != 0)
 	return enif_raise_exception(env, ATOM(level));
 
-    if (((order[0] & 0x0f) == ORDER_RANDOM) ||
-	((order[1] & 0x0f) == ORDER_RANDOM)) {
+    if ((order[0] == ORDER_RANDOM) || (order[1] == ORDER_RANDOM)) {
 	varp_set_seed(vp, arg);
+    }
+    // order undefined,x  ==  x
+    if (order[0] == ORDER_UNDEFINED) {
+	order[0] = order[1];
+	dir[0]   = dir[1];
+	order[1] = ORDER_UNDEFINED;
+	dir[1]   = ORDER_DESCEND;
+    }
+    // order x,x == x
+    if (order[0] == order[1]) {
+	order[1] = ORDER_UNDEFINED;
+	dir[1]   = ORDER_DESCEND;
     }
 
     n = (int)dynvar_size(vp->var_map);
@@ -4846,15 +4948,19 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	nkey[0] = nkey1; nkey[1] = nkey2;
 	pkey[0] = pkey1; pkey[1] = pkey2;
 
+	/* printf("order[0] = %c%s, order[1]=%c%s\r\n",
+	       order_dir_char[dir[0]], order_name[order[0]],
+	       order_dir_char[dir[1]], order_name[order[1]]); */
+	       
 	for (i = 1; i < 3; i++) {
 	    int k = i;
-	    switch(order[i-1] & 0x0f) {
-	    case ORDER_IDENTITY:
-		order_identity(vp, pkey[k-1], nkey[k-1], n);
-		break;
+	    switch(order[i-1]) {
 	    case ORDER_UNDEFINED:
 		order_undefined(vp, pkey[k-1], nkey[k-1], n);
-		k = 0;
+		k = 0; // NOTE k=0!
+		break;
+	    case ORDER_IDENTITY:
+		order_identity(vp, pkey[k-1], nkey[k-1], n);
 		break;
 	    case ORDER_RANDOM:
 		order_random(vp, pkey[k-1], nkey[k-1], n);
@@ -4872,7 +4978,7 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 		r = -1;
 		STK_LEAVE(sort_map);
 	    }
-	    if (order[i-1] & ORDER_DESCEND)
+	    if (dir[i-1] == ORDER_DESCEND)
 		k = -k;
 	    sort_key[i-1] = k;
 	}
@@ -4901,15 +5007,25 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 
 	    QSORT(sort_map, m, sizeof(int), cmp_keys, &kp);
 	    // setup variable phases & order
-	    k1 = abs(sort_key[0])-1;
-	    k2 = abs(sort_key[1])-1;
+	    k1 = sort_key[0];
+	    k2 = sort_key[1];
+	    
 	    for (i = 0; i < m; i++) {
 		int j = sort_map[i];
 		variable_t* var = vp->var_map[j];
-		float r = pkey[k1][j] - nkey[k1][j];
-		if (fabs(r) < EPSILON)
-		    r = (pkey[k2][j] - nkey[k2][j]);
-		var->phase = (r >= 0.0) ? I_TRUE : I_FALSE;
+		float r = 0.0;
+		// select positive or negative literal
+		if (k1 > 0)
+		    r = pkey[k1-1][j] - nkey[k1-1][j];
+		else if (k1 < 0)
+		    r = pkey[-k1-1][j] - nkey[-k1-1][j];
+		if ((k2 != 0) && (fabs(r) < EPSILON)) {
+		    if (k2 > 0)
+			r = pkey[k2-1][j] - nkey[k2-1][j];
+		    else /* if (k2 < 0) */
+			r = pkey[-k2-1][j] - nkey[-k2-1][j];
+		}
+		var->phase = (r >= 0.0) ? I_TRUE : I_FALSE; // FIXME?
 		dlist_insert_last(&vp->order_list, var);
 	    }
 #if defined(DEBUG_ORDER)
@@ -7087,8 +7203,30 @@ static int cmp_shuffle QSORT_ARGS(const void* a, const void* b,void* arg)
 #endif
 
 
+// replace literals with constants when possible
+static void eval_clause_array(varp_t* vp, lit_t* lit, size_t size)
+{
+    int i;
+    for (i = 0; i < (int)size; i++) {
+	if ((lit[i] == L_TRUE(vp)) || (lit[i] == L_FALSE(vp)))
+	    ;
+	else {
+	    literal_t* lp = l2ll(vp, lit[i]);
+	    if (ll2v(lp)->level == 0) {  // since we never undo level 0
+		switch(get_ll(vp,lp)) {
+		case I_TRUE:  lit[i] = L_TRUE(vp); break;
+		case I_FALSE: lit[i] = L_FALSE(vp); break;
+		case I_BOUND:
+		case I_UNDEF:
+		default: break;
+		}
+	    }
+	}
+    }
+}
+
 // sort literal, remove duplicates trim and return new size
-static size_t sort_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
+static size_t norm_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
 {
     int i;
     unsigned Tc=0, Fc=0;
@@ -7097,22 +7235,7 @@ static size_t sort_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
 
     // replace level 0 variables with constants
     if (!raw) {
-	for (i = 0; i < (int)size; i++) {
-	    if ((lit[i] == L_TRUE(vp)) || (lit[i] == L_FALSE(vp)))
-		;
-	    else {
-		literal_t* lp = l2ll(vp, lit[i]);
-		if (ll2v(lp)->level == 0) {  // since we never undo level 0
-		    switch(get_ll(vp,lp)) {
-		    case I_TRUE:  lit[i] = L_TRUE(vp); break;
-		    case I_FALSE: lit[i] = L_FALSE(vp); break;
-		    case I_BOUND:
-		    case I_UNDEF:
-		    default: break;
-		    }
-		}
-	    }
-	}
+	eval_clause_array(vp, lit, size);
     }
     // PRINT_LIT_ARRAY("   filt0", lit, size);
 
@@ -7163,13 +7286,65 @@ static size_t sort_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
     return size;
 }
 
+// new version - no sorting
+static size_t norm1_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
+{
+    int i, j;
+    unsigned Tc=0, Fc=0;
+
+    PRINT_LIT_ARRAY("   src", lit, size);
+
+    // eval first since we must unmark "real" literals in the end!
+    if (!raw)
+	eval_clause_array(vp, lit, size);
+
+    // PRINT_LIT_ARRAY("   eval", lit, size);
+    
+    for (i = 0; i < size; i++) {
+	if (lit_is_marked(vp, lit[i], LIT_MARK0)) // A,..,A
+	    lit[i] = L_FALSE(vp);
+	else if (lit_is_marked(vp, neg_l(lit[i]), LIT_MARK0)) // !A,..,A
+	    lit[i] = L_TRUE(vp);
+	else
+	    lit_mark(vp, lit[i], LIT_MARK0);
+    }
+    // remove constants and count constants found and unmark
+    j = 0;
+    for (i = 0; i < size; i++) {
+	lit_unmark(vp, lit[i], LIT_MARK0);
+	if (lit[i] == L_TRUE(vp)) Tc++;
+	else if (lit[i] == L_FALSE(vp)) Fc++;
+	else {
+	    if (j < i)
+		lit[j++] = lit[i];
+	    else
+		j++;
+	}
+    }
+    
+    // PRINT_LIT_ARRAY("del-dup", lit, size);
+    if (j == 0) {
+	if ((Tc==0) && (Fc>0))
+	    lit[j++] = L_FALSE(vp);
+    }
+    if (Tc>0) // add the T constant to the gate
+	lit[j++] = L_TRUE(vp);
+    PRINT_LIT_ARRAY("   dest", lit, size);
+#if defined(DEBUG_BCP)
+    enif_fprintf(stdout, "%sclause: ", indent(vp->level));
+    print_sym_array_nl(vp, lit, j);
+#endif
+    return j;	
+}
+
+
 static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 			      size_t size, bool_t put_unit)
 {
     clause_t* cp;
     uint32_t hvalue;
     
-    size = sort_clause_array(vp, lit, size, false);
+    size = norm1_clause_array(vp, lit, size, false);
 
     if (lit[size-1] == L_TRUE(vp))
 	return CLAUSE_TRUE;
@@ -7269,7 +7444,7 @@ static ERL_NIF_TERM varp_find_clause(ErlNifEnv* env, int argc,
 		r = enif_make_badarg(env);
 		STK_LEAVE(literals);
 	    }
-	    len = sort_clause_array(vp, literals, len, true);
+	    len = norm1_clause_array(vp, literals, len, true);
 	    if ((cix = clause_find(vp, literals, len)) == CLAUSE_NONE)
 		r = enif_make_boolean(env, false);
 	    else
@@ -7588,7 +7763,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 make_clause:
     unmark_all(vp);
     // printf("tlit.size = %ld\r\n", dynvar_size(vp->tlit));
-    size = sort_clause_array(vp, vp->tlit, dynvar_size(vp->tlit), false);
+    size = norm1_clause_array(vp, vp->tlit, dynvar_size(vp->tlit), false);
     // printf("size = %ld\r\n", size);
 
     if (vp->tlit[size-1] == L_TRUE(vp))
@@ -7751,7 +7926,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 		    r = enif_raise_exception(env, ATOM(literal));
 		    STK_LEAVE(literals);
 		}
-		size = sort_clause_array(vp, literals, size, true);
+		size = norm1_clause_array(vp, literals, size, true);
 		if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE) {
 		    r = enif_make_badarg(env);
 		    STK_LEAVE(literals);
@@ -7815,7 +7990,7 @@ static ERL_NIF_TERM varp_clean_clause(ErlNifEnv* env, int argc,
 
     clause_unlink(vp, cp);
     if (cp->dead) goto remove;
-    size = sort_clause_array(vp, lit, size, false);
+    size = norm1_clause_array(vp, lit, size, false);
     if (lit[size-1] == L_TRUE(vp))
 	goto remove;
     if ((size == 1) && (lit[0] == L_FALSE(vp)))

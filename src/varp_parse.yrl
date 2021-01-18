@@ -211,24 +211,24 @@ ldecl -> identifier : name('$1').
 odecls -> odecl : ['$1'].
 odecls -> odecls ',' odecl : '$1'++['$3'].
 
-odecl -> rank       : ?ORDER_RANK bor ?ORDER_DESCEND.
-odecl -> '+' rank   : ?ORDER_RANK bor ?ORDER_ASCEND.
-odecl -> '-' rank   : ?ORDER_RANK bor ?ORDER_DESCEND.
-odecl -> degree     : ?ORDER_DEGREE bor ?ORDER_DESCEND.
-odecl -> '+' degree : ?ORDER_DEGREE bor ?ORDER_ASCEND.
-odecl -> '-' degree : ?ORDER_DEGREE bor ?ORDER_DESCEND.
+odecl -> rank       : 'rank'.
+odecl -> '+' rank   : '+rank'.
+odecl -> '-' rank   : '-rank'.
+odecl -> degree     : 'degree'.
+odecl -> '+' degree : '+degree'.
+odecl -> '-' degree : '-degree'.
 
-odecl -> random         : ?ORDER_RANDOM bor ?ORDER_DESCEND.
-odecl -> '+' random     : ?ORDER_RANDOM bor ?ORDER_ASCEND.
-odecl -> '-' random     : ?ORDER_RANDOM bor ?ORDER_DESCEND.
+odecl -> random         : 'random'.
+odecl -> '+' random     : '+random'.
+odecl -> '-' random     : '-random'.
 
-odecl -> identity       : ?ORDER_IDENTITY bor ?ORDER_ASCEND.
-odecl -> '+' identity   : ?ORDER_IDENTITY bor ?ORDER_ASCEND.
-odecl -> '-' identity   : ?ORDER_IDENTITY bor ?ORDER_DESCEND.
+odecl -> identity       : 'identity'.
+odecl -> '+' identity   : '+identity'.
+odecl -> '-' identity   : '-identity'.
 
-odecl -> user           : ?ORDER_USER bor ?ORDER_DESCEND.
-odecl -> '+' user       : ?ORDER_USER bor ?ORDER_ASCEND.
-odecl -> '-' user       : ?ORDER_USER bor ?ORDER_DESCEND.
+odecl -> user           : 'user'.
+odecl -> '+' user       : '+user'.
+odecl -> '-' user       : '-user'.
 
 odecl -> oexpr      : '$1'.
     

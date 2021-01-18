@@ -73,7 +73,7 @@
 -export([queue_first/1]).
 -export([queue_next/2]).
 -export([queue_clear/1]).
--export([order_sort/4]).
+-export([order_sort/2,order_sort/3,order_sort/4]).
 -export([order_first/2, order_last/2]).
 -export([next_unbound/1, next_unbound/2]).
 -export([bump/3]).
@@ -108,7 +108,7 @@
 -type unsigned() :: non_neg_integer().
 -type literal() :: integer().
 -type symbol() :: binary() | string() | term().
--type sort_key() :: integer().
+-type sort_key() :: atom() | string().
 -type sort_value() :: integer().
 -type binding() :: literal() | {literal(),literal()}.
 -type bindings() :: [binding()] | {binding()}.  %% variable size tuple?
@@ -589,6 +589,15 @@ get_bindings(_Vp, Level, Trail, AsTuple)
     ?nif_stub().
 
 get_number_of_bindings(_Vp, _Level) ->
+    ?nif_stub().
+
+-spec order_sort(Vp::varp(), Key::sort_key()) -> ok.
+order_sort(_Vp, _Key) ->
+    ?nif_stub().
+
+-spec order_sort(Vp::varp(), Key1::sort_key(), 
+		 KeyOrArg::sort_key()|sort_value()) -> ok.
+order_sort(_Vp, _Key1, _KeyOrArg) ->
     ?nif_stub().
 
 -spec order_sort(Vp::varp(), Key1::sort_key(), Key2::sort_key(),

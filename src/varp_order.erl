@@ -16,7 +16,7 @@ options() ->
     [#{ long => "sort",
 	key => sort,
 	spec => {list,{enum,[?ORDER]}},
-	default => [?ORDER_IDENTITY],
+	default => identity,
 	description => "Specifiy variable order."
       },
       #{ long => "seed",
@@ -85,9 +85,9 @@ order_literals(Bs, Param) ->
     ?dbg("Seed = ~w\n", [Seed]),
     case maps:get(sort,Param) of
 	[Key1,Key2] ->
-	    varp_formula:order_sort(Bs,Key1,Key2,Seed);
+	    varp:order_sort(Bs#bs.vp,Key1,Key2,Seed);
 	[Key1] ->
-	    varp_formula:order_sort(Bs,Key1,?ORDER_UNDEFINED,Seed)
+	    varp:order_sort(Bs#bs.vp,Key1,Seed)
     end,
     Bs1 = case maps:get(first,Param) of
 	      [] -> Bs;

@@ -431,13 +431,13 @@ saturate_c2() ->
 		   {'and',A,B}}
 		 ]},
 	  Vp),
-    Ai = varp:find_symbol(Vp,varp_ast:var_term(A)),
-    Bi = varp:find_symbol(Vp,varp_ast:var_term(B)),
+    _Ai = varp:find_symbol(Vp,varp_ast:var_term(A)),
+    _Bi = varp:find_symbol(Vp,varp_ast:var_term(B)),
     Xi = varp:find_symbol(Vp,varp_ast:var_term(X)),
     Yi = varp:find_symbol(Vp,varp_ast:var_term(Y)),
     Zi = varp:find_symbol(Vp,varp_ast:var_term(Z)),
 
-    ?dbg0("~w\n", [[{A,Ai},{B,Bi},{X,Xi},{Y,Yi},{Z,Zi}]]),
+    ?dbg0("~w\n", [[{A,_Ai},{B,_Bi},{X,Xi},{Y,Yi},{Z,Zi}]]),
     varp_nif:bind(Vp, F),
     true = varp_nif:bcp(Vp),
     %% varp:vec_sat_lap(Vp,3,0,0,0),

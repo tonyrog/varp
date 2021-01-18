@@ -18,8 +18,8 @@
 
 %% -compile(export_all).
 
--define(ORDER_OPT(Ord,Ord2),
-	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},{seed,0}]}).
+-define(SORT(Ord1,Ord2),
+	{order,[{sort,[(Ord),(Ord2)]},{seed,0}]}).
 
 -define(REORDER_NONE,
 	[
@@ -32,14 +32,14 @@
 
 -define(REORDER_0,
 	[
-	 {0,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
-	 {1,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
-	 {2,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	 {0,?SORT(degree,random)},
+	 {1,?SORT(rank,random)},
+	 {2,?SORT(random,random)}
 	]).
 
 -define(REORDER_1,
 	[
-	 {0,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)}
+	 {0,?SORT(rank,random)}
 	 {1,{saturate,[{level,1},{laps,1}]}}
 	]).
 
@@ -419,9 +419,9 @@ reorder_(Bs,  N, Reorder) ->
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
 		[Key1] ->
-		    varp_formula:order_sort(Bs,Key1,?ORDER_UNDEFINED,Seed);
+		    varp:order_sort(Bs#bs.vp,Key1,Seed);
 		[Key1,Key2] ->
-		    varp_formula:order_sort(Bs,Key1,Key2,Seed)
+		    varp:order_sort(Bs#bs.vp,Key1,Key2,Seed)
 	    end;
 	{ok,{saturate,Opts}} ->
 	    ?dbg0("Saturate: ~p\n", [Opts]),
@@ -430,7 +430,7 @@ reorder_(Bs,  N, Reorder) ->
 	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
 	_ ->
 	    Seed = varp_formula:getopt(Bs,seed),
-	    varp_formula:order_sort(Bs,?ORDER_RANDOM,?ORDER_UNDEFINED,Seed)
+	    varp:order_sort(Bs#bs.vp,random,Seed)
     end.
 
 

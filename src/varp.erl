@@ -111,9 +111,8 @@
 -export([queue_next/2]).
 -export([queue_clear/1]).
 -export([get_decision/2]).
--export([order_sort/2, order_sort/3]).
+-export([order_sort/2, order_sort/3, order_sort/4]).
 -export([order_first/2, order_last/2]).
--export([order_sort/4]).
 -export([next_unbound/1, next_unbound/2]).
 -export([bump/3]).
 -export([subscribe/2]).
@@ -695,6 +694,7 @@ varp_run(Do, Formula, GOpts) ->
     start_cprof(GOpts),
     start_fprof(GOpts),
     R = (catch do_run(Do, Formula, GOpts)),
+    varp_monitor:stop(), %% if started
     case R of
 	{'EXIT',{Error, _Where}} ->
 	    io:format("~s\n", [format_error(Error)]),
@@ -1772,6 +1772,8 @@ get_bindings(Vp, Level, Trail, AsTuple) -> varp_nif:get_bindings(Vp, Level, Trai
 get_number_of_bindings(Vp, Level) -> varp_nif:get_number_of_bindings(Vp, Level).
 order_first(Vp, VarList) -> varp_nif:order_first(Vp, VarList).
 order_last(Vp, List) -> varp_nif:order_last(Vp, List).
+order_sort(Vp, Key1) -> varp_nif:order_sort(Vp, Key1).
+order_sort(Vp, Key1, KeyArg) -> varp_nif:order_sort(Vp, Key1, KeyArg).
 order_sort(Vp, Key1, Key2, Arg) -> varp_nif:order_sort(Vp, Key1, Key2, Arg).
 clauseset_offset(Vp, Si) -> varp_nif:clauseset_offset(Vp, Si).
 clauseset_offset(Vp, Si, Offset) -> varp_nif:clauseset_offset(Vp, Si, Offset).
@@ -1805,16 +1807,6 @@ get_queue_(Vp,I,Acc) ->
 	false -> lists:reverse(Acc);
 	J -> get_queue_(Vp,J,[J|Acc])
     end.
-
--spec order_sort(Vp::varp(), Key1::sort_key()) -> integer().
-			
-order_sort(Vp, Key1) ->
-    order_sort(Vp, Key1, 0).
-
--spec order_sort(Vp::varp(), Key1::sort_key(), Key2::sort_key()) -> integer().
-
-order_sort(Vp, Key1, Key2) ->
-    varp_nif:order_sort(Vp, Key1, Key2, 0).
 
 get_clauses(Vp,Var) ->
     get_clauses(Vp,Var,literal).

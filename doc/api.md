@@ -112,7 +112,9 @@ Set configurable items in varp
   kind of non deterministc, number is wanted as seed.
 
 ``` python
-varpy.add_variable(vp [,is_atom [, is_used])
+varpy.add_variable(vp)
+varpy.add_variable(vp, is_atom)
+varpy.add_variable(vp, is_atom, is_used)
 ```
 
 Create a new variable. The variable is return as an index to the
@@ -124,7 +126,9 @@ exception: system_limit (too many variables)
 
 
 ``` python
-varpy.add_variables(vp, num, [,is_atom [,is_used])
+varpy.add_variables(vp, num)
+varpy.add_variables(vp, num, is_atom)
+varpy.add_variables(vp, num, is_atom, is_used)
 ```
 
 Create __num__ new variables. The variables are return as a tuple
@@ -209,14 +213,6 @@ Return the bind level for variable __x__, where it was assigned during bcp.
 exception: variable (x is not a variable)
 
 ``` python
-varpy.implication_pos(vp, x)
-```
-
-Return the position where literal __x__ is found in the implication clause.
-
-exception: variable (x is not a variable)
-
-``` python
 varpy.conflicting_clause(vp, i)
 ```
 
@@ -250,7 +246,8 @@ same variable or are bound to the same constant.
 exception: literal (x or y are not literals)
 
 ``` python
-varpy.isused(vp, x [,value])
+varpy.isused(vp, x)
+varpy.isused(vp, x, value)
 ```
 
 Check if literal __x__ is used in any clause or is forced to be
@@ -260,7 +257,8 @@ be included in fist and next\_unbound calls.
 exception: variable (x is not a variable)
 
 ``` python
-varpy.isatom(vp, x [,value])
+varpy.isatom(vp, x)
+varpy.isatom(vp, x value)
 ```
 
 Check if literal __x__ is an __atom__, that is
@@ -298,7 +296,10 @@ Undo bindings typically after an nbind. Undo will undo all bindings
 until a decision and flip the variable if not already flipped.
 
 ``` python
-varpy.bcp(vp [,[x1,..,xn] [,all]])
+varpy.bcp(vp)
+
+varpy.bcp(vp [x1,..,xn])
+varpy.bcp(vp [x1,..,xn], all)
 ```
 
 Run value propagation. Return __True__ if no
@@ -309,7 +310,7 @@ __[EXPERIMENTAL]__
 If literals __x1__..__xn__ are given they are checked for
 "turbo" rule, that is, if all clauses that xi
 is a part of are true regardless of the value of xi.
-If 'all' is true then all xi's must be true for the
+If 'all' is __True__ then all xi's must be true for the
 rule to hold. If turbo rule is successful then 
 'turbo' is returned.
 
@@ -339,32 +340,20 @@ simple backtracking using a tight loop:
 
 
 ``` python
-varpy.add_clause(vp, [x1,...,xn] [,clause_set])
+varpy.add_clause(vp, [x1,...,xn])
+varpy.add_clause(vp, [x1,...,xn], clause_set)
 ```
 
 Create a new clause, given as a literal list and return the
 new clause index. All varables indices must already have been
 created by calling add_variable. The clause create is installed
-in one of four clause sets: 'delta', 'gamma', 'alpha', 'beta'.
+in one of four clause sets: 'delta', 'gamma', 'alpha', 'beta'
+given by __clause\_set__
 The 'delta' clauseset is use to store the "problem" formula
 clauses while 'gamma' is used for storing learnt clauses. 
 However the conflict clause(s) created by varpy.conflict are created in 
 'alpha' and may then, by user, moved into 'gamma'.
 
-
-``` python
-varpy.get_clause(vp, cix [, x | None [, raw]] )
-```
-
-Retrieve a clause as list given the clause index __cix__.
-If literal __x__ is given then literal __x__ is removed 
-from the clause list returned. if __raw__ is __True__ then literals 
-bound on level 0 are also return as normal, otherwise they are
-filtered away.
-If all literals in the clause are __False__, that is the clause is
-contrdictory __False__ is returned. If any literal is __True__
-then __True__ is returned. Otherwise a clause in list 
-is returned.
 
 ``` python
 varpy.find_clause(vp, [x1,...,xn])
@@ -374,7 +363,8 @@ Check if the clause [__x1__,...,__xn__] exist among the clausesets.
 return clause index if found, return __False__ otherwise.
 
 ``` python
-varpy.compress_clause(vp,  cix | [x1,...,xn])
+varpy.compress_clause(vp,  cix)
+varpy.compress_clause(vp,  [x1,...,xn])
 ```
 
 Return a compressed version of the clause [__x1__,...,__xn__], 
@@ -423,7 +413,6 @@ Get information about variable x
 
 * 'implication'
 * 'implication\_clause'
-* 'implication\_pos'
 * 'level'
 * 'phase'
 * 'is\_atom'
@@ -441,11 +430,13 @@ Get information about literal x
 
 * 'degree'
 * 'user'
-* 'edge'
+* 'mark'
+* 'xref'
 * 'symbol'
 
 ``` python
-varpy.del_clause(vp, cix | [x1,...,xn])
+varpy.del_clause(vp, cix)
+varpy.del_clause(vp, [x1,...,xn])
 ```
 
 Delete clause __cix__ or [__x1__,...,__xn__] from clausesets.
@@ -474,7 +465,10 @@ is constant.
 exception: literal (x is not a literal)
 
 ``` python
-varpy.get_clauses(vp, cix, skip, raw)
+varpy.get_clause(vp, cix)
+varpy.get_clause(vp, cix, skip)
+varpy.get_clause(vp, cix, skip, raw)
+varpy.get_clause(vp, cix, skip, raw, as_tuple)
 ```
 
 Return a list of literals given by clause index __cix__.
@@ -486,7 +480,7 @@ Also remove literals on level 0 if __raw__ is __False__.
 varpy.get_decision(vp, l)
 ```
 
-Get literal on decision level __l__.
+Get decision literal on level __l__.
 
 ``` python
 varpy.get_undo_state(vp, l)
@@ -502,7 +496,10 @@ Return the undo state on level __l__
 * 'undef'
 
 ``` python
-varpy.get_bindings(vp, [l, [clauseinfo, [as_trail, [as_tuple]]]])
+varpy.get_bindings(vp)
+varpy.get_bindings(vp, l)
+varpy.get_bindings(vp, l, as_trail)
+varpy.get_bindings(vp, l, as_trail, as_tuple)
 ```
 
 Return all bindings on level __l__. Return them in order of when
@@ -510,14 +507,14 @@ binding where made if __as_trail__ is __True__ otherwise the bidnings
 are returned as latest binding first. if __as_tuple__ is __True__ then
 bindings are returned as a tuple otherwise a list is returned.
 
-if clauseinfo is __True__ then a list of
-tuples (literal, pos, implication\_clause) are returned otherwise
-a list of literals are returned. A negative literal means that the
+A list of literals are returned. A negative literal means that the
 variable is bound to __False__ a positive literal means that the
 variable is bound to __True__.
 
 ``` python
-varpy.get_nbindings(vp, count [, clauseinfo, [as_trail, [as_tuple]]])
+varpy.get_nbindings(vp, count)
+varpy.get_nbindings(vp, count, as_trail)
+varpy.get_nbindings(vp, count, as_trail, as_tuple)
 ```
 
 Return a maximum of __count__ bindings.
@@ -526,9 +523,7 @@ is __True__, otherwise the bidnings are returned as latest binding first.
 if __as_tuple__ is __True__ then bindings are returned as a tuple 
 otherwise a list is returned.
 
-if clauseinfo is __True__ then a list of
-tuples (literal, pos, implication\_clause) are returned otherwise
-a list of literals are returned. A negative literal means that the
+A list of literals are returned. A negative literal means that the
 variable is bound to __False__ a positive literal means that the
 variable is bound to __True__.
 
@@ -539,6 +534,9 @@ varpy.get_number_of_bindings(vp, l)
 Return number of bindings on level __l__.
 
 ``` python
+varpy.order_sort(vp, key)
+varpy.order_sort(vp, key, arg)
+varpy.order_sort(vp, key1, key2)
 varpy.order_sort(vp, key1, key2, arg)
 ```
 
@@ -589,7 +587,8 @@ are placed last.
 exception: level (when level != 0)
 
 ``` python
-varpy.next_unbound(varp [, previous])
+varpy.next_unbound(varp)
+varpy.next_unbound(varp, previous)
 ```
 
 Return the next unbound literal in the current variable order.
@@ -619,7 +618,10 @@ Remove all literals enqueued on the bcp queue by calls to
 varpy.bind or varpy.decide.
 
 ``` python
-varpy.add_symbol(vp, x|xs, string|term)
+varpy.add_symbol(vp, x, string)
+varpy.add_symbol(vp, x, term)
+varpy.add_symbol(vp, xs, string)
+varpy.add_symbol(vp, xs, term)
 ```
 
 Associate a term or string to to a variable __x__ or variables __xs__,
@@ -631,7 +633,8 @@ list of variables, integer encoding or bit vector.
 Integer encoding should store least significant bit first (at index 0)
 
 ``` python
-varpy.del_symbol(vp, string|term)
+varpy.del_symbol(vp, string)
+varpy.del_symbol(vp, term)
 ```
 
 Remove the symbol from the symbol table.
@@ -685,7 +688,8 @@ For example a value of, 0.1 means move 10% in number of variables.
 If __n__ is an integer then x is moved that exact number of steps.
 
 ``` python
-varpy.subscribe(vp, flag|[flag])
+varpy.subscribe(vp, flag)
+varpy.subscribe(vp, [flag])
 ```
 
 Flags
@@ -758,7 +762,8 @@ existing clause.
 
 
 ``` python
-varpy.minimize(vp, cix [, 'local'|'recursive'])
+varpy.minimize(vp, cix)
+varpy.minimize(vp, cix, 'local'|'global'|'recursive')
 ```
 
 Minimize clause, may be called after varpy.conflict and requires

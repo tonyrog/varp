@@ -48,7 +48,6 @@
 -export([is_bound/2]).
 -export([is_unbound/2]).
 -export([getopt/2]).
--export([order_sort/2, order_sort/4]).
 -export([order_first/2]).
 -export([order_last/2]).
 -export([model/1, model/2]).
@@ -407,13 +406,6 @@ variable_list_(Bs, [], Acc) ->
 
 cat([X|Xs], Ys) -> cat(Xs, [X|Ys]);
 cat([], Ys) -> Ys.
-
-order_sort(Bs,[Key1,Key2]) -> order_sort(Bs,Key1,Key2,-1);
-order_sort(Bs,[Key1]) -> order_sort(Bs,Key1,?ORDER_UNDEFINED,-1).
-
-order_sort(Bs,Key1,Key2,Arg) 
-  when is_integer(Key1), is_integer(Key2), is_integer(Arg) ->
-    varp_nif:order_sort(Bs#bs.vp,Key1,Key2,Arg).
 
 config(Bs, Item, Value) ->
     varp_nif:config(Bs#bs.vp, Item, Value).

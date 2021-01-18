@@ -703,7 +703,7 @@ order_install() ->
 
 order_identity() ->    
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
-    ok = varp:order_sort(V, ?ORDER_IDENTITY),
+    ok = varp:order_sort(V, identity),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
     
@@ -714,15 +714,13 @@ order_user() ->
 	      varp_nif:set_user_count(V,L,Cp),
 	      varp_nif:set_user_count(V,-L,Cn)
       end, [{X1,12,10},{X2,11,13},{X3,16,14},{X4,15,17},{X5,20,18},{X6,19,21}]),
-    ok = varp:order_sort(V, ?ORDER_USER bor ?ORDER_ASCEND),
-    %% U1 = [X1,-X2,X3,-X4,X5,-X6],
-    [X1,X2,X3,X4,X5,X6] = varp:order_all(V),
-    [1,-1,1,-1,1,-1] = varp:phase_all(V),
-
-    ok = varp:order_sort(V, ?ORDER_USER bor ?ORDER_DESCEND),
-    %% U2 = [-X6,X5,-X4,X3,-X2,X1],
+    ok = varp:order_sort(V, '-user'),
     [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
     [-1,1,-1,1,-1,1] = varp:phase_all(V),
+
+    ok = varp:order_sort(V, '+user'),
+    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
+    [1,-1,1,-1,1,-1] = varp:phase_all(V),
     ok.
 
 order_degree() ->
@@ -734,10 +732,10 @@ order_degree() ->
     %% d(X5) = 5
     %% d(X6) = 6
 
-    ok = varp:order_sort(V, ?ORDER_DEGREE bor ?ORDER_DESCEND),
+    ok = varp:order_sort(V, '-degree'),
     [X6, X5, X4, X3, X2, X1] = varp:order_all(V),
 
-    ok = varp:order_sort(V, ?ORDER_DEGREE bor ?ORDER_ASCEND),
+    ok = varp:order_sort(V, '+degree'),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
@@ -750,17 +748,17 @@ order_rank() ->
     %% r(X5) = 1/7+1/6+1/5+1/4+1/3
     %% r(X6) = 1/7+1/6+1/5+1/4+1/3+1/2
 
-    ok = varp:order_sort(V, ?ORDER_RANK bor ?ORDER_DESCEND),
+    ok = varp:order_sort(V, '-rank'),
     [X6, X5, X4, X3, X2, X1] = varp:order_all(V),
 
-    ok = varp:order_sort(V, ?ORDER_RANK bor ?ORDER_ASCEND),
+    ok = varp:order_sort(V, '+rank'),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
 order_first() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first check
-    ok = varp:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
+    ok = varp:order_sort(V, identity, undefined, 0),
     ok = varp_nif:order_first(V, [X5, X6]),
     [X5, X6, X1, X2, X3, X4] = varp:order_all(V),
     ok.
@@ -768,7 +766,7 @@ order_first() ->
 order_last() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% last check
-    ok = varp_nif:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
+    ok = varp_nif:order_sort(V, identity, undefined, 0),
     ok = varp_nif:order_last(V, [X1,X2]),
     [X3, X4, X5, X6, X1, X2] = varp:order_all(V),
     ok.
@@ -776,7 +774,7 @@ order_last() ->
 order_first_and_last() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first & last check
-    ok = varp_nif:order_sort(V, ?ORDER_IDENTITY, ?ORDER_UNDEFINED, 0),
+    ok = varp_nif:order_sort(V, identity, undefined, 0),
     ok = varp_nif:order_first(V, [X5, X6]),
     ok = varp_nif:order_last(V, [X1,X2]),
     [X5, X6, X3, X4, X1, X2] = varp:order_all(V),
@@ -784,15 +782,13 @@ order_first_and_last() ->
 
 order_random() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
-    ok = varp_nif:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
-			 ?ORDER_UNDEFINED, 1001),
+    ok = varp_nif:order_sort(V, '=random', undefined, 1001),
     [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
     [-1,-1,-1,1,1,1] = varp:phase_all(V),
     
     %% ?verbose("random,1001, Vs = ~p\n", [Sort1]),
 
-    ok = varp_nif:order_sort(V, ?ORDER_RANDOM bor ?ORDER_INTERLEAVE, 
-			 ?ORDER_UNDEFINED, 1003),
+    ok = varp_nif:order_sort(V, '=random', undefined, 1003),
     %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
     [X1,X2,X3,X6,X4,X5] = varp:order_all(V),
     [1,-1,1,-1,1,1] = varp:phase_all(V),
@@ -1214,14 +1210,22 @@ watch1() ->
     X4 = var(V),
     X5 = var(V),
 
-    C1 = clause(V, [X5,X4,X3,X2,X1]),
-       [X1,X2,X3,X4,X5] = varp_nif:get_clause(V, C1),
-    %%  0  A   0  0  0
-    %% initial watch points are set in the end!
+    C1 = clause(V, [X1,X2,X3,X4,X5]),
+    CL = varp:get_clause(V, C1),
+    io:format("CL = ~w\n", [CL]),
+    %% reverse-sorted or not sorted
+    W =
+	case CL of
+	    [X5,X4,X3,X2,X1] -> %% reverse-sorted
+		4;
+	    [X1,X2,X3,X4,X5] -> %% unsorted
+		1
+	end,
+
     0 = varp_nif:clause_info(V, C1, watch0),
     1 = varp_nif:clause_info(V, C1, watch1),
 
-    %% bind X4, move wp 0
+    %% X4=0
     varp_nif:push(V),
     varp_nif:bind(V, -X4),
     true = varp_nif:bcp(V),
@@ -1229,7 +1233,7 @@ watch1() ->
     0 = varp_nif:clause_info(V, C1, watch0),
     1 = varp_nif:clause_info(V, C1, watch1),
 
-    %% bind -X3, not watched, watch points should stay the same
+    %% X3=0
     varp_nif:push(V),
     varp_nif:bind(V, -X3),
     true = varp_nif:bcp(V),
@@ -1237,6 +1241,7 @@ watch1() ->
     0 = varp_nif:clause_info(V, C1, watch0),
     1 = varp_nif:clause_info(V, C1, watch1),
 
+    %% X1=0
     varp_nif:push(V),
     varp_nif:bind(V, -X1),
     true = varp_nif:bcp(V),
@@ -1244,6 +1249,7 @@ watch1() ->
     4 = varp_nif:clause_info(V, C1, watch0),
     1 = varp_nif:clause_info(V, C1, watch1),
 
+    %% X5=0
     varp_nif:push(V),
     varp_nif:bind(V, -X5),
     true = varp_nif:bcp(V),
@@ -1259,16 +1265,16 @@ watch1() ->
     %% add clauses under the above bindings
     Y3 = -X5, Y2 = -X4, Y1 = -X2, 
     C2 = clause(V, [Y3, Y2, Y1]),
-    [Y1, Y2, Y3] = varp_nif:get_clause(V, C2),
+    [Y3, Y2, Y1] = get_clause(V, C2),
 
     0 = varp_nif:clause_info(V, C2, watch0),
     2 = varp_nif:clause_info(V, C2, watch1),
 
     Z3 = X4, Z2 = X3, Z1 = -X1,
     C3 = clause(V, [Z3,Z2,Z1]),
-    [Z1,Z2,Z3] = varp_nif:get_clause(V, C3),
+    [Z1,Z2,Z3] = get_clause(V, C3),
 
-    0 = varp_nif:clause_info(V, C3, watch0),
+    2 = varp_nif:clause_info(V, C3, watch0),
     1 = varp_nif:clause_info(V, C3, watch1),
 
     ok.
@@ -1345,7 +1351,7 @@ build_all() ->
     varp_nif:bind(Vp, -X3),
 
     F = varp_circuit:all(Vp, [X1,X2,X3,X4,X5]),
-    %% print_clauses(Vp,false,true),
+    print_clauses(Vp,false,true),
     false = varp_nif:value(Vp, F).
 
 %% Check that install of variables partial evaluate!
@@ -1829,17 +1835,16 @@ get_sym_literal(Vp, Li) ->
 
 %% 
 %% bcp 999 clauses
+%% 2021-01-18
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 55013
 %% 2021-01-15
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 54684
-%%
 %% 2021-01-13
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 51582
-%%
 %% 2020-11-01?
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 45477
 %% {literal_integer,false},{literal_size,64},{value_packing,1} => 34047
 %% {literal_integer,false},{literal_size,64},{value_packing,no} => 35276
-%%
 %% OLD VALUE:
 %% 2020-06-01?
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412
@@ -2152,7 +2157,7 @@ install_cnf(V, CNF, Set) ->
 		  Ci ->
 		      %% check the clause
 		      GetClause = varp_nif:get_clause(V, Ci),
-		      assert_equal(GetClause, abs_sort(Clause)),
+		      assert_equal(abs_sort(GetClause), abs_sort(Clause)),
 		      [Ci|Acc]
 	      end
       end, [], CNF).

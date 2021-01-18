@@ -72,22 +72,24 @@
 	 config_notebook
 	}).
 
--define(ORDER_OPT(Ord,Ord2),
-	{order,[{sort,[(Ord) bor ?ORDER_DESCEND,Ord2]},
-		{seed,-1}]}).
+-define(SORT(Ord,Ord2),
+	{order,[{sort,[(Ord),(Ord2)]},{seed,0}]}).
+
+-define(REORDER_NONE,
+	[
+	]).
 
 -define(REORDER_0,
 	[
-	 {1,?ORDER_OPT(?ORDER_DEGREE,?ORDER_RANDOM)},
-	 {2,?ORDER_OPT(?ORDER_RANK,?ORDER_RANDOM)},
-	 {3,?ORDER_OPT(?ORDER_RANDOM,?ORDER_RANDOM)}
+	 {1,?SORT(degree,random)},
+	 {2,?SORT(rank,random)},
+	 {3,?SORT(random,random)}
 	]).
 
 -define(REORDER_1,
 	[
-	 {1,?ORDER_OPT(?ORDER_RANDOM,?ORDER_UNDEFINED)}
+	 {1,?SORT(random,undefined)}
 	]).
-
 
 version() ->
     {ok,Vsn} = application:get_key(varp, vsn),
@@ -928,24 +930,38 @@ solve(Mode, S, Bound) ->
 	    output_error(S, varp:format_error(Message))
     end.
 
-order(Ascend, Ord) ->
-    case Ascend of
-	descend -> ?ORDER_DESCEND;  %% backwards compatible
- 	0       -> ?ORDER_DESCEND;
-	false   -> ?ORDER_DESCEND;
-	ascend  -> ?ORDER_ASCEND;
-	1       -> ?ORDER_ASCEND;
-	true  -> ?ORDER_ASCEND
-    end 
-	bor
-    case Ord of
-	degree    -> ?ORDER_DEGREE;
-	rank      -> ?ORDER_RANK;
-	activity  -> ?ORDER_DEGREE; %% not used anymore
-	user      -> ?ORDER_USER;
-	random    -> ?ORDER_RANDOM;
-	identity  -> ?ORDER_IDENTITY;
-	undefined -> ?ORDER_UNDEFINED
+order(DoAscend, Ord) ->
+    Dir = case DoAscend of
+	      descend -> -1;  %% backwards compatible values
+	      ascend  ->  1;
+	      0       -> -1;
+	      false   -> -1;
+	      1       -> 1;
+	      true    -> 1;
+	      undefined -> 0
+	  end,
+    if Dir =:= 0 ->  %% default direction (is decend)
+	    Ord;
+       Dir < 0 ->
+	    case Ord of
+		degree    -> '-degree';
+		rank      -> '-rank';
+		activity  -> '-degree';
+		user      -> '-user';
+		random    -> '-random';
+		identity  -> '-identity';
+		undefined -> undefined
+	    end;
+       Dir > 0 ->
+	    case Ord of
+		degree    -> '+degree';
+		rank      -> '+rank';
+		activity  -> '+degree';
+		user      -> '+user';
+		random    -> '+random';
+		identity  -> '+identity';
+		undefined -> undefined
+	    end
     end.
 
 %% add inc_learned_factor - no units found for T seconds
@@ -966,7 +982,7 @@ read_backjump_params(S,I) ->
      {restart_counter,    read_param(?BJK(I,restart_counter), S, 0) },
      {restart_interval,   read_param(?BJK(I,restart_interval), S, 0)},
      {bump,               read_param(?BJK(I,bump), S, 1) },
-     {reorder, ?REORDER_1}
+     {reorder, ?REORDER_NONE}
     ].
 
 read_saturate_params(S,I) ->
@@ -1022,7 +1038,7 @@ export(Type, File, S, Bound) ->
     Meta = maps:from_list(Bound),
     case parse(Formula, Meta) of
 	{ok,{Sections,Form}} ->
-	    Options = [{assoc,Assoc}],
+	    Options = [{assoc,Assoc},{phase,true},{use_phase,true}],
 	    GOpts = varp:load_option_list(Options),
 	    GOpts1 = varp:section_opts(Sections, GOpts),
 	    Do =
