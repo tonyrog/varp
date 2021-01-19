@@ -36,7 +36,7 @@ all() ->
 	   symbols, clause_simplify,
 	   bcp2, bcp3, bcp4, bcp_turbo1,
 	   clause_bcp, clause_learn_d1, clause_learn_a1,
-	   watch1,
+	   watch_1,
 	   %% mark intersect
 	   intersect1, intersect2, intersect_var0,
 	   intersect_var1, intersect_var2,
@@ -358,10 +358,8 @@ bcp_add() ->
     Z = var(V, <<"Z">>),
     varp_nif:push(V),
     varp_nif:bind(V, -Y),
-    Cix1 = clause(V, [X, Y, Z]),
+    _Cix1 = clause(V, [X, Y, Z]),
     varp_nif:pop(V),
-    0 = varp_nif:clause_info(V, Cix1, watch0),
-    2 = varp_nif:clause_info(V, Cix1, watch1),
     varp_nif:bind(V, -X),
     true = varp_nif:bcp(V),
     _Cix2 = clause(V, [X, -Z]),
@@ -472,8 +470,6 @@ l_undo(Vp) ->
     varp_nif:pop(Vp),
     varp_nif:pop(Vp).
 	      
-	      
-
 %% Test eval
 clause_bcp() ->
     V = varp_nif:new(#{}),
@@ -721,6 +717,22 @@ order_user() ->
     ok = varp:order_sort(V, '+user'),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     [1,-1,1,-1,1,-1] = varp:phase_all(V),
+
+    %% variants
+    ok = varp:order_sort(V, '-user', undefined),
+    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
+    ok = varp:order_sort(V, undefined, '-user'),
+    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
+    ok = varp:order_sort(V, '-user', '-user'),
+    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
+    ok = varp:order_sort(V, '-user', '+user'),
+    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
+    ok = varp:order_sort(V, '+user', '-user'),
+    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
+    ok = varp:order_sort(V, '+user', undefined),
+    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
+    ok = varp:order_sort(V, undefined, '+user'),
+    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
 order_degree() ->
@@ -755,6 +767,31 @@ order_rank() ->
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
+order_random() ->
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
+    ok = varp_nif:order_sort(V, '=random', undefined, 1001),
+    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
+    [-1,-1,-1,1,1,1] = varp:phase_all(V),
+    
+    %% ?verbose("random,1001, Vs = ~p\n", [Sort1]),
+
+    ok = varp_nif:order_sort(V, '=random', undefined, 1003),
+    %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
+    [X1,X2,X3,X6,X4,X5] = varp:order_all(V),
+    [1,-1,1,-1,1,1] = varp:phase_all(V),
+    %% ?verbose("random,1003, Vs = ~p\n", [Sort2]),
+
+    %% variants
+    ok = varp_nif:order_sort(V, '+random', undefined, 1001),
+    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
+    ok = varp_nif:order_sort(V, '+random', 1001),
+    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
+    ok = varp_nif:order_sort(V, undefined, '+random', 1001),
+    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
+
+    ok.
+
+
 order_first() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first check
@@ -780,20 +817,6 @@ order_first_and_last() ->
     [X5, X6, X3, X4, X1, X2] = varp:order_all(V),
     ok.
 
-order_random() ->
-    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
-    ok = varp_nif:order_sort(V, '=random', undefined, 1001),
-    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
-    [-1,-1,-1,1,1,1] = varp:phase_all(V),
-    
-    %% ?verbose("random,1001, Vs = ~p\n", [Sort1]),
-
-    ok = varp_nif:order_sort(V, '=random', undefined, 1003),
-    %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
-    [X1,X2,X3,X6,X4,X5] = varp:order_all(V),
-    [1,-1,1,-1,1,1] = varp:phase_all(V),
-    %% ?verbose("random,1003, Vs = ~p\n", [Sort2]),
-    ok.
 
 unbound(Vp, X) ->
     X1 = varp_nif:next_unbound(Vp,X),
@@ -1202,7 +1225,7 @@ intersect_var2() ->
     ok.
     
 
-watch1() ->
+watch_1() ->
     V = varp_nif:new(#{}),
     X1 = var(V),
     X2 = var(V),
@@ -1213,49 +1236,26 @@ watch1() ->
     C1 = clause(V, [X1,X2,X3,X4,X5]),
     CL = varp:get_clause(V, C1),
     io:format("CL = ~w\n", [CL]),
-    %% reverse-sorted or not sorted
-    W =
-	case CL of
-	    [X5,X4,X3,X2,X1] -> %% reverse-sorted
-		4;
-	    [X1,X2,X3,X4,X5] -> %% unsorted
-		1
-	end,
-
-    0 = varp_nif:clause_info(V, C1, watch0),
-    1 = varp_nif:clause_info(V, C1, watch1),
 
     %% X4=0
     varp_nif:push(V),
     varp_nif:bind(V, -X4),
     true = varp_nif:bcp(V),
 
-    0 = varp_nif:clause_info(V, C1, watch0),
-    1 = varp_nif:clause_info(V, C1, watch1),
-
     %% X3=0
     varp_nif:push(V),
     varp_nif:bind(V, -X3),
     true = varp_nif:bcp(V),
-
-    0 = varp_nif:clause_info(V, C1, watch0),
-    1 = varp_nif:clause_info(V, C1, watch1),
 
     %% X1=0
     varp_nif:push(V),
     varp_nif:bind(V, -X1),
     true = varp_nif:bcp(V),
 
-    4 = varp_nif:clause_info(V, C1, watch0),
-    1 = varp_nif:clause_info(V, C1, watch1),
-
     %% X5=0
     varp_nif:push(V),
     varp_nif:bind(V, -X5),
     true = varp_nif:bcp(V),
-
-    4 = varp_nif:clause_info(V, C1, watch0),
-    1 = varp_nif:clause_info(V, C1, watch1),
 
     ?T = varp_nif:value(V, X2),
 
@@ -1267,15 +1267,9 @@ watch1() ->
     C2 = clause(V, [Y3, Y2, Y1]),
     [Y3, Y2, Y1] = get_clause(V, C2),
 
-    0 = varp_nif:clause_info(V, C2, watch0),
-    2 = varp_nif:clause_info(V, C2, watch1),
-
     Z3 = X4, Z2 = X3, Z1 = -X1,
     C3 = clause(V, [Z3,Z2,Z1]),
     [Z1,Z2,Z3] = get_clause(V, C3),
-
-    2 = varp_nif:clause_info(V, C3, watch0),
-    1 = varp_nif:clause_info(V, C3, watch1),
 
     ok.
 
@@ -1835,6 +1829,8 @@ get_sym_literal(Vp, Li) ->
 
 %% 
 %% bcp 999 clauses
+%% 2021-01-19
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 62035
 %% 2021-01-18
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 55013
 %% 2021-01-15
@@ -2280,7 +2276,7 @@ dump_clauses(_V, _Raw, false, _Verb) ->
 dump_clauses(V, Raw, I, Verb) ->
     {_,SI,IX} = split_cix(I),
     WATCH = case varp_nif:clause_info(V, I, watch) of
-		{-1,-1} -> "";
+		false -> "";
 		{P1,P2} -> " watch:"++integer_to_list(P1)++","++
 			       integer_to_list(P2)
 	    end,

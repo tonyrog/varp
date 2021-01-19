@@ -504,8 +504,9 @@ varpy.get_bindings(vp, l, as_trail, as_tuple)
 
 Return all bindings on level __l__. Return them in order of when
 binding where made if __as_trail__ is __True__ otherwise the bidnings
-are returned as latest binding first. if __as_tuple__ is __True__ then
-bindings are returned as a tuple otherwise a list is returned.
+are returned as latest binding first (default). 
+if __as_tuple__ is __True__ (default) then bindings are returned 
+as a tuple otherwise a list is returned.
 
 A list of literals are returned. A negative literal means that the
 variable is bound to __False__ a positive literal means that the
@@ -520,7 +521,7 @@ varpy.get_nbindings(vp, count, as_trail, as_tuple)
 Return a maximum of __count__ bindings.
 Return them in order of when binding where made, if __as_trail__ 
 is __True__, otherwise the bidnings are returned as latest binding first.
-if __as_tuple__ is __True__ then bindings are returned as a tuple 
+if __as_tuple__ is __True__ (default) then bindings are returned as a tuple 
 otherwise a list is returned.
 
 A list of literals are returned. A negative literal means that the
@@ -531,7 +532,7 @@ variable is bound to __True__.
 varpy.get_number_of_bindings(vp, l)
 ```
 
-Return number of bindings on level __l__.
+Return number of bindings on binding level __l__.
 
 ``` python
 varpy.order_sort(vp, key)

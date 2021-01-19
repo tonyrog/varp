@@ -42,6 +42,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_formula:config(Bs, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     0 = varp_nif:push(Bs#bs.vp), %% assert, may be relaxed
+    put(proof_output, ?GETOPT_BS(Bs, proof_output)),
     case varp_formula:getopt(Bs1,method) of
 	collect -> collect(Bs1, 0, N, []);
 	count   -> count(Bs1, 0, N)
@@ -140,7 +141,7 @@ undo_all(Bs) ->
 %% Xi is the current decision, that failed, 
 %% Stack contains the negated previous decisions
 proof_output(Bs) ->
-    case ?GETOPT_BS(Bs, proof_output) of
+    case get(proof_output) of
 	none ->
 	    ok;
 	_ ->
@@ -149,7 +150,7 @@ proof_output(Bs) ->
     end.
 
 %% proof_end(Bs) ->
-%%    case ?GETOPT_BS(Bs, proof_output) of
+%%    case get(proof_output) of
 %%	none ->
 %%	    ok;
 %%	_ ->

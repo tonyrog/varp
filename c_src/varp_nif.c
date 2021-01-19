@@ -480,8 +480,6 @@ typedef struct _symbol_t // :dlink - dlist
 typedef struct _wlink_t
 {
     struct _wlink_t* next;
-    // FIXME: store literal here in case of 2-clause!
-    long p;
 } wlink_t;
 
 // #define USE_CLAUSE_SEGMENTS
@@ -490,9 +488,9 @@ typedef struct _wlink_t
 #define MAX_CLAUSE_OFFSET MAX_CLAUSE_SEGMENT_SIZE
 #define DEF_SEGMENT_SIZE (1 << 20)
 
-// sizeof wlink should be 8 on 32 bit machine or 16 on 64 bit machine
-// 32 bit machine alignement should be 2*8 = 16 bytes
-// 64 bit machine alignement should be 2*16 = 32 bytes
+// sizeof wlink should be 4 on 32 bit machine or 8 on 64 bit machine
+// 32 bit machine alignement should be 2*4 = 8 bytes
+// 64 bit machine alignement should be 2*8 = 16 bytes
 #define CLAUSE_ALIGNMENT (2*sizeof(wlink_t))
 
 typedef struct _clause_t
@@ -506,6 +504,7 @@ typedef struct _clause_t
 	unsigned select:2;    // 0=unit,1=2-clause,2=3-clause,3=n_clause	
 	unsigned dead:1;      // clause is dead
 	unsigned conflict:1;  // conflict list
+	unsigned watched:1;   // clause is watched
 	unsigned unwatch:1;   // clause is scheduled to be unwatched
 	unsigned delete:1;    // marked for deletion
 	unsigned dynamic:1;   // not in a segment
@@ -829,8 +828,6 @@ DECL_ATOM(value_packing);
 DECL_ATOM(variable);
 DECL_ATOM(varp);
 DECL_ATOM(watch);
-DECL_ATOM(watch0);
-DECL_ATOM(watch1);
 DECL_ATOM(xref);
 DECL_ATOM(vsids);
 DECL_ATOM(none);
@@ -2141,10 +2138,9 @@ void print_sym_array_nl(varp_t* vp, lit_t* lit, size_t size)
 void print_clause(varp_t* vp, char* label, clause_t* cp)
 {
     unsigned k;
-    enif_fprintf(stdout, "%s %d:%d (t=%ld) (w=%ld:%ld) [%d/%s",
+    enif_fprintf(stdout, "%s %d:%d (t=%ld) [%d/%s",
 		 label, GET_SI(cp->cix), GET_IX(cp->cix),
-		 cp->stamp, cp->wl[0].p, cp->wl[1].p,
-		 export_l(cp->lit[0]),
+		 cp->stamp, export_l(cp->lit[0]),
 		 format_ival(get_l(vp,cp->lit[0])));
     for (k=1; k<cp->size; k++)
 	enif_fprintf(stdout, ",%d/%s",
@@ -2155,9 +2151,8 @@ void print_clause(varp_t* vp, char* label, clause_t* cp)
 
 void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
 {
-    enif_fprintf(stdout, "%s id=%d:%d,[%ld:%ld] ",
-		 label, GET_SI(cp->cix), GET_IX(cp->cix),
-		 cp->wl[0].p, cp->wl[1].p);
+    enif_fprintf(stdout, "%s id=%d:%d ",
+		 label, GET_SI(cp->cix), GET_IX(cp->cix));
     print_sym_array(vp, cp->lit, cp->size);
     if (cp->dead)
 	enif_fprintf(stdout, " dead");
@@ -2167,20 +2162,13 @@ void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
 
 static inline void wlink_clear(wlink_t* wlp)
 {
-    wlp->p = -1;
-    wlp->next = NULL;   // mark dead for debug
+    wlp->next = NULL;
 }
 
 static inline void wlink_link(wlink_t* wlp, literal_t* lp)
 {
     wlp->next = lp->wlist;  // link literal
     lp->wlist = wlp;
-}
-
-static inline void wlink_set(wlink_t* wlp, long p, literal_t* lp)
-{
-    wlp->p = p;   // new watch point
-    wlink_link(wlp, lp);
 }
 
 // FIXME: make constant
@@ -2197,7 +2185,6 @@ static void wlink_unlink(varp_t* vp, clause_t* cp, literal_t* lp)
     if (wl != NULL) {
 	*wlp = wl->next;  // unlink
 	wl->next = NULL;  // do we need to clear this?
-	wl->p = -1;       // mark as not used
     }
 }
 
@@ -2209,9 +2196,11 @@ static inline void unwatch_l(varp_t* vp, clause_t* cp, lit_t l)
 // remove the 2-WL watch points
 static void clause_unwatch(varp_t* vp, clause_t* cp)
 {
-    long p;
-    if ((p = cp->wl[0].p) >= 0) unwatch_l(vp, cp, cp->lit[p]);
-    if ((p = cp->wl[1].p) >= 0) unwatch_l(vp, cp, cp->lit[p]);
+    if (cp->watched) {
+	unwatch_l(vp, cp, cp->lit[0]);
+	unwatch_l(vp, cp, cp->lit[1]);
+	cp->watched = 0;
+    }
 }
 
 static void schedule_unwatch_clause(varp_t* vp, clause_t* cp)
@@ -2401,8 +2390,6 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 	    values[7] = enif_make_int(env, val);
     }
     return enif_make_map_from_arrays(env, sub_info_keys, values, 8, info);
-
-
 }
 
 static void log_permanent(varp_t* vp, literal_t* x, literal_t* y)
@@ -2952,6 +2939,7 @@ static clause_t* clause_alloc(varp_t* vp, int si, int size)
 	cp->select = (size > 3) ? 3 : size-1;
 	cp->dead = 0;
 	cp->conflict = 0;
+	cp->watched = 0;
 	cp->unwatch = 0;
 	cp->delete = 0;
     }
@@ -4809,12 +4797,12 @@ static int vif_get_order(ErlNifEnv* env, ERL_NIF_TERM arg,
     }
     if (EQUAL_KEY(env, p_random, arg)) {
 	*orderp = ORDER_RANDOM;
-	*dirp =ORDER_ASCEND;
+	*dirp = ORDER_ASCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, n_random, arg)) {
 	*orderp = ORDER_RANDOM;
-	*dirp =ORDER_DESCEND;
+	*dirp = ORDER_DESCEND;
 	return 1;
     }
     if (EQUAL_KEY(env, e_random, arg)) {
@@ -5551,24 +5539,6 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     return enif_make_int(env, cp->size);
 }
 
-// insert sort literal level 'l' into la
-// while keeping track on position 'p' and literal index 'v'
-void insert_sort2(int l, int p, int la[3], long pa[3])
-{
-    if (l >= la[0]) {
-	la[2] = la[1]; la[1] = la[0]; la[0] = l;
-	pa[2] = pa[1]; pa[1] = pa[0]; pa[0] = p;
-    }
-    else if (l >= la[1]) {
-	la[2] = la[1]; la[1] = l;
-	pa[2] = pa[1]; pa[1] = p;
-    }
-    else if (l >= la[2]) {
-	la[2] = l;
-	pa[2] = p;
-    }
-}
-
 static int is_unit_clause(varp_t* vp, clause_t* cp)
 {
     long p;
@@ -5601,11 +5571,37 @@ static int is_unit_clause(varp_t* vp, clause_t* cp)
 // (lp0,level0)
 // setup TWL structure for a clause
 
-static inline void clause_watch_insert(varp_t* vp, clause_t* cp,
-				       long p1, long p2)
+static inline void clause_watch_insert(varp_t* vp, clause_t* cp)
 {
-    wlink_set(&cp->wl[0], p1, l2ll(vp, cp->lit[p1]));
-    wlink_set(&cp->wl[1], p2, l2ll(vp, cp->lit[p2]));
+    wlink_link(&cp->wl[0], l2ll(vp, cp->lit[0]));
+    wlink_link(&cp->wl[1], l2ll(vp, cp->lit[1]));
+}
+
+// insert sort literal level 'l' into la
+// while keeping track on position 'p' and literal index 'v'
+static void insert_sort2(int l, int p, int la[3], long pa[3])
+{
+    if (l >= la[0]) {
+	la[2] = la[1]; la[1] = la[0]; la[0] = l;
+	pa[2] = pa[1]; pa[1] = pa[0]; pa[0] = p;
+    }
+    else if (l >= la[1]) {
+	la[2] = la[1]; la[1] = l;
+	pa[2] = pa[1]; pa[1] = p;
+    }
+    else if (l >= la[2]) {
+	la[2] = l;
+	pa[2] = p;
+    }
+}
+
+static void swap_lit(lit_t* lit, int p, int q)
+{
+    if (p != q) {
+	lit_t tmp = lit[p];
+	lit[p] = lit[q];
+	lit[q] = tmp;
+    }
 }
 
 static int clause_watch(varp_t* vp, clause_t* cp)
@@ -5617,6 +5613,7 @@ static int clause_watch(varp_t* vp, clause_t* cp)
     int nfalse = 0;
     int lev;
 
+    // fixme: swap in clause literals ?
     la[0] = la[1] = la[2] = -1;
     pa[0] = pa[1] = pa[2] = -1;
 
@@ -5639,7 +5636,7 @@ static int clause_watch(varp_t* vp, clause_t* cp)
 	}
 	insert_sort2(lev,p,la,pa);
     }
-/*
+
     DBG("size=%ld, nfalse=%d,\r\n"
 	"la[0]=%d,la[1]=%d,la[2]=%d,\r\n"
 	"pa[0]=%ld,pa[1]=%ld,pa[2]=%ld\r\n",
@@ -5651,15 +5648,18 @@ static int clause_watch(varp_t* vp, clause_t* cp)
 	printf("Could not set TWL\r\n");
 	return -1;
     }
-*/
+
+    swap_lit(cp->lit, 0, pa[0]);
+    swap_lit(cp->lit, 1, pa[1]);
 
     // setup watch
-    clause_watch_insert(vp, cp, pa[0], pa[1]);
+    clause_watch_insert(vp, cp);
+    cp->watched = 1;
 
     if ((la[0] == INT_MAX) && (la[1] != INT_MAX)) {
 	if (!dead) {
 	    DBG("Set UNIT\r\n");
-	    put_l(vp, cp->lit[pa[0]], I_TRUE, cp->cix, vp->level);
+	    put_l(vp, cp->lit[0], I_TRUE, cp->cix, vp->level);
 	}
 	return 1;
     }
@@ -6018,7 +6018,8 @@ static void subst_ll(varp_t* vp, lit_t xl, lit_t yl)
 
 	ASSERT(yl == cp->lit[ypix]);
 
-	if ((ypix == cp->wl[0].p) || (ypix == cp->wl[1].p)) {
+	// if ((ypix == cp->wl[0].p) || (ypix == cp->wl[1].p)) {
+	if ((ypix == 0) || (ypix == 1)) {
 	    clause_unwatch(vp, cp);
 	    rewatch = 1;
 	}
@@ -6225,11 +6226,11 @@ static ERL_NIF_TERM varp_pop_level(ErlNifEnv* env, int argc,
 
 // use 2-lower bits on 0 pointer to signal cases
 #define ev_LITERAL  0
-#define ev_NONE     1
+#define ev_WATCH    1
 #define ev_DEAD     2
 #define ev_CONFLICT 3
 
-#define EV_NONE     ((literal_t*) ev_NONE)
+#define EV_WATCH    ((literal_t*) ev_WATCH)
 #define EV_DEAD     ((literal_t*) ev_DEAD)
 #define EV_CONFLICT ((literal_t*) ev_CONFLICT)
 
@@ -6240,51 +6241,47 @@ static ERL_NIF_TERM varp_pop_level(ErlNifEnv* env, int argc,
 // return (literal_t*) 2  dead
 // return assigned literal otherwise
 //
-static inline literal_t* bcp_2_clause(varp_t* vp, clause_t* cp, wlink_t* wl1)
+
+// wp1 = 0|1
+static inline literal_t* bcp_2_clause(varp_t* vp, clause_t* cp, pos_t wp1)
 {
     ival_t lw;
-    lit_t  l;
+    lit_t  l1;
     literal_t* lp1;
 
     COUNT(vp, CLAUSE_2);
 
-    l = cp->lit[wl1->p];  // FIXME: make p = l for binary case!
-    if ((lw = get_l(vp, l)) == I_TRUE) {
+    l1 = cp->lit[wp1];
+    if ((lw = get_l(vp, l1)) == I_TRUE) {
 	COUNT(vp, CLAUSE_D);
 	return EV_DEAD;
     }
     if (lw == I_FALSE)
 	return EV_CONFLICT;
-    lp1 = l2ll(vp,l);
+    lp1 = l2ll(vp,l1);
     put_nq_ll(vp, lp1, I_TRUE, cp->cix, vp->level);
     return lp1;
 }
 
-// bcp_3_clause us this 3-(wp0+wp1) to find the new watch point
-//  0    1     2    wp0+wp1
-//  p    wp0   wp1  = 3-3 = 0
-//  wp0  p     wp1  = 3-2 = 1
-//  wp0  wp1   p    = 3-1 = 2
-
+// wp0 = 0|1  wp1 = 1-wp0!
 static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
-				      wlink_t* wl0, wlink_t* wl1,
-				      wlink_t** wlp)
+				      pos_t wp0,  pos_t wp1)
 {
     ival_t lw;
-    lit_t  l1, l;
+    lit_t  l1, pl;
     literal_t* lp1;
     pos_t  p;
 
     COUNT(vp, CLAUSE_3);
 
-    l1 = cp->lit[wl1->p];
+    l1 = cp->lit[wp1];
     if ((lw = get_l(vp, l1)) == I_TRUE) {
 	COUNT(vp, CLAUSE_D);
 	return EV_DEAD;
     }
-    p = 3-(wl0->p + wl1->p); // !!
-    l = cp->lit[p];
-    switch(get_l(vp, l)) {
+    p = 2;
+    pl = cp->lit[p];
+    switch(get_l(vp, pl)) {
     case I_TRUE:
 	return EV_DEAD;
     case I_FALSE:
@@ -6298,24 +6295,12 @@ static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
     default:
 	break;
     }
-    DBG_BCP("%sMovewp3: %s %d=>%ld\r\n", indent(vp->level), format_lit(vp, cp->lit[wl0->p]), wl0->p, p);
-    *wlp = wl0->next;
-    wlink_set(wl0, p, l2ll(vp,l));
-    return EV_NONE;
+    // swap lit[wl0->p] and lit[p]
+    DBG_BCP("%sSwap: (%d,%d)\r\n", indent(vp->level), wp0, p);
+    cp->lit[p] = cp->lit[wp0];
+    cp->lit[wp0] = pl;
+    return EV_WATCH;
 }
-
-//
-// bcp 4-clause ?
-//
-//  0    1     2    3      3-(wp0+wp1)
-//  -    wp0   wp1  -      3-(1+2) = 0
-//  wp0  -     wp1  -      3-(2+0) = 1
-//  wp0  wp1   -    -      3-(0+1) = 2
-//                         (wp0+wp1)
-//  wp0  -     -    wp1    3
-//  -    wp0   -    wp1    4
-//  -    -     wp0  wp1    5
-//
 
 #ifdef TWL_BACKWARD
 #define WATCH_INIT(w)   ((w)-1)
@@ -6327,43 +6312,58 @@ static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
 #define WATCH_WRAP(p,n) (((p) >= (n)) ? 0 : (p))
 #endif
 
+// wp0 = 0|1  wp1 = 1-wp0
 static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
-				      wlink_t* wl0, wlink_t* wl1,
-				      wlink_t** wlp, int n)
+				      pos_t wp0, pos_t wp1, int n)
 {
-    pos_t wp0, wp1;
     pos_t p;
     ival_t lw;
     lit_t l1;
 
     COUNT(vp, CLAUSE_N);
 
-    wp1 = wl1->p;
-    ASSERT(wp1 >= 0);
-
     l1 = cp->lit[wp1];
     if ((lw = get_l(vp, l1)) == I_TRUE) {
 	COUNT(vp, CLAUSE_D);
 	return EV_DEAD;
     }
-    wp0 = wl0->p;
-    ASSERT(wp0 >= 0);
+
+    p = n-1;
+    while(p > 1) {
+	lit_t pl = cp->lit[p];
+	switch(get_l(vp, pl)) {
+	case I_FALSE:
+	    break;
+	case I_TRUE:
+	    return EV_DEAD;
+	case I_UNDEF: // swap lit[wl0->p] and lit[p]
+	    DBG_BCP("%sSwap: (%d,%d)\r\n", indent(vp->level), wp0, p);
+	    cp->lit[p] = cp->lit[wp0];
+	    cp->lit[wp0] = pl;
+	    return EV_WATCH;
+	case I_BOUND:
+	default:
+	    ASSERT(0);
+	}
+	p--;
+    }
+    /*
     p = WATCH_INIT(wp0);
     p = WATCH_WRAP(p,n);
     // first step can NOT be wp0, so we can use a do loop
     do {
 	if (p != wp1) {
-	    switch(get_l(vp, cp->lit[p])) {
+	    lit_t pl = cp->lit[p];
+	    switch(get_l(vp, pl)) {
 	    case I_FALSE:
 		break;
 	    case I_TRUE:
 		return EV_DEAD;
-	    case I_UNDEF: // found a wp
-		DBG_BCP("%sMovewp: %s %d=>%ld\r\n", indent(vp->level),
-			format_lit(vp, cp->lit[wl0->p]), wl0->p, p);
-		*wlp = wl0->next;
-		wlink_set(wl0, p, l2ll(vp, cp->lit[p]));
-		return EV_NONE;
+	    case I_UNDEF: // swap lit[wl0->p] and lit[p]
+		DBG_BCP("%sSwap: (%d,%d)\r\n", indent(vp->level), wp0, p);
+		cp->lit[p] = cp->lit[wp0];
+		cp->lit[wp0] = pl;
+		return EV_WATCH;
 	    case I_BOUND:
 	    default:
 		ASSERT(0);
@@ -6372,6 +6372,7 @@ static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
 	p = WATCH_STEP(p);
 	p = WATCH_WRAP(p,n);
     } while (p != wp0);
+    */
 
     if (lw == I_FALSE)
 	return EV_CONFLICT;
@@ -6464,17 +6465,15 @@ restart:
 #endif
 	if (!cp->dead && !cp->conflict) {
 	    int i = wlink_index(wl);
-	    wlink_t* wl0 = &cp->wl[i];
-	    wlink_t* wl1 = &cp->wl[1-i];
 	    switch((cp->select)&3) {
 	    case 1:
-		lp = bcp_2_clause(vp, cp, wl1);
+		lp = bcp_2_clause(vp, cp, 1-i);
 		break;
 	    case 2:
-		lp = bcp_3_clause(vp, cp, wl0, wl1, wlp);
+		lp = bcp_3_clause(vp, cp, i, 1-i);
 		break;
 	    case 3:
-		lp = bcp_n_clause(vp, cp, wl0, wl1, wlp, cp->size);
+		lp = bcp_n_clause(vp, cp, i, 1-i, cp->size);
 		break;
 	    default:
 		enif_fprintf(stdout, "clause %d:%d select=%d\r\n",
@@ -6503,8 +6502,13 @@ restart:
 		    schedule_unwatch_clause(vp, cp);
 		}
 		break;
-	    case ev_NONE:
+	    case ev_WATCH: {
+		wlink_t* wl0 = &cp->wl[i];
+		// cp->lit[i] is now the new literal to watch
+		*wlp = wl0->next;
+		wlink_link(wl0, l2ll(vp, cp->lit[i]));
 		break;
+	    }
 	    default:
 		if (vp->level == 0) {
 		    cp->dead = 1;
@@ -6543,7 +6547,7 @@ restart:
     
     if ((vp->level == 0) && vp->opt.xref)
 	kill_clauses(vp, neg_ll(lp0));
-    return 0;    
+    return 0;
     
 conflict:
     if ((vp->level == 0) && vp->opt.xref)
@@ -8428,7 +8432,7 @@ static ERL_NIF_TERM make_jump_info(ErlNifEnv* env, varp_t* vp, clause_t* cp)
 			    make_cix(env, cp->cix));
 }
 
-// get status/watch0/watch1/watch/length
+// get status/length
 static ERL_NIF_TERM varp_clause_info(ErlNifEnv* env, int argc,
 				     const ERL_NIF_TERM argv[])
 {
@@ -8456,14 +8460,13 @@ static ERL_NIF_TERM varp_clause_info(ErlNifEnv* env, int argc,
 	else
 	    return enif_make_ok(env);
     }
-    if (argv[2] == ATOM(watch0))
-	return enif_make_long(env,cp->wl[0].p);
-    if (argv[2] == ATOM(watch1))
-	return enif_make_long(env,cp->wl[1].p);
-    if (argv[2] == ATOM(watch))
-	return enif_make_tuple2(env,
-				enif_make_long(env,cp->wl[0].p),
-				enif_make_long(env,cp->wl[1].p));
+    if (argv[2] == ATOM(watch)) {
+	if (cp->watched)
+	    return enif_make_tuple2(env,
+				    enif_make_int(env, export_l(cp->lit[0])),
+				    enif_make_int(env, export_l(cp->lit[1])));
+	return enif_make_boolean(env, 0);
+    }
     return enif_make_badarg(env);
 }
 
@@ -9339,8 +9342,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(variable);
     LOAD_ATOM(varp);
     LOAD_ATOM(watch);
-    LOAD_ATOM(watch0);
-    LOAD_ATOM(watch1);
     LOAD_ATOM(xref);
     LOAD_ATOM(vsids);
     LOAD_ATOM(none);
