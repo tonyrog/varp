@@ -20,30 +20,26 @@ analyze_(_Vp, _Level, _Bump, _Minimize, N, N) ->
 analyze_(Vp, Level, Bump, Minimize, I, N) ->
     case varp_nif:conflict(Vp, Level, Bump, I) of
 	undefined ->  %% duplicate
-	    %% io:format("clause duplicate\n"),
 	    analyze_(Vp, Level, Bump, Minimize, I+1, N);
 	Cix when is_integer(Cix) ->
-	    %% Clause = varp_nif:get_clause(Vp, Cix),
 	    Len0 = varp_nif:clause_info(Vp, Cix, length),
 	    case Minimize of
 		none ->
 		    [{Len0,0,Cix}|
 		     analyze_(Vp, Level, Bump, Minimize, I+1, N)];
 		Type -> %% local/recursive
-		    case varp_nif:minimize(Vp, Cix, Type) of
-			undefined ->
-			    %%io:format("clause duplicate after minimize\n"),
+		    case varp_nif:minimize(Vp, Cix, Type, false) of
+			undefined -> %% duplicate
 			    analyze_(Vp, Level, Bump, Minimize, I+1, N);
+			{UIP,Len} -> %% uip removed?
+			    io:format("UIP ~w and ~w literals where removed\n",
+				      [UIP, Len0-Len]),
+			    io:format("Clause' = ~w\n", [varp:get_clause(Vp, Cix)]),
+			    [{Len,Len0-Len,Cix}|
+			     analyze_(Vp, Level, Bump, Minimize, I+1, N)];
 			Len ->
-			    %% check_uip(Vp, Cix, Clause),
 			    [{Len,Len0-Len,Cix}|
 			     analyze_(Vp, Level, Bump, Minimize, I+1, N)]
 		    end
 	    end
     end.
-
-%% check UIP is still in clause
-%% check_uip(Vp, Cix, Clause) ->
-%%    Clause1 = varp_nif:get_clause(Vp,Cix),
-%%    true = (hd(Clause) =:= hd(Clause1)).
-    

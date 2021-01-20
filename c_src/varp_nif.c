@@ -50,7 +50,6 @@
 //
 // configurations
 // NIF_TRACE
-// TWL_BACKWARD
 // ASSERTIONS         various sanity test in runtime (during test)
 // DEBUG              various output during debug
 // DEBUG_MEM          special wrapped allocators to find leaks etc
@@ -63,8 +62,7 @@
 // LIT_VALUE          store literal values instead of variable value
 // PACKED_VALUE       two bit values in separate vector size=1,4 per byte
 //
-//#define NIF_TRACE
-#define TWL_BACKWARD
+// #define NIF_TRACE
 #define LIT_INTEGER 32
 #define LIT_VALUE
 #define PACKED_VALUE 1
@@ -77,10 +75,6 @@
 //#define FENCE_MEM
 //#define VALIDATE_TWL
 //#define VALIDATE_MODEL
-
-// #define COUNT(vp, cnt)
-#define COUNT(vp, cnt) vp->counter[(cnt)]++
-
 
 #ifdef ASSERTIONS
 // #define NDEBUG
@@ -108,11 +102,21 @@ typedef enum {
 } qtype_t;
 
 // counters
-#define CLAUSE_N      0   // n>2
-#define CLAUSE_2      1
-#define CLAUSE_3      2
-#define CLAUSE_D      3
-#define NUM_COUNTERS  4
+#define CLAUSE_MON_COUNTER    0   // cp->select
+#define CLAUSE_2_COUNTER      1   // cp->select
+#define CLAUSE_3_COUNTER      2   // cp->select
+#define CLAUSE_N_COUNTER      3   // cp->select
+#define CLAUSE_DEAD_COUNTER   4   // count number of dead clauses
+#define BCP_COUNTER           5   // number of bcp
+#define CONFLICT_COUNTER      6   // number of conflicts
+#define PROPAGATION_COUNTER   7   // number of propgations
+#define DECISION_COUNTER      8   // number of decisions
+#define NUM_COUNTERS  9
+
+// #define COUNT(vp, cnt)
+#define COUNT(vp, cnt) vp->counter[(cnt)]++
+
+
 
 // use LSB bit to signal negation, this makes it easy
 // to use cantor pair encoding since literals have as
@@ -288,6 +292,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "conflict",            4,  varp_conflict )	  \
     NIF( "minimize",            2,  varp_minimize )	  \
     NIF( "minimize",            3,  varp_minimize )	  \
+    NIF( "minimize",            4,  varp_minimize )	  \
     NIF( "move_clause",         3,  varp_move_clause ) \
     NIF( "unmark",              1,  varp_unmark ) \
     NIF( "mark",                2,  varp_mark ) \
@@ -572,6 +577,10 @@ typedef struct arc4_stream_t {
 #define SUB_FLAG_MAX_BOUND   0x0200    // report max bound variables since last
 #define SUB_FLAG_NUM_SUBST   0x0400    // report number of susbstitutions
 #define SUB_FLAG_MIN_LEVEL   0x0100    // report min level (at conflict)
+#define SUB_FLAG_NUM_CONFL   0x0200    // report number of conflicts
+#define SUB_FLAG_NUM_PROP    0x0400    // report number of propagations
+#define SUB_FLAG_NUM_DECI    0x0800    // report number of decisions
+#define SUB_FLAG_NUM_BCP     0x1000    // report number of decisions
 
 typedef struct _subscription_t {   // :dlink_t in dlist_t
     dlink_t link;
@@ -623,6 +632,8 @@ typedef struct _varp_t {
     uint32_t cfree[NUM_CSET]; // number of clauses marked as free
     uint32_t cdead[NUM_CSET]; // number of dead clauses (level=0)
 
+    uint64_t counter[NUM_COUNTERS];
+
     int num_conflicting;      // number of conflicting clauses saved
     int max_conflicting;      // max number of conflicting <= MAX_CONFLICTING
     cix_t conflicting_clauses[MAX_CONFLICTING];
@@ -668,10 +679,6 @@ typedef struct _varp_t {
     int32_t      min_level;     // statistics min level since last check
 
     slist_t q;                  // literal queue for propagation
-
-    uint64_t  counter[NUM_COUNTERS];
-    uint64_t  bcp_counter;    // performance counter/step counter/clock
-    uint64_t  conflict_counter; // number of conflicts
 
     variable_t constant;
 
@@ -757,14 +764,17 @@ ErlNifFunc varp_funcs[] =
 
 DECL_ATOM(alpha);
 DECL_ATOM(atom);
-DECL_ATOM(bcp_counter);
 DECL_ATOM(beta);
+DECL_ATOM(bcp_counter);
 DECL_ATOM(clause_2_counter);
 DECL_ATOM(clause_3_counter);
 DECL_ATOM(clause_d_counter);
 DECL_ATOM(clause_n_counter);
-DECL_ATOM(conflict);
+DECL_ATOM(clause_m_counter);
 DECL_ATOM(conflict_counter);
+DECL_ATOM(propagation_counter);
+DECL_ATOM(decision_counter);
+DECL_ATOM(conflict);
 DECL_ATOM(dead);
 DECL_ATOM(default);
 DECL_ATOM(delta);
@@ -803,6 +813,10 @@ DECL_ATOM(number_of_learnt_clauses);
 DECL_ATOM(number_of_subst_variables);
 DECL_ATOM(number_of_unbound_variables);
 DECL_ATOM(number_of_variables);
+DECL_ATOM(number_of_conflicts);
+DECL_ATOM(number_of_propagations);
+DECL_ATOM(number_of_decisions);
+DECL_ATOM(number_of_bcps);
 DECL_ATOM(off);
 DECL_ATOM(phase);
 DECL_ATOM(init_phase);
@@ -833,6 +847,7 @@ DECL_ATOM(vsids);
 DECL_ATOM(none);
 DECL_ATOM(log2);
 DECL_ATOM(log10);
+// DECL_ATOM(rank);
 DECL_ATOM(next);
 DECL_ATOM(version);
 DECL_ATOM(seed);
@@ -2340,7 +2355,7 @@ static int get_num_subscribers(varp_t* vp)
 static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 {
     ErlNifEnv* env = vp->msg_env;
-    ERL_NIF_TERM sub_info_keys[8] = {
+    ERL_NIF_TERM sub_info_keys[12] = {
 	ATOM(number_of_variables),
 	ATOM(number_of_bound_variables),
 	ATOM(number_of_clauses),
@@ -2349,8 +2364,16 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 	ATOM(max_bound),
 	ATOM(number_of_subst_variables),
 	ATOM(min_level),
+	ATOM(number_of_conflicts),
+	ATOM(number_of_propagations),
+	ATOM(number_of_decisions),
+	ATOM(number_of_bcps),
     };
-    ERL_NIF_TERM values[8] = {
+    ERL_NIF_TERM values[12] = {
+	ATOM(undefined),
+	ATOM(undefined),
+	ATOM(undefined),
+	ATOM(undefined),
 	ATOM(undefined),
 	ATOM(undefined),
 	ATOM(undefined),
@@ -2389,7 +2412,15 @@ static int make_sub_info(varp_t* vp,uint32_t flags,ERL_NIF_TERM* info)
 	else
 	    values[7] = enif_make_int(env, val);
     }
-    return enif_make_map_from_arrays(env, sub_info_keys, values, 8, info);
+    if (flags & SUB_FLAG_NUM_CONFL)
+	values[8] = enif_make_uint64(env, vp->counter[CONFLICT_COUNTER]);
+    if (flags & SUB_FLAG_NUM_PROP)
+	values[9] = enif_make_uint64(env, vp->counter[PROPAGATION_COUNTER]);
+    if (flags & SUB_FLAG_NUM_DECI)
+	values[10] = enif_make_uint64(env, vp->counter[DECISION_COUNTER]);
+    if (flags & SUB_FLAG_NUM_BCP)
+	values[11] = enif_make_uint64(env, vp->counter[BCP_COUNTER]);    
+    return enif_make_map_from_arrays(env, sub_info_keys, values, 12, info);
 }
 
 static void log_permanent(varp_t* vp, literal_t* x, literal_t* y)
@@ -3064,7 +3095,7 @@ static cix_t clause_insert(varp_t* vp, int si, clause_t* cp, uint32_t hvalue)
     cix_t cix = MAKE_CIX(si,ix);
 
     cp->cix    = cix;
-    cp->stamp  = vp->bcp_counter;
+    cp->stamp  = vp->counter[BCP_COUNTER];
     cp->hvalue = hvalue;
 
     if (dynvec_resize(vp->clauseset, si, ix+1) < 0)
@@ -3293,8 +3324,8 @@ static ERL_NIF_TERM make_literal(ErlNifEnv* env, literal_t* lp)
 
 
 // Read a list or tuple of literals into vp->tlit!
-// return size or -1 on failure
-static int vif_load_literals(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg)
+// return length in lenp
+static int vif_load_tlit(ErlNifEnv* env,varp_t* vp,int* lenp,ERL_NIF_TERM arg)
 {
     unsigned int n;
     int len;
@@ -3302,21 +3333,23 @@ static int vif_load_literals(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM arg)
     
     if (enif_get_list_length(env, arg, &n)) {
 	dynvar_resize(vp->tlit, n);
-	len = n;
+	len = n;  // known length
 	if (!vif_get_lit_list(env, vp, arg, &len, vp->tlit))
-	    return -1;
-	return len;
+	    return 0;
+	*lenp = len;
+	return 1;
     }
     else if (enif_get_tuple(env, arg, &len, &elem)) {
 	int i;
 	dynvar_resize(vp->tlit, (size_t) len);
 	for (i = 0; i < len; i++) {
 	    if (!vif_get_lit(env, vp, elem[i], &vp->tlit[i]))
-		return -1;
+		return 0;
 	}
-	return len;
+	*lenp = len;
+	return 1;
     }
-    return -1;
+    return 0;
 }
 
 
@@ -3841,13 +3874,8 @@ static int setup(varp_t* vp, varp_config_t* config)
     vp->max_bound = 0;
 
     vp->max_conflicting = MAX_CONFLICTING;
-    vp->bcp_counter = 0;
-    vp->conflict_counter = 0;
-    vp->counter[CLAUSE_N] = 0;   // n-clause (n > 3)
-    vp->counter[CLAUSE_2] = 0;   // 2-clause
-    vp->counter[CLAUSE_3] = 0;   // 3-clause
-    vp->counter[CLAUSE_D] = 0;   // dead clause counter
-
+    memset(vp->counter, 0, sizeof(vp->counter));
+    
     var_init(vp, &vp->constant, 0);
     vp->var_map[0] = &vp->constant;
     set_vv(vp, &vp->constant, I_TRUE);
@@ -5316,6 +5344,7 @@ static int set_lit(ErlNifEnv* env, varp_t* vp, lit_t xp, ival_t val, int level)
     }
     vp->caller_env = env;
     if (level > 0) {
+	COUNT(vp, DECISION_COUNTER);
 	vp->bnd[level].decision = xp;
 	vp->bnd[level].value = val;
 	vp->bnd[level].t = uSET;
@@ -5433,6 +5462,10 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     cix_t  cix;
     clause_t* cp;
     int i,n;
+    lit_t uip;
+    int uip_was_removed;
+    int keep_uip = true;
+    int start_index; // default to keep_uip
     int method = 0;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
@@ -5440,14 +5473,20 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     if (!vif_get_cix(env, vp, argv[1], &cix))
 	return enif_make_badarg(env);
     if (argc > 2) {
-	if (EQUAL_KEY(env, local, argv[2]))
+	if (EQUAL_KEY(env, none, argv[2]))
 	    method = 0;
+	if (EQUAL_KEY(env, local, argv[2]))
+	    method = 1;
 	else if (EQUAL_KEY(env, global, argv[2]))
 	    method = 2;	
 	else if (EQUAL_KEY(env, recursive, argv[2]))
 	    method = 3;
 	else
 	    return enif_make_badarg(env);
+	if (argc > 3) {
+	    if (!enif_get_boolean(env, argv[3], &keep_uip))
+		return enif_make_badarg(env);
+	}
     }
     if ((cp = get_clause(vp, cix)) == NULL)
 	return enif_make_badarg(env);
@@ -5456,14 +5495,16 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 
     if ((n = (int)cp->size) == 1)
 	return enif_make_int(env, 1);
-
+    if (method == 0)  // do nothing
+	return enif_make_int(env, n);
+    
     dynvar_resize(vp->tlit, 0);
 
     // mark literals in conflict clause
     for (i = 0; i < n; i++) {
 	lit_mark(vp, cp->lit[i], LIT_MARK1);
     }
-    if (method > 0) {
+    if (method > 1) {
 	// forward version of recursive mark
 	for (i = 1; i < vp->level; i++) {
 	    variable_t** bpv = bindings_at(vp, i);
@@ -5485,9 +5526,15 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	}
     }
     
-    // now check if we can remove any literals (but NOT UIP in lit[0])
-    dynvar_append(vp->tlit, &cp->lit[0]); // copy UIP
-    for (i = 1; i < n; i++) {
+    // now check if we can remove any literals
+    if (keep_uip) {
+	dynvar_append(vp->tlit, &cp->lit[0]);
+	start_index = 1;
+    }
+    else
+	start_index = 0;
+    
+    for (i = start_index; i < n; i++) {
 	lit_t li = cp->lit[i];
 	variable_t* var = var_l(vp, li);
 	if ((cix = var->implication_clause) == CLAUSE_NONE) {
@@ -5499,9 +5546,11 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 		dynvar_append(vp->tlit, &li);
 	}
     }
-
     ASSERT(dynvar_size(vp->tlit) > 0);
 
+    uip = cp->lit[0];
+    uip_was_removed = (uip != vp->tlit[0]);
+    
     // clear marks
     for (i = 0; i < n; i++) {
 	lit_unmark(vp, cp->lit[i], LIT_MARK1);
@@ -5536,7 +5585,11 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	cp->size = size;
 	cp->select = (size > 3) ? 3 : size-1;
     }
-    return enif_make_int(env, cp->size);
+    if (keep_uip && uip_was_removed)
+	return enif_make_tuple2(env,
+				external_l(env, uip),
+				enif_make_int(env, cp->size));
+    enif_make_int(env, cp->size);
 }
 
 static int is_unit_clause(varp_t* vp, clause_t* cp)
@@ -6233,29 +6286,51 @@ static ERL_NIF_TERM varp_pop_level(ErlNifEnv* env, int argc,
 #define EV_WATCH    ((literal_t*) ev_WATCH)
 #define EV_DEAD     ((literal_t*) ev_DEAD)
 #define EV_CONFLICT ((literal_t*) ev_CONFLICT)
+#define EV_TRIGGER  ((literal_t*) ev_CONFLICT)
 
-// bcp clause
-// is called when at least one literal was set to FALSE!
-// return (literal_t*) 3  conflict
-// return (literal_t*) 1  non conclusive
-// return (literal_t*) 2  dead
-// return assigned literal otherwise
+// monitor clause
+// A ~A - B C D E F
+// if A or ~A are set then an undefined literal B is selected
+// B ~B - A C D E F   and B is waited for
+// when all literals got values a trigger will fire
 //
 
-// wp1 = 0|1
+static inline literal_t* mon_clause(varp_t* vp, clause_t* cp,
+				    pos_t wp0, pos_t wp1)
+{
+    int n = cp->size;
+    pos_t p;
+
+    for (p = 2; p < n; p++) {
+	lit_t pl = cp->lit[p];
+	switch(get_l(vp, pl)) {
+	case I_FALSE: break;
+	case I_TRUE:  break;
+	case I_UNDEF: // swap lit[0] and lit[p]
+	    DBG_BCP("%sSwap: (%d,%d)\r\n", indent(vp->level), wp0, p);
+	    cp->lit[p] = cp->lit[wp0];
+	    cp->lit[wp0] = pl;
+	    cp->lit[wp1] = neg_l(pl);
+	    return EV_WATCH;
+	case I_BOUND:
+	default:
+	    ASSERT(0);
+	}
+	p--;
+    }
+    // all literals got values - trigger
+    return EV_TRIGGER;
+}
+
 static inline literal_t* bcp_2_clause(varp_t* vp, clause_t* cp, pos_t wp1)
 {
     ival_t lw;
     lit_t  l1;
     literal_t* lp1;
 
-    COUNT(vp, CLAUSE_2);
-
     l1 = cp->lit[wp1];
-    if ((lw = get_l(vp, l1)) == I_TRUE) {
-	COUNT(vp, CLAUSE_D);
+    if ((lw = get_l(vp, l1)) == I_TRUE)
 	return EV_DEAD;
-    }
     if (lw == I_FALSE)
 	return EV_CONFLICT;
     lp1 = l2ll(vp,l1);
@@ -6263,7 +6338,6 @@ static inline literal_t* bcp_2_clause(varp_t* vp, clause_t* cp, pos_t wp1)
     return lp1;
 }
 
-// wp0 = 0|1  wp1 = 1-wp0!
 static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
 				      pos_t wp0,  pos_t wp1)
 {
@@ -6272,13 +6346,9 @@ static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
     literal_t* lp1;
     pos_t  p;
 
-    COUNT(vp, CLAUSE_3);
-
     l1 = cp->lit[wp1];
-    if ((lw = get_l(vp, l1)) == I_TRUE) {
-	COUNT(vp, CLAUSE_D);
+    if ((lw = get_l(vp, l1)) == I_TRUE)
 	return EV_DEAD;
-    }
     p = 2;
     pl = cp->lit[p];
     switch(get_l(vp, pl)) {
@@ -6302,34 +6372,18 @@ static inline literal_t* bcp_3_clause(varp_t* vp, clause_t* cp,
     return EV_WATCH;
 }
 
-#ifdef TWL_BACKWARD
-#define WATCH_INIT(w)   ((w)-1)
-#define WATCH_STEP(p)   ((p)-1)
-#define WATCH_WRAP(p,n) (((p) < 0) ? ((n)-1) : (p))
-#else
-#define WATCH_INIT(w)   ((w)+1)
-#define WATCH_STEP(p)   ((p)+1)
-#define WATCH_WRAP(p,n) (((p) >= (n)) ? 0 : (p))
-#endif
-
-// wp0 = 0|1  wp1 = 1-wp0
 static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
-				      pos_t wp0, pos_t wp1, int n)
+				      pos_t wp0, pos_t wp1)
 {
     pos_t p;
     ival_t lw;
     lit_t l1;
-
-    COUNT(vp, CLAUSE_N);
+    int n = cp->size;
 
     l1 = cp->lit[wp1];
-    if ((lw = get_l(vp, l1)) == I_TRUE) {
-	COUNT(vp, CLAUSE_D);
+    if ((lw = get_l(vp, l1)) == I_TRUE)
 	return EV_DEAD;
-    }
-
-    p = n-1;
-    while(p > 1) {
+    for (p = 2; p < n; p++) {
 	lit_t pl = cp->lit[p];
 	switch(get_l(vp, pl)) {
 	case I_FALSE:
@@ -6345,35 +6399,7 @@ static inline literal_t* bcp_n_clause(varp_t* vp, clause_t* cp,
 	default:
 	    ASSERT(0);
 	}
-	p--;
     }
-    /*
-    p = WATCH_INIT(wp0);
-    p = WATCH_WRAP(p,n);
-    // first step can NOT be wp0, so we can use a do loop
-    do {
-	if (p != wp1) {
-	    lit_t pl = cp->lit[p];
-	    switch(get_l(vp, pl)) {
-	    case I_FALSE:
-		break;
-	    case I_TRUE:
-		return EV_DEAD;
-	    case I_UNDEF: // swap lit[wl0->p] and lit[p]
-		DBG_BCP("%sSwap: (%d,%d)\r\n", indent(vp->level), wp0, p);
-		cp->lit[p] = cp->lit[wp0];
-		cp->lit[wp0] = pl;
-		return EV_WATCH;
-	    case I_BOUND:
-	    default:
-		ASSERT(0);
-	    }
-	}
-	p = WATCH_STEP(p);
-	p = WATCH_WRAP(p,n);
-    } while (p != wp0);
-    */
-
     if (lw == I_FALSE)
 	return EV_CONFLICT;
     else {  // unit set other watchpoint
@@ -6465,7 +6491,13 @@ restart:
 #endif
 	if (!cp->dead && !cp->conflict) {
 	    int i = wlink_index(wl);
-	    switch((cp->select)&3) {
+	    int sel = cp->select;
+	    COUNT(vp, sel);
+	    switch(sel) {
+	    case 0:
+		ASSERT(i == 0);
+		lp = mon_clause(vp, cp, i, i-1);
+		break;
 	    case 1:
 		lp = bcp_2_clause(vp, cp, 1-i);
 		break;
@@ -6473,18 +6505,15 @@ restart:
 		lp = bcp_3_clause(vp, cp, i, 1-i);
 		break;
 	    case 3:
-		lp = bcp_n_clause(vp, cp, i, 1-i, cp->size);
+		lp = bcp_n_clause(vp, cp, i, 1-i);
 		break;
-	    default:
-		enif_fprintf(stdout, "clause %d:%d select=%d\r\n",
-			     GET_SI(cp->cix), GET_IX(cp->cix),
-			     cp->select);
-		print_sym_clause(vp, "  bcp: ", cp);
-		ASSERT(0);
 	    }
 	    switch((intptr_t)lp) {
-	    case ev_CONFLICT:
-		if (vp->max_conflicting == 1) {
+	    case ev_CONFLICT: // | TRIGGER?
+		if (sel == 0) {
+		    DBG1("monitor clause %d trigger\r\n", cp->cix);
+		}
+		else if (vp->max_conflicting == 1) {
 		    vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
 		    goto conflict;
 		}
@@ -6496,6 +6525,7 @@ restart:
 		    goto conflict;
 		break;
 	    case ev_DEAD:
+		COUNT(vp, CLAUSE_DEAD_COUNTER);
 		if (vp->level == 0) {
 		    cp->dead = 1;
 		    vp->cdead[GET_SI(cp->cix)]++;
@@ -6504,9 +6534,14 @@ restart:
 		break;
 	    case ev_WATCH: {
 		wlink_t* wl0 = &cp->wl[i];
-		// cp->lit[i] is now the new literal to watch
 		*wlp = wl0->next;
 		wlink_link(wl0, l2ll(vp, cp->lit[i]));
+		if (sel == 0) {
+		    wlink_t* wl1 = &cp->wl[1-i];
+		    // FIXME!!! make better
+		    wlink_unlink(vp, cp, neg_ll(lp0));
+		    wlink_link(wl1, l2ll(vp, cp->lit[1-i]));
+		}
 		break;
 	    }
 	    default:
@@ -6529,7 +6564,7 @@ restart:
 				goto conflict;
 			}
 			else {
-			    DBG1("bcp max depth %d reached enqueue\n",
+			    DBG1("bcp max depth %d reached enqueue\r\n",
 				 MAX_BCP_DEPTH);
 			    lqueue_insert_ll(vp, neg_ll(lp));
 			}
@@ -6560,26 +6595,32 @@ static int bcp(varp_t* vp)
     literal_t* lp;
     int r = 0;
     int level = vp->level;
+    variable_t** bpv = bindings_at(vp, level);
+    int level_size = vp->bnd[level].size;
+
     DBG_BCP("%sBcp: %s\r\n",
 	    indent(level), format_literal(vp, slist_first(&vp->q)));
+    COUNT(vp, BCP_COUNTER);
     while((lp = lqueue_deq(vp)) != NULL) {
-	if ((r = bcp_clauses(vp, lp, MAX_BCP_DEPTH)) < 0)
+	if ((r = bcp_clauses(vp, lp, MAX_BCP_DEPTH)) < 0) {
+	    COUNT(vp, CONFLICT_COUNTER);
 	    break;
+	}
     }
     set_max_bound(vp);
-    if ((level == 0) &&
-	(get_num_subscribers(vp) > 0)) { // report all permanent bindings
-	variable_t** bpv = bindings_at(vp, 0);
-	int size = vp->bnd[0].size;
-	int i = vp->report_index;
-	while(i < size) {
-	    literal_t* xp = literal_vv(vp, bpv[i]);
-	    DBG0("log index=%d %s\r\n", i, format_literal(vp,xp));
-	    log_permanent(vp, xp, NULL);
-	    i++;
+    if (level == 0) {
+	if (get_num_subscribers(vp) > 0) { // report all permanent bindings
+	    int i = vp->report_index;
+	    while(i < level_size) {
+		literal_t* xp = literal_vv(vp, bpv[i]);
+		DBG0("log index=%d %s\r\n", i, format_literal(vp,xp));
+		log_permanent(vp, xp, NULL);
+		i++;
+	    }
 	}
-	vp->report_index = size;
+	vp->report_index = level_size; // always move report_index
     }
+    vp->counter[PROPAGATION_COUNTER] += (vp->bnd[level].size - level_size);
     return r;
 }
 
@@ -6619,13 +6660,11 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 	turbo = argv[1];
     }
     vp->caller_env = env;
-    vp->bcp_counter++;
     vp->num_conflicting = 0;
     bcp(vp);
     vp->caller_env = NULL;
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
     if (vp->num_conflicting) {
-	vp->conflict_counter++;
 	lqueue_clear(vp);
 	DBG("num conflicts = %d\r\n", vp->num_conflicting);
 	// clear all conflict flags
@@ -6774,7 +6813,6 @@ next:
     DBG_ORDER("%sNbcp: next decision=%s\r\n",
 	      indent(level), format_lit(vp, xp));
 bcp:
-    vp->bcp_counter++;
     bcp(vp);
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
     if (vp->num_conflicting == 0) {
@@ -6791,7 +6829,6 @@ bcp:
     DBG_NBCP("%sContradiction\r\n", indent(level));
     // conflict found
     vp->caller_env = NULL;
-    vp->conflict_counter++;
     lqueue_clear(vp);
     DBG("num conflicts = %d\n", vp->num_conflicting);
     clear_conflict_marks(vp,vp->conflicting_clauses, vp->num_conflicting);
@@ -6850,13 +6887,37 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
     if (EQUAL_KEY(env, bcp_counter, argv[1])) {
-	return enif_make_uint64(env, vp->bcp_counter);
+	return enif_make_uint64(env, vp->counter[BCP_COUNTER]);
     }
-    if (EQUAL_KEY(env, level, argv[1])) {
-	return enif_make_uint(env, vp->level);
+    if (EQUAL_KEY(env, number_of_bcps, argv[1])) { // ALIAS
+	return enif_make_uint64(env, vp->counter[BCP_COUNTER]);
     }
     if (EQUAL_KEY(env, conflict_counter, argv[1]) ) {
-	return enif_make_uint64(env, vp->conflict_counter);
+	return enif_make_uint64(env, vp->counter[CONFLICT_COUNTER]);
+    }    
+    if (EQUAL_KEY(env, number_of_conflicts, argv[1]) ) {  // ALIAS
+	return enif_make_uint64(env, vp->counter[CONFLICT_COUNTER]);
+    }
+    if (EQUAL_KEY(env, number_of_propagations, argv[1]) ) {
+	return enif_make_uint64(env, vp->counter[PROPAGATION_COUNTER]);
+    }    
+    if (EQUAL_KEY(env, number_of_decisions, argv[1]) ) {
+	return enif_make_uint64(env, vp->counter[DECISION_COUNTER]);
+    }
+    if (EQUAL_KEY(env, clause_n_counter, argv[1])) {
+	return enif_make_uint64(env, vp->counter[CLAUSE_N_COUNTER]);
+    }
+    if (EQUAL_KEY(env, clause_m_counter, argv[1])) {
+	return enif_make_uint64(env, vp->counter[CLAUSE_MON_COUNTER]);
+    }    
+    if (EQUAL_KEY(env, clause_2_counter, argv[1])) {
+	return enif_make_uint64(env, vp->counter[CLAUSE_2_COUNTER]);
+    }
+    if (EQUAL_KEY(env, clause_3_counter, argv[1])) {
+	return enif_make_uint64(env, vp->counter[CLAUSE_3_COUNTER]);
+    }
+    if (EQUAL_KEY(env, clause_d_counter, argv[1])) {
+	return enif_make_uint64(env, vp->counter[CLAUSE_DEAD_COUNTER]);
     }
     if (EQUAL_KEY(env, max_conflicting, argv[1])) {
 	return enif_make_int(env, vp->max_conflicting);
@@ -6888,17 +6949,9 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	int n = (dynvar_size(vp->var_map)-1) - get_num_bound(vp);
 	return enif_make_int(env, n);
     }
-    if (EQUAL_KEY(env, clause_n_counter, argv[1])) {
-	return enif_make_uint64(env, vp->counter[CLAUSE_N]);
-    }
-    if (EQUAL_KEY(env, clause_2_counter, argv[1])) {
-	return enif_make_uint64(env, vp->counter[CLAUSE_2]);
-    }
-    if (EQUAL_KEY(env, clause_3_counter, argv[1])) {
-	return enif_make_uint64(env, vp->counter[CLAUSE_3]);
-    }
-    if (EQUAL_KEY(env, clause_d_counter, argv[1])) {
-	return enif_make_uint64(env, vp->counter[CLAUSE_D]);
+
+    if (EQUAL_KEY(env, level, argv[1])) {
+	return enif_make_uint(env, vp->level);
     }
     if (EQUAL_KEY(env, size, argv[1])) {
 	return enif_make_uint(env, vp->opt.vsize);
@@ -7158,6 +7211,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 //
 // add clause (and normalize, remove literals)
 //
+#if 0
 static int cmp_abs_lit QSORT_ARGS(const void* ap,const void* bp,void* arg)
 {
     (void) arg;
@@ -7189,23 +7243,7 @@ static int cmp_abs_lit QSORT_ARGS(const void* ap,const void* bp,void* arg)
 	return ll2v(a)->ix - ll2v(b)->ix;
 #endif
 }
-
-#ifdef USE_CLAUSE_SHUFFLE
-
-typedef struct
-{
-    lit_t lit;
-    int32_t key;
-} shuffle_key_t;
-
-static int cmp_shuffle QSORT_ARGS(const void* a, const void* b,void* arg)
-{
-    UNUSED(arg);
-    return ((shuffle_key_t*)a)->key - ((shuffle_key_t*)b)->key;
-}
-
 #endif
-
 
 // replace literals with constants when possible
 static void eval_clause_array(varp_t* vp, lit_t* lit, size_t size)
@@ -7230,6 +7268,7 @@ static void eval_clause_array(varp_t* vp, lit_t* lit, size_t size)
 }
 
 // sort literal, remove duplicates trim and return new size
+#if 0
 static size_t norm_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
 {
     int i;
@@ -7289,6 +7328,7 @@ static size_t norm_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
 
     return size;
 }
+#endif
 
 // new version - no sorting
 static size_t norm1_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
@@ -7341,14 +7381,14 @@ static size_t norm1_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw
     return j;	
 }
 
-
 static cix_t add_clause_array(varp_t* vp, int si, lit_t* lit,
 			      size_t size, bool_t put_unit)
 {
     clause_t* cp;
     uint32_t hvalue;
-    
-    size = norm1_clause_array(vp, lit, size, false);
+
+    if ((size = norm1_clause_array(vp, lit, size, false)) == 0)
+	return CLAUSE_FALSE;
 
     if (lit[size-1] == L_TRUE(vp))
 	return CLAUSE_TRUE;
@@ -7377,7 +7417,6 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    unsigned int n;
     int len;
     int si = DELTA;
     cix_t cix;
@@ -7385,18 +7424,13 @@ static ERL_NIF_TERM varp_add_clause(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-
+    if (!vif_load_tlit(env, vp, &len, argv[1]))
+    	return enif_make_badarg(env);
     if (argc == 3) {
 	if (!vif_get_si(env, argv[2], &si))
 	    return enif_make_badarg(env);
     }
-
-    if (!enif_get_list_length(env, argv[1], &n))
-	return enif_make_badarg(env);
-    dynvar_resize(vp->tlit, n);
-    len = n;
-    if (!vif_get_lit_list(env, vp, argv[1], &len, vp->tlit))
-	return enif_make_badarg(env);
+    
     vp->caller_env = env;
     if ((cix = add_clause_array(vp,si,vp->tlit,len,true)) == CLAUSE_NONE)
 	ret = enif_raise_exception(env, ATOM(memory_limit));
@@ -7432,31 +7466,16 @@ static ERL_NIF_TERM varp_find_clause(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int len;
-    unsigned int n;
     cix_t cix;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-
-    if (!enif_get_list_length(env, argv[1], &n))
+    if (!vif_load_tlit(env, vp, &len, argv[1]))
 	return enif_make_badarg(env);
-    else {
-	ERL_NIF_TERM r;
-	STK_BEGIN(lit_t, literals, n) {
-	    len = n;
-	    if (!vif_get_lit_list(env, vp, argv[1], &len, literals)) {
-		r = enif_make_badarg(env);
-		STK_LEAVE(literals);
-	    }
-	    len = norm1_clause_array(vp, literals, len, true);
-	    if ((cix = clause_find(vp, literals, len)) == CLAUSE_NONE)
-		r = enif_make_boolean(env, false);
-	    else
-		r = enif_make_int(env, (int)cix);
-	} STK_END(literals);
-
-	return r;
-    }
+    len = norm1_clause_array(vp, vp->tlit, len, true);
+    if ((cix = clause_find(vp, vp->tlit, len)) == CLAUSE_NONE)
+	return enif_make_boolean(env, false);
+    return enif_make_int(env, (int)cix);
 }
 
 //
@@ -7493,7 +7512,7 @@ static ERL_NIF_TERM varp_compress_clause(ErlNifEnv* env, int argc,
 			STK_LEAVE(buffer);
 		    }
 		    for (i = 0; i < csize; i++) {
-			if (!enif_get_int(env, elem[i], &x)) {
+			if (!enif_get_int(env, elem[i], &x) || (x == 0)) {
 			    r = enif_make_badarg(env);
 			    STK_LEAVE(buffer);
 			}
@@ -7714,8 +7733,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    unmark_all(vp);
 	    return enif_make_badarg(env);
 	}
-	// printf("cp->size=%d\r\n", cp->size);
-	cp->stamp = vp->bcp_counter;  // mark clause as used in conflict
+	cp->stamp = vp->counter[BCP_COUNTER]; // timestamp clause
 
 	// conflict reason
 	for (i = 0; i < (int)cp->size; i++) {
@@ -7904,7 +7922,7 @@ static void validate_twl(varp_t* vp)
 }
 #endif
 
-// delete a clause by index or literal list
+// delete a clause by index or literal list/tuple
 static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
@@ -7918,27 +7936,12 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
     if (!vif_get_cix(env, vp, argv[1], &cix)) {
-	unsigned int len;
-	
-	if (!enif_get_list_length(env, argv[1], &len))
+	int len;
+	if (!vif_load_tlit(env, vp, &len, argv[1]))
 	    return enif_make_badarg(env);
-	else {
-	    ERL_NIF_TERM r = enif_make_ok(env);
-	    STK_BEGIN(lit_t, literals, len) {
-		int size = len;
-		if (!vif_get_lit_list(env, vp, argv[1], &size, literals)) {
-		    r = enif_raise_exception(env, ATOM(literal));
-		    STK_LEAVE(literals);
-		}
-		size = norm1_clause_array(vp, literals, size, true);
-		if ((cix = clause_find(vp, literals, size)) == CLAUSE_NONE) {
-		    r = enif_make_badarg(env);
-		    STK_LEAVE(literals);
-		}
-	    } STK_END(literals);
-	    if (r != enif_make_ok(env)) // fixme: check if exception
-		return r;
-	}
+	len = norm1_clause_array(vp, vp->tlit, len, true);
+	if ((cix = clause_find(vp, vp->tlit, len)) == CLAUSE_NONE)
+	    return enif_make_badarg(env);
     }
 
     si = GET_SI(cix);
@@ -7948,7 +7951,7 @@ static ERL_NIF_TERM varp_del_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
 
 #ifdef VALIDATE_TWL
-    if (cp->stamp == vp->bcp_counter) {
+    if (cp->stamp == vp->counter[BCP_COUNTER]) {
 	enif_fprintf(stdout, "deleting a new clause %d:%d\r\n",
 		     si, ix);
     }
@@ -8484,7 +8487,7 @@ static ERL_NIF_TERM varp_use_clause(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if ((cp = get_clause(vp, cix)) == NULL)
 	return enif_make_badarg(env);
-    cp->stamp = vp->bcp_counter;
+    cp->stamp = vp->counter[BCP_COUNTER];
     return enif_make_ok(env);
 }
 
@@ -8529,6 +8532,14 @@ static int vif_get_sub_flag(ErlNifEnv* env, ERL_NIF_TERM term, uint32_t* flag)
 	*flag = SUB_FLAG_MAX_BOUND;
     else if (EQUAL_KEY(env, min_level, term))
 	*flag = SUB_FLAG_MIN_LEVEL;
+    else if (EQUAL_KEY(env, number_of_conflicts, term))
+	*flag = SUB_FLAG_NUM_CONFL;
+    else if (EQUAL_KEY(env, number_of_propagations, term))
+	*flag = SUB_FLAG_NUM_PROP;
+    else if (EQUAL_KEY(env, number_of_decisions, term))
+	*flag = SUB_FLAG_NUM_DECI;
+    else if (EQUAL_KEY(env, number_of_bcps, term))
+	*flag = SUB_FLAG_NUM_BCP;    
     else
 	return 0;
     return 1;
@@ -9272,14 +9283,16 @@ NIF_LIST
 static void load_atoms(ErlNifEnv* env)
 {
     LOAD_ATOM(alpha);
+    LOAD_ATOM(beta);
     LOAD_ATOM(atom);
     LOAD_ATOM(bcp_counter);
-    LOAD_ATOM(beta);
     LOAD_ATOM(clause_2_counter);
     LOAD_ATOM(clause_3_counter);
     LOAD_ATOM(clause_d_counter);
     LOAD_ATOM(clause_n_counter);
-    LOAD_ATOM(conflict_counter);
+    LOAD_ATOM(clause_m_counter);
+    LOAD_ATOM(conflict_counter);    
+    LOAD_ATOM(conflict);
     LOAD_ATOM(dead);
     LOAD_ATOM(default);
     LOAD_ATOM(delta);
@@ -9317,6 +9330,10 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(number_of_subst_variables);
     LOAD_ATOM(number_of_unbound_variables);
     LOAD_ATOM(number_of_variables);
+    LOAD_ATOM(number_of_conflicts);
+    LOAD_ATOM(number_of_propagations);
+    LOAD_ATOM(number_of_decisions);
+    LOAD_ATOM(number_of_bcps);
     LOAD_ATOM(off);
     LOAD_ATOM(phase);
     LOAD_ATOM(init_phase);

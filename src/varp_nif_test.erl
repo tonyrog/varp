@@ -131,17 +131,25 @@ test1() ->
     X1 = var(V),
     X2 = var(V),
     X3 = var(V),
+
     Ls0 = lists:usort([X1, X2, X3]),
+    CL0 = Ls0,
+    ?verbose("CL0=~w\n", [CL0]),
     C0 = clause(V, Ls0),
-    ?verbose("C0=~w\n", [C0]),
     Ls0 = get_clause(V, C0),
-    ?verbose("Ls0=~w\n", [Ls0]),
     
     Ls1 = lists:usort([X1,-X2,X3]),
+    CL1 = Ls1,
+    ?verbose("CL1=~w\n", [CL1]),
     C1 = clause(V, Ls1),
-    ?verbose("C0=~w\n", [C1]),
     Ls1 = get_clause(V, C1),
-    ?verbose("Ls0=~w\n", [Ls1]),
+
+
+    Ls2 = lists:usort([-X1,X2,-X3]),
+    CL2 = list_to_tuple(Ls2),
+    ?verbose("CL2=~w\n", [CL2]),
+    C2 = clause(V, CL2),
+    Ls2 = get_clause(V, C2),
     ok.
 
 test1_gamma() ->

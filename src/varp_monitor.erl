@@ -46,7 +46,9 @@ stop() ->
 start_monitor(Bs) ->
     SELF = self(),
     Info = [atom,variable,number_of_variables,number_of_bound_variables,
-	    number_of_clauses, number_of_dead_clauses],
+	    number_of_clauses, number_of_dead_clauses,
+	    number_of_conflicts, number_of_propagations,
+	    number_of_decisions, number_of_bcps],
     Ref = make_ref(),
     {Pid,Mon} = 
 	spawn_monitor(

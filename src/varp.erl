@@ -76,8 +76,7 @@
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/4]).
--export([minimize/2]).
--export([minimize/3]).
+-export([minimize/2,minimize/3,minimize/4]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -1012,9 +1011,9 @@ no_models(Bs) ->
 order_decl([]) -> [];
 order_decl(Vs) -> order_decl(Vs,[]).
 
-order_decl([Key1,Key2|Vs],Opts) when is_integer(Key1), is_integer(Key2) ->
+order_decl([Key1,Key2|Vs],Opts) when is_atom(Key1), is_atom(Key2) ->
     order_decl(Vs,[{order,[Key1,Key2]}|Opts]);
-order_decl([Key1|Vs],Opts) when is_integer(Key1) ->
+order_decl([Key1|Vs],Opts) when is_atom(Key1) ->
     order_decl(Vs,[{order,[Key1]}|Opts]);
 order_decl([{order_list,Ls1}|Vs],[{order_list,Ls}|Opts]) ->
     order_decl(Vs, [{order_list,Ls++Ls1}|Opts]);
@@ -1724,6 +1723,7 @@ conflicting_clause(Vp, Index) -> varp_nif:conflicting_clause(Vp, Index).
 conflict(Vp,Level, Bump, Index) -> varp_nif:conflict(Vp,Level, Bump, Index).
 minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
 minimize(Vp,CluseIndex,Style) -> varp_nif:minimize(Vp,CluseIndex,Style).
+minimize(Vp,CluseIndex,Style,KeepUIP) -> varp_nif:minimize(Vp,CluseIndex,Style,KeepUIP).
 is_variable(Vp,Lit) -> varp_nif:is_variable(Vp,Lit).
 is_bound(Vp,Lit) -> varp_nif:is_bound(Vp,Lit).
 is_equal(Vp,LitA,LitB) -> varp_nif:is_equal(Vp,LitA,LitB).

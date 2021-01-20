@@ -969,7 +969,6 @@ read_backjump_params(S,I) ->
     [
      %% {display,    true},
      {minimize,           read_param(?BJK(I,minimize), S, none)},
-     {iorder,             read_param(?BJK(I,iorder), S, 0)},
      {stumble,            read_param(?BJK(I,stumble), S, 0)},
      {olle,               read_param(?BJK(I,olle), S, 0)},
      {stumble_olle,       read_param(?BJK(I,stumble_olle), S, false)},
@@ -988,6 +987,7 @@ read_backjump_params(S,I) ->
 read_saturate_params(S,I) ->
     [{level, wxSpinCtrl:getValue(S#s.config_saturate)},
      {q, read_param(?SAT(I,q), S, 0)},
+     {f, read_param(?SAT(I,f), S, 0)},
      {r, read_param(?SAT(I,r), S, 0)},
      {laps, read_param(?SAT(I,laps), S, 0)},
      {threshold, read_param(?SAT(I,threshold), S, 0)}
@@ -1268,7 +1268,9 @@ run(Bs, Param) ->
 	    number_of_bound_variables,
 	    number_of_subst_variables,
 	    number_of_clauses,
-	    number_of_dead_clauses],
+	    number_of_dead_clauses,
+	    number_of_conflicts
+	   ],
     Ref = make_ref(),
     {Pid,Mon} =
 	spawn_monitor(
@@ -1346,9 +1348,10 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
 	      number_of_subst_variables:=NS,
 	      number_of_clauses:=NC,
 	      number_of_dead_clauses:=ND,
-	      number_of_bcp:=NE,
+	      number_of_bcps:=NE,
 	      max_level := XL,
-	      min_level := IL
+	      min_level := IL,
+	      number_of_conflicts := CF
 	     }) ->
     CurrentTime = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(CurrentTime - StartTime,
@@ -1357,8 +1360,8 @@ update_info(#{nbound:=NBound,window:=Window},StartTime,
     MIMA = [integer_to_list(XL),"[/",integer_to_list(IL),"]"],
     Status = io_lib:format(
 	       "#Var: ~-8w #Bound: ~-16s #Clauses: ~-8w"
-	       "#Dead: ~-8w #Bcp: ~-10w #Depth: ~-9s #Time: ~s",
-	       [NV, NBS, NC, ND, NE, MIMA, format_time(Time)]),
+	       "#Dead: ~-8w #Bcp: ~-10w Depth: ~-9s #Confl: ~-10w Time: ~s",
+	       [NV, NBS, NC, ND, NE, MIMA, CF, format_time(Time)]),
     wxGauge:setValue(NBound, trunc(100*(NB/max(1,NV)))),
     wxFrame:setStatusText(Window, Status,[]).
 
@@ -1396,9 +1399,10 @@ f2i(N) when N >= 0, N < 100 ->
 merge_get_info(Info1, Info2) ->
     minfo([number_of_clauses,
 	   number_of_dead_clauses,
-	   number_of_bcp,
+	   number_of_bcps,
 	   max_level,
-	   min_level
+	   min_level,
+	   number_of_conflicts
 	  ],
 	  Info1, Info2).
 
@@ -1407,9 +1411,10 @@ merge_info(Info1, Info2) ->
 	   number_of_subst_variables,
 	   number_of_clauses,
 	   number_of_dead_clauses,
-	   number_of_bcp,
+	   number_of_bcps,
 	   max_level,
-	   min_level
+	   min_level,
+	   number_of_conflicts
 	  ],
 	  Info1, Info2).
 
@@ -1432,12 +1437,14 @@ get_info(Bs) ->
 	   varp_nif:info(Bs#bs.vp, number_of_clauses),
        number_of_dead_clauses =>
 	   varp_nif:info(Bs#bs.vp, number_of_dead_clauses),
-       number_of_bcp =>
-	   varp_nif:info(Bs#bs.vp,bcp_counter),
+       number_of_bcps =>
+	   varp_nif:info(Bs#bs.vp, number_of_bcps),
        max_level =>
 	   varp_nif:info(Bs#bs.vp,max_level),
        min_level =>
-	   varp_nif:info(Bs#bs.vp,min_level)
+	   varp_nif:info(Bs#bs.vp,min_level),
+       number_of_conflicts =>
+	   varp_nif:info(Bs#bs.vp,number_of_conflicts)
      }.
        
 call(undefined, _Request) ->

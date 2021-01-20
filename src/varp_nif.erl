@@ -39,8 +39,7 @@
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/4]).
--export([minimize/2]).
--export([minimize/3]).
+-export([minimize/2, minimize/3, minimize/4]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -113,12 +112,19 @@
 -type binding() :: literal() | {literal(),literal()}.
 -type bindings() :: [binding()] | {binding()}.  %% variable size tuple?
 -type level() :: integer().
+-type subflag() :: variable | atom | number_of_variables |
+		   number_of_bound_variables | number_of_subst_variables |
+		   number_of_clauses | number_of_dead_clauses |
+		   max_level | max_bound | min_level | 
+		   number_of_conflicts | number_of_propagations |
+		   number_of_decisions | number_of_bcp.
 
 -export_type([varp/0]).
 -export_type([variable/0, literal/0, symbol/0]).
 -export_type([sort_key/0,sort_value/0]).
 -export_type([binding/0, bindings/0]).
 -export_type([level/0]).
+-export_type([subflag/0]).
 
 -define(nif_stub(),
 	erlang:nif_error({nif_not_loaded,module,?MODULE,line,?LINE})).
@@ -330,10 +336,17 @@ conflict(_Vp, _Level, _Bump, _Index) ->
 minimize(_Vp, _CluseIndex) ->
     ?nif_stub().
 
--spec minimize(Vp::varp(), ClauseIndex::integer(), Style::local|recursive) ->
+-spec minimize(Vp::varp(), ClauseIndex::integer(), Style::local|global|recursive) ->
 	  integer() | undefined.
 %% minimize the clause and return number of literals removed
 minimize(_Vp, _CluseIndex, _Style) ->
+    ?nif_stub().    
+
+-spec minimize(Vp::varp(), ClauseIndex::integer(),
+	       Style::local|global|recursive, KeepUIP::boolean()) ->
+	  integer() | undefined.
+%% minimize the clause and return number of literals removed
+minimize(_Vp, _CluseIndex, _Style, _KeepUIP) ->
     ?nif_stub().    
 
 -spec is_variable(Vp::varp(), Lit::literal()) -> boolean().
@@ -479,6 +492,8 @@ use_clause(_Vp,_Index) ->
 bump(_Vp,_Lit,Bump) when is_number(Bump) ->
     ?nif_stub().
 
+
+-spec subscribe(Vp::varp(), Event::subflag()|[subflag()]) -> ok.
 subscribe(_Vp,Event) when is_atom(Event) ->
     ?nif_stub().
 

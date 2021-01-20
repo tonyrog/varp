@@ -341,7 +341,9 @@ simple backtracking using a tight loop:
 
 ``` python
 varpy.add_clause(vp, [x1,...,xn])
+varpy.add_clause(vp, (x1,...,xn))
 varpy.add_clause(vp, [x1,...,xn], clause_set)
+varpy.add_clause(vp, (x1,...,xn), clause_set)
 ```
 
 Create a new clause, given as a literal list and return the
@@ -357,6 +359,7 @@ However the conflict clause(s) created by varpy.conflict are created in
 
 ``` python
 varpy.find_clause(vp, [x1,...,xn])
+varpy.find_clause(vp, (x1,...,xn))
 ```
 
 Check if the clause [__x1__,...,__xn__] exist among the clausesets.
@@ -371,6 +374,8 @@ Return a compressed version of the clause [__x1__,...,__xn__],
 or the clause given by the clause index cix.
 It writes a utf8 like code with 0x80 bit for continuation bit and 
 7-bits per byte for integer value. The LSB is coded as the literal sign.
+Note that when argument is given as an integer list the elements
+do not need to created as variables/literals.
 
 -1000 is translated to unsigned by 
 
@@ -437,6 +442,7 @@ Get information about literal x
 ``` python
 varpy.del_clause(vp, cix)
 varpy.del_clause(vp, [x1,...,xn])
+varpy.del_clause(vp, (x1,...,xn))
 ```
 
 Delete clause __cix__ or [__x1__,...,__xn__] from clausesets.
