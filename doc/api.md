@@ -338,6 +338,23 @@ simple backtracking using a tight loop:
         return True # model
 ```
 
+``` python
+varpy.vbcp(vp, [x1,...,xn])
+varpy.vbcp(vp, [x1,...,xn], single_level)
+```
+
+Vector bcp.
+If __single_level__ is __false__ (default) then each
+literal xi in x1...xn xi is used as decision followed
+by a bcp. if xi is not last then the level is pushed.
+If bcp return true then list x1...xn is checked for 
+"premature" inconsistiency and (i,xi) is returned. Otherwise the
+return value is the value of the last bcp.
+
+If __single_level__ is __true__ then each literal xi, in x1...xn,
+is bound, followed by a bcp. if bind of xi is contradictory then
+(i, xi) is returned otherwise the return value of bcp is returned.
+
 
 ``` python
 varpy.add_clause(vp, [x1,...,xn])
@@ -757,11 +774,13 @@ varpy.set_user_count(vp, x, count)
 Set user value for literal __x__ to __count__.
 
 ``` python
-varpy.conflict(vp, level, bump, i)
+varpy.conflict(vp, bump, i)
+varpy.conflict(vp, bump, [x1..xn])
 ```
 
-Do conflict analysis, called with level where the conflict i was found
-and the __bump__ factor that is applied to variables involved in the conflict.
+Do conflict analysis on conflict i (normally 0) or
+a clause supplied if no conflict clause exist.
+The __bump__ factor is applied to variables involved in the conflict.
 Returned value is a clause index in clauseset 'alpha'. This
 clause may then be minimized and later moved to 'gamma'.
 if __None__ is returned then the conflict clause was a copy of an

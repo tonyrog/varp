@@ -38,7 +38,7 @@
 -export([implication_level/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
--export([conflict/4]).
+-export([conflict/3]).
 -export([minimize/2, minimize/3, minimize/4]).
 -export([is_variable/2]).
 -export([is_bound/2]).
@@ -50,6 +50,7 @@
 -export([undo/1]).
 -export([bcp/1, bcp/2, bcp/3]).
 -export([nbcp/1]).
+-export([vbcp/2, vbcp/3]).
 -export([add_clause/2]).
 -export([add_clause/3]).
 -export([find_clause/2]).
@@ -326,9 +327,10 @@ conflicting_clause(Vp) ->
 conflicting_clause(_Vp, _Index) ->
     ?nif_stub().
 
--spec conflict(Vp::varp(), Level::level(), Bump::number(),
-	       ConflictNum::integer()) -> ClauseIndex::integer() | undefined.
-conflict(_Vp, _Level, _Bump, _Index) ->
+-spec conflict(Vp::varp(), Bump::number(), 
+	       ConflictNumOrClause::integer()|[literal()]) ->
+	  ClauseIndex::integer() | undefined.
+conflict(_Vp, _Bump, _IndexOrClause) ->
     ?nif_stub().
 
 -spec minimize(Vp::varp(), ClauseIndex::integer()) -> integer() | undefined.
@@ -422,8 +424,17 @@ bcp(_Vp, _TurboLiteralList) ->
 bcp(_Vp, _TurboLiteralList, _TurboAll) ->
     ?nif_stub().
 
-
+-spec nbcp(Vp::varp()) -> false | true.
 nbcp(_Vp) ->
+    ?nif_stub().
+
+-spec vbcp(Vp::varp(),[literal()]) -> {integer(),literal()} | false | true.
+vbcp(_Vp, _Xs) ->
+    ?nif_stub().
+
+-spec vbcp(Vp::varp(),[literal()],SingleLevel::boolean()) ->
+	  {integer(),literal()} | false | true.
+vbcp(_Vp, _Xs, _SingleLevel) ->
     ?nif_stub().
 
 -spec clauseset_size(Vp::varp(),Si::integer()) ->

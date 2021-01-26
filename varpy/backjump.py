@@ -12,10 +12,10 @@ def bj(vp):
 #        gsize = varpy.clauseset_size(vp, 'gamma')
 #        if ((gsize > 0) and ((gsize % 100) == 0)):
 #            print("|gamma| = "+str(gsize))
-        cix = varpy.conflict(vp, l, 3.0, 0)
+        cix = varpy.conflict(vp, 3.0, 0)
         if cix == None:
             pass
-        elif varpy.minimize(vp, cix) == None:
+        elif varpy.minimize(vp, cix, local) == None:
             pass
         else:
             clause = varpy.get_clause(vp, cix)

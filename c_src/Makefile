@@ -8,8 +8,10 @@ CFLAGS=-MMD -MF .$<.d -I"$(ERL_TOP)/usr/include"
 CSOURCES=varp_nif.c xnif_funcs.c
 PRIVDIR=../priv
 
+# -Wno-incompatible-pointer-types -Wno-unused-result
+WARN = -Wno-unused-result -Wall -Wunused -Wsign-compare -Wformat
 CFLAGS += -DDLOG_DEFAULT=DLOG_NONE # -DEBUG_MEM 
-CFLAGS += -std=c99 -fomit-frame-pointer -O3 -Wno-incompatible-pointer-types -Wno-unused-result -Wunused -fpic
+CFLAGS += -std=c99 -fomit-frame-pointer $(WARN) -O3 -fpic
 LDFLAGS+=-shared
 
 ifneq (, $(findstring CYGWIN,$(OS)))

@@ -214,7 +214,7 @@ main(Bs,Param,MaxLearned,MR) ->
 		0 ->
 		    return(?DONE,MR,Bs);
 		_ ->
-		    conflict(Bs,Param,Level,MaxLearned,MR)
+		    conflict(Bs,Param,MaxLearned,MR)
 	    end;
 	true ->  %% model
 	    Level = varp_nif:level(Bs#bs.vp),
@@ -248,10 +248,10 @@ main(Bs,Param,MaxLearned,MR) ->
 	    end
     end.
 
-conflict(Bs,Param,Level,MaxLearned,MR) ->
+conflict(Bs,Param,MaxLearned,MR) ->
     %% LClauseList = [{ClauseLength, ClauseIndex}] 
     %% ClauseLength may be 1 !
-    LClauses1 = varp_conflict:analyze(Bs#bs.vp,Level,
+    LClauses1 = varp_conflict:analyze(Bs#bs.vp,
 				      maps:get(bump,Param),
 				      maps:get(minimize,Param)),
     case lists:keysort(1, LClauses1) of
@@ -354,7 +354,7 @@ main_bcp(Bs,Param,Level,MaxLearned,MR) ->
 		0 ->
 		    return(?DONE,MR,Bs);
 		_ ->
-		    conflict(Bs,Param,Level,MaxLearned,MR)
+		    conflict(Bs,Param,MaxLearned,MR)
 	    end;
 	true ->
 	    restart(Bs,Param,MaxLearned,MR)
@@ -595,7 +595,14 @@ display_stat(Bs,Param) ->
 	    io:format("usage olle counter: ~w\n",
 		      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
 	    io:format("number of reorders: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]);
+		      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]),
+	    io:format("number_of_marks: ~w\n", 
+		      [varp:info(Bs#bs.vp, mark_counter)]),
+	    io:format("number_of_decisions: ~w\n", 
+		      [varp:info(Bs#bs.vp, decision_counter)]),
+	    io:format("number_of_conflicts: ~w\n", 
+		      [varp:info(Bs#bs.vp, conflict_counter)]),
+	    ok;
 	delta ->
 	    io:format("Backjump deltas used\n", []),
 	    lists:foreach(fun(D) ->

@@ -327,6 +327,38 @@ bcp4() ->
 
     ok.
 
+vbcp() ->
+    V = varp_nif:new(#{}),
+    X1 = var(V, <<"X1">>),
+    X2 = var(V, <<"X2">>),
+    X3 = var(V, <<"X3">>),
+    X4 = var(V, <<"X4">>),
+    X5 = var(V, <<"X5">>),
+    X6 = var(V, <<"X6">>),
+    _ = clause(V, [-X1, X2]),
+    _ = clause(V, [-X3, X4]),
+    _ = clause(V, [-X4, X5]),
+    _ = clause(V, [-X5, X6]),
+
+    L = varp_nif:push(V),
+    {2,X3} = varp_nif:vbcp(V, [X1, X3, -X4]),
+    varp_nif:pop(V, L),
+
+    L = varp_nif:push(V),
+    {3,X3} = varp_nif:vbcp(V, [X5, X1, X3, -X4, X6]),
+    varp_nif:pop(V, L),
+
+    L = varp_nif:push(V),
+    true = varp_nif:vbcp(V, [X1, X3]),
+    varp_nif:pop(V, L),
+
+    L = varp_nif:push(V),
+    varp_nif:bind(V, -X3),
+    {2,X3} = varp_nif:vbcp(V, [X1, X3, -X4], true),
+    varp_nif:pop(V, L).
+    
+    
+
 bcp_turbo1() ->
     V = varp_nif:new(#{xref=>true}),
     X = var(V, <<"X">>),
@@ -1467,7 +1499,7 @@ clause_learn_d1() ->
 
     _Dix = varp_nif:conflicting_clause(V, 0),
     %% ?verbose("conflicting_clause1: ~w: ~w\n",[Dix,varp_nif:get_clause(V,_Dix)]),
-    Cix1 = varp_nif:conflict(V, 4, 1.0, 0),
+    Cix1 = varp_nif:conflict(V, 1.0, 0),
     Learnt1 = varp_nif:get_clause(V, Cix1),
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
@@ -1488,7 +1520,7 @@ clause_learn_d1() ->
 	     [_Cix2,varp_nif:get_clause(V,_Cix2)]),
     %% ?verbose("DUMP4\n"),
     %% dump(V, false),
-    Cix2 = varp_nif:conflict(V, 1, 1.0, 0),
+    Cix2 = varp_nif:conflict(V, 1.0, 0),
     Learnt2 = varp_nif:get_clause(V, Cix2),
     ?verbose("learnt_clause: ~w\n", [Learnt2]),
     true = ([-1] == abs_sort(Learnt2)),
@@ -1527,8 +1559,7 @@ clause_learn_a1() ->
     true = push_bind_and_bcp(V, C),
     false = push_bind_and_bcp(V, X),
 
-    Level = varp_nif:level(V),
-    Aix1 = varp_nif:conflict(V, Level, 1.0, 0),
+    Aix1 = varp_nif:conflict(V, 1.0, 0),
     Learnt1 = varp_nif:get_clause(V,Aix1),
     ?verbose("conflicting_clause1: ~w: ~w\n",
 	      [split_cix(Aix1),Learnt1]),
@@ -1547,8 +1578,7 @@ clause_learn_a1() ->
     %% dump(V, false),
 
     false = varp_nif:bcp(V),
-    Level1 = varp_nif:level(V),
-    Aix2 = varp_nif:conflict(V, Level1, 1.0, 0),
+    Aix2 = varp_nif:conflict(V, 1.0, 0),
     Learnt2 = varp_nif:get_clause(V,Aix2),
     ?verbose("conflicting_clause2: ~w: ~w\n",
 	      [split_cix(Aix2),Learnt2]),
@@ -1627,8 +1657,7 @@ clause_learn_g1() ->
 
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Level = varp_nif:level(Vp),
-    Cix = varp_nif:conflict(Vp, Level, 1, 0),
+    Cix = varp_nif:conflict(Vp, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     Len1 = varp_nif:minimize(Vp, Cix, local),
@@ -1685,8 +1714,7 @@ clause_learn_g2() ->
     
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Level = varp_nif:level(Vp),
-    Cix = varp_nif:conflict(Vp, Level, 1, 0),
+    Cix = varp_nif:conflict(Vp, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     Len1 = varp_nif:minimize(Vp, Cix, local),
@@ -1772,8 +1800,7 @@ clause_learn_g3() ->
     %% CONFLICT should be the conflict
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Level = varp_nif:level(Vp),
-    Cix = varp_nif:conflict(Vp, Level, 1, 0),
+    Cix = varp_nif:conflict(Vp, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     Len1 = varp_nif:minimize(Vp, Cix, local),
@@ -1837,6 +1864,9 @@ get_sym_literal(Vp, Li) ->
 
 %% 
 %% bcp 999 clauses
+%% 2021-01-25
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 75404
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 74103
 %% 2021-01-19
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 62035
 %% 2021-01-18

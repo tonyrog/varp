@@ -75,7 +75,7 @@
 -export([implication_level/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
--export([conflict/4]).
+-export([conflict/3]).
 -export([minimize/2,minimize/3,minimize/4]).
 -export([is_variable/2]).
 -export([is_bound/2]).
@@ -87,6 +87,7 @@
 -export([undo/1]).
 -export([bcp/1, bcp/2, bcp/3]).
 -export([nbcp/1]).
+-export([vbcp/2, vbcp/3]).
 -export([add_clause/2]).
 -export([add_clause/3]).
 -export([find_clause/2]).
@@ -1716,11 +1717,11 @@ bind(Vp,X,Level) -> varp_nif:bind(Vp,X,Level).
 decide(Vp,X) -> varp_nif:decide(Vp,X).
 decide(Vp,X,Level) -> varp_nif:decide(Vp,X,Level).
 subst(Vp,X,Y) -> varp_nif:subst(Vp,X,Y).
-implication_clause(Vp, Lit) -> varp_nif:implication_clause(Vp, Lit).
-implication_level(Vp, Lit) -> varp_nif:implication_level(Vp, Lit).
+implication_clause(Vp,Lit) -> varp_nif:implication_clause(Vp,Lit).
+implication_level(Vp,Lit) -> varp_nif:implication_level(Vp,Lit).
 conflicting_clause(Vp) -> varp_nif:conflicting_clause(Vp).
-conflicting_clause(Vp, Index) -> varp_nif:conflicting_clause(Vp, Index).
-conflict(Vp,Level, Bump, Index) -> varp_nif:conflict(Vp,Level, Bump, Index).
+conflicting_clause(Vp,Index) -> varp_nif:conflicting_clause(Vp,Index).
+conflict(Vp,Bump,IndexOrClause) -> varp_nif:conflict(Vp,Bump,IndexOrClause).
 minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
 minimize(Vp,CluseIndex,Style) -> varp_nif:minimize(Vp,CluseIndex,Style).
 minimize(Vp,CluseIndex,Style,KeepUIP) -> varp_nif:minimize(Vp,CluseIndex,Style,KeepUIP).
@@ -1739,6 +1740,8 @@ bcp(Vp) -> varp_nif:bcp(Vp).
 bcp(Vp,TurboLiteralList) -> varp_nif:bcp(Vp,TurboLiteralList).
 bcp(Vp,TurboLiteralList,TurboAll) -> varp_nif:bcp(Vp,TurboLiteralList,TurboAll).
 nbcp(Vp) -> varp_nif:nbcp(Vp).
+vbcp(Vp,Xs) -> varp_nif:vbcp(Vp,Xs).
+vbcp(Vp,Xs,SingleLevel) -> varp_nif:vbcp(Vp,Xs,SingleLevel).
 clauseset_size(Vp, Si) -> varp_nif:clauseset_size(Vp, Si).
 add_clause(Vp,Ls) -> varp_nif:add_clause(Vp,Ls).
 add_clause(Vp,Ls,Si) -> varp_nif:add_clause(Vp,Ls,Si).
@@ -2114,6 +2117,24 @@ bcpv_(V,I, Vt, Acc) ->
 	    bcpv_(V,I-1, Vt, [Ei|Acc])
     end.
 
+%% extract the I:th permutaion from Vt
+%%  vtl(0, {A,B,C}) -> [A,B,C]
+%%  vtl(2#111, {A,B,C}) -> [A,B,C]
+%%  vtl(2#011, {A,B,C}) -> [-A,B,C]
+
+%% to be used with new vbcp(Vp, Xs, true)
+vtl(V, I, Vt) ->
+    vtl_(V, tuple_size(Vt), I, Vt, []).
+vtl_(_V, 0, _I, _Vt, Acc) ->
+    Acc;
+vtl_(V, J, I, Vt, Acc) ->
+    E = element(J,Vt),
+    if I band (1 bsl (J-1)) =/= 0 ->
+	    vtl_(V, J-1, I, Vt, [E|Acc]);
+       true -> 
+	    vtl_(V, J-1, I, Vt, [-E|Acc])
+    end.
+
 %% given number I set vars in Vt according to bit
 bindv(V, I, Vt) ->
     bindv(V, tuple_size(Vt), I, Vt).
@@ -2121,8 +2142,10 @@ bindv(V, I, Vt) ->
 bindv(_V, 0, _I, _Vt) ->
     true;
 bindv(V, J, I, Vt) ->
-    Xj = if I band (1 bsl (J-1)) =/= 0 -> element(J,Vt); 
-	    true -> -element(J,Vt)
+    Xj = if I band (1 bsl (J-1)) =/= 0 -> 
+		 element(J,Vt); 
+	    true ->
+		 -element(J,Vt)
 	 end,
     varp_nif:bind(V,Xj) andalso bindv(V,J-1,I,Vt).
 
