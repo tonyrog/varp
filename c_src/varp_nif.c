@@ -5505,7 +5505,6 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	return enif_make_int(env, n);
     
     dynvar_resize(vp->tlit, 0);
-    dynvar_resize(vp->ulit, 0);    
 
     // now check if we can remove any literals
     start_index = keep_uip ? 1 : 0;
@@ -6498,16 +6497,16 @@ restart:
 	    switch(cp->select) {
 	    case 0:
 		ASSERT(i == 0);
-		r = mon_clause(vp, cp, i, i-1);
+		r = mon_clause(vp,cp,i,1-i);
 		break;
 	    case 1:
-		r = bcp_2_clause(vp, cp, 1-i,&u);
+		r = bcp_2_clause(vp,cp,1-i,&u);
 		break;
 	    case 2:
-		r = bcp_3_clause(vp, cp, i, 1-i,&u);
+		r = bcp_3_clause(vp,cp,i,1-i,&u);
 		break;
 	    default:
-		r = bcp_n_clause(vp, cp, i, 1-i,&u);
+		r = bcp_n_clause(vp,cp,i,1-i,&u);
 		break;
 	    }
 	    switch(r) {

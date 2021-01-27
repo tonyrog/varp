@@ -2669,23 +2669,22 @@ int enif_print(FILE* out, ERL_NIF_TERM term)
 // if STATIC_ERLANG_NIF was set at build time then the init function
 // is call <modname>_nif_init(ERL_NIF_INIT_ARGS)
 //
+static PyMethodDef methods[MAX_PYNIF_FUNCS];
+
 static ErlNifEntry* nif_entry = NULL;
 static ErlNifEnv nif_env;
-// static int min_arity[MAX_PYNIF_FUNCS];
-// static int max_arity[MAX_PYNIF_FUNCS];
-static int fun_start[MAX_PYNIF_FUNCS];
-static int fun_end[MAX_PYNIF_FUNCS];
-static int nif_ari[MAX_PYNIF_FUNCS];
-static int nif_fun[MAX_PYNIF_FUNCS];
+static int  nif_max_arity[MAX_PYNIF_FUNCS];
+static int* nif_fun[MAX_PYNIF_FUNCS];
+
 
 static PyObject* pynif_call(PyObject* self, PyObject* args, int j)
 {
     PyObject** argv;
+    PyObject* r;    
     int argc;
-    int i;
-
-    DBG("pynif_call func=%d: fun_start=%d, fun_end=%d ",
-	j, fun_start[j], fun_end[j]);
+    int k;
+    
+    DBG("pynif_call func=%d:%s:\r\n", j, methods[j].ml_name);
 
     if (!PyTuple_Check(args)) {
 	PyErr_SetString(PyExc_TypeError, "args is not a argument");
@@ -2694,37 +2693,34 @@ static PyObject* pynif_call(PyObject* self, PyObject* args, int j)
 
     argv = ((PyTupleObject*)args)->ob_item;
     argc = PyTuple_GET_SIZE(args);
-
     nif_env.self = self;
 
-    // FIXME: remove this loop!
-    for (i = fun_start[j]; i < fun_end[j]; i++) {
-	if (nif_ari[i] == argc) {
-	    int k = nif_fun[i];
-	    PyObject* r;
-	    DBG("  NIF call %s/%d k=%d\r\n",
-		nif_entry->funcs[k].name,
-		nif_entry->funcs[k].arity,
-		k);
-	    r = (*nif_entry->funcs[k].fptr)(&nif_env, argc, argv);
-	    DBG("NIF result: ");
-	    if (r != NULL) {
-		Py_INCREF(r);
-		// enif_print(stderr, r);
-		// fprintf(stderr, "\r\n");
-	    }
-	    else {
-		// fprintf(stderr, "returned badarg\r\n");
-	    }
-	    if (nif_env.autodispose_list) purge_autodispose_list(&nif_env);
-	    return r;
-	}
+    if (argc > nif_max_arity[j]) {
+	PyErr_SetString(PyExc_TypeError, "badarity");
+	fprintf(stderr, "arity mismatch, %s got %d args\r\n",
+		methods[j].ml_name, argc);
+	return NULL;
     }
-    PyErr_SetString(PyExc_TypeError, "badarity");
-    fprintf(stderr, "arity mismatch %s got %d args\r\n",
-	    nif_entry->funcs[i].name, argc);
-    return NULL;
+    k = (nif_fun[j])[argc];
+	
+    DBG("  NIF call %s/%d k=%d\r\n",
+	nif_entry->funcs[k].name,
+	nif_entry->funcs[k].arity,
+	k); 
+    r = (*nif_entry->funcs[k].fptr)(&nif_env, argc, argv);
+    DBG("NIF result: ");
+    if (r != NULL) {
+	Py_INCREF(r);
+	// enif_print(stderr, r);
+	// fprintf(stderr, "\r\n");
+    }
+    else {
+	// fprintf(stderr, "returned badarg\r\n");
+    }
+    if (nif_env.autodispose_list) purge_autodispose_list(&nif_env);
+    return r;
 }
+
 
 #define PF(i) static PyObject* CAT2(pf,i)(PyObject* self, PyObject* args) { return pynif_call(self, args, (i)); }
 
@@ -2814,8 +2810,7 @@ HMODULE dlopen(const CHAR *DLL, int unused) {
 typedef void * dl_handle_t;
 #endif
 
-static int is_method_installed(PyMethodDef* methods, size_t num_methods,
-			       const char* name)
+static int is_method_installed(size_t num_methods, const char* name)
 {
     size_t j;
     for (j = 0; j < num_methods; j++) {
@@ -2824,8 +2819,6 @@ static int is_method_installed(PyMethodDef* methods, size_t num_methods,
     }
     return 0;
 }
-
-static PyMethodDef methods[MAX_PYNIF_FUNCS];
 
 #if (PY_MAJOR_VERSION > 3) || ((PY_MAJOR_VERSION==3) && (PY_MINOR_VERSION>=0))
 #define RETURN_FAIL return NULL
@@ -2879,7 +2872,6 @@ MODTYPE MODNAME(void)
     PyObject *obj_false;
     PyObject *m;
     int i;
-    int fi;
     size_t num_methods;
 
 #ifdef PYNIFFILE
@@ -2917,7 +2909,6 @@ MODTYPE MODNAME(void)
 	RETURN_FAIL;
     }
 
-    fi = 0;
     num_methods = 0;
 
     memset(methods, 0, sizeof(PyMethodDef)*(nif_entry->num_of_funcs+1));
@@ -2925,9 +2916,10 @@ MODTYPE MODNAME(void)
     for (i = 0; i < nif_entry->num_of_funcs; i++) {
 	const char* name = nif_entry->funcs[i].name;
 	int arity;
+	int max_arity;
 	int j, k;
 
-	if (is_method_installed(methods, num_methods, name))
+	if (is_method_installed(num_methods, name))
 	    continue;
 	j = num_methods++;
 	methods[j].ml_name = name;
@@ -2936,25 +2928,28 @@ MODTYPE MODNAME(void)
 	methods[j].ml_doc = NULL;
 
 	arity = nif_entry->funcs[i].arity;
-	// min_arity[j] = arity;
-	// max_arity[j] = arity;
-	fun_start[j] = fi; // entry start for arity/nif_entry pair
-	nif_ari[fi] = arity;
-	nif_fun[fi] = i;
-	fi++;
-	fun_end[j] = fi;
+
 	DBG("install function %s/%d\r\n", name, arity);
 
+	// calc max arity for all function with same name
+	max_arity = arity;
+	for (k = i+1; k < nif_entry->num_of_funcs; k++) {
+	    if (strcmp(name, nif_entry->funcs[k].name) == 0) {
+		arity = nif_entry->funcs[k].arity;
+		if (arity > max_arity) max_arity = arity;
+	    }
+	}
+	nif_max_arity[j] = max_arity;
+	nif_fun[j] = malloc((max_arity+1)*sizeof(int));
+	for (k = 0; k <= max_arity; k++)
+	    (nif_fun[j])[k] = -1;
+	arity = nif_entry->funcs[i].arity;
+	(nif_fun[j])[arity] = i;
 	// install all function with same name
 	for (k = i+1; k < nif_entry->num_of_funcs; k++) {
 	    if (strcmp(name, nif_entry->funcs[k].name) == 0) {
 		arity = nif_entry->funcs[k].arity;
-		// min_arity[j] = min(min_arity[j], arity);
-		// max_arity[j] = max(min_arity[j], arity);
-		nif_ari[fi]  = arity;
-		nif_fun[fi]  = k;
-		fi++;
-		fun_end[j] = fi;
+		(nif_fun[j])[arity] = k;
 		DBG("install function %s/%d\r\n", name, arity);
 	    }
 	}
