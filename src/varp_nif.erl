@@ -39,7 +39,7 @@
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/3]).
--export([minimize/2, minimize/3, minimize/4]).
+-export([minimize/2, minimize/3]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -338,18 +338,11 @@ conflict(_Vp, _Bump, _IndexOrClause) ->
 minimize(_Vp, _CluseIndex) ->
     ?nif_stub().
 
--spec minimize(Vp::varp(), ClauseIndex::integer(), Style::local|global|recursive) ->
+-spec minimize(Vp::varp(), ClauseIndex::integer(), Style::none|local|global|recursive) ->
 	  integer() | undefined.
 %% minimize the clause and return number of literals removed
 minimize(_Vp, _CluseIndex, _Style) ->
-    ?nif_stub().    
-
--spec minimize(Vp::varp(), ClauseIndex::integer(),
-	       Style::local|global|recursive, KeepUIP::boolean()) ->
-	  integer() | undefined.
-%% minimize the clause and return number of literals removed
-minimize(_Vp, _CluseIndex, _Style, _KeepUIP) ->
-    ?nif_stub().    
+    ?nif_stub().
 
 -spec is_variable(Vp::varp(), Lit::literal()) -> boolean().
 is_variable(_Vp, Lit) when is_integer(Lit) ->

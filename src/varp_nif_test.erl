@@ -1621,6 +1621,11 @@ implication_clauses(Vp, G) ->
 
 %% build conflict clause from graph!
 clause_learn_g1() ->
+    clause_learn_g1(local),
+    clause_learn_g1(global),
+    clause_learn_g1(recursive).
+    
+clause_learn_g1(Type) ->
     Vp = varp_nif:new(#{ qtype => fifo }),
     [A,B,C,D,E,F,G,H,I,J] = [var(Vp, Name) || 
 				Name <- ["A","B","C","D","E",
@@ -1660,17 +1665,19 @@ clause_learn_g1() ->
     Cix = varp_nif:conflict(Vp, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
-    Len1 = varp_nif:minimize(Vp, Cix, local),
-    io:format("locally minimize clause ~w[len=~w] = ~p\n", 
-	      [Cix, Len1, get_sym_clause(Vp, Cix)]),
-    Len2 = varp_nif:minimize(Vp, Cix, recursive),
-    io:format("recursive minimize clause ~w[len=~w] = ~p\n", 
-	      [Cix, Len2, get_sym_clause(Vp, Cix)]),
+    Len = varp_nif:minimize(Vp, Cix, Type),
+    io:format("~s minimize clause ~w[len=~w] = ~p\n", 
+	      [Type, Cix, Len, get_sym_clause(Vp, Cix)]),
     ok.
 
 %% example from conflict driven learning
 %% V7,V9,V14,15  and level=4 are not used
 clause_learn_g2() ->
+    clause_learn_g2(local),
+    clause_learn_g2(global),
+    clause_learn_g2(recursive).
+    
+clause_learn_g2(Type) ->
     Vp = varp_nif:new(#{ qtype => fifo }),
     [V1,V2,V3,V4,V5,V6,V8,V10,V11,V12,V13,V16,V17,V18,V19] =
 	[var(Vp, Name) || 
@@ -1717,12 +1724,9 @@ clause_learn_g2() ->
     Cix = varp_nif:conflict(Vp, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
-    Len1 = varp_nif:minimize(Vp, Cix, local),
-    io:format("locally minimize clause ~w[len=~w] = ~p\n", 
-	      [Cix, Len1, get_sym_clause(Vp, Cix)]),
-    Len2 = varp_nif:minimize(Vp, Cix, recursive),
-    io:format("recursive minimize clause ~w[len=~w] = ~p\n", 
-	      [Cix, Len2, get_sym_clause(Vp, Cix)]),
+    Len = varp_nif:minimize(Vp, Cix, Type),
+    io:format("~s minimize clause ~w[len=~w] = ~p\n", 
+	      [Type, Cix, Len, get_sym_clause(Vp, Cix)]),
     ok.
 
 
@@ -1747,6 +1751,11 @@ clause_learn_g2() ->
 %%  Z => [-V]
 
 clause_learn_g3() ->
+    clause_learn_g3(local),
+    clause_learn_g3(global),
+    clause_learn_g3(recursive).
+
+clause_learn_g3(Type) ->
     Vp = varp_nif:new(#{ qtype => fifo }),
     [A,B,C,D,E,F,G,H,I,K,L,R,S,T,X,Y,Z,CONFLICT] =
 	[var(Vp, Name) || 
@@ -1803,12 +1812,9 @@ clause_learn_g3() ->
     Cix = varp_nif:conflict(Vp, 1, 0),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
-    Len1 = varp_nif:minimize(Vp, Cix, local),
-    io:format("locally minimize clause ~w[len=~w] = ~p\n", 
-	      [Cix, Len1, get_sym_clause(Vp, Cix)]),
-    Len2 = varp_nif:minimize(Vp, Cix, recursive),
-    io:format("recursive minimize clause ~w[len=~w] = ~p\n", 
-	      [Cix, Len2, get_sym_clause(Vp, Cix)]),
+    Len = varp_nif:minimize(Vp, Cix, Type),
+    io:format("~s minimize clause ~w[len=~w] = ~p\n", 
+	      [Type, Cix, Len, get_sym_clause(Vp, Cix)]),
     ok.
     
 

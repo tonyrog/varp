@@ -76,7 +76,7 @@
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
 -export([conflict/3]).
--export([minimize/2,minimize/3,minimize/4]).
+-export([minimize/2,minimize/3]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -1724,7 +1724,6 @@ conflicting_clause(Vp,Index) -> varp_nif:conflicting_clause(Vp,Index).
 conflict(Vp,Bump,IndexOrClause) -> varp_nif:conflict(Vp,Bump,IndexOrClause).
 minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
 minimize(Vp,CluseIndex,Style) -> varp_nif:minimize(Vp,CluseIndex,Style).
-minimize(Vp,CluseIndex,Style,KeepUIP) -> varp_nif:minimize(Vp,CluseIndex,Style,KeepUIP).
 is_variable(Vp,Lit) -> varp_nif:is_variable(Vp,Lit).
 is_bound(Vp,Lit) -> varp_nif:is_bound(Vp,Lit).
 is_equal(Vp,LitA,LitB) -> varp_nif:is_equal(Vp,LitA,LitB).
