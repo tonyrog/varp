@@ -18,7 +18,8 @@ analyze(Vp, Bump, Minimize) ->
 analyze_(_Vp, _Bump, _Minimize, N, N) ->
     [];
 analyze_(Vp, Bump, Minimize, I, N) ->
-    case varp_nif:conflict(Vp, Bump, I) of
+    CCix = varp_nif:conflicting_clause(Vp, I),
+    case varp_nif:conflict(Vp, Bump, CCix) of
 	undefined ->  %% duplicate
 	    analyze_(Vp, Bump, Minimize, I+1, N);
 	Cix when is_integer(Cix) ->
@@ -28,14 +29,14 @@ analyze_(Vp, Bump, Minimize, I, N) ->
 		    [{Len0,0,Cix}|
 		     analyze_(Vp, Bump, Minimize, I+1, N)];
 		Type -> %% local/recursive
-		    io:format("minimize ~s Clause[~w]: ~w\n", 
-			      [Type, Len0, varp:get_clause(Vp, Cix)]),
+		    ?dbg0("minimize ~s Clause[~w]: ~w\n", 
+			  [Type, Len0, varp:get_clause(Vp, Cix)]),
 		    case varp_nif:minimize(Vp, Cix, Type) of
 			undefined -> %% duplicate
 			    analyze_(Vp, Bump, Minimize, I+1, N);
 			Len ->
-			    io:format("Clause'[~w]: save=~w, ~w\n",
-				      [Len,Len0-Len,varp:get_clause(Vp, Cix)]),
+			    ?dbg0("Clause'[~w]: save=~w, ~w\n",
+				  [Len,Len0-Len,varp:get_clause(Vp, Cix)]),
 			    [{Len,Len0-Len,Cix}|
 			     analyze_(Vp, Bump, Minimize, I+1, N)]
 		    end

@@ -75,8 +75,8 @@
 -export([implication_level/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
--export([conflict/3]).
--export([minimize/2,minimize/3]).
+-export([conflict/3, conflict/4]).
+-export([minimize/2, minimize/3]).
 -export([is_variable/2]).
 -export([is_bound/2]).
 -export([is_equal/3]).
@@ -1722,6 +1722,8 @@ implication_level(Vp,Lit) -> varp_nif:implication_level(Vp,Lit).
 conflicting_clause(Vp) -> varp_nif:conflicting_clause(Vp).
 conflicting_clause(Vp,Index) -> varp_nif:conflicting_clause(Vp,Index).
 conflict(Vp,Bump,IndexOrClause) -> varp_nif:conflict(Vp,Bump,IndexOrClause).
+conflict(Vp,Bump,IndexOrClause,UnitLiteral) ->
+    varp_nif:conflict(Vp,Bump,IndexOrClause,UnitLiteral).
 minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
 minimize(Vp,CluseIndex,Style) -> varp_nif:minimize(Vp,CluseIndex,Style).
 is_variable(Vp,Lit) -> varp_nif:is_variable(Vp,Lit).
@@ -1958,11 +1960,8 @@ get_bindings_list(Vp, Level) ->
 get_bindings_list(Vp, Level, Trail) ->
     varp_nif:get_bindings(Vp, Level, Trail, false).
 
-
-
 get_bindings_trail(Vp, Level) ->
     varp_nif:get_bindings(Vp, Level, true, false).
-
 
 %% bcp over vector [X1,X2,...]
 %% example X1,X2,X3
@@ -2018,7 +2017,7 @@ vec_sat(V,V0,Q,F,R,FriendMap) ->
     V1 = vec_extend(V, V0, Q),
     V2 = vec_extend_friend(V, V1, F, FriendMap),
     V3 = vec_extend_rand(V, V2, R),
-    %% io:format("V0=~w, V1=~w, V2=~w, V3=~w\n", [V0,V1,V2,V3]),
+    ?dbg0("V0=~w, V1=~w, V2=~w, V3=~w\n", [V0,V1,V2,V3]),
     vec_sat(V, V3).
 
 vec_sat(V, Vec) when is_list(Vec) ->
@@ -2095,26 +2094,136 @@ interv_(V, [false|As]) -> interv_(V, As);
 interv_(V, [A|As]) -> varp_nif:intersect_marks(V, A), interv_(V, As);
 interv_(V, []) -> varp_nif:get_marked(V, true).
 
-%% eval all 2^N combinations of Vt
+
 bcpv_(_V,-1, _Vt, Acc) ->
     list_to_tuple(Acc);
 bcpv_(V,I, Vt, Acc) ->
-    varp_nif:push(V),
-    case bindv(V, I, Vt) of
-	false ->
-	    varp_nif:queue_clear(V),
-	    varp_nif:pop(V),
-	    bcpv_(V,I-1, Vt, [false|Acc]);
+    Vec = vtl(V, I, Vt),
+    ?dbg1("bcpv: ~w\n", [Vec]),
+    L = varp_nif:push(V),
+    case varp_nif:vbcp(V, Vec) of
 	true ->
-	    L = varp_nif:push(V),
-	    Ei = case varp_nif:bcp(V) of
-		     false -> false;
-		     true -> varp_nif:get_bindings(V, L+1)
-		 end,
-	    varp_nif:pop(V),
-	    varp_nif:pop(V),
-	    bcpv_(V,I-1, Vt, [Ei|Acc])
+	    Ei = bcpv_bindings(V, L+1),
+	    varp_nif:pop(V, L),
+	    bcpv_(V,I-1, Vt, [Ei|Acc]);
+	{_J,Lj} -> %% Vec[J]=Lj is inconsistent
+	    %% io:format("~w: level=~w\n", [L, varp_nif:level(V)]),
+	    varp_nif:pop(V, L),
+	    bcpv_(V, I-1, Vt, [false|Acc]);
+	    %% case varp_nif:implication_clause(V, -Lj) of
+	    %% -1 ->  %% Probably a unit
+	    %% varp_nif:pop(V, L),
+	    %% bcpv_(V, I-1, Vt, [false|Acc]);
+	    %% CCix ->
+	    %% 		    bcpv_vconflict(V,L,CCix,Lj,I-1,Vt,[false|Acc])
+	    %% end;
+
+	false ->  %% Last eval is contradictory
+	    %% varp_nif:pop(V, L),
+	    %% bcpv_(V, I-1, Vt, [false|Acc])
+	    bcpv_conflict(V,L,I-1, Vt, [false|Acc])
     end.
+
+bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
+    ?dbg1("CCix=~w, Lj=~w\n", [CCix, Lj]),
+    ?dbg1("~w=>~s\n", [-Lj,format_clause(V,CCix)]),
+    %% Bump?
+    case varp_nif:conflict(V, 0, CCix, -Lj) of
+	undefined ->  %% duplicate
+	    varp_nif:pop(V, L),
+	    bcpv_(V, I, Vt, Acc);
+	Aix when is_integer(Aix) ->
+	    Len0 = varp_nif:clause_info(V, Aix, length),
+	    io:format("CLAUSE[~w]=~w\n", [Len0,varp_nif:get_clause(V, Aix)]),
+	    case varp_nif:minimize(V, Aix, local) of
+		undefined -> %% duplicate
+		    io:format("DUPLICATE\n"),
+		    bcpv_(V, I, Vt, Acc);
+		1 ->
+		    io:format("UNIT ~w\n", [varp_nif:get_clause(V, Aix)]),
+		    varp_nif:pop(V, L),
+		    true = varp_nif:move_clause(V, Aix, gamma),
+		    varp_nif:bcp(V),
+		    bcpv_(V,I, Vt, Acc);
+		Len ->
+		    ?dbg1("Removed: ~w\n,", [Len0-Len]),
+		    io:format("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
+		    varp_nif:pop(V, L),
+		    {true,_Gix} = varp_nif:move_clause(V,Aix,gamma),
+		    bcpv_(V, I, Vt, Acc)
+	    end
+    end.
+
+
+bcpv_conflict(V, L, I, Vt, Acc) ->
+    case varp_conflict:analyze(V, 0, local) of
+	[{1,_Count,Aix}|_] ->
+	    io:format("UNIT=~w\n", [varp_nif:get_clause(V, Aix)]),
+	    varp_nif:pop(V, L),
+	    true = varp_nif:move_clause(V, Aix, gamma),
+	    varp_nif:bcp(V),
+	    bcpv_(V,I, Vt, Acc);
+	[{_Len,_Count,Aix}|_] ->
+	    io:format("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
+	    varp_nif:pop(V, L),
+	    {true,_Gix} = varp_nif:move_clause(V, Aix, gamma),
+	    bcpv_(V,I, Vt, Acc);
+	[] ->
+	    varp_nif:pop(V, L),
+	    bcpv_(V,I,Vt,Acc)
+    end.
+
+
+bcpv_bindings(V, L) ->
+    bcpv_bindings_(V, L, varp_nif:level(V), []).
+
+bcpv_bindings_(V, L, Lmax, Acc) when L =< Lmax ->
+    case varp_nif:get_bindings(V, L, false, _AsTuple=false) of
+	[] ->
+	    bcpv_bindings_(V, L+1, Lmax, Acc);
+	[_Decide|Bs] ->
+	    %% io:format("Bs = ~w\n", [Bs]),
+	    bcpv_bindings_(V, L+1, Lmax, [Bs|Acc])
+    end;
+bcpv_bindings_(_V, _L, _Lmax, Acc) ->
+    lists:append(lists:reverse(Acc)).
+
+%% format clause as [~w/0, ~w/1 ~w]
+format_clause(V, Cix) when is_integer(Cix) ->
+    format_clause(V, get_clause(V, Cix, undefined,true));
+format_clause(V, [A|As]) ->
+    ["[", format_lit(V,A), format_clause1(V, As), "]"].
+
+format_clause1(V, As) ->
+    [[",", format_lit(V, Ai)] || Ai <- As].
+
+format_lit(V, A) ->
+    case varp_nif:value(V, A) of
+	false -> io_lib:format("~w/0", [A]);
+	true -> io_lib:format("~w/1", [A]);
+	undefined -> io_lib:format("~w", [A])
+    end.
+
+%% eval all 2^N combinations of Vt
+%% bcpv_(_V,-1, _Vt, Acc) ->
+%%     list_to_tuple(Acc);
+%% bcpv_(V,I, Vt, Acc) ->
+%%     varp_nif:push(V),
+%%     case bindv(V, I, Vt) of
+%% 	false ->
+%% 	    varp_nif:queue_clear(V),
+%% 	    varp_nif:pop(V),
+%% 	    bcpv_(V,I-1, Vt, [false|Acc]);
+%% 	true ->
+%% 	    L = varp_nif:push(V),
+%% 	    Ei = case varp_nif:bcp(V) of
+%% 		     false -> false;
+%% 		     true -> varp_nif:get_bindings(V, L+1)
+%% 		 end,
+%% 	    varp_nif:pop(V),
+%% 	    varp_nif:pop(V),
+%% 	    bcpv_(V,I-1, Vt, [Ei|Acc])
+%%     end.
 
 %% extract the I:th permutaion from Vt
 %%  vtl(0, {A,B,C}) -> [A,B,C]

@@ -344,16 +344,17 @@ varpy.vbcp(vp, [x1,...,xn], single_level)
 ```
 
 Vector bcp.
+
 If __single_level__ is __false__ (default) then each
 literal xi in x1...xn xi is used as decision followed
-by a bcp. if xi is not last then the level is pushed.
-If bcp return true then list x1...xn is checked for 
-"premature" inconsistiency and (i,xi) is returned. Otherwise the
-return value is the value of the last bcp.
+by a bcp. if bcp generates a conflict then __false__ is returned,
+If xj in xi+1...xn is inconsistent then (j,xj) is returned.
+else if xi is not last then the level is pushed and xi+1 is
+processed.
 
-If __single_level__ is __true__ then each literal xi, in x1...xn,
-is bound, followed by a bcp. if bind of xi is contradictory then
-(i, xi) is returned otherwise the return value of bcp is returned.
+If __single_level__ is __true__ then all literals xi in x1...xn,
+are assigned, followed by a bcp. if assignment of xi is inconsistent 
+then (i, xi) is returned, otherwise the return value of bcp is returned.
 
 
 ``` python
@@ -451,7 +452,6 @@ varpy.literal_info(vp, x, item)
 Get information about literal x
 
 * 'degree'
-* 'user'
 * 'mark'
 * 'xref'
 * 'symbol'
@@ -582,9 +582,6 @@ seed may be given as __arg__.
  Sort literals according to the sum of ranks for all occurences in
 all clauses. The rank for literal x is defined as the
 sum of 1/|ci| for all clauses ci where x is a member.
-* 'user'
- Sort literals according to a user value, that can be set by
-using the varpy.set\_user\_cunt(vp, x, unsigned)
 
 If the sort key is prefixed with a '+' then sorting is
 ascending. If prefix is '-' then the sort is descending, wich
@@ -768,18 +765,16 @@ varpy.clauseset_next(vp, s)
 get clause index to the next clause in clauseset __s__
 
 ``` python
-varpy.set_user_count(vp, x, count)
-```
-
-Set user value for literal __x__ to __count__.
-
-``` python
-varpy.conflict(vp, bump, i)
+varpy.conflict(vp, bump, cix)
+varpy.conflict(vp, bump, cix, xi)
 varpy.conflict(vp, bump, [x1..xn])
+varpy.conflict(vp, bump, [x1..xn], xi)
 ```
 
-Do conflict analysis on conflict i (normally 0) or
-a clause supplied if no conflict clause exist.
+Do conflict analysis on the conflict clause cix or
+explict clause [x1,...,xn], the unit literal xi must
+be supplied or __false__ (default)
+
 The __bump__ factor is applied to variables involved in the conflict.
 Returned value is a clause index in clauseset 'alpha'. This
 clause may then be minimized and later moved to 'gamma'.

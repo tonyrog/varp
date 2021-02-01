@@ -91,7 +91,6 @@ saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
 saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
     varp_nif:config(Bs#bs.vp, xref, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
-    Level = ?TOP_LEVEL,
     N = varp:get_number_of_bound_variables(Bs#bs.vp),
     FriendMap = if F =:= 0 ->
 			undefined;  %% not needed
@@ -99,7 +98,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
 			varp:make_friend_map(Bs#bs.vp)
 		end,
     %% io:format("FriendMap = ~w\n", [FriendMap]),
-    case loop(Bs1,K,Q,F,R,N,Level,MaxLaps,Threshold,FriendMap) of
+    case loop(Bs1,K,Q,F,R,N,MaxLaps,Threshold,FriendMap) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
 	{Reason,Bs2} -> 
@@ -108,7 +107,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
 	    {Reason,[],Bs2}
     end.
 
-loop(Bs,K,Q,F,R,N,Level,Laps,Threshold,FriendMap) ->
+loop(Bs,K,Q,F,R,N,Laps,Threshold,FriendMap) ->
     case lap(Bs,K,Q,F,R,FriendMap) of
 	true ->
 	    N1 = varp:get_number_of_bound_variables(Bs#bs.vp),
@@ -119,7 +118,7 @@ loop(Bs,K,Q,F,R,N,Level,Laps,Threshold,FriendMap) ->
 	       Laps1 =:= 0 ->
 		    loop_done(?ITERATIONS,Laps,Bs);
 	       true ->
-		    loop(Bs,K,Q,F,R,N1,Level,Laps1,Threshold,FriendMap)
+		    loop(Bs,K,Q,F,R,N1,Laps1,Threshold,FriendMap)
 	    end;
 	Result -> Result
     end.

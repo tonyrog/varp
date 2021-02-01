@@ -42,7 +42,7 @@ all() ->
 	   intersect_var1, intersect_var2,
 	   
 	   %% order checks
-	   order_identity, order_user, order_degree,
+	   order_identity, order_degree,
 	   order_rank, order_first,
 	   order_last,
 	   order_first_and_last,
@@ -742,38 +742,6 @@ order_identity() ->
     ok = varp:order_sort(V, identity),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
-    
-order_user() ->    
-    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
-    lists:foreach(
-      fun({L,Cp,Cn}) ->
-	      varp_nif:set_user_count(V,L,Cp),
-	      varp_nif:set_user_count(V,-L,Cn)
-      end, [{X1,12,10},{X2,11,13},{X3,16,14},{X4,15,17},{X5,20,18},{X6,19,21}]),
-    ok = varp:order_sort(V, '-user'),
-    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
-    [-1,1,-1,1,-1,1] = varp:phase_all(V),
-
-    ok = varp:order_sort(V, '+user'),
-    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
-    [1,-1,1,-1,1,-1] = varp:phase_all(V),
-
-    %% variants
-    ok = varp:order_sort(V, '-user', undefined),
-    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
-    ok = varp:order_sort(V, undefined, '-user'),
-    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
-    ok = varp:order_sort(V, '-user', '-user'),
-    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
-    ok = varp:order_sort(V, '-user', '+user'),
-    [X6,X5,X4,X3,X2,X1] = varp:order_all(V),
-    ok = varp:order_sort(V, '+user', '-user'),
-    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
-    ok = varp:order_sort(V, '+user', undefined),
-    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
-    ok = varp:order_sort(V, undefined, '+user'),
-    [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
-    ok.
 
 order_degree() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
@@ -1190,19 +1158,21 @@ intersect1() ->
     V = varp_nif:new(#{}),
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
     varp_nif:mark(V, [1,3,5,7,9,11,13,15,17,19]),
+    [1,3,5,7,9,11,13,15,17,19] = get_marked(V),
+
     varp_nif:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
-    {} = varp_nif:get_marked(V, true),
+    [] = get_marked(V),
 
     varp_nif:mark(V, [1,3,5,7,-8,9,10,11,-12,13,15,17,19]),
     varp_nif:intersect_marks(V, [2,4,6,8,10,12,14,16,18,20]),
-    {10} = varp_nif:get_marked(V, true),
+    [10] = get_marked(V),
 
     varp_nif:mark(V, [1,3,5,7,-8,9,-10,11,-12,13,15,17,19]),
     varp_nif:intersect_marks(V, [2,4,6,-8,10,-12,14,16,18,20]),
-    {-8,-12} = varp_nif:get_marked(V, true),
+    [-12,-8] = get_marked(V),
 
     varp_nif:mark(V, []),
-    {} = varp_nif:get_marked(V, true),
+    [] = get_marked(V),
     ok.
 
 intersect2() ->
@@ -1210,18 +1180,18 @@ intersect2() ->
     _Vs = [ var(V) || _ <- lists:seq(1,20)], %% install variables
     varp_nif:mark(V, {1,3,5,7,9,11,13,15,17,19}),
     varp_nif:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
-    {} = varp_nif:get_marked(V, true),
+    [] = get_marked(V),
 
     varp_nif:mark(V, {1,3,5,7,-8,9,10,11,-12,13,15,17,19}),
     varp_nif:intersect_marks(V, {2,4,6,8,10,12,14,16,18,20}),
-    {10} = varp_nif:get_marked(V, true),
+    [10] = get_marked(V),
 
     varp_nif:mark(V, {1,3,5,7,-8,9,-10,11,-12,13,15,17,19}),
     varp_nif:intersect_marks(V, {2,4,6,-8,10,-12,14,16,18,20}),
-    {-8,-12} = varp_nif:get_marked(V, true),
+    [-12,-8] =  get_marked(V),
 
     varp_nif:mark(V, {}),
-    {} = varp_nif:get_marked(V, true),
+    [] = get_marked(V),
     ok.
 
 intersect_var0() ->
@@ -1367,9 +1337,9 @@ decide1() ->
     ?F = varp_nif:value(V, X4),
     varp_nif:pop(V),
 
-    undefined = varp_nif:variable_info(V, X1, phase),
-    1 = varp_nif:variable_info(V, X2, phase),
-    1 = varp_nif:variable_info(V, X3, phase),
+    -1 = varp_nif:variable_info(V, X1, phase),
+    1  = varp_nif:variable_info(V, X2, phase),
+    1  = varp_nif:variable_info(V, X3, phase),
     -1 = varp_nif:variable_info(V, X4, phase),
     ok.
 
@@ -1497,9 +1467,10 @@ clause_learn_d1() ->
     true = push_bind_and_bcp(V, C),
     false = push_bind_and_bcp(V, X),
 
-    _Dix = varp_nif:conflicting_clause(V, 0),
-    %% ?verbose("conflicting_clause1: ~w: ~w\n",[Dix,varp_nif:get_clause(V,_Dix)]),
-    Cix1 = varp_nif:conflict(V, 1.0, 0),
+    CCix1 = varp_nif:conflicting_clause(V, 0),
+    ?verbose("conflicting_clause1: ~w: ~w\n",
+	     [CCix1,varp_nif:get_clause(V,CCix1)]),
+    Cix1 = varp_nif:conflict(V, 1.0, CCix1),
     Learnt1 = varp_nif:get_clause(V, Cix1),
     ?verbose("learnt_clause: ~w\n", [Learnt1]),
     true = ([-1,-5] == abs_sort(Learnt1)),
@@ -1515,12 +1486,10 @@ clause_learn_d1() ->
     %% dump(V, false),
 
     false = varp_nif:bcp(V),
-    _Cix2 = varp_nif:conflicting_clause(V, 0),
+    CCix2 = varp_nif:conflicting_clause(V, 0),
     ?verbose("conflicting_clause2: ~w: ~w\n", 
-	     [_Cix2,varp_nif:get_clause(V,_Cix2)]),
-    %% ?verbose("DUMP4\n"),
-    %% dump(V, false),
-    Cix2 = varp_nif:conflict(V, 1.0, 0),
+	     [CCix2,varp_nif:get_clause(V,CCix2)]),
+    Cix2 = varp_nif:conflict(V, 1.0, CCix2),
     Learnt2 = varp_nif:get_clause(V, Cix2),
     ?verbose("learnt_clause: ~w\n", [Learnt2]),
     true = ([-1] == abs_sort(Learnt2)),
@@ -1559,7 +1528,8 @@ clause_learn_a1() ->
     true = push_bind_and_bcp(V, C),
     false = push_bind_and_bcp(V, X),
 
-    Aix1 = varp_nif:conflict(V, 1.0, 0),
+    CAix1 = varp_nif:conflicting_clause(V, 0),
+    Aix1 = varp_nif:conflict(V, 1.0, CAix1),
     Learnt1 = varp_nif:get_clause(V,Aix1),
     ?verbose("conflicting_clause1: ~w: ~w\n",
 	      [split_cix(Aix1),Learnt1]),
@@ -1578,7 +1548,8 @@ clause_learn_a1() ->
     %% dump(V, false),
 
     false = varp_nif:bcp(V),
-    Aix2 = varp_nif:conflict(V, 1.0, 0),
+    CAix2 = varp_nif:conflicting_clause(V, 0),
+    Aix2 = varp_nif:conflict(V, 1.0, CAix2),
     Learnt2 = varp_nif:get_clause(V,Aix2),
     ?verbose("conflicting_clause2: ~w: ~w\n",
 	      [split_cix(Aix2),Learnt2]),
@@ -1662,7 +1633,8 @@ clause_learn_g1(Type) ->
 
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Cix = varp_nif:conflict(Vp, 1, 0),
+    CCix = varp_nif:conflicting_clause(Vp, 0),
+    Cix = varp_nif:conflict(Vp, 1, CCix),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     Len = varp_nif:minimize(Vp, Cix, Type),
@@ -1719,9 +1691,9 @@ clause_learn_g2(Type) ->
     true = varp_nif:bind(Vp, V11),
     false = varp_nif:bcp(Vp),
     
-    Dix = varp_nif:conflicting_clause(Vp, 0),
-    io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Cix = varp_nif:conflict(Vp, 1, 0),
+    CCix = varp_nif:conflicting_clause(Vp, 0),
+    io:format("conflicting ~w = ~p\n", [CCix,get_sym_clause(Vp, CCix)]),
+    Cix = varp_nif:conflict(Vp, 1, CCix),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     Len = varp_nif:minimize(Vp, Cix, Type),
@@ -1807,9 +1779,9 @@ clause_learn_g3(Type) ->
     true = varp_nif:bind(Vp, R),
     false = varp_nif:bcp(Vp),
     %% CONFLICT should be the conflict
-    Dix = varp_nif:conflicting_clause(Vp, 0),
-    io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
-    Cix = varp_nif:conflict(Vp, 1, 0),
+    CCix = varp_nif:conflicting_clause(Vp, 0),
+    io:format("conflicting ~w = ~p\n", [CCix,get_sym_clause(Vp, CCix)]),
+    Cix = varp_nif:conflict(Vp, 1, CCix),
     io:format("learned clause ~w = ~p\n", 
 	      [Cix, get_sym_clause(Vp, Cix)]),
     Len = varp_nif:minimize(Vp, Cix, Type),
@@ -1868,8 +1840,13 @@ get_sym_literal(Vp, Li) ->
 	    end
     end.
 
+get_marked(Vp) ->
+    lists:sort(varp_nif:get_marked(Vp, false)).
+
 %% 
 %% bcp 999 clauses
+%% 2021-02-01
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 77176
 %% 2021-01-25
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 75404
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 74103

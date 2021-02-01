@@ -1518,9 +1518,7 @@ int enif_snprintf(char* str, size_t size, const char *format, ...)
     return r;
 }
 
-
-// I/O
-
+// I/O  FIXME: handle %T!
 
 int enif_fprintf(FILE* filep, const char *format, ...)
 {
@@ -2676,51 +2674,28 @@ static ErlNifEnv nif_env;
 static int  nif_max_arity[MAX_PYNIF_FUNCS];
 static int* nif_fun[MAX_PYNIF_FUNCS];
 
-
-static PyObject* pynif_call(PyObject* self, PyObject* args, int j)
+static inline PyObject* pynif_call(PyObject* self, PyObject* args, int j)
 {
-    PyObject** argv;
-    PyObject* r;    
-    int argc;
+    PyObject** argv = ((PyTupleObject*)args)->ob_item;
+    int argc        = PyTuple_GET_SIZE(args);
+    PyObject* r;
     int k;
     
     DBG("pynif_call func=%d:%s:\r\n", j, methods[j].ml_name);
-
-    if (!PyTuple_Check(args)) {
-	PyErr_SetString(PyExc_TypeError, "args is not a argument");
-	return NULL;
-    }
-
-    argv = ((PyTupleObject*)args)->ob_item;
-    argc = PyTuple_GET_SIZE(args);
     nif_env.self = self;
-
-    if (argc > nif_max_arity[j]) {
+    if ((argc > nif_max_arity[j]) || ((k = (nif_fun[j])[argc]) < 0)) {
 	PyErr_SetString(PyExc_TypeError, "badarity");
 	fprintf(stderr, "arity mismatch, %s got %d args\r\n",
 		methods[j].ml_name, argc);
 	return NULL;
     }
-    k = (nif_fun[j])[argc];
-	
-    DBG("  NIF call %s/%d k=%d\r\n",
-	nif_entry->funcs[k].name,
-	nif_entry->funcs[k].arity,
-	k); 
-    r = (*nif_entry->funcs[k].fptr)(&nif_env, argc, argv);
-    DBG("NIF result: ");
-    if (r != NULL) {
+    DBG("NIF call %s/%d k=%d\r\n",
+	nif_entry->funcs[k].name, nif_entry->funcs[k].arity, k); 
+    if ((r = (*nif_entry->funcs[k].fptr)(&nif_env, argc, argv)) != NULL)
 	Py_INCREF(r);
-	// enif_print(stderr, r);
-	// fprintf(stderr, "\r\n");
-    }
-    else {
-	// fprintf(stderr, "returned badarg\r\n");
-    }
     if (nif_env.autodispose_list) purge_autodispose_list(&nif_env);
     return r;
 }
-
 
 #define PF(i) static PyObject* CAT2(pf,i)(PyObject* self, PyObject* args) { return pynif_call(self, args, (i)); }
 

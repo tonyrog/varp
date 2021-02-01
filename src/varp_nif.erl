@@ -38,7 +38,7 @@
 -export([implication_level/2]).
 -export([conflicting_clause/1]).
 -export([conflicting_clause/2]).
--export([conflict/3]).
+-export([conflict/3, conflict/4]).
 -export([minimize/2, minimize/3]).
 -export([is_variable/2]).
 -export([is_bound/2]).
@@ -83,7 +83,6 @@
 -export([clauseset_sort/2]).
 -export([clauseset_first/2]).
 -export([clauseset_next/2]).
--export([set_user_count/3]).
 -export([unmark/1]).
 -export([mark/2, mark/3]).
 -export([intersect_marks/2]).
@@ -331,6 +330,13 @@ conflicting_clause(_Vp, _Index) ->
 	       ConflictNumOrClause::integer()|[literal()]) ->
 	  ClauseIndex::integer() | undefined.
 conflict(_Vp, _Bump, _IndexOrClause) ->
+    ?nif_stub().
+
+-spec conflict(Vp::varp(), Bump::number(), 
+	       ConflictNumOrClause::integer()|[literal()],
+	       UnitLiteral::literal()) ->
+	  ClauseIndex::integer() | undefined.
+conflict(_Vp, _Bump, _IndexOrClause, _UnitLiteral) ->
     ?nif_stub().
 
 -spec minimize(Vp::varp(), ClauseIndex::integer()) -> integer() | undefined.
@@ -647,10 +653,6 @@ clauseset_first(_Vp, _Si) ->
 
 %% return index to next clause | false
 clauseset_next(_Vp, _Ix) ->
-    ?nif_stub().
-
-%% set user count (unsigned 32-bit) for sorting
-set_user_count(_Vp, _Lit, _Value) ->
     ?nif_stub().
 
 %% return next unbound literal or false
