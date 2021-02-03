@@ -121,7 +121,6 @@
 -export([clauseset_sort/2]).
 -export([clauseset_first/1, clauseset_first/2]).
 -export([clauseset_next/2]).
--export([set_user_count/3]).
 -export([unmark/1]).
 -export([mark/2, mark/3]).
 -export([intersect_marks/2]).
@@ -1686,7 +1685,7 @@ literal_info(Vp,Index) ->
 	What <- literal_info_keys()].
 
 literal_info_keys() ->
-    [degree, user, xref, symbol].
+    [mark, inqueue, degree, user, xref, symbol].
 
 %% VARP_NIF wrapper
 
@@ -1784,7 +1783,6 @@ clauseset_offset(Vp, Si, Offset) -> varp_nif:clauseset_offset(Vp, Si, Offset).
 clauseset_sort(Vp, Si) -> varp_nif:clauseset_sort(Vp, Si).
 clauseset_first(Vp, Si) -> varp_nif:clauseset_first(Vp, Si).
 clauseset_next(Vp, Ix) -> varp_nif:clauseset_next(Vp, Ix).
-set_user_count(Vp, Lit, Value) -> varp_nif:set_user_count(Vp, Lit, Value).
 next_unbound(Vp) -> varp_nif:next_unbound(Vp).
 next_unbound(Vp, Previous) -> varp_nif:next_unbound(Vp, Previous).
 unmark(Vp) -> varp_nif:unmark(Vp).
@@ -2099,7 +2097,7 @@ bcpv_(_V,-1, _Vt, Acc) ->
     list_to_tuple(Acc);
 bcpv_(V,I, Vt, Acc) ->
     Vec = vtl(V, I, Vt),
-    ?dbg1("bcpv: ~w\n", [Vec]),
+    ?dbg0("bcpv: ~w\n", [Vec]),
     L = varp_nif:push(V),
     case varp_nif:vbcp(V, Vec) of
 	true ->
@@ -2121,6 +2119,7 @@ bcpv_(V,I, Vt, Acc) ->
 	false ->  %% Last eval is contradictory
 	    %% varp_nif:pop(V, L),
 	    %% bcpv_(V, I-1, Vt, [false|Acc])
+	    %% FIX: optional learn option!
 	    bcpv_conflict(V,L,I-1, Vt, [false|Acc])
     end.
 
@@ -2158,13 +2157,13 @@ bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
 bcpv_conflict(V, L, I, Vt, Acc) ->
     case varp_conflict:analyze(V, 0, local) of
 	[{1,_Count,Aix}|_] ->
-	    io:format("UNIT=~w\n", [varp_nif:get_clause(V, Aix)]),
+	    ?dbg1("UNIT=~w\n", [varp_nif:get_clause(V, Aix)]),
 	    varp_nif:pop(V, L),
 	    true = varp_nif:move_clause(V, Aix, gamma),
 	    varp_nif:bcp(V),
 	    bcpv_(V,I, Vt, Acc);
 	[{_Len,_Count,Aix}|_] ->
-	    io:format("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
+	    ?dbg1("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
 	    varp_nif:pop(V, L),
 	    {true,_Gix} = varp_nif:move_clause(V, Aix, gamma),
 	    bcpv_(V,I, Vt, Acc);
@@ -2172,7 +2171,6 @@ bcpv_conflict(V, L, I, Vt, Acc) ->
 	    varp_nif:pop(V, L),
 	    bcpv_(V,I,Vt,Acc)
     end.
-
 
 bcpv_bindings(V, L) ->
     bcpv_bindings_(V, L, varp_nif:level(V), []).

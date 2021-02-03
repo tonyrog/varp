@@ -2,7 +2,7 @@
 
 Terminals
 	symbol true false define declare literals assert input output
-        order rank degree random identity user
+        order rank degree random identity
         'EQ' 'NEQ' 'GT' 'GTE' 'LT' 'LTE' 'NONE' 'ONE'
 	'and' 'or' 'xor' 'not' 'imp' 'equ' 'A' 'E' 'ALL' 'ANY' 'PARITY'
         'ODD' 'EVEN'
@@ -225,10 +225,6 @@ odecl -> '-' random     : '-random'.
 odecl -> identity       : 'identity'.
 odecl -> '+' identity   : '+identity'.
 odecl -> '-' identity   : '-identity'.
-
-odecl -> user           : 'user'.
-odecl -> '+' user       : '+user'.
-odecl -> '-' user       : '-user'.
 
 odecl -> oexpr      : '$1'.
     

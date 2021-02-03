@@ -371,9 +371,8 @@ varp_layout(I) when is_integer(I) ->
 		{radiobox,
 		 #{ name => [profile,I,options,order,key1,sort],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Deg",degree}, {"Rank",rank},
-		  {"User",user}, {"Rand",random}, {"Input",identity},
-		  {"Undef",undefined}]}
+		 [{"Deg",degree},{"Rank",rank},{"Rand",random},
+		  {"Input",identity},{"Undef",undefined}]}
 	       ]},
 	      {horizontal,#{},
 	       [{checkbox,#{ label => "Ascend",
@@ -381,9 +380,8 @@ varp_layout(I) when is_integer(I) ->
 		{radiobox,
 		 #{ name => [profile,I,options,order,key2,sort],
 		    options => [{majorDim,1},{style,vertical}]},
-		 [{"Deg",degree},{"Rank",rank},
-		  {"User",user},{"Rand",random},{"Input",identity},
-		  {"Undef",undefined}]}
+		 [{"Deg",degree},{"Rank",rank},{"Rand",random},
+		  {"Input",identity},{"Undef",undefined}]}
 	       ]}
 	     ]},
 

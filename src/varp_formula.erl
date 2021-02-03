@@ -35,7 +35,6 @@
 -export([log_clause/2]).
 -export([proof_output/3]).
 -export([want_proof_output/1]).
--export([clear_user_count/1]).
 
 %% building with operations
 -export([operation/4, operation/3]).
@@ -2798,13 +2797,6 @@ each_variable_(Bs, Fun, X, N) ->
     Fun(X),
     each_variable_(Bs, Fun, X+1, N).
 
-clear_user_count(Bs) ->
-    Vp = Bs#bs.vp,
-    each_variable(Bs,
-		 fun(X) ->
-			 varp_nif:set_user_count(Vp, X, 0),
-			 varp_nif:set_user_count(Vp, -X, 0)
-		 end).
 %%
 %% collect the model
 %% Boolean: {x,true} | {y,false}]
