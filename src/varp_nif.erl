@@ -89,6 +89,7 @@
 -export([intersect_var/4]).
 -export([get_marked/2]).
 -export([rand/1]).   %% debug!
+-export([noop/1]).   %% bench
 %% -define(DEBUG, true).
 
 -ifdef(DEBUG).
@@ -696,4 +697,8 @@ get_marked(_Vp, _Tuple) ->
 
 -spec rand(Vp::varp()) -> unsigned().
 rand(_Vp) ->
+    ?nif_stub().
+
+-spec noop(Vp::varp()) -> ok.
+noop(_Vp) ->
     ?nif_stub().

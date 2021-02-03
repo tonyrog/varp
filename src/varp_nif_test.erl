@@ -11,6 +11,7 @@
 
 -export([all/0]).
 -export([bench/0, bench/1]).
+-export([bench0/0, bench0/1]).
 -export([bench_purge/0, bench_purge/1, bench_purge/2]).
 
 -include("varp.hrl").
@@ -1630,6 +1631,7 @@ clause_learn_g1(Type) ->
     varp_nif:push(Vp),
     true = varp_nif:bind(Vp, D),
     false = varp_nif:bcp(Vp),
+    dump_levels(Vp),
 
     Dix = varp_nif:conflicting_clause(Vp, 0),
     io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
@@ -1641,6 +1643,85 @@ clause_learn_g1(Type) ->
     io:format("~s minimize clause ~w[len=~w] = ~p\n", 
 	      [Type, Cix, Len, get_sym_clause(Vp, Cix)]),
     ok.
+
+
+clause_learn_vg1(Type) ->
+    Vp = varp_nif:new(#{ qtype => fifo }),
+    [A,B,C,D,E,F,G,H,I,J] = [var(Vp, Name) || 
+				Name <- ["A","B","C","D","E",
+					 "F","G","H","I","J"]],
+    %% implication graph
+    Graph = #{A => [E],
+	      B => [F],
+	      C => [F,G],
+	      D => [G],
+	      E => [H,I],
+	      F => [H,I],
+	      G => [I,H],
+	      H => [J],
+	      I => [-J]
+	     },
+    RGraph = invert_graph(Graph),
+    
+    implication_clauses(Vp, RGraph), %% build clauses from implication graph
+    %% trigger leaf nodes A,B,C,D in this graph
+    varp_nif:push(Vp),
+    false = varp_nif:vbcp(Vp, [A, B, C, D]),
+    dump_levels(Vp),
+
+    Dix = varp_nif:conflicting_clause(Vp, 0),
+    io:format("conflicting ~w = ~p\n", [Dix,get_sym_clause(Vp, Dix)]),
+    CCix = varp_nif:conflicting_clause(Vp, 0),
+    Cix = varp_nif:conflict(Vp, 1, CCix),
+    io:format("learned clause ~w = ~p\n", 
+	      [Cix, get_sym_clause(Vp, Cix)]),
+    Len = varp_nif:minimize(Vp, Cix, Type),
+    io:format("~s minimize clause ~w[len=~w] = ~p\n", 
+	      [Type, Cix, Len, get_sym_clause(Vp, Cix)]),
+    ok.
+
+
+clause_learn_vg1_1(Type) ->
+    Vp = varp_nif:new(#{ qtype => fifo }),
+    [A,B,C,D,E,F,G,H,I,J] = [var(Vp, Name) || 
+				Name <- ["A","B","C","D","E",
+					 "F","G","H","I","J"]],
+    %% implication graph
+    Graph = #{A => [E],
+	      B => [F],
+	      C => [F,G],
+	      D => [G],
+	      E => [H,I],
+	      F => [H,I],
+	      G => [I,H],
+	      H => [J]
+%%	      I => [-J]
+	     },
+    RGraph = invert_graph(Graph),
+    
+    implication_clauses(Vp, RGraph), %% build clauses from implication graph
+    %% trigger leaf nodes A,B,C,D in this graph
+    varp_nif:push(Vp),
+    {5,Lj} = varp_nif:vbcp(Vp, [A, B, C, -J, D]),
+    %% dump all levels
+    dump_levels(Vp),
+
+    CCix = varp_nif:implication_clause(Vp, Lj),
+
+    %% Dix = varp_nif:conflicting_clause(Vp, 0),
+    io:format("conflicting ~w = ~p\n", [CCix,get_sym_clause(Vp, CCix)]),
+    %% CCix = varp_nif:conflicting_clause(Vp, 0),
+    Cix = varp_nif:conflict(Vp, 1, CCix),
+    io:format("learned clause ~w = ~p\n", 
+	      [Cix, get_sym_clause(Vp, Cix)]),
+    Len = varp_nif:minimize(Vp, Cix, Type),
+    io:format("~s minimize clause ~w[len=~w] = ~p\n", 
+	      [Type, Cix, Len, get_sym_clause(Vp, Cix)]),
+    ok.
+
+
+
+
 
 %% example from conflict driven learning
 %% V7,V9,V14,15  and level=4 are not used
@@ -1843,8 +1924,29 @@ get_sym_literal(Vp, Li) ->
 get_marked(Vp) ->
     lists:sort(varp_nif:get_marked(Vp, false)).
 
+%% bench0 
+bench0() ->
+    bench0(20000).
+
+bench0(N) ->
+    V = varp_nif:new(#{}),
+    T0 = erlang:monotonic_time(),
+    ok = bench0_(V,N),
+    T1 = erlang:monotonic_time(),
+    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
+    Ts = Time/1000000,
+    N / Ts.
+
+bench0_(_V, 0) ->
+    ok;
+bench0_(V, I) ->
+    varp_nif:noop(V),
+    bench0_(V, I-1).
 %% 
 %% bcp 999 clauses
+%% 2021-02-01
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 79064
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 78260
 %% 2021-02-01
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 77176
 %% 2021-01-25
@@ -1886,6 +1988,30 @@ bench(N) ->
 	       varp_nif:info(V, literal_integer),
 	       varp_nif:info(V, literal_size),
 	       varp_nif:info(V, value_packing)]),
+    ?verbose("#DEAD clauses=~w,"
+	     "#CONFLICTS=~w,"
+	     "#PROPAGATIONS=~w,"
+	     "#DECISIONS=~w,"
+	     "#BCP=~w"
+	     "#CLAUSE-2=~w,"
+	     "#CLAUSE-3=~w,"
+	     "#CLAUSE-n=~w,"
+	     "MAX_LEVEL=~w,"
+	     "MIN_LEVEL=~w,"
+	     "MAX_BOUND=~w,"
+	     "\n",
+	     [varp_nif:info(V, clause_d_counter),
+	      varp_nif:info(V, conflict_counter),
+	      varp_nif:info(V, number_of_propagations),
+	      varp_nif:info(V, decision_counter),
+	      varp_nif:info(V, bcp_counter),
+	      varp_nif:info(V, clause_2_counter),
+	      varp_nif:info(V, clause_3_counter),
+	      varp_nif:info(V, clause_n_counter),
+	      varp_nif:info(V, max_level),
+	      varp_nif:info(V, min_level),
+	      varp_nif:info(V, max_bound)
+	     ]),
     Bcp / Ts.
 
 bench_(V, _X0, 0) ->
@@ -2309,6 +2435,19 @@ dump_clauses(V, Raw, I, Verb) ->
     io:format("  ~w\n", [varp_nif:get_clause(V,I,undefined,Raw)]),
     dump_clauses(V, Raw, varp_nif:clauseset_next(V, I), Verb).
 
+dump_levels(V) ->
+    io:format("bindings:\n"),
+    dump_levels(V, 0, varp_nif:level(V)).
+
+dump_levels(V, I, N) when I =< N ->
+    Bs = varp_nif:get_bindings(V, I, false, false),
+    io:format("~w: ~s\n", 
+	      [I, [[" ",lit_sym(V,Li)] || Li <- Bs]]),
+    dump_levels(V, I+1, N);
+dump_levels(_V, I, N) when I > N ->
+    ok.
+
+
 dump_variables(V, List) ->
     dump_variables(V, List, true).
 
@@ -2316,10 +2455,7 @@ dump_variables(V, List, Verb) ->
     lists:foreach(
       fun(X) ->
 	      Keys = varp:variable_info_keys() -- [implication,symbol,level],
-	      Sym = case varp_nif:variable_info(V,X,symbol) of
-			[] -> no_symbol;
-			[{S,_}|_] -> var_str(S)
-		    end,
+	      Sym = var_sym(V, X),
 	      Level = varp_nif:variable_info(V,X,level),
 	      Value = varp_nif:value(V, X),
 	      io:format("~w: ~s = ~w @~w\n", [X, Sym, Value,Level]),
@@ -2338,9 +2474,21 @@ dump_variables(V, List, Verb) ->
 	      end
       end, List).
 
+lit_sym(V, X) when X > 0 ->
+    var_sym(V, X);
+lit_sym(V, X) when X < 0 ->
+    [$!|var_sym(V, -X)].
+
+var_sym(V, X) ->
+    case varp_nif:variable_info(V,X,symbol) of
+	[] -> no_symbol;
+	[{S,_}|_] -> var_str(S)
+    end.
+    
 var_str({p,P,As}) -> var_str(P,As);
 var_str({P,As}) when is_list(As) -> var_str(P,As);
 var_str(P) when is_list(P) -> P;
+var_str(P) when is_binary(P) -> binary_to_list(P);
 var_str(P) when is_atom(P) -> atom_to_list(P).
 
 var_str(P,As) ->
