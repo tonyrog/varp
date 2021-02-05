@@ -65,10 +65,11 @@ options() ->
      #{ long => "minimize",
 	short => "z",
 	key => minimize,
-	spec => {enum,[{"0", none}, {"none",none},
-		       {"1", local}, {"local",local},
-		       {"2", global}, {"global",global},
-		       {"3", recursive}, {"recursive",recursive}]},
+	spec => {enum,
+		 [{"0", none},  {"n", none}, {"none",none},
+		  {"1", local}, {"l", local}, {"local",local},
+		  {"2", global}, {"g", global}, {"global",global},
+		  {"3", recursive}, {"r",recursive},{"recursive",recursive}]},
 	default => none,
 	description => "Use conflict clause minimization."
       },
@@ -368,7 +369,6 @@ restart(Bs,Param,MaxLearned,MR) ->
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 	    varp_formula:proof_output(Bs,$c,"purge"),
 	    ?dbg0("purge\n",[]),
-	    %% compact(Bs),
 	    varp_formula:del_unused_clauses(Bs),
 	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
 	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
@@ -389,15 +389,6 @@ restart(Bs,Param,MaxLearned,MR) ->
 	    end
     end.
 
-compact(Bs) ->
-    N0 = varp:get_number_of_bound_variables(Bs#bs.vp),
-    varp_saturate:saturate(Bs,1,infinity,1,0), %% compact
-    N1 = varp:get_number_of_bound_variables(Bs#bs.vp),
-    if N0 =:= N1 -> 
-	    ok;
-       true -> 
-	    io:format("compact(saturate) bound ~w\n", [N1-N0])
-    end.
     
 
 reorder(Bs, Param) ->
@@ -583,19 +574,14 @@ display_stat(Bs,Param) ->
 	    ok;
 	true ->
 	    io:format("num conflict clauses added: ~w\n", 
-		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES)]),
+		      [counters:get(Bs#bs.counters,
+				    ?COUNTER_CONFLICT_CLAUSES)]),
 	    io:format("num conflict ilterals: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS)]),
+		      [counters:get(Bs#bs.counters,
+				    ?COUNTER_CONFLICT_LITERALS)]),
 	    io:format("num literals removed: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_MINIMIZE_COUNT)]),
-	    io:format("compression saved bits: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_COMPRESS_CLAUSES)]),
-	    io:format("usage stumble counter: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_STUMBLE_COUNT)]),
-	    io:format("usage olle counter: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_OLLE_COUNT)]),
-	    io:format("number of reorders: ~w\n",
-		      [counters:get(Bs#bs.counters, ?COUNTER_REORDER_COUNTER)]),
+		      [counters:get(Bs#bs.counters,
+				    ?COUNTER_MINIMIZE_COUNT)]),
 	    io:format("number_of_marks: ~w\n", 
 		      [varp:info(Bs#bs.vp, mark_counter)]),
 	    io:format("number_of_decisions: ~w\n", 

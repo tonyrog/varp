@@ -13,6 +13,7 @@
 		    {"bt",    "backtrack",   varp_backtrack},
 		    {"bj",    "backjump",    varp_backjump},
 		    {"s",     "saturate",    varp_saturate},
+		    {"so",    "satord",      varp_satord},
 		    {"red",   "reduction",   varp_reduction},
 		    {"rat",   "rat",         varp_rat},
 		    {"cnf",   "cnf",         varp_cnf},

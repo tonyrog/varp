@@ -19,6 +19,7 @@ analyze_(_Vp, _Bump, _Minimize, N, N) ->
     [];
 analyze_(Vp, Bump, Minimize, I, N) ->
     CCix = varp_nif:conflicting_clause(Vp, I),
+    ?dbg0("analyze Clause: ~w\n", [varp:get_clause(Vp, CCix)]),
     case varp_nif:conflict(Vp, Bump, CCix) of
 	undefined ->  %% duplicate
 	    analyze_(Vp, Bump, Minimize, I+1, N);

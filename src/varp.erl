@@ -163,9 +163,10 @@
 -export([vec_is_bound/2]).
 -export([vec_value/2]).
 -export([vec_bind/2]).
+-export([vtl/3]).
 -export([intersect/1, intersect/2]).
 -export([install_bindings/2, install_bindings/3]).
--export([vec_sat/6, vec_sat/5, vec_sat/2]).
+-export([vec_sat/2, vec_sat/5, vec_sat/6, vec_sat/7]).
 -export([vec_sat_lap/5]).
 
 -export([get_marked/1]).
@@ -1998,7 +1999,7 @@ vec_sat_lap_(V,Vec0,Q,F,R) ->
     vec_sat_lap_(V,Vec0,Q,F,R,undefined).
 
 vec_sat_lap_(V,Vec0,Q,F,R,FriendMap) ->
-    case vec_sat(V,Vec0,Q,F,R,FriendMap) of
+    case vec_sat(V,Vec0,Q,F,R,true,FriendMap) of
 	false -> false;
 	true ->
 	    case vec_step(V, Vec0) of
@@ -2009,16 +2010,22 @@ vec_sat_lap_(V,Vec0,Q,F,R,FriendMap) ->
     end.
 
 vec_sat(V,V0,Q,F,R) ->
-    vec_sat(V,V0,Q,F,R,undefined).
+    vec_sat(V,V0,Q,F,R,true,undefined).
 
 vec_sat(V,V0,Q,F,R,FriendMap) ->
+    vec_sat(V,V0,Q,F,R,true,FriendMap).
+
+vec_sat(V,V0,Q,F,R,Subst,FriendMap) ->
     V1 = vec_extend(V, V0, Q),
     V2 = vec_extend_friend(V, V1, F, FriendMap),
     V3 = vec_extend_rand(V, V2, R),
     ?dbg0("V0=~w, V1=~w, V2=~w, V3=~w\n", [V0,V1,V2,V3]),
-    vec_sat(V, V3).
+    vec_sat(V, V3, Subst).
 
-vec_sat(V, Vec) when is_list(Vec) ->
+vec_sat(Vp, Vi) ->
+    vec_sat(Vp, Vi, true).
+
+vec_sat(V, Vec, Subst) when is_list(Vec) ->
     0 = varp_nif:push(V),
     Res = satv_(V,list_to_tuple(Vec)),
     varp_nif:pop(V, 0),
@@ -2029,7 +2036,7 @@ vec_sat(V, Vec) when is_list(Vec) ->
 	[] ->
 	    true;
 	Bs ->
-	    case install_bindings0(V, Bs) of
+	    case install_bindings0(V, Subst, Bs) of
 		true ->
 		    varp_nif:bcp(V);
 		false ->
@@ -2115,13 +2122,36 @@ bcpv_(V,I, Vt, Acc) ->
 	    %% CCix ->
 	    %% 		    bcpv_vconflict(V,L,CCix,Lj,I-1,Vt,[false|Acc])
 	    %% end;
-
 	false ->  %% Last eval is contradictory
 	    %% varp_nif:pop(V, L),
 	    %% bcpv_(V, I-1, Vt, [false|Acc])
 	    %% FIX: optional learn option!
 	    bcpv_conflict(V,L,I-1, Vt, [false|Acc])
     end.
+
+bcpv_conflict(Vp, L, I, Vt, Acc) ->
+    case varp_conflict:analyze(Vp, 0, local) of
+	[{1,_Count,Aix}|_] ->
+	    ?dbg1("UNIT=~w\n", [varp_nif:get_clause(Vp, Aix)]),
+	    varp_nif:pop(Vp, L),
+	    true = varp_nif:move_clause(Vp, Aix, gamma),
+	    case varp_nif:bcp(Vp) of
+		true ->
+		    bcpv_(Vp,I, Vt, Acc);
+		false ->
+		    L1 = varp_nif:push(Vp),
+		    bcpv_conflict(Vp, L1, I, Vt, Acc)
+	    end;
+	[{_Len,_Count,Aix}|_] ->
+	    ?dbg1("LEARN=~w\n", [varp_nif:get_clause(Vp, Aix)]),
+	    varp_nif:pop(Vp, L),
+	    {true,_Gix} = varp_nif:move_clause(Vp, Aix, gamma),
+	    bcpv_(Vp, I, Vt, Acc);
+	[] ->
+	    varp_nif:pop(Vp, L),
+	    bcpv_(Vp,I,Vt,Acc)
+    end.
+
 
 bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
     ?dbg1("CCix=~w, Lj=~w\n", [CCix, Lj]),
@@ -2136,46 +2166,30 @@ bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
 	    io:format("CLAUSE[~w]=~w\n", [Len0,varp_nif:get_clause(V, Aix)]),
 	    case varp_nif:minimize(V, Aix, local) of
 		undefined -> %% duplicate
-		    io:format("DUPLICATE\n"),
+		    ?dbg0("DUPLICATE\n", []),
 		    bcpv_(V, I, Vt, Acc);
 		1 ->
-		    io:format("UNIT ~w\n", [varp_nif:get_clause(V, Aix)]),
+		    ?dbg0("UNIT ~w\n", [varp_nif:get_clause(V, Aix)]),
 		    varp_nif:pop(V, L),
 		    true = varp_nif:move_clause(V, Aix, gamma),
-		    varp_nif:bcp(V),
+		    true = varp_nif:bcp(V),
 		    bcpv_(V,I, Vt, Acc);
 		Len ->
 		    ?dbg1("Removed: ~w\n,", [Len0-Len]),
-		    io:format("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
+		    %% io:format("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
 		    varp_nif:pop(V, L),
 		    {true,_Gix} = varp_nif:move_clause(V,Aix,gamma),
 		    bcpv_(V, I, Vt, Acc)
 	    end
     end.
 
-
-bcpv_conflict(V, L, I, Vt, Acc) ->
-    case varp_conflict:analyze(V, 0, local) of
-	[{1,_Count,Aix}|_] ->
-	    ?dbg1("UNIT=~w\n", [varp_nif:get_clause(V, Aix)]),
-	    varp_nif:pop(V, L),
-	    true = varp_nif:move_clause(V, Aix, gamma),
-	    varp_nif:bcp(V),
-	    bcpv_(V,I, Vt, Acc);
-	[{_Len,_Count,Aix}|_] ->
-	    ?dbg1("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
-	    varp_nif:pop(V, L),
-	    {true,_Gix} = varp_nif:move_clause(V, Aix, gamma),
-	    bcpv_(V,I, Vt, Acc);
-	[] ->
-	    varp_nif:pop(V, L),
-	    bcpv_(V,I,Vt,Acc)
-    end.
-
+%% Get bindings on all levels, assume a decision
+%% is present on (almost) all levels.
 bcpv_bindings(V, L) ->
     bcpv_bindings_(V, L, varp_nif:level(V), []).
 
 bcpv_bindings_(V, L, Lmax, Acc) when L =< Lmax ->
+    %% ????
     case varp_nif:get_bindings(V, L, false, _AsTuple=false) of
 	[] ->
 	    bcpv_bindings_(V, L+1, Lmax, Acc);
@@ -2335,83 +2349,68 @@ bindings_to_map([A|As], Map) ->
 bindings_to_map([],Map) ->
     Map.
 
-install_bindings0(V,[B|Bs]) when is_tuple(B) ->
-    case install_tuple_bindings_(V, 0, 1, B) of
-	true -> install_bindings0(V, Bs);
+install_bindings0(V,Bs) ->
+    install_bindings0(V,_Subst=true,Bs).
+
+install_bindings0(V,Subst,[Bt|Bs]) when is_tuple(Bt) ->
+    case install_tuple_bindings_(V, 0, Subst, 1, Bt) of
+	true -> install_bindings0(V,Subst,Bs);
 	false -> false
     end;
-install_bindings0(V,[B|Bs]) when is_list(B) ->
-    case install_list_bindings_(V, 0, B) of
-	true -> install_bindings0(V, Bs);
+install_bindings0(V,Subst,[B|Bs]) when is_list(B) ->
+    case install_list_bindings_(V, 0, Subst, B) of
+	true -> install_bindings0(V,Subst,Bs);
 	false -> false
     end;
-install_bindings0(_V,[]) ->
+install_bindings0(_V,_Subst,[]) ->
     true.
 
 
 install_bindings(V,Bs) when is_list(Bs) ->
-    install_list_bindings_(V, varp_nif:level(V), Bs);
+    install_list_bindings_(V, varp_nif:level(V), true, Bs);
 install_bindings(V,Bt) when is_tuple(Bt) ->
-    install_tuple_bindings_(V, varp_nif:level(V), 1, Bt).
+    install_tuple_bindings_(V, varp_nif:level(V), true, 1, Bt).
 
 install_bindings(V,Level,Bs) when is_list(Bs) ->
-    install_list_bindings_(V, Level, Bs);
+    install_list_bindings_(V, Level, true, Bs);
 install_bindings(V,Level,Bt) when is_tuple(Bt) ->
-    install_tuple_bindings_(V, Level, 1, Bt).
+    install_tuple_bindings_(V, Level, true, 1, Bt).
 
-install_tuple_bindings_(_V, _Level, I, Bt) when I > tuple_size(Bt) ->
+install_tuple_bindings_(_Vp, _Level, _Subst, I, Bt) when I > tuple_size(Bt) ->
     true;
-install_tuple_bindings_(V, Level, I, Bt) when I =< tuple_size(Bt) ->
-    case element(I,Bt) of
-	X when is_integer(X) ->
-	    ?dbg0("install ~w = 1\n", [X]),
-	    true = varp_nif:bind(V, X),
-	    install_tuple_bindings_(V,Level,I+1,Bt);	    
-	{X,Y} when Level =:= 0 ->
-	    ?dbg0("install ~w = ~w\n", [X, Y]),
-	    Xa = varp_nif:variable_info(V, X, is_atom),
-	    Ya = varp_nif:variable_info(V, Y, is_atom),
-	    if Ya, not Xa ->
-		    varp_nif:subst(V, Y, X);
-	       true ->
-		    varp_nif:subst(V, X, Y)
-	    end,
-	    install_tuple_bindings_(V,Level,I+1,Bt);
-	{X,t} ->
-	    ?dbg0("install ~w = t\n", [X]),
-	    true = varp_nif:bind(V, X),
-	    install_tuple_bindings_(V,Level,I+1,Bt);
-	{X,f} ->
-	    ?dbg0("install ~w = f\n", [X]),
-	    true = varp_nif:bind(V, -X),
-	    install_tuple_bindings_(V,Level,I+1,Bt)
-    end.
+install_tuple_bindings_(Vp, Level, Subst, I, Bt) when I =< tuple_size(Bt) ->
+    install_binding(Vp, element(I,Bt), Level, Subst),
+    install_tuple_bindings_(Vp,Level,Subst,I+1,Bt).
 
-install_list_bindings_(_V,_Level,[]) ->
+install_list_bindings_(_Vp,_Level,_Subst,[]) ->
     true;
-install_list_bindings_(V,Level,[B|Bs]) ->
-    case B of
-	X when is_integer(X) ->
-	    true = varp_nif:bind(V, X),
-	    install_list_bindings_(V,Level,Bs);
-	{X,X} ->
-	    install_list_bindings_(V,Level,Bs);
-	{X,t} ->
-	    true = varp_nif:bind(V, X),
-	    install_list_bindings_(V,Level,Bs);
-	{X,f} ->
-	    true = varp_nif:bind(V, -X),
-	    install_list_bindings_(V,Level,Bs);
-	{X,Y} when Level =:= 0 ->
-	    Xa = varp_nif:variable_info(V, X, is_atom),
-	    Ya = varp_nif:variable_info(V, Y, is_atom),
-	    if Ya, not Xa ->
-		    varp_nif:subst(V, Y, X);
-	       true ->
-		    varp_nif:subst(V, X, Y)
-	    end,
-	    install_list_bindings_(V,Level,Bs)
-    end.
+install_list_bindings_(Vp,Level,Subst,[B|Bs]) ->
+    install_binding(Vp, B, Level, Subst),
+    install_list_bindings_(Vp,Level,Subst,Bs).
+
+
+install_binding(Vp, X, _Level, _Subst) when is_integer(X) ->
+    ?dbg0("install ~w = 1\n", [X]),
+    true = varp_nif:bind(Vp, X);
+install_binding(_Vp, {X,X}, _Level, _Subst) ->
+    true;
+install_binding(Vp, {X,t},  _Level, _Subst) ->
+    ?dbg0("install ~w = t\n", [X]),
+    true = varp_nif:bind(Vp, X);
+install_binding(Vp, {X,f},  _Level, _Subst) ->
+    ?dbg0("install ~w = f\n", [X]),
+    true = varp_nif:bind(Vp, -X);
+install_binding(Vp, {X,Y}, _Level = 0, _Subst = true) ->
+    ?dbg0("install ~w = ~w\n", [X, Y]),
+    Xa = varp_nif:variable_info(Vp, X, is_atom),
+    Ya = varp_nif:variable_info(Vp, Y, is_atom),
+    if Ya, not Xa ->
+	    varp_nif:subst(Vp, Y, X);
+       true ->
+	    varp_nif:subst(Vp, X, Y)
+    end;
+install_binding(_Vp, _Bnd, _Level, _Subst) ->
+    false.
 
 %%
 vec_value(V, Vec) ->

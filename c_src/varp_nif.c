@@ -327,13 +327,11 @@ NIF_LIST
 #undef NIF
 
 #define MAX_INT32         0x7fffffff
-#define MAX_UINT32        0xffffffff
 #define MAX_CONFLICTING   1024
 
-#define DEFAULT_MAP_SIZE  1024
-
-#define MAX_MAP_SIZE       (1024*1024)   // max inital size
-#define MAX_MAP_EXPAND     (256*1024)    // max expand
+#define DEFAULT_MAP_CSIZE  1024
+#define DEFAULT_MAP_VSIZE  1024
+#define INIT_MAP_VSIZE       (1024*1024)   // max inital size
 
 #define HEAP_BLOCK_SIZE      (512*1024)
 #define MAX_HEAP_ALLOC_SIZE  (HEAP_BLOCK_SIZE - sizeof(heap_t))
@@ -413,9 +411,12 @@ typedef uint16_t markbits_t;
 #define VAR_MARKN   0x0008
 #define LIT_MARK0   0x0010
 #define LIT_MARK1   0x0020
+#define LIT_MARK2   0x0040
 #define LIT_MARKQ   0x0080  // literal is inq
 #define VAR_ATOM    0x0100
 #define VAR_USED    0x0200
+#define LIT_MARKU   0x0400  // all marked
+
 
 typedef struct _literal_t
 {
@@ -490,7 +491,8 @@ typedef struct _clause_t
 {
     wlink_t    wl[2];        // ALIGNED watch point 1&2+links (DO NOT MOVE!)
     cix_t      cix;          // clause id (index) 0..n-1  (<< 1)
-    uint32_t   size;         // number of literals in lit
+    uint32_t   size;         // number of literals (used) in lit
+    uint32_t   lsize;        // number of literals (allocated) in lit
     uint32_t hvalue;         // clause hash value
     struct {
 	unsigned offset:CLAUSE_BITS;  // offset to segment start
@@ -500,7 +502,8 @@ typedef struct _clause_t
 	unsigned unwatch:1;   // clause is scheduled to be unwatched
 	unsigned delete:1;    // marked for deletion
 	unsigned dynamic:1;   // not in a segment
-	unsigned select:2;    // 0=mon,1=2-clause,2=3-clause,3=n_clause	
+	unsigned mon:1;       // monitor clause
+	// unsigned select:2;    // 0=mon,1=2-clause,2=3-clause,3=n_clause	
     };
     uint64_t stamp;          // last used time (bcp_counter clock)
     lit_t lit[];             // literal array
@@ -733,6 +736,17 @@ ErlNifFunc varp_funcs[] =
 #define EQUAL_KEY(env, name, arg)				\
     (((arg) == ATOM(name)) || (equal_string(env, ATOM(name), arg)))
 
+// Exceptions
+DECL_ATOM(arg0);
+DECL_ATOM(arg1);
+DECL_ATOM(arg2);
+DECL_ATOM(arg3);
+DECL_ATOM(arg4);
+DECL_ATOM(system_limit);
+DECL_ATOM(memory_limit);
+DECL_ATOM(internal1);
+DECL_ATOM(internal2);
+
 DECL_ATOM(alpha);
 DECL_ATOM(atom);
 DECL_ATOM(beta);
@@ -800,8 +814,6 @@ DECL_ATOM(set);
 DECL_ATOM(size);
 DECL_ATOM(status);
 DECL_ATOM(symbol);
-DECL_ATOM(system_limit);
-DECL_ATOM(memory_limit);
 DECL_ATOM(toggle);
 DECL_ATOM(true);
 DECL_ATOM(turbo);
@@ -1419,12 +1431,12 @@ static inline int is_marked(varp_t* vp, lit_t xl, markbits_t markbits)
     return (vp->lit_mark[xl] & markbits) == markbits;
 }
 
-static inline void set_mark(varp_t* vp, lit_t xl, markbits_t markbits)
+static inline void set_marks(varp_t* vp, lit_t xl, markbits_t markbits)
 {
     vp->lit_mark[xl] |= markbits;
 }
 
-static inline void clr_mark(varp_t* vp, lit_t xl, markbits_t markbits)
+static inline void clr_marks(varp_t* vp, lit_t xl, markbits_t markbits)
 {
     vp->lit_mark[xl] &= ~markbits;
 }
@@ -1444,9 +1456,9 @@ static inline void add_mark(varp_t* vp, lit_t xl, markbits_t markbits)
     lit_t vl = L_VAR(xl);
     if (!is_marked(vp, vl, VAR_MARKL)) {
 	dynvar_append(vp->mark_stack, &vl);
-	set_mark(vp, vl, VAR_MARKL);
+	set_marks(vp, vl, VAR_MARKL);
     }
-    set_mark(vp, vl, markbits);    
+    set_marks(vp, vl, markbits);    
 }
 
 
@@ -1456,7 +1468,7 @@ static inline void mark0_lit(varp_t* vp, lit_t xl)
     if (!is_marked(vp, vl, VAR_MARK0)) {
 	add_mark(vp, vl, VAR_MARK0);
 	if (is_neg_l(xl))
-	    set_mark(vp, vl, VAR_MARKN);
+	    set_marks(vp, vl, VAR_MARKN);
     }
 }
 
@@ -1467,14 +1479,14 @@ static inline void add_mark1_lit(varp_t* vp, lit_t xl)
     if (is_marked(vp, vl, VAR_MARK0)) { // must be marked
 	int neg = is_marked(vp, vl, VAR_MARKN);
 	if (is_neg_l(xl) == neg)
-	    set_mark(vp, vl, VAR_MARK1);
+	    set_marks(vp, vl, VAR_MARK1);
     }
 }
 
 static inline void unmark_var(varp_t* vp, variable_t* var)
 {
     lit_t xl = MAKE_LIT(var->ix, 0);
-    clr_mark(vp, xl, VAR_MARKL|VAR_MARK0|VAR_MARK1|VAR_MARKN);
+    clr_marks(vp, xl, VAR_MARKL|VAR_MARK0|VAR_MARK1|VAR_MARKN);
 }
 
 // return true iff variable is marked as used or
@@ -1503,7 +1515,7 @@ static void unmark_all(varp_t* vp)
 
     for (i = 0; i < (int)nmarked; i++) {
 	lit_t vl = vp->mark_stack[i];
-	clr_mark(vp, vl, VAR_MARKL|VAR_MARK0|VAR_MARK1|VAR_MARKN);
+	clr_marks(vp, vl, VAR_MARKL|VAR_MARK0|VAR_MARK1|VAR_MARKN);
     }
     dynvar_resize(vp->mark_stack, 0);
 }
@@ -1774,7 +1786,7 @@ static inline lit_t lqueue_deq(varp_t* vp)
     if ((i = dynvar_size(vp->q)) > 0) {
 	lit_t xl = vp->q[i-1];
 	dynvar_resize(vp->q, i-1);
-	clr_mark(vp, xl, LIT_MARKQ);
+	clr_marks(vp, xl, LIT_MARKQ);
 	return xl;
     }
     return LIT_FALSE;
@@ -1785,7 +1797,7 @@ static void lqueue_clear(varp_t* vp)
     int i;
     int n = dynvar_size(vp->q);
     for (i = 0; i < n; i++)
-	clr_mark(vp, vp->q[i], LIT_MARKQ);
+	clr_marks(vp, vp->q[i], LIT_MARKQ);
     dynvar_resize(vp->q, 0);
 }
 
@@ -2107,7 +2119,7 @@ static void kill_clauses(varp_t* vp, lit_t xl)
 {
     literal_t* xp = l2ll(vp, xl);
     cix_t* xptr = dynarray_element(xp->xref, 0);
-    size_t  len  = dynarray_size(xp->xref);
+    size_t  len = dynarray_size(xp->xref);
 
     DBG_BCP("%sKill %s\r\n", indent(vp->level), format_lit(vp, xl));
 
@@ -2262,11 +2274,11 @@ static int clause_is_equal(varp_t* vp, lit_t* a, lit_t* b, int size)
 
     // unordered compare
     for (i = 0; i < size; i++)  // mark all in A
-	set_mark(vp, a[i], LIT_MARK0);
+	set_marks(vp, a[i], LIT_MARK0);
     for (i = 0; all_marked && (i < size); i++)
 	all_marked = is_marked(vp, b[i], LIT_MARK0);
     for (i = 0; i < size; i++)  // mark all in A
-	clr_mark(vp, a[i], LIT_MARK0);
+	clr_marks(vp, a[i], LIT_MARK0);
     return all_marked;
 }
 
@@ -2464,8 +2476,10 @@ static clause_t* clause_alloc(varp_t* vp, int si, size_t size)
     if (cp != NULL) {
 	wlink_clear(&cp->wl[0]);
 	wlink_clear(&cp->wl[1]);
-	cp->size = size;
-	cp->select = (size > 3) ? 3 : size-1;
+	cp->size = size;  // used
+	cp->lsize = size; // allocated
+	cp->mon = 0;
+	// cp->select = (size > 3) ? 3 : size-1;
 	cp->dead = 0;
 	cp->conflict = 0;
 	cp->watched = 0;
@@ -2902,8 +2916,8 @@ static void default_config(varp_config_t* conf)
     conf->init_phase = I_TRUE;
     conf->use_phase = false;
     conf->all_used  = false;
-    conf->vsize  = DEFAULT_MAP_SIZE;
-    conf->csize  = DEFAULT_MAP_SIZE;
+    conf->vsize  = DEFAULT_MAP_VSIZE;
+    conf->csize  = DEFAULT_MAP_CSIZE;
     conf->seed   = 0;
 }
 
@@ -2914,10 +2928,10 @@ static int vif_config(ErlNifEnv* env,
 {
     if (EQUAL_KEY(env, size, key)) {
 	if (EQUAL_KEY(env, default, value))
-	    opt->vsize = DEFAULT_MAP_SIZE;
+	    opt->vsize = DEFAULT_MAP_VSIZE;
 	else if (!vif_get_size_t(env, value, &opt->vsize))
 	    return 0;
-	else if ((opt->vsize < 2) || (opt->vsize > MAX_MAP_SIZE))
+	else if ((opt->vsize < 2) || (opt->vsize > INIT_MAP_VSIZE))
 	    return 0;
     }
     else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, fifo, value)) {
@@ -3464,7 +3478,7 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     }
     if (is_atom) mark |= VAR_ATOM;
     if (is_used) mark |= VAR_USED;
-    set_mark(vp, MAKE_LIT(i,0), mark);
+    set_marks(vp, MAKE_LIT(i,0), mark);
     return enif_make_int(env, i);
 }
 
@@ -3506,7 +3520,7 @@ static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
     
     j = i;
     while(n--) {
-	set_mark(vp, MAKE_LIT(j,0), mark);
+	set_marks(vp, MAKE_LIT(j,0), mark);
 	j++;
     }
     return enif_make_tuple2(env,
@@ -4725,11 +4739,11 @@ static ERL_NIF_TERM varp_is_used(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	was_used = is_marked(vp, xl, VAR_USED);
 	if (use && !was_used) {
-	    set_mark(vp, xl, VAR_USED);
+	    set_marks(vp, xl, VAR_USED);
 	    order_move_top(vp, var);
 	}
 	else if (!use && was_used) {
-	    clr_mark(vp, xl, VAR_USED);
+	    clr_marks(vp, xl, VAR_USED);
 	    order_remove(vp, var);
 	}
 	return enif_make_boolean(env, was_used);
@@ -4757,9 +4771,9 @@ static ERL_NIF_TERM varp_is_atom(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	was_atom = lit_is_atom(vp, xl);
 	if (atom)
-	    set_mark(vp, L_VAR(xl), VAR_ATOM);
+	    set_marks(vp, L_VAR(xl), VAR_ATOM);
 	else
-	    clr_mark(vp, L_VAR(xl), VAR_ATOM);
+	    clr_marks(vp, L_VAR(xl), VAR_ATOM);
 	return enif_make_boolean(env, was_atom);
     }
 }
@@ -4847,18 +4861,29 @@ static int clauseset_plug_hole(varp_t* vp, int si, int ix)
     return h;
 }
 
+static inline cix_t get_implication(varp_t* vp, lit_t xl)
+{
+    return vp->var_lev[INDEX(xl)].implication_clause;
+}
+
+static inline clause_t* get_implication_clause(varp_t* vp, lit_t xl)
+{
+    cix_t cix = get_implication(vp, xl);
+    return (cix == CLAUSE_NONE) ? NULL : get_clause(vp, cix);
+}
+
 // check if (dp - l) is a sub-clause of cp (all literals except l are marked)
 // constats (level=0) are ignored, fixme mark all level 0 literals!?
-static bool_t is_clause_marked(varp_t* vp, clause_t* dp, lit_t l)
+static bool_t is_clause_marked(varp_t* vp, clause_t* dp,
+			       lit_t l, markbits_t mark)
 {
     int i;
 
     for (i = 0; i < (int)dp->size; i++) {
 	lit_t li = dp->lit[i];
 	if (li != l) {
-	    // variable_t* var = var_l(vp, li);
 	    if (vp->var_lev[INDEX(li)].level > 0) {
-		if (!is_marked(vp, li, LIT_MARK1))
+		if (!is_marked(vp, li, mark))
 		    return false;
 	    }
 	}
@@ -4866,50 +4891,61 @@ static bool_t is_clause_marked(varp_t* vp, clause_t* dp, lit_t l)
     return true;
 }
 
+//#define DBGM(...) do { fprintf(stderr,__VA_ARGS__); fflush(stderr); } while(0)
+#define DBGM(...)
+
 static int rec_clause_mark(varp_t* vp, clause_t* dp, lit_t u, int depth)
 {
     int i;
     int all_marked = true;
     size_t size = dp->size;
 
-    DBG1("%srec_clause_mark: %s ", indent(depth), format_lit(vp, u));
-    print_sym_array_nl(vp, dp->lit, dp->size);
+    DBGM("%srec_clause_mark: %s ", indent(depth), format_lit(vp, u));
+    // print_sym_array_nl(vp, dp->lit, dp->size);
     
-    for (i = 0; (i < (int)size) /* && all_marked */; i++) {
+    for (i = 0; (i < (int)size) && all_marked; i++) {
 	lit_t xl = dp->lit[i];
-	if (xl != u) {  // skip unit literal
+	if (xl == u) { // skip unit literal
+	    DBGM("%s%s UNIT (skip)\r\n", indent(depth+1), format_lit(vp, xl));
+	}
+	else if (is_marked(vp, xl, LIT_MARK1)) {
+	    DBGM("%s%s MARKED\r\n", indent(depth+1), format_lit(vp, xl));
+	}
+	else if (is_marked(vp, xl, LIT_MARK2)) { // already visited
+	    int marked = is_marked(vp, xl, LIT_MARKU);
+	    DBGM("%s%s VISITED mark=%d\r\n",
+		 indent(depth+1), format_lit(vp, xl), marked);
+	    all_marked = all_marked && marked;
+	}
+	else {
 	    cix_t  cix;
 	    varlev_t* vlp = &vp->var_lev[INDEX(xl)];
-	    // variable_t* var = var_l(vp, xl);
-	    lit_t nxl = neg_l(xl);
-
-	    DBG1("%slit[i]: %s\r\n", indent(depth+1), format_lit(vp, xl));
-
-	    if (vlp->level == 0)
-		DBG1("%s%s ATOM\r\n", indent(depth+1), format_lit(vp, xl));
-	    else if ((cix=vlp->implication_clause) == CLAUSE_NONE)
-		DBG1("%s%s DECISION\r\n", indent(depth+1), format_lit(vp, xl));
-	    else if (is_marked(vp, xl, LIT_MARK1))
-		DBG1("%s%s MARKED\r\n", indent(depth+1), format_lit(vp, xl));
+	    if (vlp->level == 0) {
+		DBGM("%s%s ATOM\r\n", indent(depth+1), format_lit(vp, xl));
+		// all_marked = 0;
+	    }
+	    else if ((cix=vlp->implication_clause) == CLAUSE_NONE) {
+		DBGM("%s%s DECISION\r\n", indent(depth+1), format_lit(vp, xl));
+		all_marked = 0;
+	    }
 	    else {
 		clause_t* dp1 = get_clause(vp, cix);
-		if (rec_clause_mark(vp, dp1, nxl, depth+1)) {
-		    set_mark(vp, xl, LIT_MARK1);
-		    DBG1("%smark: %s\r\n", indent(depth+1), format_lit(vp, xl));
-		    COUNT(vp, MARK_COUNTER);
-		}
-		else {
-		    // terminate early?
-		    // all_marked = false;
-		    return 0;
-		}
+		int marked = rec_clause_mark(vp, dp1, neg_l(xl), depth+1);
+		set_marks(vp, xl, LIT_MARK2);  // mark visited
+		if (marked) set_marks(vp, xl, LIT_MARKU); // cache result
+		DBGM("%s%s REC (marked=%d)\r\n",
+		     indent(depth+1),format_lit(vp,xl), marked);
+		COUNT(vp, MARK_COUNTER);
+		all_marked = all_marked && marked;
 	    }
 	}
     }
+    DBGM("%s%s: ALL_MARKED=%d\r\n",
+	 indent(depth), format_lit(vp, u), all_marked);    
     return all_marked;
 }
 
-// Minimize a clause wrt implication clauses as subclauses
+
 static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 				  const ERL_NIF_TERM argv[])
 {
@@ -4948,13 +4984,16 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
     
     dynvar_resize(vp->tlit, 0);
 
-    for (i = 0; i < n; i++)
-	set_mark(vp, cp->lit[i], LIT_MARK1);
+    for (i = 0; i < n; i++) {
+	DBGM("%s MARK\r\n", format_lit(vp, cp->lit[i]));
+	set_marks(vp, cp->lit[i], LIT_MARK1);
+    }
     vp->counter[MARK_COUNTER] += n;
 
+    // assume UIP is in position 0
+    dynvar_append(vp->tlit, &cp->lit[0]);    
+
     switch(method) {
-    case m_local:
-	break;
     case m_global:
 	// forward version
 	for (i = 1; i < vp->level; i++) {
@@ -4964,56 +5003,49 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	    for (j = 0; j < bsz; j++) {
 		lit_t xl = bpv[j];
 		varlev_t* vlp = &vp->var_lev[INDEX(xl)];
+		// NOTE vlp->level > 0! (since i = level)
 		if ((cix = vlp->implication_clause) != CLAUSE_NONE) {
-		    // lit_t xl = lit_vv(vp, var);
 		    lit_t nxl = neg_l(xl);
 		    if (!is_marked(vp, nxl, LIT_MARK1)) {
 			clause_t* dp = get_clause(vp, cix);
-			if (is_clause_marked(vp, dp, xl)) {
-			    set_mark(vp, nxl, LIT_MARK1);
+			if (is_clause_marked(vp, dp, xl, LIT_MARK1)) {
+			    set_marks(vp, nxl, LIT_MARK1);
 			    COUNT(vp, MARK_COUNTER);
 			}
 		    }
 		}
 	    }
 	}
+	// pass
+    case m_local:
+	for (i = 1; i < n; i++) {
+	    lit_t xl = cp->lit[i];
+	    clause_t* dp;
+	    if ((dp = get_implication_clause(vp, xl)) == NULL)
+		dynvar_append(vp->tlit, &xl);
+	    else if (!is_clause_marked(vp, dp, neg_l(xl), LIT_MARK1))
+		dynvar_append(vp->tlit, &xl);
+	}
 	break;
     case m_recursive:
 	for (i = 1; i < n; i++) {
 	    lit_t xl = cp->lit[i];
-	    // variable_t* var = var_l(vp, xl);
-	    if ((cix = vp->var_lev[INDEX(xl)].implication_clause) !=
-		CLAUSE_NONE) {
-		clause_t* dp = get_clause(vp, cix);
-		rec_clause_mark(vp, dp, neg_l(xl), 0);
-	    }
+	    clause_t* dp;
+	    if ((dp = get_implication_clause(vp, xl)) == NULL)
+		dynvar_append(vp->tlit, &xl);
+	    else if (!rec_clause_mark(vp, dp, neg_l(xl), 0))
+		dynvar_append(vp->tlit, &xl);
 	}
 	break;
     default:
 	break;
     }
 
-    // assume UIP is in position 0
-    dynvar_append(vp->tlit, &cp->lit[0]);
-    
-    // keep all decisions and literals not "marked"
-    for (i = 1; i < n; i++) {
-	lit_t li = cp->lit[i];
-	// variable_t* var = var_l(vp, li);
-	if ((cix = vp->var_lev[INDEX(li)].implication_clause) == CLAUSE_NONE) {
-	    dynvar_append(vp->tlit, &li);
-	}
-	else {
-	    clause_t* dp = get_clause(vp, cix);
-	    if (!is_clause_marked(vp, dp, neg_l(li)))
-		dynvar_append(vp->tlit, &li);
-	}
-    }
     ASSERT(dynvar_size(vp->tlit) > 0);
 
     // clear marks
     for (i = 0; i < n; i++) {
-	clr_mark(vp, cp->lit[i], LIT_MARK1);
+	clr_marks(vp, cp->lit[i], LIT_MARK1|LIT_MARK2|LIT_MARKU);
     }
     if ((method == m_recursive) || (method == m_global)) {
 	for (i = 1; i < vp->level; i++) {
@@ -5022,8 +5054,8 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	    int j;
 	    for (j = 0; j < bsz; j++) {
 		lit_t lit = bpv[j];
-		clr_mark(vp, lit, LIT_MARK1);
-		clr_mark(vp, neg_l(lit), LIT_MARK1);
+		clr_marks(vp, lit, LIT_MARK1|LIT_MARK2|LIT_MARKU);
+		clr_marks(vp, neg_l(lit), LIT_MARK1|LIT_MARK2|LIT_MARKU);
 	    }
 	}
     }
@@ -5042,8 +5074,8 @@ static ERL_NIF_TERM varp_minimize(ErlNifEnv* env, int argc,
 	}
 	memcpy(cp->lit, vp->tlit, size*sizeof(lit_t));
 	cp->hvalue = hvalue;
-	cp->size = size;
-	cp->select = (size > 3) ? 3 : size-1;
+	cp->size = size;       // lsize remember the real size
+	// cp->select = (size > 3) ? 3 : size-1;
     }
     return enif_make_int(env, cp->size);
 }
@@ -5104,13 +5136,11 @@ static void insert_sort2(int l, int p, int la[3], long pa[3])
     }
 }
 
-static void swap_lit(lit_t* lit, int p, int q)
+static inline void swap_lit(lit_t* lit, int p, int q)
 {
-    if (p != q) {
-	lit_t tmp = lit[p];
-	lit[p] = lit[q];
-	lit[q] = tmp;
-    }
+    lit_t t = lit[p];
+    lit[p] = lit[q];
+    lit[q] = t;
 }
 
 static int clause_watch(varp_t* vp, clause_t* cp)
@@ -5176,31 +5206,6 @@ static int clause_watch(varp_t* vp, clause_t* cp)
 	return 0;
     return 1;
 }
-
-//
-// add a clause to the system and normalise contents
-// first SORT (reversed) the literals according to abs(lit[i]) then lit[i]
-// this means that high numbered literals comes first and lastly
-// the constants will appear, FALSE last
-//   x6 x3 F x3 x2 T x5 x3 F x1 -x3 => x6 x5 x3 x3 x3 -x3 x2 T F F
-// after sort, normalise start with to remove the FALSE literals
-//   x6 x5 x3 x3 x3 -x3 x2 T F F => x6 x5 x3 x3 x3 -x3 x2 T
-// TRUE literals are removed and remembered (Tc=1)
-//   x6 x5 x3 x3 x3 -x3 x2 T => x6 x5 x3 x3 x3 -x3 x2
-// duplicate elements are removed / reduced  (for XOR even number are removed)
-//   x6 x5 x3 x3 x3 -x3 x2 => x6 x5 x3 -x3 x2
-// negated pairs are removed and Tc is updated
-//   x6 x5 x2  ( Tc=2 )
-// check Tc
-//   OR:
-//      x6 x5 x2 T
-//
-// OR:
-//   X (Tc=0,Fc>0) => X -1
-//   X (Tc>0) => X => X  1
-//
-
-// la[0] >= la[1] >= la[2]
 
 static pos_t xref_find_pix(clause_t* cp, lit_t lit)
 {
@@ -5434,7 +5439,7 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	for (i = 0; i < (int)size; i++) {
 	    lit_t xl = vp0->q[i];
 	    vp->q[i] = xl;
-	    set_mark(vp, xl, LIT_MARKQ);
+	    set_marks(vp, xl, LIT_MARKQ);
 	}
     }
 
@@ -5714,113 +5719,6 @@ static ERL_NIF_TERM varp_pop_level(ErlNifEnv* env, int argc,
     return enif_make_int(env, vp->level);
 }
 
-// use 2-lower bits on 0 pointer to signal cases
-#define EV_UNIT     0   // unit is in lit[0]
-#define EV_CONFLICT 1   // conflict found
-#define EV_WATCH    2   // update watch point i
-#define EV_WATCH2   3   // update watch point i
-#define EV_DEAD     4   // clause is dead
-#define EV_TRIGGER  5
-
-// monitor clause
-// A ~A - B C D E F
-// if A or ~A are set then an undefined literal B is selected
-// B ~B - A C D E F   and B is waited for
-// when all literals got values a trigger will fire
-//
-
-static inline int mon_clause(varp_t* vp, lit_t* lit, int32_t size,
-			     pos_t wp0, pos_t wp1)
-{
-    pos_t p;
-
-    for (p = 2; p < size; p++) {
-	lit_t pl = lit[p];
-	switch(get_value(vp, pl)) {
-	case I_FALSE: break;
-	case I_TRUE:  break;
-	case I_UNDEF: // swap lit[0] and lit[p]
-	    lit[p] = lit[wp0];
-	    lit[wp0] = pl;
-	    lit[wp1] = neg_l(pl);
-	    return EV_WATCH;
-	case I_BOUND:
-	default:
-	    ASSERT(0);
-	}
-    }
-    // all literals got values - trigger
-    return EV_TRIGGER;
-}
-
-static inline int bcp_2_clause(varp_t* vp, lit_t l1)
-{
-    ival_t lw;
-
-    if ((lw = get_value(vp, l1)) == I_TRUE)
-	return EV_DEAD;
-    if (lw == I_FALSE)
-	return EV_CONFLICT;
-    return EV_UNIT;
-}
-
-static inline lit_t bcp_3_clause(varp_t* vp,lit_t* lit,pos_t wp0,lit_t l1)
-{
-    ival_t lw;
-    lit_t  pl;
-
-    if ((lw = get_value(vp, l1)) == I_TRUE)
-	return EV_DEAD;
-    pl = lit[2];
-    switch(get_value(vp, pl)) {
-    case I_TRUE:
-	return EV_DEAD;
-    case I_FALSE:
-	if (lw == I_FALSE)
-	    return EV_CONFLICT;
-	return EV_UNIT;
-    case I_UNDEF:
-    case I_BOUND:
-    default:
-	break;
-    }
-    // swap lit[wp0] and lit[2]
-    lit[2] = lit[wp0];
-    lit[wp0] = pl;
-    return EV_WATCH;
-}
-
-static inline int bcp_n_clause(varp_t* vp,lit_t* lit,int32_t size,
-			       pos_t wp0,lit_t l1)
-{
-    pos_t p;
-    ival_t lw;
-
-    if ((lw = get_value(vp, l1)) == I_TRUE)
-	return EV_DEAD;
-
-    for (p = 2; p < size; p++) {
-    // for (p = n-1; p >= 2; p--) {
-	lit_t pl = lit[p];
-	switch(get_value(vp, pl)) {
-	case I_FALSE:
-	    break;
-	case I_TRUE:
-	    return EV_DEAD;
-	case I_UNDEF: // swap lit[wl0->p] and lit[p]
-	    lit[p] = lit[wp0];
-	    lit[wp0] = pl;
-	    return EV_WATCH;
-	case I_BOUND:
-	default:
-	    ASSERT(0);
-	}
-    }
-    if (lw == I_FALSE)
-	return EV_CONFLICT;
-    return EV_UNIT;
-}
-
 static int is_turbo_clause(varp_t* vp, clause_t* cp, lit_t x, lit_t* zp)
 {
     lit_t* yp = cp->lit;
@@ -5870,124 +5768,161 @@ static int bcp_turbo(varp_t* vp, lit_t xp)
     return r;
 }
 
+#define NEXT do { wlp = &wl->next; goto next; } while(0)
+// #define NEXT goto next1
+
 static int bcp_clauses(varp_t* vp, lit_t xl, int level, int depth)
 {
     wlink_t** wlp;
     wlink_t*  wl;
+    clause_t* cp;
+    int i;
+    lit_t* lit;
+    uint32_t p;
+    ival_t lw;
+
 restart:
     wlp = watch_list(vp, xl);
     DBG_BCP("%sBcp_clauses: %s\r\n", indent(level),format_lit(vp, neg_l(xl)));
-
-    while((wl = *wlp) != NULL) {
-	clause_t* cp = clause_pointer(wl);
-	int i = wlink_index(wl);
+//    goto next;
+//next1:
+//    wlp = &wl->next;
+next:
+    if ((wl = *wlp) == NULL) goto done;
+    cp = clause_pointer(wl);
+    if (cp->dead || cp->conflict) NEXT;
+    i = wlink_index(wl);
 #if defined(DEBUG_BCP)
-	print_sym_clause(vp, "  bcp: ", cp);
+    print_sym_clause(vp, "  bcp: ", cp);
 #endif
-	if (!cp->dead && !cp->conflict) {
-	    lit_t* lit = cp->lit;
-	    lit_t u = lit[1-i];
-	    int r;
-	    COUNT(vp, cp->select);
-	    switch(cp->select) {
-	    case 0: {
-		ASSERT(i == 0);
-		r = mon_clause(vp,lit,cp->size,i,1-i);
-		break;
-	    }
-	    case 1: {
-		r = bcp_2_clause(vp,u);
-		break;
-	    }
-	    case 2: {
-		r = bcp_3_clause(vp,lit,i,u);
-		break;
-	    }
-	    default: {
-		r = bcp_n_clause(vp,lit,cp->size,i,u);
-		break;
-	    }
-	    }
-
-	    switch(r) {
-	    case EV_TRIGGER: // monitor clause triggered
-		DBG1("monitor clause %d trigger\r\n", cp->cix);
-		// collect clause
-		break;
-	    case EV_CONFLICT:
-		if (vp->max_conflicting == 1) {
-		    vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
-		    goto conflict;
-		}
-		else if (vp->num_conflicting < vp->max_conflicting) {
-		    vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
-		    cp->conflict = 1;
-		}
-		else
-		    goto conflict;
-		break;
-	    case EV_DEAD:
-		COUNT(vp, CLAUSE_DEAD_COUNTER);
-		if (level == 0) {
-		    cp->dead = 1;
-		    vp->cdead[GET_SI(cp->cix)]++;
-		    schedule_unwatch_clause(vp, cp);
-		}
-		break;
-	    case EV_WATCH: {
-		wlink_t* wl0 = &cp->wl[i];
-		*wlp = wl0->next;
-		wlink_link(vp, wl0, lit[i]);
-		break;
-	    }
-	    case EV_WATCH2: {
-		wlink_t* wl0 = &cp->wl[i];
-		wlink_t* wl1 = &cp->wl[1-i];		
-		*wlp = wl0->next;
-		wlink_link(vp, wl0, lit[i]);
-		// FIXME!!! make better
-		wlink_unlink(vp, cp, neg_l(xl));
-		wlink_link(vp, wl1, lit[1-i]);
-		break;
-	    }
-	    case EV_UNIT: {
-		put_nq_l(vp, u, I_TRUE, cp->cix, level);
-		if (level == 0) {
-		    cp->dead = 1;
-		    vp->cdead[GET_SI(cp->cix)]++;
-		    schedule_unwatch_clause(vp, cp);
-		}
-		if (wl->next == NULL) {
-		    if ((level == 0) && vp->opt.xref)
-			kill_clauses(vp, neg_l(xl));
-		    xl = neg_l(u);
-		    goto restart;
-		}
-		
-		if (vp->opt.qtype == q_recursive) {
-		    if (depth) {
-			if (bcp_clauses(vp, neg_l(u), level, depth-1) < 0)
-			    goto conflict;
-		    }
-		    else {
-			DBG1("bcp max depth %d reached enqueue\r\n",
-			     MAX_BCP_DEPTH);
-			lqueue_insert(vp, neg_l(u));
-		    }
-		}
-		else {
-		    lqueue_insert(vp, neg_l(u));
-		}
-		break;
-	    }
+    lit = cp->lit;
+    if ((lw = get_value(vp, lit[1-i])) == I_TRUE)
+	goto ev_dead;
+    switch(cp->size) {
+    case 0: // monitor lsize gives the actual size
+	COUNT(vp, CLAUSE_MON_COUNTER);
+	for (p = 2; p < cp->lsize; p++) {
+	    switch(get_value(vp, lit[p])) {
+	    case I_FALSE: break;
+	    case I_TRUE:  break;
 	    default:
-		break;
+		swap_lit(lit, i, p);
+		lit[1-i] = neg_l(lit[i]);
+		goto ev_watch2;
 	    }
 	}
-	if (*wlp == wl)
-	    wlp = &wl->next;
+	goto ev_trigger; // all literals got values - trigger
+    case 1: ASSERT(0);
+    case 2:
+	COUNT(vp, CLAUSE_2_COUNTER);
+	break;
+    case 3:
+	COUNT(vp, CLAUSE_3_COUNTER);
+	switch(get_value(vp, lit[2])) {
+	case I_TRUE:
+	    goto ev_dead;
+	case I_FALSE:
+	    break;
+	default:
+	    swap_lit(lit, i, 2);
+	    goto ev_watch;	    
+	}
+	break;
+    default:
+	COUNT(vp, CLAUSE_N_COUNTER);
+	for (p = 2; p < cp->size; p++) {
+	    // for (p = n-1; p >= 2; p--) {
+	    switch(get_value(vp, lit[p])) {
+	    case I_FALSE:
+		break;
+	    case I_TRUE:
+		goto ev_dead;
+	    default:
+		swap_lit(lit, i, p);
+		goto ev_watch;
+	    }
+	}
+	break;
     }
-    
+    if (lw == I_FALSE)
+	goto ev_conflict;
+
+// ev_unit:
+    put_nq_l(vp, lit[1-i], I_TRUE, cp->cix, level);
+    if (level == 0) {
+	cp->dead = 1;
+	vp->cdead[GET_SI(cp->cix)]++;
+	schedule_unwatch_clause(vp, cp);
+    }
+    if (wl->next == NULL) { // last in watch list! do tail call
+	if ((level == 0) && vp->opt.xref)
+	    kill_clauses(vp, neg_l(xl));
+	xl = neg_l(lit[1-i]);
+	goto restart;
+    }
+    if (vp->opt.qtype == q_recursive) {
+	if (depth) {
+	    if (bcp_clauses(vp, neg_l(lit[1-i]), level, depth-1) < 0)
+		goto conflict;
+	}
+	else {
+	    DBG1("bcp max depth %d reached enqueue\r\n",
+		 MAX_BCP_DEPTH);
+	    lqueue_insert(vp, neg_l(lit[1-i]));
+	}
+    }
+    else {
+	lqueue_insert(vp, neg_l(lit[1-i]));
+    }
+    NEXT;
+
+ev_watch: {
+	wlink_t* wl0 = &cp->wl[i];
+	*wlp = wl0->next;
+	wlink_link(vp, wl0, lit[i]);
+    }
+    goto next; // wlp does not need update
+
+ev_conflict:
+    if (vp->max_conflicting == 1) {
+	vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
+	goto conflict;
+    }
+    else if (vp->num_conflicting < vp->max_conflicting) {
+	vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
+	cp->conflict = 1;
+    }
+    else
+	goto conflict;
+    NEXT;    
+
+ev_dead:
+    COUNT(vp, CLAUSE_DEAD_COUNTER);
+    if (level == 0) {
+	cp->dead = 1;
+	vp->cdead[GET_SI(cp->cix)]++;
+	schedule_unwatch_clause(vp, cp);
+    }
+    NEXT;
+		
+ev_watch2: {
+	// NOT TESTED
+	wlink_t* wl0 = &cp->wl[i];
+	wlink_t* wl1 = &cp->wl[1-i];
+	*wlp = wl0->next;
+	wlink_link(vp, wl0, lit[i]);
+	// FIXME!!! make better
+	wlink_unlink(vp, cp, neg_l(xl));
+	wlink_link(vp, wl1, lit[1-i]);
+    }
+    goto next; // wlp does not need update
+
+ev_trigger:
+    DBG1("monitor clause %d trigger\r\n", cp->cix);
+    // collect clause
+    NEXT;    
+
+done:    
     if ((level == 0) && vp->opt.xref)
 	kill_clauses(vp, neg_l(xl));
     return 0;
@@ -6762,12 +6697,12 @@ static size_t norm_clause_array(varp_t* vp, lit_t* lit, size_t size, bool_t raw)
 	else if (is_marked(vp, neg_l(lit[i]), LIT_MARK0)) // !A,..,A
 	    lit[i] = LIT_TRUE;
 	else
-	    set_mark(vp, lit[i], LIT_MARK0);
+	    set_marks(vp, lit[i], LIT_MARK0);
     }
     // remove constants and count constants found and unmark
     j = 0;
     for (i = 0; i < (int)size; i++) {
-	clr_mark(vp, lit[i], LIT_MARK0);
+	clr_marks(vp, lit[i], LIT_MARK0);
 	if (lit[i] == LIT_TRUE) Tc++;
 	else if (lit[i] == LIT_FALSE) Fc++;
 	else {
@@ -7156,7 +7091,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!get_bump(env,vp,argv[1],&bump)) {
 	DBG0("bump\r\n");
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(arg1));	
     }
     
     if (vif_load_ulit(env, vp, &len, argv[2])) {
@@ -7166,19 +7101,19 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     else if (vif_get_cix(env, vp, argv[2], &cix)) {
 	if ((cp = get_clause(vp, cix)) == NULL) {
 	    DBG0("get_clause: cix=%d\r\n", cix);
-	    return enif_make_badarg(env);
+	    return enif_raise_exception(env, ATOM(arg2));	    
 	}
 	lit = cp->lit;
 	len = cp->size;
     }
     else {
 	DBG0("get_clause: argv[2]\\n");
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(arg2));
     }
     if (argc > 3) {
 	if (!vif_get_lit(env, vp, argv[3], &u)) {
 	    DBG0("lit: argv[3]\r\n");
-	    return enif_make_badarg(env);
+	    return enif_raise_exception(env, ATOM(arg3));
 	}
     }
 
@@ -7222,7 +7157,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	if (pos < 0) {
 	    unmark_all(vp);
 	    DBG0("trail=NULL\r\n");
-	    return enif_make_badarg(env);
+	    return enif_raise_exception(env, ATOM(internal1));
 	}
 	ul = L_VAR(trail_vec[pos]);
 	u = lit_l(vp, ul);
@@ -7236,12 +7171,12 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    cix = vp->var_lev[INDEX(ul)].implication_clause;
 	    if ((cix == CLAUSE_NONE) || ((cp = get_clause(vp, cix)) == NULL)) {
 		unmark_all(vp);
-		return enif_make_badarg(env);
+		return enif_raise_exception(env, ATOM(internal2));
 	    }
 	    cp->stamp = vp->counter[BCP_COUNTER]; // timestamp clause
 	    lit = cp->lit;
 	    len = cp->size;
-	    clr_mark(vp, ul, VAR_MARK0);
+	    clr_marks(vp, ul, VAR_MARK0);
 	    pos--;
 	    step--;
 	}
@@ -7266,7 +7201,7 @@ make_clause:
 	return enif_make_undefined(env);  // It is a copy
     if ((cp = clause_alloc(vp, ALPHA, size)) == NULL) {
 	DBG0("clause alloc alpha size=%ld\r\n", size);
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(memory_limit));
     }
 
     // copy clause but swap in lit[0]=UIP
@@ -7279,7 +7214,7 @@ make_clause:
     }
     if ((cix = clause_insert(vp, ALPHA, cp, hvalue)) == CLAUSE_NONE) {
 	DBG0("insert alpha size=%ld\r\n", size);
-	return enif_make_badarg(env);
+	return enif_raise_exception(env, ATOM(memory_limit));
     }
     return make_cix(env, cix);
 }
@@ -7574,18 +7509,6 @@ static ERL_NIF_TERM varp_clauseset_sort(ErlNifEnv* env, int argc,
 	    cm[i]->cix = MAKE_CIX(si,i);  // set the new index
 	}
 
-	// remap implication_clauses
-	// only remap level0!!! and they should be old anyways?!
-#if 0
-	{
-	    size_t vn = dynvar_size(vp->var_map);
-	    for (i = 1; i < (int)vn; i++) {
-		remap_cix(&(vp->var_map[i]->implication_clause), "imp",
-			  si, rmap, n);
-	    }
-	}
-#endif
-	// now map all xrefs and edges
 	if (vp->opt.xref) {
 	    size_t vn = dynvar_size(vp->var_map);
 	    for (i = 1; i < (int)vn; i++) {
@@ -8369,12 +8292,12 @@ static void intersect_marked(varp_t* vp)
 	lit_t vl = vp->mark_stack[i];
 	if (is_marked(vp, vl, VAR_MARK0|VAR_MARK1)) {
 	    // both mark 0 and 1 - retain only mark 0
-	    clr_mark(vp, vl, VAR_MARK1);
+	    clr_marks(vp, vl, VAR_MARK1);
 	    i++;
 	}
 	else {
 	    // remove element i
-	    clr_mark(vp, vl, VAR_MARKL|VAR_MARK0|VAR_MARK1|VAR_MARKN);
+	    clr_marks(vp, vl, VAR_MARKL|VAR_MARK0|VAR_MARK1|VAR_MARKN);
 	    // shrink stack by swapping in last element
 	    vp->mark_stack[i] = vp->mark_stack[nmarked-1];
 	    nmarked--;
@@ -8655,6 +8578,15 @@ NIF_LIST
 
 static void load_atoms(ErlNifEnv* env)
 {
+    LOAD_ATOM(arg0);
+    LOAD_ATOM(arg1);
+    LOAD_ATOM(arg2);
+    LOAD_ATOM(arg3);
+    LOAD_ATOM(arg4);
+    LOAD_ATOM(system_limit);
+    LOAD_ATOM(memory_limit);    
+    LOAD_ATOM(internal1);
+    LOAD_ATOM(internal2);    
     LOAD_ATOM(alpha);
     LOAD_ATOM(beta);
     LOAD_ATOM(atom);
@@ -8721,8 +8653,6 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(size);
     LOAD_ATOM(status);
     LOAD_ATOM(symbol);
-    LOAD_ATOM(system_limit);
-    LOAD_ATOM(memory_limit);    
     LOAD_ATOM(toggle);
     LOAD_ATOM(true);
     LOAD_ATOM(turbo);
