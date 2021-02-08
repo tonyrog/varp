@@ -242,8 +242,8 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "isused",              3,  varp_is_used )   \
     NIF( "isatom",              2,  varp_is_atom ) \
     NIF( "isatom",              3,  varp_is_atom )    \
-    NIF( "get_phase",           2,  varp_get_phase )  \
-    NIF( "set_phase",           2,  varp_set_phase )  \
+    NIF( "phase",               2,  varp_phase ) \
+    NIF( "set_phase",           2,  varp_set_phase ) \
     NIF( "push",                1,  varp_push_level ) \
     NIF( "pop",                 1,  varp_pop_level ) \
     NIF( "pop",                 2,  varp_pop_level ) \
@@ -1226,27 +1226,6 @@ static size_t get_number_of_clauses(varp_t* vp)
 	cnum += vp->cnum[si];
     return cnum;
 }
-
-// check if literal is negated
-//static inline int is_neg_ll(literal_t* lp)
-//{
-//    return lp->neg;
-//}
-
-// return the variable from literal pointer
-//static inline variable_t* ll2v(literal_t* lp)
-//{
-//    return (variable_t*)
-//	(((uint8_t*)(lp)) -
-//	 (sizeof(variable_t) - (is_neg_ll(lp) ? sizeof(literal_t) :
-//				2*sizeof(literal_t))));
-//}
-
-// negate a literal
-//static inline literal_t* neg_ll(literal_t* lp)
-//{
-//    return is_neg_ll(lp) ? (lp - 1) : (lp + 1);
-//}
 
 static inline literal_t* vindex_ll(varp_t* vp, int i)
 {
@@ -4531,7 +4510,7 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 		if (!cdlist_is_first(&vp->order_list, var)) {
 		    if (set_phase)
 			vp->var_lev[INDEX(lit[i])].phase = 
-			    L_NEG(lit[i]) ? I_FALSE : I_TRUE;
+			    is_neg_l(lit[i]) ? I_FALSE : I_TRUE;
 		    dlist_remove(&vp->order_list, var);
 		    dlist_insert_first(&vp->order_list, var);
 		}
@@ -4575,7 +4554,7 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 		if (!cdlist_is_last(&vp->order_list, var)) {
 		    if (set_phase)
 			vp->var_lev[INDEX(lit[i])].phase = 
-			    L_NEG(lit[i]) ? I_FALSE : I_TRUE;
+			    is_neg_l(lit[i]) ? I_FALSE : I_TRUE;
 		    dlist_remove(&vp->order_list, var);
 		    dlist_insert_last(&vp->order_list, var);
 		}
@@ -4798,13 +4777,13 @@ static ERL_NIF_TERM varp_is_atom(ErlNifEnv* env, int argc,
     }
 }
 
-static ERL_NIF_TERM varp_get_phase(ErlNifEnv* env, int argc,
-				   const ERL_NIF_TERM argv[])
+static ERL_NIF_TERM varp_phase(ErlNifEnv* env, int argc,
+			       const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
     varp_t* vp;
     lit_t xl;
-    varlev_t* vlp;    
+    varlev_t* vlp;
     ERL_NIF_TERM r;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
@@ -4837,9 +4816,9 @@ static ERL_NIF_TERM varp_set_phase(ErlNifEnv* env, int argc,
     switch(vlp->phase) {
     case I_TRUE: r = enif_make_int(env, 1); break;
     case I_FALSE: r = enif_make_int(env, -1); break;
-    default: r =  enif_make_undefined(env); break;
+    default: r = enif_make_undefined(env); break;
     }
-    vlp->phase = L_NEG(xl) ? I_FALSE : I_TRUE;
+    vlp->phase = is_neg_l(xl) ? I_FALSE : I_TRUE;
     return r;
 }
 

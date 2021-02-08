@@ -45,7 +45,7 @@
 -export([is_equal/3]).
 -export([isused/2, isused/3]).
 -export([isatom/2, isatom/3]).
--export([get_phase/2, set_phase/2]).
+-export([phase/2, set_phase/2]).
 -export([push/1]).
 -export([pop/1, pop/2]).
 -export([undo/1]).
@@ -382,8 +382,8 @@ isatom(_Vp, Var) when is_integer(Var) ->
 isatom(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
     ?nif_stub().
 
--spec get_phase(Vp::varp(), Var::literal()) -> -1 | 1 | undefined.
-get_phase(_Vp, Var) when is_integer(Var) ->
+-spec phase(Vp::varp(), Var::literal()) -> -1 | 1 | undefined.
+phase(_Vp, Var) when is_integer(Var) ->
     ?nif_stub().
 
 -spec set_phase(Vp::varp(), Lit::literal()) -> -1 | 1 | undefined.

@@ -269,7 +269,7 @@ exception: variable (x is not a variable)
 
 
 ``` python
-varpy.get_phase(vp, x)
+varpy.phase(vp, x)
 ```
 
 Lookup the stored phase of variable __x__ and return

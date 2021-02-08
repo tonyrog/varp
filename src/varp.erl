@@ -82,7 +82,7 @@
 -export([is_equal/3]).
 -export([isused/2, isused/3]).
 -export([isatom/2, isatom/3]).
--export([set_phase/2, get_phase/2]).
+-export([set_phase/2, phase/2]).
 -export([push/1]).
 -export([pop/1, pop/2]).
 -export([undo/1]).
@@ -1736,7 +1736,7 @@ isused(Vp,Var,Status) -> varp_nif:isused(Vp,Var,Status).
 isatom(Vp,Var) -> varp_nif:isatom(Vp,Var).
 isatom(Vp,Var,Status) -> varp_nif:isatom(Vp,Var,Status).
 set_phase(Vp, Lit) -> varp_nif:set_phase(Vp, Lit).
-get_phase(Vp, Var) -> varp_nif:get_phase(Vp, Var).
+phase(Vp, Var) -> varp_nif:phase(Vp, Var).
 pop(Vp) -> varp_nif:pop(Vp).
 pop(Vp,Level) -> varp_nif:pop(Vp,Level).
 push(Vp) -> varp_nif:push(Vp).
