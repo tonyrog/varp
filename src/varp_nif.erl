@@ -45,6 +45,7 @@
 -export([is_equal/3]).
 -export([isused/2, isused/3]).
 -export([isatom/2, isatom/3]).
+-export([get_phase/2, set_phase/2]).
 -export([push/1]).
 -export([pop/1, pop/2]).
 -export([undo/1]).
@@ -75,6 +76,7 @@
 -export([queue_clear/1]).
 -export([order_sort/2,order_sort/3,order_sort/4]).
 -export([order_first/2, order_last/2]).
+-export([order_first/3, order_last/3]).
 -export([next_unbound/1, next_unbound/2]).
 -export([bump/3]).
 -export([subscribe/2]).
@@ -380,6 +382,14 @@ isatom(_Vp, Var) when is_integer(Var) ->
 isatom(_Vp, Var, Status) when is_integer(Var), is_boolean(Status) ->
     ?nif_stub().
 
+-spec get_phase(Vp::varp(), Var::literal()) -> -1 | 1 | undefined.
+get_phase(_Vp, Var) when is_integer(Var) ->
+    ?nif_stub().
+
+-spec set_phase(Vp::varp(), Lit::literal()) -> -1 | 1 | undefined.
+set_phase(_Vp, Lit) when is_integer(Lit) ->
+    ?nif_stub().
+
 %% push binding level and return the level before push
 %% This allows code like:
 %%    Level = push()
@@ -579,7 +589,6 @@ get_nbindings(_Vp,Count,_AsTrail,_AsTuple)
   when is_integer(Count), Count>= 0 ->
     ?nif_stub().
 
-
 -spec get_bindings(Vp::varp()) -> 
 	  bindings().
 
@@ -636,8 +645,16 @@ order_sort(_Vp, _Key1, _Key2, _Arg) ->
 order_first(_Vp, _VarList) ->
     ?nif_stub().
 
+-spec order_first(Vp::varp(), [literal()], SetPhase::boolean()) -> ok.
+order_first(_Vp, _VarList, SetPhase) when is_boolean(SetPhase) ->
+    ?nif_stub().
+
 -spec order_last(Vp::varp(), List::[literal()]) -> ok.
 order_last(_Vp, _List) ->
+    ?nif_stub().
+
+-spec order_last(Vp::varp(), [literal()], SetPhase::boolean()) -> ok.
+order_last(_Vp, _VarList, SetPhase) when is_boolean(SetPhase) ->
     ?nif_stub().
 
 clauseset_offset(_Vp, _Si) ->

@@ -138,15 +138,11 @@ new(OptMap) when is_map(OptMap) ->
       }.
 
 add_variable(Bs) ->
-    Var = varp_nif:add_variable(Bs#bs.vp, false),
-    varp_nif:isused(Bs#bs.vp, Var, true),
-    Var.    
+    varp_nif:add_variable(Bs#bs.vp, false, true).
 
 %% Create a variable and mark all atoms as used
 add_variable(Bs, IsAtom) ->
-    Var = varp_nif:add_variable(Bs#bs.vp, IsAtom),
-    varp_nif:isused(Bs#bs.vp, Var, true),
-    Var.
+    varp_nif:add_variable(Bs#bs.vp, IsAtom, true).
 
 %% add symbol name to literal 
 -spec add_symbol(Bs::#bs{}, L::integer(), Sym::term()|iolist()) ->

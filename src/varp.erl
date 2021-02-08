@@ -82,6 +82,7 @@
 -export([is_equal/3]).
 -export([isused/2, isused/3]).
 -export([isatom/2, isatom/3]).
+-export([set_phase/2, get_phase/2]).
 -export([push/1]).
 -export([pop/1, pop/2]).
 -export([undo/1]).
@@ -113,6 +114,7 @@
 -export([get_decision/2]).
 -export([order_sort/2, order_sort/3, order_sort/4]).
 -export([order_first/2, order_last/2]).
+-export([order_first/3, order_last/3]).
 -export([next_unbound/1, next_unbound/2]).
 -export([bump/3]).
 -export([subscribe/2]).
@@ -1733,6 +1735,8 @@ isused(Vp,Var) -> varp_nif:isused(Vp,Var).
 isused(Vp,Var,Status) -> varp_nif:isused(Vp,Var,Status).
 isatom(Vp,Var) -> varp_nif:isatom(Vp,Var).
 isatom(Vp,Var,Status) -> varp_nif:isatom(Vp,Var,Status).
+set_phase(Vp, Lit) -> varp_nif:set_phase(Vp, Lit).
+get_phase(Vp, Var) -> varp_nif:get_phase(Vp, Var).
 pop(Vp) -> varp_nif:pop(Vp).
 pop(Vp,Level) -> varp_nif:pop(Vp,Level).
 push(Vp) -> varp_nif:push(Vp).
@@ -1774,8 +1778,10 @@ get_bindings(Vp, Level) -> varp_nif:get_bindings(Vp,Level).
 get_bindings(Vp, Level, Trail) -> varp_nif:get_bindings(Vp,Level,Trail).
 get_bindings(Vp, Level, Trail, AsTuple) -> varp_nif:get_bindings(Vp, Level, Trail, AsTuple).
 get_number_of_bindings(Vp, Level) -> varp_nif:get_number_of_bindings(Vp, Level).
-order_first(Vp, VarList) -> varp_nif:order_first(Vp, VarList).
+order_first(Vp, List) -> varp_nif:order_first(Vp, List).
 order_last(Vp, List) -> varp_nif:order_last(Vp, List).
+order_first(Vp, List, SetPhase) -> varp_nif:order_first(Vp, List, SetPhase).
+order_last(Vp, List, SetPhase) -> varp_nif:order_last(Vp, List, SetPhase).
 order_sort(Vp, Key1) -> varp_nif:order_sort(Vp, Key1).
 order_sort(Vp, Key1, KeyArg) -> varp_nif:order_sort(Vp, Key1, KeyArg).
 order_sort(Vp, Key1, Key2, Arg) -> varp_nif:order_sort(Vp, Key1, Key2, Arg).
@@ -2132,7 +2138,7 @@ bcpv_(V,I, Vt, Acc) ->
 bcpv_conflict(Vp, L, I, Vt, Acc) ->
     case varp_conflict:analyze(Vp, 0, local) of
 	[{1,_Count,Aix}|_] ->
-	    ?dbg1("UNIT=~w\n", [varp_nif:get_clause(Vp, Aix)]),
+	    ?dbg0("UNIT=~w\n", [varp_nif:get_clause(Vp, Aix)]),
 	    varp_nif:pop(Vp, L),
 	    true = varp_nif:move_clause(Vp, Aix, gamma),
 	    case varp_nif:bcp(Vp) of

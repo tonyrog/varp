@@ -241,7 +241,9 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "isused",              2,  varp_is_used ) \
     NIF( "isused",              3,  varp_is_used )   \
     NIF( "isatom",              2,  varp_is_atom ) \
-    NIF( "isatom",              3,  varp_is_atom )   \
+    NIF( "isatom",              3,  varp_is_atom )    \
+    NIF( "get_phase",           2,  varp_get_phase )  \
+    NIF( "set_phase",           2,  varp_set_phase )  \
     NIF( "push",                1,  varp_push_level ) \
     NIF( "pop",                 1,  varp_pop_level ) \
     NIF( "pop",                 2,  varp_pop_level ) \
@@ -279,7 +281,9 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "order_sort",          3,  varp_order_sort ) \
     NIF( "order_sort",          4,  varp_order_sort ) \
     NIF( "order_first",         2,  varp_order_first ) \
+    NIF( "order_first",         3,  varp_order_first ) \
     NIF( "order_last",          2,  varp_order_last ) \
+    NIF( "order_last",          3,  varp_order_last ) \
     NIF( "next_unbound",        1,  varp_next_unbound )  \
     NIF( "next_unbound",        2,  varp_next_unbound )  \
     NIF( "queue_first",         1,  varp_queue_first )	\
@@ -4501,11 +4505,16 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int len;
-
+    int set_phase = 0;
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_raise_exception(env, ATOM(level));
+    if (argc >= 3) {
+	if (!enif_get_boolean(env, argv[2], &set_phase))
+	    return enif_make_badarg(env);
+    }
 
     // vif_load_tlit?
     if (vif_get_lit_list(env, vp, argv[1], &len, NULL)) {
@@ -4520,6 +4529,9 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 	    for (i = len-1; i >= 0; i--) {
 		variable_t* var = var_l(vp, lit[i]);
 		if (!cdlist_is_first(&vp->order_list, var)) {
+		    if (set_phase)
+			vp->var_lev[INDEX(lit[i])].phase = 
+			    L_NEG(lit[i]) ? I_FALSE : I_TRUE;
 		    dlist_remove(&vp->order_list, var);
 		    dlist_insert_first(&vp->order_list, var);
 		}
@@ -4539,11 +4551,16 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
     UNUSED(argc);
     varp_t* vp;
     int len;
-
+    int set_phase = 0;
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
     if (vp->level != 0)
 	return enif_raise_exception(env, ATOM(level));
+    if (argc >= 3) {
+	if (!enif_get_boolean(env, argv[2], &set_phase))
+	    return enif_make_badarg(env);
+    }
 
     if (vif_get_lit_list(env, vp, argv[1], &len, NULL)) {
 	ERL_NIF_TERM r = enif_make_ok(env);
@@ -4556,6 +4573,9 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 	    for (i = 0; i < (int)len; i++) {
 		variable_t* var = var_l(vp, lit[i]);
 		if (!cdlist_is_last(&vp->order_list, var)) {
+		    if (set_phase)
+			vp->var_lev[INDEX(lit[i])].phase = 
+			    L_NEG(lit[i]) ? I_FALSE : I_TRUE;
 		    dlist_remove(&vp->order_list, var);
 		    dlist_insert_last(&vp->order_list, var);
 		}
@@ -4776,6 +4796,51 @@ static ERL_NIF_TERM varp_is_atom(ErlNifEnv* env, int argc,
 	    clr_marks(vp, L_VAR(xl), VAR_ATOM);
 	return enif_make_boolean(env, was_atom);
     }
+}
+
+static ERL_NIF_TERM varp_get_phase(ErlNifEnv* env, int argc,
+				   const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    lit_t xl;
+    varlev_t* vlp;    
+    ERL_NIF_TERM r;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_lit(env, vp, argv[1], &xl))
+	return enif_raise_exception(env, ATOM(literal));
+    vlp = &vp->var_lev[INDEX(xl)];
+    switch(vlp->phase) {
+    case I_TRUE:  r = enif_make_int(env, 1); break;
+    case I_FALSE: r = enif_make_int(env, -1); break;
+    default:      r = enif_make_undefined(env); break;
+    }
+    return r;
+}
+
+static ERL_NIF_TERM varp_set_phase(ErlNifEnv* env, int argc,
+				   const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    varp_t* vp;
+    lit_t xl;
+    varlev_t* vlp;
+    ERL_NIF_TERM r;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_lit(env, vp, argv[1], &xl))
+	return enif_raise_exception(env, ATOM(literal));
+    vlp = &vp->var_lev[INDEX(xl)];
+    switch(vlp->phase) {
+    case I_TRUE: r = enif_make_int(env, 1); break;
+    case I_FALSE: r = enif_make_int(env, -1); break;
+    default: r =  enif_make_undefined(env); break;
+    }
+    vlp->phase = L_NEG(xl) ? I_FALSE : I_TRUE;
+    return r;
 }
 
 static int bind_lit(varp_t* vp, lit_t xp, ival_t val)

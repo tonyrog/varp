@@ -17,40 +17,82 @@
 
 -include("varp.hrl").
 
+-define(DEFAULT_TIMEOUT, infinity).
+-define(DEFAULT_SIZE,    10).
+-define(DEFAULT_ROUNDS,  2).
+-define(DEFAULT_ITER,    1000).
+-define(DEFAULT_MODE,    sat).
+
 options() ->
     [#{ long  => "timeout",
 	short => "t",
 	key   => timeout,
 	spec  => {union,[float,{enum,[{"infinity",infinity}]}]},
-	default => infinity,
+	default => ?DEFAULT_TIMEOUT,
 	description => "Timeout in seconds"
       },
      #{ long => "size",
-	short => "s",
+	short => "v",
 	key => size,
 	spec => unsigned, 
-	default => 10,
-	description => "Variable selection size"
+	default => ?DEFAULT_SIZE,
+	description => "Variable selection vector size"
+      },
+     #{ long => "rounds",
+	short => "r",
+	key => rounds,
+	spec => unsigned, 
+	default => ?DEFAULT_ROUNDS,
+	description => "Number of selections"
       },
      #{ long  => "iterations",
 	short => "n",
 	key   => iter,
 	spec  => unsigned,
-	default => 1000,
-	description => "Number of samples"
-      }].
+	default => ?DEFAULT_ITER,
+	description => "Number of samples per round"
+      },
+     #{ long  => "mode",
+	short => "m",
+	key   => mode,
+	spec  => {enum, [{"s", sat}, {"sat", sat},
+			 {"u", unsat}, {"unsat", unsat}]},
+	default => ?DEFAULT_MODE,
+	description => "Select negation (unsat) or not (sat, default)"
+      }
+    ].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    Timeout = maps:get(timeout, Param, infinity),
-    Size = maps:get(size, Param, 10),
-    N = maps:get(iter, Param, 1000),
-    Vt = list_to_tuple(varp:vec_extend_rand(Bs#bs.vp, [], Size)),
-    Map = loop(Bs#bs.vp, N, Vt, #{}),
-    %% Assumed = update_list(Map), 
-    Assumed = [-Li || Li <- update_list(Map)],
-    ?dbg0("Satord = ~w\n", [Assumed]),
+    Timeout = maps:get(timeout, Param, ?DEFAULT_TIMEOUT),
+    Size = maps:get(size, Param, ?DEFAULT_SIZE),
+    N = maps:get(iter, Param, ?DEFAULT_ITER),
+    %% N should not be > 2^Size
+    if (N >= (1 bsl Size)) ->
+	    io:format("n > 2^v! use saturate?", []);
+       true ->
+	    ok
+    end,
+    R = maps:get(rounds, Param, ?DEFAULT_ROUNDS),
+    Mode = maps:get(mode, Param, ?DEFAULT_MODE),
+    Map = rounds(Bs#bs.vp, R, Size, N, #{}),
+    Ls0 = literal_list(Map),   %% get probable literals
+    Ls = [ Li || {Ln,Li} <- Ls0, %% Ln > R, 
+		 varp_nif:isatom(Bs#bs.vp, Li)],
+    ?dbg1("kept ~w\n", [Ls]),
+    Assumed = case Mode of
+		  sat -> Ls;
+		  unsat -> [-Li || Li <- Ls]
+	      end,
     varp:order_first(Bs#bs.vp, Assumed),
     {?CONTINUE,[],Bs}.
+
+rounds(_Vp, 0, _Size, _N, Map) ->
+    Map;
+rounds(Vp, R, Size, N, Map) ->
+    %% new random selection
+    Vt = list_to_tuple(varp:vec_extend_rand(Vp, [], Size)),
+    Map1 = loop(Vp, N, Vt, Map),
+    rounds(Vp, R-1, Size, N, Map1).
 
 loop(_Vp, 0, _Vt, Map) ->
     Map;
@@ -63,9 +105,9 @@ loop(Vp, I, Vt, Map) ->
 	    Ei = varp_nif:get_bindings(Vp, L+2, false, _AsTuple=false),
 	    ?dbg0("Vj ~w -> Ei ~w\n", [Vj, Ei]),
 	    varp_nif:pop(Vp, L),
-	    Map1 = update(Ei, Map),
+	    Map1 = intersect(Ei, Map),
 	    loop(Vp, I-1, Vt, Map1);
-	_ -> %% false or contradiction
+	_ -> %% false or contradiction (map hold for all)
 	    ?dbg0("Vj ~w -> false\n", [Vj]),
 	    varp_nif:pop(Vp, L),
 	    loop(Vp, I-1, Vt, Map)
@@ -75,28 +117,31 @@ loop(Vp, I, Vt, Map) ->
 %%   Li => N       seen N times
 %%   Li => false   -Li seen
 %%
-update([Li|Ls], Map) ->
+intersect([Li|Ls], Map) ->
     case maps:find(Li, Map) of
 	error ->
 	    case maps:find(-Li, Map) of
 		{ok,false} ->
 		    error(internal);
 		{ok,_N} -> 
-		    update(Ls, Map#{ Li => false });
+		    intersect(Ls, Map#{ Li => false, -Li => false });
 		error ->
-		    update(Ls, Map#{ Li => 1 })
+		    intersect(Ls, Map#{ Li => 1 })
 	    end;
 	{ok,false} ->
-	    update(Ls, Map);
+	    intersect(Ls, Map);
 	{ok,N} ->
-	    update(Ls, Map#{ Li => N + 1})
+	    intersect(Ls, Map#{ Li => N + 1})
     end;
-update([], Map) ->
+intersect([], Map) ->
     Map.
 
-update_list(Map) ->
+literal_list(Map) ->
+    NRemoved = maps:fold(fun(_, false, N) -> N+1;
+			    (_Li, _, N) -> N
+			 end, 0, Map),
+    ?dbg1("literals not constant (removed) = ~w\n", [NRemoved]),
     Ls = maps:fold(fun(_, false, Acc) -> Acc;
 		      (Li, N, Acc) -> [{N,Li}|Acc]
 		   end, [], Map),
-    Ls1 = lists:reverse(lists:sort(Ls)),
-    [Li || {_N,Li} <- Ls1].
+    lists:reverse(lists:sort(Ls)).

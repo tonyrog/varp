@@ -267,6 +267,25 @@ or set using is\_atom(vp, x, True)
 
 exception: variable (x is not a variable)
 
+
+``` python
+varpy.get_phase(vp, x)
+```
+
+Lookup the stored phase of variable __x__ and return
+-1 if negative 1 if positive and __None__ if not set.
+
+
+``` python
+varpy.set_phase(vp, x)
+```
+
+Set the phase of a variable given literal x,
+if x is negative the the phase is set to -1 otherwise
+the phase is set to 1. The previous phase value for 
+variable x is returned.
+
+
 ``` python
 varpy.push(vp)
 ```
@@ -591,19 +610,27 @@ exception: level (when level != 0)
 
 ``` python
 varpy.order_first(vp, [x1,..,xn])
+varpy.order_first(vp, [x1,..,xn], set_phase)
 ```
 
 Update current sort order so that literals __x1__..__xn__
 are placed first.
+If __set_phase__ is True then the sign of the literal is
+used to update the phase, for later decision. Otherwise
+the sign of the literal is ignored.
 
 exception: level (when level != 0)
 
 ``` python
 varpy.order_last(vp, [x1,..,xn])
+varpy.order_last(vp, [x1,..,xn], set_phase)
 ```
 
 Update current sort order so that literals __x1__..__xn__
 are placed last.
+If __set_phase__ is True then the sign of the literal is
+used to update the phase, for later decision. Otherwise
+the sign of the literal is ignored.
 
 exception: level (when level != 0)
 
