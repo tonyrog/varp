@@ -1,1 +1,1 @@
-#define VARP_VSN "0.9.47"
+#define VARP_VSN "0.9.48"
