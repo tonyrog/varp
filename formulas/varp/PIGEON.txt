@@ -45,6 +45,8 @@ clauses that are dead after the first eval.
 -qtype=lifo	5.52s
 -qtype=fifo	5.49s
 
+otp 24.0 + clang -O3  = 2.81
+
 
 MIN BCP pigon = n
 
