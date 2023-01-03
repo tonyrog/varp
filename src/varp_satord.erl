@@ -63,7 +63,7 @@ options() ->
     ].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    Timeout = maps:get(timeout, Param, ?DEFAULT_TIMEOUT),
+    _Timeout = maps:get(timeout, Param, ?DEFAULT_TIMEOUT),
     Size = maps:get(size, Param, ?DEFAULT_SIZE),
     N = maps:get(iter, Param, ?DEFAULT_ITER),
     %% N should not be > 2^Size
@@ -76,7 +76,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Mode = maps:get(mode, Param, ?DEFAULT_MODE),
     Map = rounds(Bs#bs.vp, R, Size, N, #{}),
     Ls0 = literal_list(Map),   %% get probable literals
-    Ls = [ Li || {Ln,Li} <- Ls0, %% Ln > R, 
+    Ls = [ Li || {_Ln,Li} <- Ls0, %% Ln > R, 
 		 varp_nif:isatom(Bs#bs.vp, Li)],
     ?dbg1("kept ~w\n", [Ls]),
     Assumed = case Mode of

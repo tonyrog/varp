@@ -313,7 +313,7 @@ lexpr60 -> lexpr60 'xor' lexpr50    : { op('$2'), '$1', '$3' }.
 
 lexpr70 -> lexpr60                  : '$1'.
 lexpr70 -> lexpr70 'or'  lexpr60    : { 'or', '$1', '$3' }.
-lexpr70 -> lexpr70 '||'  lexpr60    : { 'and', '$1', '$3' }.
+lexpr70 -> lexpr70 '||'  lexpr60    : { 'or', '$1', '$3' }.
 
 lexpr80 -> lexpr70                  : '$1'.
 lexpr80 -> lexpr80 '->'  lexpr70    : { 'imp', '$1', '$3' }.

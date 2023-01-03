@@ -1944,6 +1944,8 @@ bench0_(V, I) ->
     bench0_(V, I-1).
 %% 
 %% bcp 999 clauses
+%% 2021-06-15
+%% {literal_integer,true},{literal_size,32},{value_packing,1} => 82504
 %% 2021-02-01
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 79064
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 78260

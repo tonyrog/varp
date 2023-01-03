@@ -14,6 +14,7 @@
 -export([tokens/1]).
 -export([parse/1, parse/2]).
 -export([scan_file/1]).
+-export([remove_comments/1]).
 -export([read_file/1]).
 -export([file/1, string/1]).
 -export([archive_path/1]).
@@ -1046,21 +1047,27 @@ order_decl([],Opts) ->
 load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
-	    {ok, Data} = read_file(F),
-	    case varp_dimacs:parse(Data) of
-		Error={error,Ln,Reason} ->
-		    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
-		    Error;
-		Cnf = {cnf,{_NVars,_NClauses,Sections0,_CLs}} ->
-		    %% io:format("% loaded: ~p\n", [Cnf]),
-		    Formula1 = join_f(JoinOp,Cnf,Formula0),
-		    Sections1 = append_sections(Sections, Sections0),
-		    load_files(Fs,Formula1,Sections1,JoinOp,GOpts);
-		Snf = {snf,{_NVars,_NClauses,Sections0,_CLs}} ->
-		    %% io:format("% loaded: ~p\n", [Snf]),
-		    Formula1 = join_f(JoinOp,Snf,Formula0),
-		    Sections1 = append_sections(Sections, Sections0),
-		    load_files(Fs,Formula1,Sections1,JoinOp,GOpts)
+	    case read_file(F) of
+		{ok, Data} ->
+		    case varp_dimacs:parse(Data) of
+			Error={error,Ln,Reason} ->
+			    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
+			    Error;
+			Cnf = {cnf,{_NVars,_NClauses,Sections0,_CLs}} ->
+			    %% io:format("% loaded: ~p\n", [Cnf]),
+			    Formula1 = join_f(JoinOp,Cnf,Formula0),
+			    Sections1 = append_sections(Sections, Sections0),
+			    load_files(Fs,Formula1,Sections1,JoinOp,GOpts);
+			Snf = {snf,{_NVars,_NClauses,Sections0,_CLs}} ->
+			    %% io:format("% loaded: ~p\n", [Snf]),
+			    Formula1 = join_f(JoinOp,Snf,Formula0),
+			    Sections1 = append_sections(Sections, Sections0),
+			    load_files(Fs,Formula1,Sections1,JoinOp,GOpts)
+		    end;
+		Error={error,Reason} ->
+		    io:format("Unable to read file ~s (~w)\n",
+			      [F, Reason]),
+		    Error 
 	    end;
        Ext =:= ".dat"; Ext =:= ".txt" -> %% fixme
 	    %% try input modules
@@ -1081,16 +1088,21 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		    Error
 	    end;
        true ->
-	    %% io:format("Read file ~s\n", [F]),
-	    {ok, Data} = read_file(F),
-	    case parse(F, Data, GOpts) of
-		{ok,{Sections1,Formula}} ->
-		    %% io:format("% loaded: ~s\n", [F]),
-		    Formula1 = join_f(JoinOp,Formula,Formula0),
-		    load_files(Fs,Formula1,
-			       append_sections(Sections,Sections1),
-			       JoinOp,GOpts);
-		Error ->
+	    case read_file(F) of
+		{ok, Data} ->
+		    case parse(F, Data, GOpts) of
+			{ok,{Sections1,Formula}} ->
+			    %% io:format("% loaded: ~s\n", [F]),
+			    Formula1 = join_f(JoinOp,Formula,Formula0),
+			    load_files(Fs,Formula1,
+				       append_sections(Sections,Sections1),
+				       JoinOp,GOpts);
+			Error ->
+			    Error
+		    end;
+		Error={error,Reason} ->
+		    io:format("Unable to read file ~s (~w)\n",
+			      [F, Reason]),
 		    Error
 	    end
     end;
@@ -1161,6 +1173,7 @@ output_model(Bs,Partial,I) ->
 	false ->
 	    Model;
 	Flavour ->
+	    put(meta, Bs#bs.meta), %% access to environment
 	    case varp_output(Bs#bs.output, user, Partial, Model) of
 		{error, no_output} ->
 		    varp_formula:print_model(Flavour,I,Partial,Model),
@@ -1372,8 +1385,10 @@ scan_file(File) ->
 %% Archive aware file:read
 read_file(FileName) ->
     case archive_path(FileName) of
-	{file,"",File} -> file:read_file(File);
-	{file,Dir,File} -> file:read_file(filename:join(Dir,File));
+	{file,"",File} ->
+	    file:read_file(File);
+	{file,Dir,File} ->
+	    file:read_file(filename:join(Dir,File));
 	{archive,tgz,ArchiveFile,File} ->
 	    case file:open(ArchiveFile,[read,compressed,raw,binary]) of
 		{ok,Fd} ->
@@ -1542,6 +1557,7 @@ tokens(String) ->
 
 %% remove C-style comments from data
 remove_comments([$/,$/|Cs]) -> remove_comments(remove_line(Cs));
+remove_comments([$#|Cs]) -> remove_comments(remove_line(Cs));
 remove_comments([$/,$*|Cs]) -> remove_comments(remove_block(Cs));
 remove_comments([C|Cs]) -> [C|remove_comments(Cs)];
 remove_comments([]) -> [].
@@ -2117,7 +2133,7 @@ bcpv_(V,I, Vt, Acc) ->
 	    Ei = bcpv_bindings(V, L+1),
 	    varp_nif:pop(V, L),
 	    bcpv_(V,I-1, Vt, [Ei|Acc]);
-	{_J,Lj} -> %% Vec[J]=Lj is inconsistent
+	{_J,_Lj} -> %% Vec[J]=Lj is inconsistent
 	    %% io:format("~w: level=~w\n", [L, varp_nif:level(V)]),
 	    varp_nif:pop(V, L),
 	    bcpv_(V, I-1, Vt, [false|Acc]);

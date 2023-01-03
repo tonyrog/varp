@@ -5910,8 +5910,7 @@ next:
 		goto conflict;
 	}
 	else {
-	    DBG1("bcp max depth %d reached enqueue\r\n",
-		 MAX_BCP_DEPTH);
+	    // DBG1("bcp max depth %d reached enqueue\r\n", MAX_BCP_DEPTH);
 	    lqueue_insert(vp, neg_l(lit[1-i]));
 	}
     }
@@ -6224,7 +6223,7 @@ bcp:
 }
 
 // check all literals in lit that they are constistent
-// either undefined ot have the same sign as the bound variable
+// either undefined or have the same sign as the bound variable
 // return -1 if consistent, otherwise index to first inconsistent literal
 static int vconsistent(varp_t* vp, int pos, lit_t* lp, int len)
 {

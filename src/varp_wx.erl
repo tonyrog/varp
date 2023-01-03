@@ -748,11 +748,11 @@ save(S, Overwrite) ->
 solve(Mode, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp_scan:string(Meta) of
-	{ok,Ts,_Ln} ->
+	{ok,Ts,_} ->
 	    case parse_bindings(Ts) of
 		{ok,L} ->
 		    solve(Mode, S, L);
-		{error,{_Ln,Reason,Mess1}} ->
+		{error,{_,Reason,Mess1}} ->
 		    Err = io_lib:format("~w ~p\n",
 					[Reason,Mess1]),
 		    output_error(S, Err)
@@ -1014,11 +1014,11 @@ add_extension(Path, Ext) ->
 export(Type, File, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp_scan:string(Meta) of
-	{ok,Ts,_Ln} ->
+	{ok,Ts,_} ->
 	    case parse_bindings(Ts) of
 		{ok,L} ->
 		    export(Type, File, S, L);
-		{error,{_Ln,Reason,Mess1}} ->
+		{error,{_,Reason,Mess1}} ->
 		    Err = io_lib:format("~w ~p\n",
 					[Reason,Mess1]),
 		    output_error(S, Err)

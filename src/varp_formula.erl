@@ -7,7 +7,7 @@
 
 -module(varp_formula).
 
-%%-define(DEBUG, true).
+%% -define(DEBUG, true).
 %% -compile(export_all).
 -export([build/1, build/2]).
 -export([new/0, new/1]).
@@ -559,6 +559,7 @@ fmt_var_list(Bs,Xs) ->
     lists:join(",", [fmt_var(Bs,X)||X<-Xs]).
 
 variable(V, Bs) ->
+    ?dbg("variable: ~p\n", [V]),
     W = expand_meta(V, Bs),
     ?dbg("variable expand: ~p -> ~w\n", [V,W]),
     case find_var(W, Bs) of
@@ -747,11 +748,14 @@ build1(F, Bs) ->
       	Value -> Value
     catch
       	throw:contradiction -> 
-     	    {{bool,?F},Bs}
+     	    {{bool,?F},Bs};
+	error:Error:Stack ->
+	    io:format("error: ~w\n~p\n", [Error,Stack])
     end.
 
 build__(F, Bs) ->
     %% io:format("build__ ~p\n", [F]),
+    %% io:format("Bs = ~p\n", [Bs]),
     R={_F1,_Bs1} = build_(F, Bs),
     %% io:format("build__ => ~p\n", [_F1]),
     %% io:format("Bs1 = ~p\n", [_Bs1]),
@@ -1229,7 +1233,7 @@ eval_domain({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if A1 =< B1 -> lists:seq(A1, B1);
-       true -> lists:reverse(lists:seq(B1,A1))
+       true -> [] %% lists:reverse(lists:seq(B1,A1))
     end;
 eval_domain({call,{id,"union"},[A,B]}, Bs) ->
     A1 = eval_domain(A,Bs),
@@ -1275,7 +1279,8 @@ eval_meta({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
     if A1 =< B1 -> lists:seq(A1, B1);
-       true -> lists:reverse(lists:seq(B1,A1))
+       true -> []
+       %% true -> lists:reverse(lists:seq(B1,A1))
     end;
 eval_meta({id,"true"}, _Bs)  -> true;
 eval_meta({id,"false"}, _Bs) -> false;
@@ -1364,7 +1369,8 @@ eval_meta({Op,A,B},Bs) ->
 	{'div',A1,B1} -> A1 div B1;
 	{'rem',A1,B1} -> A1 rem B1
     end;
-
+eval_meta(Ls, Bs) when is_list(Ls) -> %% FIXME!?
+    eval_meta_list(Ls, Bs);
 eval_meta({vec,Ls}, Bs) -> %% literal vector
     eval_meta_list(Ls, Bs);
 eval_meta({Op,A},Bs) ->
@@ -1697,7 +1703,7 @@ eqk(K,N,Xs,Bs) ->
     {B1,Bs3} = all(B,Bs2),
     operation_('and', negate(A1), B1, Bs3).
 
-gtk(0,_N, Xs, Bs) ->
+gtk(K,_N, Xs, Bs) when K =< 0 ->
     any(Xs,Bs);
 gtk(K,N,_Xs,Bs) when K >= N -> %% no models
     {{bool,?F}, Bs};
@@ -2257,7 +2263,7 @@ operation('div',Y,{uint,Zm,Zs},Bs) ->
     Div = normalize(Yt,K,Qs),
     {Div,Bs2};
 
-%% DivZero  coould be used to generate a Exception output
+%% DivZero  could be used to generate a Exception output
 %% Signed?
 operation('rem',{uint,N,Ys},{uint,M,Zs},Bs) ->
     K = erlang:max(N,M),

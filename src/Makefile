@@ -4,7 +4,8 @@ ERLC="$(shell which erlc)"
 ERLC_FLAGS=-MMD -MP -MF .$<.d -I ../.. +debug_info
 YRL_SRC=$(wildcard *.yrl)
 XRL_SRC=$(wildcard *.xrl)
-ERL_SOURCES=$(wildcard *.erl) $(YRL_SRC:%.yrl=%.erl) $(XRL_SRC:%.xrl=%.erl)
+YRL_XRL_GENERATES=$(YRL_SRC:%.yrl=%.erl) $(XRL_SRC:%.xrl=%.erl)
+ERL_SOURCES=$(wildcard *.erl) $(YRL_XRL_GENERATES)
 ERL_OBJECTS=$(ERL_SOURCES:%.erl=../ebin/%.beam)
 ALL_OBJECTS=$(ERL_OBJECTS)
 ERL_MODULES=$(ERL_SOURCES:%.erl=%)
@@ -16,12 +17,12 @@ VERSION=$(shell git describe --always --tags)
 APP_SRC=$(APP).app.src
 APP_TARGET=../ebin/$(APP).app
 
-.PRECIOUS: $(YRL_SRC:%.yrl=%.erl) $(XRL_SRC:%.xrl=%.erl)
+.PRECIOUS: $(YRL_XRL_GENERATES)
 
 all: $(APP_TARGET) ../ebin/varp_plugin.beam $(ALL_OBJECTS)
 
 clean:
-	rm -f $(ALL_OBJECTS) *.core .*.d
+	rm -f $(ALL_OBJECTS) *.core .*.d $(YRL_XRL_GENERATES)
 
 ../ebin/%.beam: %.erl
 	$(ERLC) $(ERLC_FLAGS) -o ../ebin $<

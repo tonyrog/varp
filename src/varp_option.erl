@@ -27,13 +27,9 @@
 %% Option format:
 %%  --long 123
 %%  --long=123
-%%  -long 123
 %%  -l 123
 %%  -l123
 %%
-%% fixme: boolean options -lax == -l true -a true -x true
-%% 
-
 
 %% Given a option list construct a map
 %% from keywords to options
@@ -332,7 +328,7 @@ print_help({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
 		       format_value(Def),
 		       Desc])
     end;
-print_help({_Key,#{ key := _Key }}) -> %% ignore internal options
+print_help({Key,#{ key := Key }}) -> %% ignore internal options
     ok.
 
 usage(Spec) ->
