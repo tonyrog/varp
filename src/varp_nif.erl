@@ -11,8 +11,8 @@
 
 -export([new/1]).
 -export([clone/2]).
--export([info/2]).
--export([config/3]).
+-export([info/2, get_option/2]).
+-export([config/3, set_option/3]).
 -export([add_variable/1]).
 -export([add_variable/2]).
 -export([add_variable/3]).
@@ -172,6 +172,8 @@ new(Options) when is_map(Options) ->
 clone(_Vp, Options) when is_map(Options) ->
     ?nif_stub().
 
+get_option(Vp, Key) ->
+    info(Vp, Key).
 
 info(_Vp, Key) when is_atom(Key); is_list(Key) ->
     ?nif_stub().
@@ -181,6 +183,9 @@ info(_Vp, Key) when is_atom(Key); is_list(Key) ->
 %%    permanent       -- number of clauses that are permanent
 %%    max_conflicting -- max number of conflicting <= MAX_CONFLICTING
 %% 
+set_option(Vp, Key, Value) ->
+    config(Vp, Key, Value).
+
 config(_Vp, Item, _Value) when is_atom(Item) ->
     ?nif_stub().
 

@@ -92,7 +92,10 @@
 -type vtype() :: 'int' | 'uint' | 'bit'.
 -type ptype() :: vtype() | 'bool'.
 -type psize() :: pos_integer().
--type pbits() :: {vtype(),Size::psize(),[literal()]} | {bool,literal()}.
+-type uvec() :: {'uint',Size::psize(),[literal()]}.
+-type ivec() :: {'int',Size::psize(),[literal()]}.
+-type bvec() :: {'bit',Size::psize(),[literal()]}.
+-type pbits() :: uvec()|ivec()|bvec()|{bool,literal()}.
 
 -type pred()  :: {p,Name::atom(),[index()]}.
 -type index() :: integer() | atom() | [integer()|atom()] | func().

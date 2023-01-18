@@ -1925,6 +1925,7 @@ get_marked(Vp) ->
     lists:sort(varp_nif:get_marked(Vp, false)).
 
 %% bench0 
+%% 2023-01-04:  2476473 
 bench0() ->
     bench0(20000).
 
@@ -1970,6 +1971,13 @@ bench0_(V, I) ->
 %% 2020-06-01?
 %% {literal_integer,true},{literal_size,32},{value_packing,1} => 33412
 %%
+%% 2023-01-04
+%%    :  9625
+%% -O0:  9558
+%% -O1:  61111
+%% -O2:  68398
+%% -O3:  71605
+%% 
 bench() ->
     bench(20000).
 

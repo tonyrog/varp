@@ -7,6 +7,9 @@
 
 -module(varp_circuit).
 
+-export([var/1, var/2, atom/2]).
+-export([vars/2]).
+-export([inv/1]).
 -export([inv_gate/2, inv_gate/3,
 	 inv_pin/2,
 	 or_gate/3, or_gate/4,
@@ -17,10 +20,16 @@
 	 nand_gate/3, nand_gate/4, 
 	 xor_gate/3, xor_gate/4,
 	 xnor_gate/3, xnor_gate/4,
+	 equ_gate/3, equ_gate/4,
 	 min_gate/3, min_gate/4,
 	 max_gate/3, max_gate/4,
-	 half_adder/3, half_adder/4, half_adder/5,
-	 full_adder/3, full_adder/4, full_adder/5, full_adder/6]).
+	 lt_gate/3, lt_gate/4,
+	 lte_gate/3, lte_gate/4,
+	 gt_gate/3, gt_gate/4,
+	 gte_gate/3, gte_gate/4,
+	 gate/3, gate/4, gate/5,
+	 ite/4
+	]).
 
 -export([comparator/3, comparator/5]).
 -export([left_assoc/3, left_assoc/4]).
@@ -41,12 +50,9 @@
 -export([gtk/3, gtk/4]).
 -export([gtek/3, gtek/4]).
 
--export([add/3, add/4]).
--export([add_ci/4, add_ci/5]).
--export([add_co/4, add_co/5]).
--export([add_ci_co/5, add_ci_co/6]).
-
--export([symbol_value/2]).
+-export([symbol/2]).
+-export([literal/2]).
+-export([symbol_value/2, symbol_value/3]).
 -export([unsigned_value/2]).
 -export([signed_value/2]).
 
@@ -54,22 +60,32 @@
 -export([bind_value/3]).
 -export([bind_integer/3]).
 -export([bind_bits/3]).
+-export([mon/2]).
 
--compile(export_all).
+%% TEST
+-export([bcp_match/2]).
+-export([bt_match/2]).
+-export([test/0]).
+-export([test_mon/1]).
+
+%% -compile(export_all).
 
 inv(true) -> false;
 inv(false) -> true;
 inv(X) -> -X.
 
-var(Vp) -> var(Vp, undefined).
+var(Vp) ->
+    var(Vp, undefined).
 var(Vp, Symbol) ->
-    X = varp_nif:add_variable(Vp,false),
-    varp_nif:isused(Vp, X, true),
+    X = varp_nif:add_variable(Vp, _IsAtom=false, _IsUsed=true),
     sym(Vp, X, Symbol).
 
+vars(Vp, N) when is_integer(N), N > 0 ->
+    {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=false, _IsUsed=true),
+    lists:seq(First, Last).
+
 atom(Vp, Symbol) ->
-    X = varp_nif:add_variable(Vp,true),
-    varp_nif:isused(Vp, X, true),
+    X = varp_nif:add_variable(Vp, _IsAtom=true, _IsUsed=true),
     sym(Vp, X, Symbol).
 
 sym(_Vp, X, undefined) -> X;
@@ -77,6 +93,9 @@ sym(Vp, X, Symbol) ->
     varp_nif:add_symbol(Vp, X, Symbol),
     X.
 
+%% or_clauses(Vp, _X, true, _Z) -> true;
+%% or_clauses(Vp, _X, _Y, true) -> true;
+%% or_clauses(Vp, _X, false false) -> false;
 or_clauses(Vp, X, Y, Z) ->
     clause(Vp, [inv(X),Y,Z]),
     clause(Vp, [X,inv(Y)]),
@@ -88,7 +107,15 @@ and_clauses(Vp, X, Y, Z) ->
     or_clauses(Vp, inv(X), inv(Y), inv(Z)),
     X.
 
-
+%% X = Y xor false  =>  X = Y
+xor_clauses(Vp, X, Y, false) ->
+    clause(Vp,[X,inv(Y)]),
+    clause(Vp,[inv(X),Y]),
+    X;
+xor_clauses(Vp, X, false, Z) ->
+    clause(Vp,[X,inv(Z)]),
+    clause(Vp,[inv(X),Z]),
+    X;
 xor_clauses(Vp, X, Y, Z) ->
     clause(Vp,[X,inv(Y),Z]),
     clause(Vp,[X,Y,inv(Z)]),
@@ -123,7 +150,7 @@ nor_gate(Vp, Y, Z) ->
     nor_gate(Vp, var(Vp), Y, Z).
 
 nor_gate(Vp, X, Y, Z) ->
-    inv(or_clauses(Vp, X, Y, Z)).
+    or_clauses(Vp, inv(X), Y, Z).
 
 %% x = y -> z (NOT y OR z)
 imp_gate(Vp, Y, Z) ->
@@ -150,7 +177,7 @@ and_gate(Vp, X, Y, Z) ->
 nand_gate(Vp, Y, Z) ->
     nand_gate(Vp, var(Vp), Y, Z).
 nand_gate(Vp, X, Y, Z) ->
-    inv(and_clauses(Vp, X, Y, Z)).
+    and_clauses(Vp, inv(X), Y, Z).
 
 %% x = y XOR z
 xor_gate(Vp, Y, Z) ->
@@ -164,14 +191,14 @@ xnor_gate(Vp, Y, Z) ->
     xnor_gate(Vp, var(Vp), Y, Z).
 
 xnor_gate(Vp, X, Y, Z) ->
-    inv(xor_clauses(Vp, X, Y, Z)).
+    xor_clauses(Vp, inv(X), Y, Z).
 
 %% x = (y == z)
 equ_gate(Vp, Y, Z) ->
     equ_gate(Vp, var(Vp), Y, Z).
 
 equ_gate(Vp, X, Y, Z) ->
-    inv(xor_clauses(Vp, X, Y, Z)).
+    xor_clauses(Vp, X, inv(Y), Z).
 
 gate(_Vp,'not',Y) -> inv(Y);
 gate(Vp,'all',Ys) -> all(Vp, Ys);
@@ -183,23 +210,26 @@ gate(Vp,'even',Ys) -> even(Vp, Ys);
 gate(Vp,'parity',Ys) -> parity(Vp, Ys).
 		     
 %% return gate function from name
-gate(Vp,'or',X,Y,Z) -> or_gate(Vp,X,Y,Z);
-gate(Vp,'nor',X,Y,Z) -> nor_gate(Vp,X,Y,Z);
-gate(Vp,'imp',X,Y,Z) -> imp_gate(Vp,X,Y,Z);
+gate(Vp,'or',X,Y,Z)   -> or_gate(Vp,X,Y,Z);
+gate(Vp,'nor',X,Y,Z)  -> nor_gate(Vp,X,Y,Z);
+gate(Vp,'imp',X,Y,Z)  -> imp_gate(Vp,X,Y,Z);
 gate(Vp,'nimp',X,Y,Z) -> nimp_gate(Vp,X,Y,Z);
-gate(Vp,'and',X,Y,Z) -> and_gate(Vp,X,Y,Z);
+gate(Vp,'and',X,Y,Z)  -> and_gate(Vp,X,Y,Z);
 gate(Vp,'nand',X,Y,Z) -> nand_gate(Vp,X,Y,Z);
-gate(Vp,'xor',X,Y,Z) -> xor_gate(Vp,X,Y,Z);
+gate(Vp,'xor',X,Y,Z)  -> xor_gate(Vp,X,Y,Z);
 gate(Vp,'xnor',X,Y,Z) -> xnor_gate(Vp,X,Y,Z);
-gate(Vp,'equ',X,Y,Z) -> equ_gate(Vp,X,Y,Z);
+gate(Vp,'equ',X,Y,Z)  -> equ_gate(Vp,X,Y,Z);
+gate(Vp,'lt',X,Y,Z)   -> lt_gate(Vp,X,Y,Z);
+gate(Vp,'lte',X,Y,Z)  -> lte_gate(Vp,X,Y,Z);
+gate(Vp,'gt',X,Y,Z)   -> gt_gate(Vp,X,Y,Z);
+gate(Vp,'gte',X,Y,Z)  -> gte_gate(Vp,X,Y,Z);
 
-gate(Vp,'eq',K,X,Ys) -> eqk(Vp,K,X,Ys);
-gate(Vp,'neq',K,X,Ys) -> neqk(Vp,K,X,Ys);
-gate(Vp,'lt',K,X,Ys) -> ltk(Vp,K,X,Ys);
-gate(Vp,'lte',K,X,Ys) -> ltek(Vp,K,X,Ys);
-gate(Vp,'gt',K,X,Ys) -> gtk(Vp,K,X,Ys);
-gate(Vp,'gte',K,X,Ys) -> gtek(Vp,K,X,Ys).
-
+gate(Vp,'EQ',K,X,Ys) -> eqk(Vp,K,X,Ys);
+gate(Vp,'NEQ',K,X,Ys) -> neqk(Vp,K,X,Ys);
+gate(Vp,'LT',K,X,Ys) -> ltk(Vp,K,X,Ys);
+gate(Vp,'LTE',K,X,Ys) -> ltek(Vp,K,X,Ys);
+gate(Vp,'GT',K,X,Ys) -> gtk(Vp,K,X,Ys); 
+gate(Vp,'GTE',K,X,Ys) -> gtek(Vp,K,X,Ys).
 
 gate(Vp,'not',X,Y) -> inv_clauses(Vp, X, Y), X;
 gate(Vp,'or',Y,Z) -> or_gate(Vp,Y,Z);
@@ -211,6 +241,10 @@ gate(Vp,'nand',Y,Z) -> nand_gate(Vp,Y,Z);
 gate(Vp,'xor',Y,Z) -> xor_gate(Vp,Y,Z);
 gate(Vp,'xnor',Y,Z) -> xnor_gate(Vp,Y,Z);
 gate(Vp,'equ',Y,Z) -> equ_gate(Vp,Y,Z);
+gate(Vp,'lt',Y,Z) -> lt_gate(Vp,Y,Z);
+gate(Vp,'lte',Y,Z) -> lte_gate(Vp,Y,Z);
+gate(Vp,'gt',Y,Z) -> gt_gate(Vp,Y,Z);
+gate(Vp,'gte',Y,Z) -> gte_gate(Vp,Y,Z);
 
 gate(Vp,'all',X,Ys) -> all(Vp,X,Ys);
 gate(Vp,'any',X,Ys) -> any(Vp,X,Ys);
@@ -220,13 +254,12 @@ gate(Vp,'odd',X,Ys) -> odd(Vp,X,Ys);
 gate(Vp,'even',X,Ys) -> even(Vp,X,Ys);
 gate(Vp,'parity',X,Ys) -> parity(Vp,X,Ys);
 
-gate(Vp,'eq',K,Ys) -> eqk(Vp,K,Ys);
-gate(Vp,'neq',K,Ys) -> neqk(Vp,K,Ys);
-gate(Vp,'lt',K,Ys) -> ltk(Vp,K,Ys);
-gate(Vp,'lte',K,Ys) -> ltek(Vp,K,Ys);
-gate(Vp,'gt',K,Ys) -> gtk(Vp,K,Ys);
-gate(Vp,'gte',K,Ys) -> gtek(Vp,K,Ys).
-
+gate(Vp,'EQ',K,Ys) -> eqk(Vp,K,Ys);
+gate(Vp,'NEQ',K,Ys) -> neqk(Vp,K,Ys);
+gate(Vp,'LT',K,Ys) -> ltk(Vp,K,Ys);
+gate(Vp,'LTE',K,Ys) -> ltek(Vp,K,Ys);
+gate(Vp,'GT',K,Ys) -> gtk(Vp,K,Ys);
+gate(Vp,'GTE',K,Ys) -> gtek(Vp,K,Ys).
 
 %% x = MIN(y,z) = (y AND z)
 min_gate(Vp, Y, Z) ->
@@ -238,37 +271,50 @@ min_gate(Vp, X, Y, Z) ->
 %% x = MAX(y,z) = (y OR z)
 max_gate(Vp, Y, Z) ->
     max_gate(Vp, var(Vp), Y, Z).
-
 max_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, X, Y, Z).
 
-half_adder(Vp, Y, Z) ->
-    half_adder(Vp, var(Vp), Y, Z).
+%% x = LT(y,z) = !y AND z
+lt_gate(Vp, Y, Z) ->
+    lt_gate(Vp, var(Vp), Y, Z).
+lt_gate(Vp, X, Y, Z) ->
+    and_clauses(Vp, X, inv(Y), Z).
 
-half_adder(Vp, X, Y, Z) ->
-    half_adder(Vp, X, Y, Z, var(Vp)).
+%% x = LTE(y,z) = !GT(y,z)
+lte_gate(Vp, Y, Z) ->
+    lte_gate(Vp, var(Vp), Y, Z).
+lte_gate(Vp, X, Y, Z) ->
+    gt_gate(Vp, inv(X), Y, Z).
 
-half_adder(Vp, X, Y, Z, Co) ->
-    S1 = xor_gate(Vp, X, Y, Z),
-    Co1 = and_gate(Vp, Co, Y, Z),
-    {S1, Co1}.
+%% x = GT(y,z) = LT(z,y)
+gt_gate(Vp, Y, Z) ->
+    gt_gate(Vp, var(Vp), Y, Z).
+gt_gate(Vp, X, Y, Z) ->
+    lt_gate(Vp, X, Z, Y).
 
-full_adder(Vp, Y, Z) ->
-    full_adder(Vp, var(Vp), Y, Z).
+%% x = GTE(y,z) = !LT(y,z)
+gte_gate(Vp, Y, Z) ->
+    gte_gate(Vp, var(Vp), Y, Z).
+gte_gate(Vp, X, Y, Z) ->
+    lt_gate(Vp, inv(X), Y, Z).
 
-full_adder(Vp, X, Y, Z) ->
-    full_adder(Vp, X, Y, Z, false).
-
-full_adder(Vp, X, Y, Z, Ci) ->
-    full_adder(Vp, X, Y, Z, Ci, var(Vp)).
-
-full_adder(Vp, X, Y, Z, Ci, Co) ->
-    S1 = xor_gate(Vp,Y,Z),
-    S2 = xor_gate(Vp,X,S1,Ci),  %% S2==X!
-    A1 = and_gate(Vp,S1,Ci),
-    A2 = and_gate(Vp,Y,Z),
-    Co1 = or_gate(Vp,Co,A1,A2),
-    {S2, Co1}.
+%%
+%% if-then-else circuit
+%%  (I & T) | (~I & E)
+%%
+ite(_Vp,true,T,_E) ->   T;
+ite(_Vp,false,_T,E) ->  E;
+ite(_Vp,_I,X,X) ->      X;
+%% (I & false) | (~I & E) == ~I & E
+ite(Vp,I,false,E) ->
+    and_gate(Vp, inv(I),E);
+%% (I & T) | (~I & false) == I & T
+ite(Vp,I,T,false) ->
+    and_gate(Vp, I,T);
+ite(Vp,I,T,E) ->
+    A1 = and_gate(Vp,I,T),
+    A2 = and_gate(Vp,inv(I),E),
+    or_gate(Vp,A1,A2).
 
 %% (min,max) = SORT(y, z)
 comparator(Vp, Y, Z) ->
@@ -297,7 +343,6 @@ minmax(Vp,[X1,X2],Ys) ->
 minmax(Vp,[X1,X2|Xs],Ys) ->
     {Min,Max} = comparator(Vp,X1,X2),
     minmax(Vp,[Max|Xs],[Min|Ys]).
-
 
 any(Vp,Ys) -> none_assoc(Vp,'or',Ys).
 any(Vp,X,Ys) -> none_assoc(Vp,'or',X,Ys).
@@ -427,7 +472,7 @@ eqk(Vp,1,X,Ys) ->
     one(Vp, X, Ys);
 eqk(Vp,K,X,Ys) ->
     eqk_(Vp,K,length(Ys),X,Ys).
-    
+
 eqk_(Vp,0,_N,X,Ys) ->
     inv(any(Vp,X,Ys));
 eqk_(_Vp,K,N,_X,_Ys) when K > N -> %% no models
@@ -457,237 +502,310 @@ eq1_(Vp, X, [Y|Ys], Zi, Zs) ->
 eq1_(Vp, X, [], Zi, Zs) ->
     and_gate(Vp, X, Zi, none(Vp,Zs)).
 
-%% variables
-vars(Vp,N) ->
-    {L,H} = vars(Vp,N),
-    lists:seq(L,H).
+%% make a monitor for array Ys
+%% true when all variables in Ys are bound
+%% 
+%%  -X1 or  Y1
+%%  -X1 or -Y1
+%%  -X2 or  Y2
+%%  -X2 or -Y2
+%%  ...
+%%  -Xn or  Yn
+%%  -Xn or -Yn
+%%  Z X1 X2 ... Xn
+%% 
+%%
 
-'bnot'(_Vp, Ys) ->
-    [inv(Yi) || Yi <- Ys].
+mon(Vp, Ys) ->
+    Xs = vars(Vp, length(Ys)),
+    X = var(Vp),
+    mon_clauses(Vp, Ys, Xs),
+    clause(Vp, [X | Xs]),
+    X.
 
-sub(Vp, Ys, Zs) ->
-    add_ci(Vp, Ys, 'bnot'(Vp,Zs), true).
-
-sub(Vp, Xs, Ys, Zs) ->
-    add_ci(Vp, Xs, Ys, 'bnot'(Vp,Zs), true).
-
-%% adder
-add(Vp, Ys, Zs) ->
-    add_(Vp, Ys, Zs, false, var(Vp)).
-
-add(Vp, Xs, Ys, Zs) ->
-    add_(Vp, Xs, Ys, Zs, false, var(Vp)).
-
-%% adder with carry in
-add_ci(Vp, Ys, Zs, Ci) ->
-    add_(Vp, Ys, Zs, Ci, var(Vp)).
-
-add_ci(Vp, Xs, Ys, Zs, Ci) ->
-    add_(Vp, Xs, Ys, Zs, Ci, var(Vp)).
-
-%% adder with carry out
-add_co(Vp, Ys, Zs, Co) ->
-    add_(Vp, Ys, Zs, false, Co).
-
-add_co(Vp, Xs, Ys, Zs, Co) ->
-    add_(Vp, Xs, Ys, Zs, false, Co).
-
-%% adder with carry in and carry out
-add_ci_co(Vp, Ys, Zs, Ci, Co) ->
-    add_(Vp, Ys, Zs, Ci, Co).
-
-add_ci_co(Vp, Xs, Ys, Zs, Ci, Co) ->
-    add_(Vp, Xs, Ys, Zs, Ci, Co).
-
-add_(Vp, Ys, Zs, Ci, Co) ->
-    Xs = vars(Vp,length(Ys)),
-    add_(Vp, Xs, Ys, Zs, Ci, Co).
-
-add_(Vp, Xs, Ys, Zs, Ci, Co) ->
-    Cs = add__(Vp, Xs, Ys, Zs, [Ci], Co),
-    {[Co|Cs], Xs}.
-    
-add__(Vp, [X], [Y], [Z], Cs=[Ci|_], Co) ->
-    {X,Co} = full_adder(Vp, X, Y, Z, Ci, Co),
-    [Co|Cs];
-add__(Vp, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
-    {X,Cx} = full_adder(Vp, X, Y, Z, Ci),
-    add__(Vp, Xs, Ys, Zs, [Cx|Cs], Co).
+mon_clauses(Vp, [Y|Ys], [X|Xs]) ->
+    clause(Vp, [inv(X), Y]),
+    clause(Vp, [inv(X), inv(Y)]),
+    mon_clauses(Vp, Ys, Xs);
+mon_clauses(_Vp, [], []) ->
+    ok.
 
 %% TEST
+test() ->
+    true = test_or(),
+    true = test_nor(),
+    true = test_and(),
+    true = test_nand(),
+    true = test_xor(),
+    true = test_xnor(),
+    true = test_equ(),
+    true = test_lt(),
+    true = test_lte(),
+    true = test_gt(),
+    true = test_gte(),
+
+    true = test_any(),
+    true = test_all(),
+    true = test_none(),
+    true = test_one(),
+    true = test_one_2(),
+    true = test_eqk(0),
+    true = test_eqk(1),
+    true = test_eqk(2),
+    true = test_eqk(3),
+    true = test_eqk(4),
+
+    %% true = test_ltk(0),
+    true = test_ltk(1),
+    true = test_ltk(2),
+    true = test_ltk(3),
+    true = test_ltk(4),
+
+    true = test_ltek(0),
+    true = test_ltek(1),
+    true = test_ltek(2),
+    true = test_ltek(3),
+    %% true = test_ltek(4),
+
+    true = test_gtk(0),
+    true = test_gtk(1),
+    true = test_gtk(2),
+    true = test_gtk(3),
+    %% true = test_gtk(4),
+
+    %% true = test_gtek(0),
+    true = test_gtek(1),
+    true = test_gtek(2),
+    true = test_gtek(3),
+    true = test_gtek(4),
+
+    ok.
 
 clause(Vp, Ls) ->
     %%io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
     varp_nif:add_clause(Vp, Ls).
 
-test_gate(Gate) ->
+test_gate(Gate, Match) ->
+    io:format("GATE: ~s\n", [Gate]),
     Vp = varp_nif:new(#{xref => true}),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    X = var(Vp, "X"),
-    C = gate(Vp,Gate,X,A,B),
-    varp_nif:bind(Vp, C),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    A = var(Vp, a),
+    B = var(Vp, b),
+    X = var(Vp, x),
+    _C = gate(Vp,Gate,X,A,B),
+    %% varp_nif:bind(Vp, C),
+    bt_match(Vp, Match).
 
+bt_match(Vp, Match0) ->
+    Match = lists:sort([lists:sort(M) || M <- Match0]),
+    varp_nif:push(Vp),
+    case bt_all(Vp, undefined, []) of
+	{_Count, Match} ->
+	    true;
+	{_Count, Models} ->
+	    bt_diff(Models, Match),
+	    false
+    end.
+
+bcp_match(Vp, M0) ->
+    M = lists:sort(M0),
+    varp_nif:push(Vp),
+    case varp_nif:bcp(Vp) of
+	true ->
+	    case model(Vp, []) of
+		[M] -> true;
+		_ -> false
+	    end;
+	false -> false
+    end.
+
+bt_diff([M|Ms], Match) ->
+    case lists:member(M, Match) of
+	true ->
+	    bt_diff(Ms, Match -- [M]);
+	false ->
+	    io:format("model ~w is not matched\n", [M]),
+	    bt_diff(Ms, Match)
+    end;
+bt_diff([], Match) ->
+    io:format("matches not generated:\n"),
+    lists:foreach(
+      fun(M) ->
+	      io:format("match ~p\n", [M])
+      end, Match).
+    
+
+eval2(Fun) ->
+    lists:sort([ [{a,A},{b,B},{x,Fun(A,B)}] || 
+		   A <- [false,true],
+		   B <- [false,true]]).
+
+eval3(Fun) ->
+    lists:sort([ [{a,A},{b,B},{c,C},{x,Fun(A,B,C)}] || 
+		   A <- [false,true], 
+		   B <- [false,true],
+		   C <- [false,true]]).
+
+eval4(Fun) ->
+    lists:sort([ [{a,A},{b,B},{c,C},{d,D},{x,Fun(A,B,C,D)}] || 
+		   A <- [false,true], 
+		   B <- [false,true],
+		   C <- [false,true],
+		   D <- [false,true]
+	       ]).
+    
 test_or() ->
-    test_gate('or').
+    M = eval2(fun erlang:'or'/2),
+    test_gate('or', M).
 
 test_nor() ->
-    test_gate('nor').
+    M = eval2(fun (A,B) -> not (A or B) end),
+    test_gate('nor', M).
 
 test_and() ->
-    test_gate('and').
+    M = eval2(fun erlang:'and'/2),
+    test_gate('and', M).
 
 test_nand() ->
-    test_gate('nand').
+    M = eval2(fun (A,B) -> not (A and B) end),
+    test_gate('nand', M).
 
 test_xor() ->
-    test_gate('xor').
+    M = eval2(fun erlang:'xor'/2),
+    test_gate('xor', M).
 
 test_xnor() ->
-    test_gate('xnor').
+    M = eval2(fun (A,B) -> not (A xor B) end),
+    test_gate('xnor', M).
+
+test_equ() ->
+    M = eval2(fun (A,B) -> (A =:= B) end),
+    test_gate('equ', M).
+
+test_lt() ->
+    M = eval2(fun (A,B) -> (A < B) end),
+    test_gate('lt', M).
+
+test_lte() ->
+    M = eval2(fun (A,B) -> (A =< B) end),
+    test_gate('lte', M).
+
+test_gt() ->
+    M = eval2(fun (A,B) -> (A > B) end),
+    test_gate('gt', M).
+
+test_gte() ->
+    M = eval2(fun (A,B) -> (A >= B) end),
+    test_gate('gte', M).
 
 test_any() ->
     Vp = varp_nif:new(#{xref => true}),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    C = var(Vp, "C"),
-    D = var(Vp, "D"),
-    E = any(Vp, [A,B,C,D]),
-    varp_nif:bind(Vp, E),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = any(Vp, [var(Vp, a),var(Vp, b),var(Vp, c),var(Vp, d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s\n", ["any"]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> A or B or C or D end)).
 
 test_all() ->
     Vp = varp_nif:new(#{xref => true}),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    C = var(Vp, "C"),
-    D = var(Vp, "D"),
-    E = all(Vp, [A,B,C,D]),
-    varp_nif:bind(Vp, E),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = all(Vp, [var(Vp, a),var(Vp, b),var(Vp, c),var(Vp, d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s\n", ["all"]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> A and B and C and D end)).
 
 test_none() ->
     Vp = varp_nif:new(#{xref => true}),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    C = var(Vp, "C"),
-    D = var(Vp, "D"),
-    E = none(Vp, [A,B,C,D]),
-    varp_nif:bind(Vp, E),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = none(Vp, [var(Vp, a),var(Vp, b),var(Vp, c),var(Vp, d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s\n", ["none"]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> not (A or B or C or D) end)).
 
-
-test_eq1() ->
+test_one() ->
     Vp = varp_nif:new(#{xref => true}),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    C = var(Vp, "C"),
-    D = var(Vp, "D"),
-    E = one(Vp, [A,B,C,D]),
-    varp_nif:bind(Vp, E),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = one(Vp, [var(Vp,a),var(Vp,b),var(Vp,c),var(Vp,d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s\n", ["one"]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> count([A,B,C,D]) =:= 1 end)).
 
-test_eq1_2() ->
+test_one_2() ->
     Vp = varp_nif:new(#{xref => true}),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    C = var(Vp, "C"),
-    D = false,
-    E = one(Vp, [A,B,C,D]),
-    varp_nif:bind(Vp, E),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = one(Vp, [var(Vp,a),var(Vp,b),var(Vp,c),false]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s\n", ["one2"]),
+    bt_match(Vp, eval3(fun(A,B,C) -> count([A,B,C,false]) =:= 1 end)).
 
-test_half_adder1() ->
+test_eqk(K) ->
     Vp = varp_nif:new(#{xref => true}),
-    S = var(Vp, "S"),
-    A = var(Vp, "A"),
-    B = var(Vp, "B"),
-    C = var(Vp, "C"),
-    half_adder(Vp, S, A, B, C),
-    bt_all(Vp).
+    X = eqk(Vp,K,[var(Vp,a),var(Vp,b),var(Vp,c),var(Vp,d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s/~w\n", ["eqk",K]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> count([A,B,C,D]) =:= K end)).
 
-test_full_adder1() ->
+test_ltk(K) ->
     Vp = varp_nif:new(#{xref => true}),
-    X = var(Vp, "X"),
-    Y = var(Vp, "Y"),
-    Z = var(Vp, "Z"),
-    Ci = var(Vp, "Ci"),
-    Co = var(Vp, "Co"),
-    full_adder(Vp, X, Y, Z, Ci, Co),
-    bt_all(Vp).
+    X = ltk(Vp,K,[var(Vp,a),var(Vp,b),var(Vp,c),var(Vp,d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s/~w\n", ["ltk",K]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> count([A,B,C,D]) < K end)).
 
-test_add() ->
-    test_add(3).
-
-test_add(N) ->
+test_ltek(K) ->
     Vp = varp_nif:new(#{xref => true}),
-    {Y0,Y1} = varp_nif:add_variables(Vp,N),
-    {Z0,Z1} = varp_nif:add_variables(Vp,N),
-    Ys = lists:seq(Y0,Y1),
-    varp_nif:add_symbol(Vp, Ys, "Y"),
-    io:format("Y = ~w\n", [Ys]),
-    Zs = lists:seq(Z0,Z1),
-    varp_nif:add_symbol(Vp, Zs, "Z"),
-    io:format("Z = ~w\n", [Zs]),
-    {[Ci,_Cj|_], Xs} = add(Vp, Ys, Zs),
-    varp_nif:add_symbol(Vp, Ci, "Carry"),
-    io:format("X = ~w\n", [Xs]),
-    varp_nif:add_symbol(Vp, Xs, "X"),
-    set_status(Vp, Ci, false),
-    %% set_overflow(Vp, uint, Ci, Cj, false),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = ltek(Vp,K,[var(Vp,a),var(Vp,b),var(Vp,c),var(Vp,d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s/~w\n", ["ltek",K]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> count([A,B,C,D]) =< K end)).
 
-
-test_sub() ->
-    test_sub(3).
-
-test_sub(N) ->
+test_gtk(K) ->
     Vp = varp_nif:new(#{xref => true}),
-    {Y0,Y1} = varp_nif:add_variables(Vp,N),
-    {Z0,Z1} = varp_nif:add_variables(Vp,N),
-    Ys = lists:seq(Y0,Y1),
-    varp_nif:add_symbol(Vp, Ys, "Y"),
-    io:format("Y = ~w\n", [Ys]),
-    Zs = lists:seq(Z0,Z1),
-    varp_nif:add_symbol(Vp, Zs, "Z"),
-    io:format("Z = ~w\n", [Zs]),
-    {[Ci,_Cj|_], Xs} = sub(Vp, Ys, Zs),
-    varp_nif:add_symbol(Vp, -Ci, "Br"),
-    io:format("X = ~w\n", [Xs]),
-    varp_nif:add_symbol(Vp, Xs, "X"),
-    set_status(Vp, -Ci, false),
-    %% set_overflow(Vp, uint, Ci, Cj, false),
-    varp_nif:push(Vp),
-    bt_all(Vp).
+    X = gtk(Vp,K,[var(Vp,a),var(Vp,b),var(Vp,c),var(Vp,d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s/~w\n", ["gtk",K]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> count([A,B,C,D]) > K end)).
 
-%% Handle carry (Is it wise to backtrack over a Carry variable?)
-set_status(Vp, Ci, false) ->    %% never generate carry
-    xor_gate(Vp,false,Ci,false);
-set_status(Vp, Ci, true) ->     %% always generate carry
-    xor_gate(Vp,false,Ci,true);
-set_status(_Vp,_Ci, ignore) ->  %% allow carry overflow
-    ignore.
+test_gtek(K) ->
+    Vp = varp_nif:new(#{xref => true}),
+    X = gtek(Vp,K,[var(Vp,a),var(Vp,b),var(Vp,c),var(Vp,d)]),
+    sym(Vp, X, x),
+    io:format("GATE: ~s/~w\n", ["gtek",K]),
+    bt_match(Vp, eval4(fun(A,B,C,D) -> count([A,B,C,D]) >= K end)).
 
+%% count number of 'true' in a list of booleans
+count([true|As]) -> 1+count(As);
+count([false|As]) -> count(As);
+count([]) -> 0.
+     
+test_mon(N) ->
+    Vp = varp_nif:new(#{xref => true}),
+    Ys = vars(Vp, N),
+    Ys1 = lists:sort([{rand:uniform(),
+		       case rand:uniform(2) =:= 1 of
+			   true -> -Y;
+			   false -> Y
+		       end} || Y <- Ys]),
+    Ys2 = [Y || {_,Y} <- Ys1],
+    X  = mon(Vp, Ys2),
+    io:format("Ys=~w, X=~w\n", [Ys2, X]),
+    varp_nif_test:print_clauses(Vp),
+    test_mon_loop(Vp, Ys2, X).
 
-set_overflow(Vp,int,Ci,Cj, false) -> %% never generate overflow
-    xor_gate(Vp,false,Ci,Cj);
-set_overflow(Vp,int,Ci,Cj, true) -> %% always generate overflow
-    xor_gate(Vp,true,Ci,Cj);
-set_overflow(Vp,_Type,Ci,_Cj,false) -> %% never generate overflow
-    xor_gate(Vp,false,Ci,false);
-set_overflow(Vp,_Type,Ci,_Cj,true) -> %% never generate overflow
-    xor_gate(Vp,false,Ci,true);
-set_overflow(_Vp,_Type,_Ci,_Cj, ignore) ->  %% allow carry overflow
-    ignore.
-
+test_mon_loop(Vp, [Y], X) ->
+    varp_nif:bind(Vp, Y),
+    true = varp_nif:bcp(Vp),
+    V = varp_nif:value(Vp,X),
+    io:format("mon: ~w/1, X=~w\n", [Y,V]),
+    case varp_nif:value(Vp, X) of
+	true -> ok;
+	_ -> error
+    end;
+test_mon_loop(Vp, [Y|Ys], X) ->
+    varp_nif:bind(Vp, Y),
+    true = varp_nif:bcp(Vp),
+    V = varp_nif:value(Vp, X),
+    io:format("mon: ~w/1, X=~w\n", [Y,V]),
+    case V of
+	true -> false;
+	false -> false;
+	undefined  ->
+	    test_mon_loop(Vp, Ys, X)
+    end.
 
 bt(Vp) ->
     case not varp_nif:nbcp(Vp) of
@@ -701,71 +819,89 @@ bt(Vp) ->
     end.
 
 %% limit>=1 !
-bt_all(Vp) ->
-    bt_all(Vp, undefined).
+%%bt_all(Vp) ->
+%%    bt_all(Vp, undefined, undefined).
 
-bt_all(Vp, Limit) ->
+bt_all(Vp, Limit, Acc) ->
     T0 = erlang:monotonic_time(),
-    Count = 
+    {Count,Acc1} = 
 	case varp_nif:next_unbound(Vp) of
 	    false ->
-		0;
+		{0,Acc};
 	    _ ->
 		case bt(Vp) of
 		    true ->
-			io:format("~p\n", [model(Vp)]),
-			bt_all_(Vp, 1, Limit);
+			bt_all_(Vp, 1, Limit, model(Vp, Acc));
 		    false ->
-			0
+			{0,Acc}
 		end
 	end,
     T1 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T1-T0,native,microsecond),
     io:format("~w models found in ~w us\n", [Count, Time]),
-    Count.
+    if is_list(Acc1) ->
+	    {Count,lists:sort(Acc1)};
+       true ->
+	    {Count, Acc1}
+    end.
 
-bt_all_(Vp, Count, Limit) ->
+bt_all_(Vp, Count, Limit, Acc) ->
     case varp_nif:undo(Vp) andalso not bt_done(Count, Limit) of
 	true ->
 	    case bt(Vp) of
 		true ->
-		    io:format("~p\n", [model(Vp)]),
-		    bt_all_(Vp, Count+1, Limit);
+		    Acc1 = model(Vp, Acc),
+		    bt_all_(Vp, Count+1, Limit, Acc1);
 		false ->
-		    Count
+		    {Count,Acc}
 	    end;
 	false ->
-	    Count
+	    {Count,Acc}
     end.
 
 bt_done(_Count, undefined) -> false;
 bt_done(Count, Limit) -> Count >= Limit.
 
-%% model(Vp) ->
-%%    N = varp_nif:info(Vp, 'number_of_variables'),
-%%    [symbol(Vp, X) ||
-%%	X <- lists:seq(1, N),
-%%	varp_nif:value(Vp, X), varp_nif:variable_info(Vp, X, 'is_atom')].
-
-model(Vp) ->
-    model_(Vp, varp_nif:first_symbol(Vp), []).
+model(Vp, Acc) ->
+    M = model_(Vp, varp_nif:first_symbol(Vp), []),
+    if Acc =:= print -> 
+	    io:format("~w\n", [M]),
+	    print;
+       Acc =:= undefined ->
+	    M;
+       is_list(Acc) ->
+	    [M|Acc]
+    end.
 
 model_(_Vp, false, Model) ->
-    Model;
-model_(Vp, Var, Model) ->
-    case symbol_value(Vp, Var) of
+    lists:sort(Model);
+model_(Vp, Vt=[Type|Var], Model) when is_atom(Type) ->
+    case symbol_value(Vp,Type,Vt) of
 	undefined ->
 	    error({not_defined, Var});
-	false -> 
-	    model_(Vp, varp_nif:next_symbol(Vp,Var), Model);
+	Value ->
+	    model_(Vp, varp_nif:next_symbol(Vp,Vt), [{Var,Value}|Model])
+    end;
+model_(Vp, Var, Model) ->
+    case symbol_value(Vp,Var) of
+	undefined ->
+	    error({not_defined, Var});
 	Value ->
 	    model_(Vp, varp_nif:next_symbol(Vp,Var), [{Var,Value}|Model])
     end.
 
-symbol_value(Vp, Symbol) ->
-    case varp_nif:find_symbol(Vp, Symbol) of
+symbol_value(Vp,Symbol) ->
+    symbol_value(Vp,uint,Symbol).
+
+symbol_value(Vp,Type,Symbol) ->
+    Si = varp_nif:find_symbol(Vp, Symbol),
+    case Si of
 	false -> undefined;
-	Xs when is_list(Xs) -> unsigned_value(Vp, Xs);
+	Xs when is_list(Xs) ->
+	    %% io:format("symbol_value: ~p,~p, xs=~p\n", [Type,Symbol,Xs]),
+	    if Type =:= int -> signed_value(Vp, Xs);
+	       true -> unsigned_value(Vp, Xs)
+	    end;
 	X when is_integer(X) -> varp_nif:value(Vp, X)
     end.
 
@@ -774,9 +910,7 @@ unsigned_value(Vp, Xs) ->
 
 unsigned_value_(Vp, [X|Xs], I, Value) ->
     case varp_nif:value(Vp, X) of
-	undefined -> 
-	    io:format("~w index=~w undefined\n", [X,I]),
-	    undefined;
+	undefined -> undefined; %% format as partial?
 	true -> unsigned_value_(Vp, Xs, I+1, Value + (1 bsl I));
 	false -> unsigned_value_(Vp, Xs, I+1, Value)
     end;

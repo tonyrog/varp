@@ -697,6 +697,7 @@ varp_run(Do, Formula, GOpts) ->
     start_cprof(GOpts),
     start_fprof(GOpts),
     R = (catch do_run(Do, Formula, GOpts)),
+    %% R = (do_run(Do, Formula, GOpts)),
     varp_monitor:stop(), %% if started
     case R of
 	{'EXIT',{Error, _Where}} ->
