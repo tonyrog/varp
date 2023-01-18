@@ -10,8 +10,9 @@ PRIVDIR=../priv
 
 # -Wno-incompatible-pointer-types -Wno-unused-result
 WARN = -Wno-unused-result -Wall -Wunused -Wsign-compare -Wformat
-CFLAGS += -DDLOG_DEFAULT=DLOG_NONE # -DEBUG_MEM 
-CFLAGS += -std=c99 $(WARN) -O3 -fpic  # -fomit-frame-pointer 
+OPT = -O3  -fomit-frame-pointer -march=native
+CFLAGS += -DDLOG_DEFAULT=DLOG_NONE              # -DEBUG_MEM 
+CFLAGS += $(WARN) $(OPT) -fpic                  # -std=c99 
 LDFLAGS+=-shared
 
 ifneq (, $(findstring CYGWIN,$(OS)))
