@@ -93,6 +93,9 @@
 
 typedef uint8_t bool_t;
 
+#define ign 2
+typedef uint8_t ignore_t;   // true/false/ignore
+
 #if defined(__WIN32__) || defined(_WIN32)
 #define TYPEOF(x) decltype(x)
 #else
@@ -169,11 +172,11 @@ typedef enum {
 #define NIF_DIRTY_FUNC(name,arity,fptr) {(name),(arity),(fptr)}
 #endif
 
-#define DBG1(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
+#define DBG1(...) do { enif_fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 #define DBG0(...)
 
 #ifdef DEBUG
-#define DBG(...) do { fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
+#define DBG(...) do { enif_fprintf(stderr, __VA_ARGS__); fflush(stderr); } while(0)
 #else
 #define DBG(...)
 #endif
@@ -594,7 +597,7 @@ typedef struct _subscription_t {   // :dlink_t in dlist_t
 typedef struct _varp_config_t
 {
     qtype_t  qtype;      // literal queue is fifo/lifo/recursive
-    bool_t   xref;       // xref used or not    
+    bool_t   xref;       // xref used or not
     bool_t   hash;       // clause has or not
     bool_t   vsids;      // variable state independent decaying sum
     bool_t   use_phase;  // use saved phase
@@ -603,6 +606,11 @@ typedef struct _varp_config_t
     size_t   vsize;
     size_t   csize;
     uint64_t seed;
+    // config used by high level but passed in varp resource structure
+    ignore_t carry;      // carry must be true/false/ignore
+    ignore_t borrow;     // borrow must be true/false/ignore
+    ignore_t overflow;   // borrow must be true/false/ignore
+    ignore_t divz;       // division by zero must be true/false/ignore    
 } varp_config_t;
 
 typedef struct _varp_new_opt_t {
@@ -776,6 +784,7 @@ DECL_ATOM(fifo);
 DECL_ATOM(flags);
 DECL_ATOM(gamma);
 DECL_ATOM(hash);
+DECL_ATOM(ignore);
 DECL_ATOM(implication);
 DECL_ATOM(implication_clause);
 DECL_ATOM(inqueue);
@@ -839,6 +848,10 @@ DECL_ATOM(log10);
 DECL_ATOM(next);
 DECL_ATOM(version);
 DECL_ATOM(seed);
+DECL_ATOM(carry);
+DECL_ATOM(borrow);
+DECL_ATOM(overflow);
+DECL_ATOM(divz);
 // sort
 DECL_ATOM(identity);
 DECL_ATOM(p_identity);
@@ -2902,8 +2915,52 @@ static void default_config(varp_config_t* conf)
     conf->vsize  = DEFAULT_MAP_VSIZE;
     conf->csize  = DEFAULT_MAP_CSIZE;
     conf->seed   = 0;
+    // hi level flags
+    conf->carry = ign;
+    conf->borrow = ign;
+    conf->overflow = ign;
+    conf->divz = ign;
 }
 
+static int vif_bool_config(ErlNifEnv* env,const ERL_NIF_TERM value,bool_t* var)
+{
+    if (enif_is_true(env, value))
+	*var = true;
+    else if (enif_is_false(env, value))
+	*var = false;
+    else
+	return 0;
+    return 1;
+}
+
+static int vif_ival_config(ErlNifEnv* env,const ERL_NIF_TERM value,ival_t* var)
+{
+    if (enif_is_true(env, value))
+	*var = I_TRUE;
+    else if (enif_is_false(env, value))
+	*var = I_FALSE;
+    else if (enif_is_undefined(env, value))
+	*var = I_UNDEF;
+    else
+	return 0;
+    return 1;
+}
+
+static int vif_ignore_config(ErlNifEnv* env,const ERL_NIF_TERM value,
+			     ignore_t* var)
+{
+    if (enif_is_true(env, value))
+	*var = true;
+    else if (enif_is_false(env, value))
+	*var = false;
+    else if (EQUAL_KEY(env, ignore, value))
+	*var = ign;
+    else
+	return 0;
+    return 1;
+}
+
+// set config parameters
 static int vif_config(ErlNifEnv* env,
 		      const ERL_NIF_TERM key,
 		      const ERL_NIF_TERM value,
@@ -2917,60 +2974,42 @@ static int vif_config(ErlNifEnv* env,
 	else if ((opt->vsize < 2) || (opt->vsize > INIT_MAP_VSIZE))
 	    return 0;
     }
-    else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, fifo, value)) {
-	opt->qtype = q_fifo;
+    else if (EQUAL_KEY(env, qtype, key)) {
+	if (EQUAL_KEY(env, fifo, value))
+	    opt->qtype = q_fifo;
+	else if (EQUAL_KEY(env, lifo, value))
+	    opt->qtype = q_lifo;
+	else if (EQUAL_KEY(env, recursive, value))
+	    opt->qtype = q_recursive;
+	else
+	    return 0;
     }
-    else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, lifo, value)) {
-	opt->qtype = q_lifo;
-    }
-    else if (EQUAL_KEY(env, qtype, key) && EQUAL_KEY(env, recursive, value)) {
-	opt->qtype = q_recursive;
-    }
-    else if (EQUAL_KEY(env, xref, key) && enif_is_true(env, value)) {
-	opt->xref = true;
-    }
-    else if (EQUAL_KEY(env, xref, key) && enif_is_false(env, value)) {
-	opt->xref = false;
-    }
-    else if (EQUAL_KEY(env, vsids, key) && enif_is_true(env, value)) {
-	opt->vsids = true;
-    }
-    else if (EQUAL_KEY(env, vsids, key) && enif_is_false(env, value)) {
-	opt->vsids = false;
-    }
-    else if (EQUAL_KEY(env, hash, key) && enif_is_true(env, value)) {
-	opt->hash = true;
-    }
-    else if (EQUAL_KEY(env, hash, key) && enif_is_false(env, value)) {
-	opt->hash = false;
-    }
-    else if (EQUAL_KEY(env, use_phase, key) && enif_is_true(env, value)) {
-	opt->use_phase = true;
-    }
-    else if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
-	opt->use_phase = false;
-    }
-    else if (EQUAL_KEY(env, all_used, key) && enif_is_true(env, value)) {
-	opt->all_used = true;
-    }
-    else if (EQUAL_KEY(env, all_used, key) && enif_is_false(env, value)) {
-	opt->all_used = false;
-    }
-    else if (EQUAL_KEY(env, init_phase, key) && enif_is_true(env, value)) {
-	opt->init_phase = I_TRUE;
-    }
-    else if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
-	opt->init_phase = I_FALSE;
-    }
-    else if (EQUAL_KEY(env, init_phase, key) && enif_is_undefined(env, value)) {
-	opt->init_phase = I_UNDEF;
-    }
+    else if (EQUAL_KEY(env, xref, key))
+	return vif_bool_config(env, value, &opt->xref);
+    else if (EQUAL_KEY(env, vsids, key))
+	return vif_bool_config(env, value, &opt->vsids);
+    else if (EQUAL_KEY(env, hash, key))
+	return vif_bool_config(env, value, &opt->hash);
+    else if (EQUAL_KEY(env, use_phase, key))
+	return vif_bool_config(env, value, &opt->use_phase);
+    else if (EQUAL_KEY(env, all_used, key))
+	return vif_bool_config(env, value, &opt->all_used);
+    else if (EQUAL_KEY(env, init_phase, key))
+	return vif_ival_config(env, value, &opt->init_phase);
+    else if (EQUAL_KEY(env, carry, key))
+	return vif_ignore_config(env, value, &opt->carry);
+    else if (EQUAL_KEY(env, borrow, key))
+	return vif_ignore_config(env, value, &opt->borrow);
+    else if (EQUAL_KEY(env, overflow, key))
+	return vif_ignore_config(env, value, &opt->overflow);
+    else if (EQUAL_KEY(env, divz, key))
+	return vif_ignore_config(env, value, &opt->divz);
     else if (EQUAL_KEY(env, seed, key)) {
 	uint64_t seed;
 	if (!enif_get_uint64(env, value, &seed))
 	    return 0;
 	opt->seed = seed;
-    }     
+    }
     else
 	return 0;
     return 1;
@@ -3037,6 +3076,7 @@ static int parse_new_opts(ErlNifEnv* env,ERL_NIF_TERM map,varp_new_opt_t* opt)
 	return 0;
 
     while (enif_map_iterator_get_pair(env, &iter, &key, &value)) {
+	DBG("parse key:%T, value:%T\r\n", key, value);
 	if (!vif_new_config(env, key, value, opt)) {
 	    enif_map_iterator_destroy(env, &iter);
 	    return 0;
@@ -3671,7 +3711,8 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 	    STK_BEGIN(ERL_NIF_TERM, element, n) {
 		int i;
 		for (i = 0; i < (int)n; i++)
-		    element[i] = enif_make_int(env, export_l(sp->lit[i]));
+		    element[i] = external_l(env, sp->lit[i]);
+		// element[i] = enif_make_int(env, export_l(sp->lit[i]));
 		r = enif_make_list_from_array(env, element, n);
 	    } STK_END0(element);
 	}
@@ -6354,6 +6395,15 @@ static size_t sref_memory_size(varp_t* vp)
     return size;
 }
 
+static ERL_NIF_TERM make_ignore(ErlNifEnv* env, ignore_t value)
+{
+    switch(value) {
+    case false: return ATOM(false);
+    case true:  return ATOM(true);
+    case ign:   return ATOM(ignore);
+    default:    return ATOM(undefined);
+    }
+}
     
 // get information
 static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
@@ -6365,6 +6415,7 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
+    // FIXME: hash argv[1] atom! use atom_hash
     if (EQUAL_KEY(env, bcp_counter, argv[1])) {
 	return enif_make_uint64(env, vp->counter[BCP_COUNTER]);
     }
@@ -6449,6 +6500,19 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	default: return ATOM(undefined);
 	}
     }
+    if (EQUAL_KEY(env, carry, argv[1])) {
+	return make_ignore(env, vp->opt.carry);
+    }
+    if (EQUAL_KEY(env, borrow, argv[1])) {
+	return make_ignore(env, vp->opt.borrow);
+    }
+    if (EQUAL_KEY(env, overflow, argv[1])) {
+	return make_ignore(env, vp->opt.overflow);
+    }
+    if (EQUAL_KEY(env, divz, argv[1])) {
+	return make_ignore(env, vp->opt.divz);
+    }    
+    
     if (EQUAL_KEY(env, max_level, argv[1])) {
 	int val = get_and_reset_max_level(vp);
 	return enif_make_int(env, val);
@@ -6561,6 +6625,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    vp->max_conflicting = ivalue;
 	return enif_make_ok(env);
     }
+    
     if (EQUAL_KEY(env, xref, key)) {
 	int enable;
 
@@ -6590,6 +6655,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
+    
     if (EQUAL_KEY(env, vsids, key)) {
 	int enable;
 	if (!enif_get_boolean(env, value, &enable))
@@ -6603,6 +6669,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
+    
     if (EQUAL_KEY(env, hash, key)) {
 	int enable;
 	if (!enif_get_boolean(env, value, &enable))
@@ -6627,6 +6694,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
+    
     if (EQUAL_KEY(env, qtype, key)) {
 	if (EQUAL_KEY(env, fifo, value))
 	    vp->opt.qtype = q_fifo;
@@ -6638,41 +6706,55 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	    return enif_make_badarg(env);
 	return enif_make_ok(env);
     }
-    if (EQUAL_KEY(env, use_phase, key) && enif_is_true(env, value)) {
-	vp->opt.use_phase = true;
+    
+    if (EQUAL_KEY(env, use_phase, key)) {
+	if (!vif_bool_config(env, value, &vp->opt.use_phase))
+	    return enif_make_badarg(env);
 	return enif_make_ok(env);
     }
-    if (EQUAL_KEY(env, use_phase, key) && enif_is_false(env, value)) {
-	vp->opt.use_phase = false;
+
+    if (EQUAL_KEY(env, all_used, key)) {
+	if (!vif_bool_config(env, value, &vp->opt.all_used))
+	    return enif_make_badarg(env);
+	return enif_make_ok(env);
+    }
+    
+    if (EQUAL_KEY(env, init_phase, key)) {
+	if (!vif_ival_config(env, value, &vp->opt.init_phase))
+	    return enif_make_badarg(env);
+	return enif_make_ok(env);
+    }
+
+    if (EQUAL_KEY(env, carry, key)) {
+	if (!vif_ignore_config(env, value, &vp->opt.carry))
+	    return enif_make_badarg(env);
 	return enif_make_ok(env);	
     }
-    if (EQUAL_KEY(env, all_used, key) && enif_is_true(env, value)) {
-	vp->opt.all_used = true;
-	return enif_make_ok(env);
-    }
-    if (EQUAL_KEY(env, all_used, key) && enif_is_false(env, value)) {
-	vp->opt.all_used = false;
+    if (EQUAL_KEY(env, borrow, key)) {
+	if (!vif_ignore_config(env, value, &vp->opt.borrow))
+	    return enif_make_badarg(env);
 	return enif_make_ok(env);	
     }
-    if (EQUAL_KEY(env, init_phase, key) && enif_is_true(env, value)) {
-	vp->opt.init_phase = I_TRUE;
+
+    if (EQUAL_KEY(env, overflow, key)) {
+	if (!vif_ignore_config(env, value, &vp->opt.overflow))
+	    return enif_make_badarg(env);
 	return enif_make_ok(env);
     }
-    if (EQUAL_KEY(env, init_phase, key) && enif_is_false(env, value)) {
-	vp->opt.init_phase = I_FALSE;
+    if (EQUAL_KEY(env, divz, key)) {
+	if (!vif_ignore_config(env, value, &vp->opt.divz))
+	    return enif_make_badarg(env);
 	return enif_make_ok(env);
     }
-    else if (EQUAL_KEY(env, init_phase, key) && enif_is_undefined(env, value)) {
-	vp->opt.init_phase = I_UNDEF;
-	return enif_make_ok(env);
-    }
-    else if (EQUAL_KEY(env, seed, key)) {
+    
+    if (EQUAL_KEY(env, seed, key)) {
 	uint64_t seed;
 	if (!enif_get_uint64(env, value, &seed))
 	    return enif_make_badarg(env);
 	varp_set_seed(vp, seed);
 	return enif_make_ok(env);
-    }    
+    }
+    
     return enif_make_badarg(env);
 }
 
@@ -8654,6 +8736,7 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(flags);
     LOAD_ATOM(gamma);
     LOAD_ATOM(hash);
+    LOAD_ATOM(ignore);
     LOAD_ATOM(implication);
     LOAD_ATOM(implication_clause);
     LOAD_ATOM(inqueue);
@@ -8717,6 +8800,10 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(next);
     LOAD_ATOM(version);
     LOAD_ATOM(seed);
+    LOAD_ATOM(carry);
+    LOAD_ATOM(borrow);
+    LOAD_ATOM(overflow);
+    LOAD_ATOM(divz);    
     LOAD_ATOM_STRING(exclamation_mark, "!");
     LOAD_ATOM(identity);
     LOAD_ATOM_STRING(p_identity, "+identity");
