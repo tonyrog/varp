@@ -76,7 +76,8 @@ sync_apply(Mod, Fun, Args) ->
 			try apply(Mod, Fun, Args) of
 			    _Res -> PARENT ! {self(),ok}
 			catch 
-			    error:_ ->
+			    error:Error:Stack ->
+				io:format("Crash: ~p\n~p\n", [Error,Stack]),
 				PARENT ! {self(),error}
 			end
 		end),
@@ -706,7 +707,7 @@ nbcp_loop(V) ->
     ?verbose("bindings = ~w\n", [_Bs]),
     case varp_nif:undo(V) of
 	false ->
-	    ?verbose("bcp_count = ~w\n", [varp_nif:info(V, bcp_counter)]),
+	    ?verbose("bcp_count = ~w\n", [varp_nif:getstat(V, bcp_counter)]),
 	    contradiction;
 	true ->
 	    nbcp_loop(V)
@@ -852,7 +853,7 @@ uorder_basic() ->
     varp_nif:bind(Vp, 1),
     varp_nif:bind(Vp, 5),
     [2,3,4,6,7,8,9,10] = unbound(Vp),
-    varp_nif:config(Vp, xref, true),
+    varp_nif:setopt(Vp, xref, true),
     varp_nif:subst(Vp, 4, 6),
     [2,3,4,7,8,9,10] = unbound(Vp),
     ok.
@@ -1444,7 +1445,7 @@ cnf_sort_offset_delete(N, M, K) ->
 
 clause_learn_d1() ->
     V = varp_nif:new(#{}),
-    ok = varp_nif:config(V, max_conflicting, 1),
+    ok = varp_nif:setopt(V, max_conflicting, 1),
     A = var(V, <<"A">>),  %% 1
     B = var(V, <<"B">>),  %% 2
     C = var(V, <<"C">>),  %% 3
@@ -1505,7 +1506,7 @@ clause_learn_d1() ->
 
 clause_learn_a1() ->
     V = varp_nif:new(#{}),
-    ok = varp_nif:config(V, max_conflicting, 1),
+    ok = varp_nif:setopt(V, max_conflicting, 1),
     A = var(V, <<"A">>),  %% 1
     B = var(V, <<"B">>),  %% 2
     C = var(V, <<"C">>),  %% 3
@@ -1994,10 +1995,10 @@ bench(N) ->
 	      "LITERAL_SIZE=~w,"
 	      "VALUE_PACKING=~w\n",
 	      [Bcp/Ts, 
-	       varp_nif:info(V, number_of_clauses),
-	       varp_nif:info(V, literal_integer),
-	       varp_nif:info(V, literal_size),
-	       varp_nif:info(V, value_packing)]),
+	       varp_nif:getstat(V, number_of_clauses),
+	       varp_nif:getstat(V, literal_integer),
+	       varp_nif:getstat(V, literal_size),
+	       varp_nif:getstat(V, value_packing)]),
     ?verbose("#DEAD clauses=~w,"
 	     "#CONFLICTS=~w,"
 	     "#PROPAGATIONS=~w,"
@@ -2010,22 +2011,22 @@ bench(N) ->
 	     "MIN_LEVEL=~w,"
 	     "MAX_BOUND=~w,"
 	     "\n",
-	     [varp_nif:info(V, clause_d_counter),
-	      varp_nif:info(V, conflict_counter),
-	      varp_nif:info(V, number_of_propagations),
-	      varp_nif:info(V, decision_counter),
-	      varp_nif:info(V, bcp_counter),
-	      varp_nif:info(V, clause_2_counter),
-	      varp_nif:info(V, clause_3_counter),
-	      varp_nif:info(V, clause_n_counter),
-	      varp_nif:info(V, max_level),
-	      varp_nif:info(V, min_level),
-	      varp_nif:info(V, max_bound)
+	     [varp_nif:getstat(V, clause_d_counter),
+	      varp_nif:getstat(V, conflict_counter),
+	      varp_nif:getstat(V, number_of_propagations),
+	      varp_nif:getstat(V, decision_counter),
+	      varp_nif:getstat(V, bcp_counter),
+	      varp_nif:getstat(V, clause_2_counter),
+	      varp_nif:getstat(V, clause_3_counter),
+	      varp_nif:getstat(V, clause_n_counter),
+	      varp_nif:getstat(V, max_level),
+	      varp_nif:getstat(V, min_level),
+	      varp_nif:getstat(V, max_bound)
 	     ]),
     Bcp / Ts.
 
 bench_(V, _X0, 0) ->
-    varp_nif:info(V, bcp_counter);
+    varp_nif:getstat(V, bcp_counter);
 bench_(V, X0, I) ->
     varp_nif:push(V),
     true = varp_nif:bind(V, X0),
@@ -2353,7 +2354,7 @@ val(_V, [], Val) -> Val.
 
 %% Verify that we can reach all clauses via xref
 verify_xref(V, CNF) ->
-    true = varp_nif:info(V, xref),  %% assert we have xref enabled
+    true = varp_nif:getopt(V, xref),  %% assert we have xref enabled
     DegLs = deg_literal_list(CNF),
     %% check that clauses reached by Ls are in CNF
     lists:foreach(
@@ -2375,7 +2376,7 @@ verify_xref(V, CNF) ->
       end, DegLs).
 
 verify_hash(V, CNF) ->
-    true = varp_nif:info(V, hash),  %% assert we have hash enabled
+    true = varp_nif:getopt(V, hash),  %% assert we have hash enabled
     lists:foreach(
       fun(Clause) ->
 	      Ci = varp_nif:find_clause(V, Clause),
@@ -2385,7 +2386,7 @@ verify_hash(V, CNF) ->
 %% Utils
 
 get_watched(V) ->
-    get_watched(V, lists:seq(1, varp_nif:info(V, number_of_variables))).
+    get_watched(V, lists:seq(1, varp_nif:getstat(V, number_of_variables))).
 
 get_watched(V, [Xi|Xs]) ->
     Wi0 = varp_nif:get_clauses(V, Xi, watch),
@@ -2402,11 +2403,11 @@ dump(V, Verb) ->
 	    lists:foreach(
 	      fun({Key, Value}) ->
 		      io:format("  ~s: ~p\n", [Key,Value])
-	      end, varp:info(V));
+	      end, varp:getopt(V));
        true -> ok
     end,
     io:format("VARIABLES\n"),
-    dump_variables(V, lists:seq(1, varp_nif:info(V,number_of_variables)), Verb),
+    dump_variables(V, lists:seq(1, varp_nif:getstat(V,number_of_variables)), Verb),
     io:format("CLAUSES DELTA\n"),
     dump_clauses(V, true, varp_nif:clauseset_first(V,delta), Verb),
     io:format("CLAUSES GAMMA\n"),

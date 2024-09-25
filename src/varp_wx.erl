@@ -14,7 +14,7 @@
 
 -include_lib("wx/include/wx.hrl").
 
--export([start/0]).
+-export([start/0, start/1]).
 -export([main_loop/1]).
 
 -export([output_model/4]).  %% varp callback
@@ -96,6 +96,9 @@ version() ->
     Vsn.
 
 start() ->
+    start([]).
+
+start(Bound) ->
     application:ensure_all_started(varp),
     application:load(wx),
     start_win_reg(),
@@ -104,7 +107,7 @@ start() ->
 	      %% put('_wx_object_', {?MODULE,'_wx_init_'}),
 	      Wx = wx:new(),
 	      %% try wx:batch(fun() -> create_window(Wx) end) of
-	      try create_window(Wx) of
+	      try create_window(Wx, Bound) of
 		  S ->
 		      wxWindow:show(S#s.window),
 		      register_process(),
@@ -116,7 +119,7 @@ start() ->
 	      end
       end).
 
-create_window(Wx) ->
+create_window(Wx, Bound) ->
     Window = wxFrame:new(Wx, -1, "Varp", [{size, {900,600}}]),
 
     Path = code:priv_dir(varp),
@@ -185,7 +188,12 @@ create_window(Wx) ->
     %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 
     MetaBox = wxStaticBoxSizer:new(?wxVERTICAL, Win1, [{label, "meta"}]),
-    Meta = wxTextCtrl:new(Win1, 1, [{value, ""},
+    
+    MetaVal = string:trim(
+		lists:concat(
+		  lists:append([ [Var,"=",Value," "] || 
+				   {Var,Value} <- lists:reverse(Bound)]))),
+    Meta = wxTextCtrl:new(Win1, 1, [{value, MetaVal},
 				    {style, ?wxDEFAULT}]),
     Formula = wxStyledTextCtrl:new(Win1),
     wxStyledTextCtrl:styleSetFont(Formula, ?wxSTC_STYLE_DEFAULT, FixedFont),
@@ -747,7 +755,7 @@ save(S, Overwrite) ->
 %% FIXME block interface while running
 solve(Mode, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
-    case varp_scan:string(Meta) of
+    case varp:tokens(Meta) of
 	{ok,Ts,_} ->
 	    case parse_bindings(Ts) of
 		{ok,L} ->
@@ -1013,7 +1021,7 @@ add_extension(Path, Ext) ->
 
 export(Type, File, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
-    case varp_scan:string(Meta) of
+    case varp:tokens(Meta) of
 	{ok,Ts,_} ->
 	    case parse_bindings(Ts) of
 		{ok,L} ->
@@ -1428,23 +1436,23 @@ minfo([], _Src, Dst) ->
 	
 get_info(Bs) ->
     #{ number_of_variables =>
-	   varp_nif:info(Bs#bs.vp, number_of_variables),
+	   varp_nif:getstat(Bs#bs.vp, number_of_variables),
        number_of_bound_variables => 
-	   varp_nif:info(Bs#bs.vp, number_of_bound_variables),
+	   varp_nif:getstat(Bs#bs.vp, number_of_bound_variables),
        number_of_subst_variables => 
-	   varp_nif:info(Bs#bs.vp, number_of_subst_variables),
+	   varp_nif:getstat(Bs#bs.vp, number_of_subst_variables),
        number_of_clauses =>
-	   varp_nif:info(Bs#bs.vp, number_of_clauses),
+	   varp_nif:getstat(Bs#bs.vp, number_of_clauses),
        number_of_dead_clauses =>
-	   varp_nif:info(Bs#bs.vp, number_of_dead_clauses),
+	   varp_nif:getstat(Bs#bs.vp, number_of_dead_clauses),
        number_of_bcps =>
-	   varp_nif:info(Bs#bs.vp, number_of_bcps),
+	   varp_nif:getstat(Bs#bs.vp, number_of_bcps),
        max_level =>
-	   varp_nif:info(Bs#bs.vp,max_level),
+	   varp_nif:getstat(Bs#bs.vp,max_level),
        min_level =>
-	   varp_nif:info(Bs#bs.vp,min_level),
+	   varp_nif:getstat(Bs#bs.vp,min_level),
        number_of_conflicts =>
-	   varp_nif:info(Bs#bs.vp,number_of_conflicts)
+	   varp_nif:getstat(Bs#bs.vp,number_of_conflicts)
      }.
        
 call(undefined, _Request) ->

@@ -79,7 +79,7 @@ run(Bs, Param0) when is_record(Bs, bs), is_map(Param0) ->
 order_literals(Bs, Param) ->
     ?dbg0("order params=~p\n", [Param]),
     Seed = case maps:get(seed,Param) of
-	       -1 -> varp_formula:getopt(Bs,seed);
+	       -1 -> varp_nif:getopt(Bs#bs.vp,seed);
 	       S0 -> S0
 	   end,
     ?dbg("Seed = ~w\n", [Seed]),

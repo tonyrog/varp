@@ -8,10 +8,10 @@ input(Line, _Acc) ->
 		   (X) when X >= $0, X =< $9 -> (X-$0)
 		end,
     Ns = [Translate(I) || I <- lists:sublist(Line,81)],
-    Ss = [{p,'S',[I,J]} || I <- lists:seq(1,9), J <- lists:seq(1,9)],
+    Ss = [{p,<<"S">>,[I,J]} || I <- lists:seq(1,9), J <- lists:seq(1,9)],
     NsSs = lists:zip(Ss, Ns),
     %% remove all zeros and inject indices
-    {true,{'ALL',[{p,'S',[I,J,K]} || {{p,'S',[I,J]},K} <- NsSs, K =/= 0]}}.
+    {true,{'ALL',[{p,<<"S">>,[I,J,K]} || {{p,<<"S">>,[I,J]},K} <- NsSs, K =/= 0]}}.
 
 output(Fd, _Partial, Model) ->
     %% io:format(Fd, "~p\n", [Model]).
@@ -36,7 +36,7 @@ output(Fd, _Partial, Model) ->
     io:format(Fd,"+-+-+--+--+-+--+--+-+--+\n",[]),
     ok.
 
-s(I,J, [{{p,'S',[I,J,K]},true}|_Ms]) ->
+s(I,J, [{{p,<<"S">>,[I,J,K]},true}|_Ms]) ->
     integer_to_list(K);
 s(I,J, [_|Ms]) -> 
     s(I,J,Ms);

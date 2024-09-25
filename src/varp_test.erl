@@ -8,7 +8,10 @@
 -module(varp_test).
 
 -compile(export_all).
+-define(DEBUG, true).
 -include("varp.hrl").
+
+-define(var(X), {p,<<(X)>>,[]}).
 
 all() ->
     Failed = 
@@ -25,6 +28,7 @@ all() ->
 		  end
 	  end, 0, 
 	  [
+	   parse,
 	   constants,
 	   inc,
 	   add,
@@ -53,7 +57,9 @@ sync_apply(Mod, Fun, Args) ->
 			try apply(Mod, Fun, Args) of
 			    _Res -> PARENT ! {self(),ok}
 			catch 
-			    error:_ ->
+			    error:Reason:Stack ->
+				io:format("crash: ~p:\n", [Reason]),
+				io:format("~p\n", [Stack]),
 				PARENT ! {self(),error}
 			end
 		end),
@@ -61,6 +67,52 @@ sync_apply(Mod, Fun, Args) ->
 	{Pid, Result} ->
 	    Result
     end.
+
+parse() ->
+    %% variables
+    ?var("A") = parse_formula("A"),
+    {lop,'not',?var("A")} = parse_formula("not A"),
+
+    %% connectives
+    {lop,'and',{lop,'not',?var("A")},?var("B")} = parse_formula("not A and B"),
+    {lop,'and',?var("A"),?var("B")} = parse_formula("A and B"),
+    {lop,'and',?var("A"),?var("B")} = parse_formula("A AND B", true),
+    {lop,'and',?var("A"),?var("B")} = parse_formula("A && B"),
+
+    {lop,'or',?var("A"),?var("B")} = parse_formula("A or B"),
+    {lop,'or',?var("A"),?var("B")} = parse_formula("A OR B", true),
+    {lop,'or',?var("A"),?var("B")} = parse_formula("A || B"),
+
+    {lop,'imp',?var("A"),?var("B")} = parse_formula("A imp B"),
+    {lop,'imp',?var("A"),?var("B")} = parse_formula("A Implies B", true),
+    {lop,'imp',?var("A"),?var("B")} = parse_formula("A -> B"),
+
+    {lop,'xor',?var("A"),?var("B")} = parse_formula("A xor B"),
+    {lop,'xor',?var("A"),?var("B")} = parse_formula("A XOR B", true),
+
+    {lop,'equ',?var("A"),?var("B")} = parse_formula("A equ B"),
+    {lop,'equ',?var("A"),?var("B")} = parse_formula("A equivalent B"),
+    {lop,'equ',?var("A"),?var("B")} = parse_formula("A Equivalent B", true),
+    {lop,'equ',?var("A"),?var("B")} = parse_formula("A <-> B"),
+    
+    %% arith
+    {lop,'mul',?var("A"),?var("B")} = parse_formula("A * B"),
+    {lop,'div',?var("A"),?var("B")} = parse_formula("A / B"),
+    {lop,'rem',?var("A"),?var("B")} = parse_formula("A % B"),
+
+    {lop,'add',?var("A"),?var("B")} = parse_formula("A + B"),
+    {lop,'sub',?var("A"),?var("B")} = parse_formula("A - B"),
+
+    %% arith in quantifier
+    {{'ALL',[{op,'=',<<"i">>,{range,{const,1},{const,2}}}]},
+     {p,<<"P">>,[<<"i">>]}} = parse_formula("[A i=1..2] P(i)"),
+    {{'ANY',[{op,'=',<<"i">>,{range,{const,1},{const,2}}}]},
+     {p,<<"P">>,[<<"i">>]}} = parse_formula("[E i=1..2] P(i)"),
+    {{'ONE',[{op,'=',<<"i">>,{range,{const,1},{const,2}}}]},
+     {p,<<"P">>,[<<"i">>]}} = parse_formula("[E! i=1..2] P(i)"),
+
+    ok.
+
 
 constants() ->
     {{uint,1,[?F]},_} = varp_formula:build({uint,1,0}),
@@ -81,25 +133,25 @@ constants() ->
     ok.
 
 inc() ->
-    true = sat({'eq', {'add',{int,4,3},{uint,1,1}}, {int,4,4}},
+    true = sat({lop, 'eq', {lop, 'add',{int,4,3},{uint,1,1}}, {int,4,4}},
 	       [[]]),
-    true = sat({'eq', {'sub',{int,4,3},{uint,1,1}}, {int,4,2}},
+    true = sat({lop, 'eq', {lop, 'sub',{int,4,3},{uint,1,1}}, {int,4,2}},
 	       [[]]),
     ok.
 
 add() ->
-    X = {p,'X',[]},
-    Y = {p,'Y',[]},
+    X = ?var("X"),
+    Y = ?var("Y"),
 
-    true = sat({'eq', {'add',{int,4,3},{uint,4,2}}, {int,4,5}},
+    true = sat({lop,'eq', {lop,'add',{int,4,3},{uint,4,2}}, {int,4,5}},
 	       [[]]),
-    true = sat({'eq', {'add',{int,4,3},{uint,4,2}}, {int,4,X}},
+    true = sat({lop,'eq', {lop,'add',{int,4,3},{uint,4,2}}, {int,4,X}},
 	       [[{X,5}]]),
-    true = sat({'eq', {'add',{int,4,3},{uint,4,X}}, {int,4,5}},
+    true = sat({lop,'eq', {lop,'add',{int,4,3},{uint,4,X}}, {int,4,5}},
 	       [[{X,2}]]),
-    true = sat({'eq', {'add',{int,4,X},{uint,4,2}}, {int,4,5}},
+    true = sat({lop,'eq', {lop,'add',{int,4,X},{uint,4,2}}, {int,4,5}},
 	       [[{X,3}]]),
-    true = sat({'lt', {'add',{uint,2,X},{uint,2,Y}}, {uint,3,4}},
+    true = sat({lop,'lt', {lop,'add',{uint,2,X},{uint,2,Y}}, {uint,3,4}},
 	       [[{X,3},{Y,0}],
 		[{X,2},{Y,1}],
 		[{X,2},{Y,0}],
@@ -110,44 +162,43 @@ add() ->
 		[{X,0},{Y,2}],
 		[{X,0},{Y,1}],
 		[{X,0},{Y,0}]]),
-    true = sat({'eq',{'add',{uint,2,X},{uint,3,Y}},{uint,3,5}},
+    true = sat({lop,'eq',{lop,'add',{uint,2,X},{uint,3,Y}},{uint,3,5}},
 	       [[{X,Xi},{Y,Yi}] || 
 		   Xi <- [0,1,2,3], Yi <- [0,1,2,3,4,5,6,7], Xi+Yi == 5]),
-    true = sat({'lt', {'add',{int,2,X},{int,2,Y}}, {int,3,-1}},
+    true = sat({lop,'lt', {lop,'add',{int,2,X},{int,2,Y}}, {int,3,-1}},
 	       [[{X,Xi},{Y,Yi}] || 
 		   Xi <- [-2,-1,0,1], Yi <- [-2,-1,0,1], Xi+Yi< -1]),
     ok.
 
 sub() ->
-    X = {p,'X',[]},
-
-    true = sat({'eq', {'sub',{int,4,3},{uint,4,2}}, {int,4,1}},
+    X = ?var("X"),
+    true = sat({lop,'eq', {lop,'sub',{int,4,3},{uint,4,2}}, {int,4,1}},
 	       [[]]),
-    true = sat({'eq', {'sub',{int,4,3},{uint,4,2}}, {int,4,X}},
+    true = sat({lop,'eq', {lop,'sub',{int,4,3},{uint,4,2}}, {int,4,X}},
 	       [[{X,1}]]),
     ok.
 
 mul() ->
-    X = {p,'X',[]},
-    Y = {p,'Y',[]},
+    X = ?var("X"),
+    Y = ?var("Y"),
 
-    true = sat({'eq', {'mul',{uint,4,3},{uint,4,2}}, {uint,8,6}},
+    true = sat({lop,'eq', {lop,'mul',{uint,4,3},{uint,4,2}}, {uint,8,6}},
 		    [[]]),
 
-    true = sat({'eq', {'mul',{int,4,3},{uint,4,2}}, {int,8,6}},
+    true = sat({lop,'eq', {lop,'mul',{int,4,3},{uint,4,2}}, {int,8,6}},
 		    [[]]),
 
-    true = sat({'eq', {'mul',{int,4,3},{uint,4,2}}, {int,8,X}},
+    true = sat({lop,'eq', {lop,'mul',{int,4,3},{uint,4,2}}, {int,8,X}},
 		    [[{X,6}]]),
 
-    true = sat({'eq', {'mul',{int,4,-3},{uint,4,2}}, {int,8,X}},
+    true = sat({lop,'eq', {lop,'mul',{int,4,-3},{uint,4,2}}, {int,8,X}},
 		    [[{X,-6}]]),
 
-    true = sat({'eq', {'mul',{uint,4,X},{uint,4,Y}}, {int,8,7}},
+    true = sat({lop,'eq', {lop,'mul',{uint,4,X},{uint,4,Y}}, {int,8,7}},
 		    [[{X,1},{Y,7}], 
 		     [{X,7},{Y,1}]]),
 
-    true = sat({'eq', {'mul',{int,4,X},{int,4,Y}}, {int,8,7}},
+    true = sat({lop,'eq', {lop,'mul',{int,4,X},{int,4,Y}}, {int,8,7}},
 		    [[{X,1},{Y,7}], 
 		     [{X,7},{Y,1}],
 		     [{X,-1},{Y,-7}], 
@@ -155,17 +206,17 @@ mul() ->
     ok.
 
 'div'() ->
-    X = {p,'X',[]},
-    Y = {p,'Y',[]},
+    X = ?var("X"),
+    Y = ?var("Y"),
 
-    true = sat({'eq', {'div',{uint,4,3},{uint,4,2}}, {uint,4,1}},
+    true = sat({lop,'eq', {lop,'div',{uint,4,3},{uint,4,2}}, {uint,4,1}},
 	       [[]]),
-    true = sat({'eq', {'div',{uint,6,4},{uint,4,2}}, {uint,4,X}},
+    true = sat({lop,'eq', {lop,'div',{uint,6,4},{uint,4,2}}, {uint,4,X}},
 	       [[{X,2}]]),
-    true = sat({'eq', {'div',{uint,6,X},{uint,4,2}}, {uint,4,5}},
+    true = sat({lop,'eq', {lop,'div',{uint,6,X},{uint,4,2}}, {uint,4,5}},
 	       [[{X,11}], 
 		[{X,10}]]),
-    true = sat({'eq', {'div',{uint,4,X},{uint,4,Y}}, {uint,4,5}},
+    true = sat({lop,'eq', {lop,'div',{uint,4,X},{uint,4,Y}}, {uint,4,5}},
 		    [[{X,15},{Y,3}],
 		     [{X,11},{Y,2}],
 		     [{X,10},{Y,2}],
@@ -173,48 +224,48 @@ mul() ->
     ok.
 
 cmp_1() ->
-    X = {p,'X',[]},
-    true = sat({'lt', {uint,4,X},{uint,4,2}},
+    X = ?var("X"),
+    true = sat({lop,'lt', {uint,4,X},{uint,4,2}},
 	       [[{X,0}],[{X,1}]]).
 
 cmp_2() ->
-    X = {p,'X',[]},
-    true = sat({'lt', {int,4,X},{int,4,2}},
+    X = ?var("X"),
+    true = sat({lop,'lt', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(-8,1)]).
 
 cmp_3() ->
-    X = {p,'X',[]},
-    true = sat({'gt', {uint,4,X},{uint,4,2}},
+    X = ?var("X"),
+    true = sat({lop, 'gt', {uint,4,X},{uint,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,15)]).
 
 cmp_4() ->
-    X = {p,'X',[]},
-    true = sat({'gt', {int,4,X},{int,4,2}},
+    X = ?var("X"),
+    true = sat({lop,'gt', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,7)]).
 
 shift() ->
-    X = {p,'X',[]},
+    X = ?var("X"),
 
-    true = sat({'eq', {'shl',{uint,4,3}, {uint,1,1}}, {uint,4,6}},
+    true = sat({lop,'eq', {lop,'shl',{uint,4,3}, {uint,1,1}}, {uint,4,6}},
 	       [[]]),
-    true = sat({'eq', {'shl',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
+    true = sat({lop,'eq', {lop,'shl',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,6}]]),
-    true = sat({'eq', {'shr',{uint,4,3}, {uint,1,1}}, {uint,4,1}},
+    true = sat({lop,'eq', {lop,'shr',{uint,4,3}, {uint,1,1}}, {uint,4,1}},
 	       [[]]),
-    true = sat({'eq', {'shr',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
+    true = sat({lop,'eq', {lop,'shr',{uint,4,3}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,1}]]),
-    true = sat({'eq', {'shr',{int,4,-1}, {uint,1,1}}, {int,4,X}},
+    true = sat({lop,'eq', {lop,'shr',{int,4,-1}, {uint,1,1}}, {int,4,X}},
 	       [[{X,-1}]]),
-    true = sat({'eq', {'shl',{int,4,-1}, {uint,1,1}}, {int,4,X}},
+    true = sat({lop,'eq', {lop,'shl',{int,4,-1}, {uint,1,1}}, {int,4,X}},
 	       [[{X,-2}]]),
     ok.
 
 rotate() ->
-    X = {p,'X',[]},
+    X = ?var("X"),
 
-    true = sat({'eq', {'rol',{uint,4,X}, {uint,1,1}}, {uint,4,X}},
+    true = sat({lop,'eq', {lop,'rol',{uint,4,X}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,15}], [{X,0}]]),
-    true = sat({'eq', {'rol',{int,4,X}, {uint,1,1}}, {int,4,X}},
+    true = sat({lop,'eq', {lop,'rol',{int,4,X}, {uint,1,1}}, {int,4,X}},
 	       [[{X,-1}], [{X,0}]]),
     ok.
 %%
@@ -235,9 +286,9 @@ rotate() ->
 %%
 equation1() ->
     N = 8,
-    Xv = {p,'X',[]},
-    Yv = {p,'Y',[]},
-    Zv = {p,'Z',[]},
+    Xv = ?var("X"),
+    Yv = ?var("Y"),
+    Zv = ?var("Z"),
     X = {uint,N,Xv},
     Y = {uint,N,Yv},
     Z = {uint,N,Zv},
@@ -245,8 +296,8 @@ equation1() ->
 sat(
   {'ALL',
    [
-    {'eq', {'SUM', [X,Y,{'neg',Z},-12]}, 0},
-    {'eq', {'SUM', [{'mul',X,X},{'mul',Y,Y},{'neg',{'mul',Z,Z}},-12]},0}
+    {lop,'eq', {'SUM', [X,Y,{lop,'neg',Z},-12]}, 0},
+    {lop,'eq', {'SUM', [{lop,'mul',X,X},{lop,'mul',Y,Y},{lop,'neg',{lop,'mul',Z,Z}},-12]},0}
    ]},
   [[{Xv,13},{Yv,78},{Zv,(13+78)-12}],
    [{Xv,14},{Yv,45},{Zv,(14+45)-12}],
@@ -263,14 +314,14 @@ sat(
 %% solve 7x + 11y + 26z = 123
 equation2() ->
     N = 10,
-    Xv = {p,'X',[]},
-    Yv = {p,'Y',[]},
-    Zv = {p,'Z',[]},
+    Xv = ?var("X"),
+    Yv = ?var("Y"),
+    Zv = ?var("Z"),
     X = {uint,N,Xv},
     Y = {uint,N,Yv},
     Z = {uint,N,Zv},
     true = sat(
-	     {'eq', {'SUM',[{'mul',7,X},{'mul',11,Y},{'mul',26,Z},-123]}, 0},
+	     {lop,'eq', {'SUM',[{lop,'mul',7,X},{lop,'mul',11,Y},{lop,'mul',26,Z},-123]}, 0},
 	     [
 	      [{Xv,5},{Yv,8},{Zv,0}],
 	      [{Xv,6},{Yv,5},{Zv,1}],
@@ -281,24 +332,24 @@ equation2() ->
 
 saturate_a1() ->
     Vp = varp_nif:new(#{ xref => true }),
-    X1 = {p,'X1',[]},
-    X2 = {p,'X2',[]},
-    X3 = {p,'X3',[]},
-    X4 = {p,'X4',[]},
-    X5 = {p,'X5',[]},
-    X6 = {p,'X6',[]},
-    X7 = {p,'X7',[]},
+    X1 = ?var("X1"),
+    X2 = ?var("X2"),
+    X3 = ?var("X3"),
+    X4 = ?var("X4"),
+    X5 = ?var("X5"),
+    X6 = ?var("X6"),
+    X7 = ?var("X7"),
     F = varp_ast:build(
-	  {'ALL',[{imp, X1, X2},
-		  {imp, {'not',X1}, X2},
-		  {imp, X1, {'not',X3}},
-		  {imp, {'not',X1}, {'not',X3}},
-		  {imp, X1, X4},
-		  {imp, {'not',X1}, {'not',X4}},
-		  {imp, X1, {'not',X5}},
-		  {imp, {'not',X1}, X5},
-		  {imp, X1, X6},
-		  {imp, X6, X7}]}, Vp),
+	  {'ALL',[{lop,imp, X1, X2},
+		  {lop,imp, {lop,'not',X1}, X2},
+		  {lop,imp, X1, {lop,'not',X3}},
+		  {lop,imp, {lop,'not',X1}, {lop,'not',X3}},
+		  {lop,imp, X1, X4},
+		  {lop,imp, {lop,'not',X1}, {lop,'not',X4}},
+		  {lop,imp, X1, {lop,'not',X5}},
+		  {lop,imp, {lop,'not',X1}, X5},
+		  {lop,imp, X1, X6},
+		  {lop,imp, X6, X7}]}, Vp),
     varp_nif:bind(Vp, F),
     true = varp_nif:bcp(Vp),
     varp:vec_sat_lap(Vp,1,0,0,0),
@@ -315,14 +366,14 @@ saturate_a1() ->
     
 saturate_a2() ->
     Vp = varp_nif:new(#{ xref => true }),
-    X = {p,'X',[]},
-    A = {p,'A',[]},
-    B = {p,'B',[]},
-    C = {p,'C',[]},
-    D = {p,'D',[]},
+    X = ?var("X"),
+    A = ?var("A"),
+    B = ?var("B"),
+    C = ?var("C"),
+    D = ?var("D"),
     F = varp_ast:build(
-	  {'ALL',[{imp, X, {'ALL',[A,{'not',B},C,{'not',D}]}},
-		  {imp, {'not',X}, {'ALL',[A,{'not',B},{'not',C},D]}}]},
+	  {'ALL',[{lop,imp, X, {'ALL',[A,{lop,'not',B},C,{lop,'not',D}]}},
+		  {lop,imp, {lop,'not',X}, {'ALL',[A,{lop,'not',B},{lop,'not',C},D]}}]},
 	  Vp),
     varp_nif:bind(Vp, F),
     true = varp_nif:bcp(Vp),
@@ -337,14 +388,14 @@ saturate_a2() ->
     
 saturate_b1() ->
     Vp = varp_nif:new(#{ xref => true }),
-    X = {p,'X',[]},
-    Y = {p,'Y',[]},
-    A = {p,'A',[]},
+    X = ?var("X"),
+    Y = ?var("Y"),
+    A = ?var("A"),
     F = varp_ast:build(
-	  {'ALL',[{imp, {'and',X,Y}, A},
-		  {imp, {'and',X,{'not',Y}}, A},
-		  {imp, {'and',{'not',X},Y}, A},
-		  {imp, {'and',{'not',X},{'not',Y}}, A}
+	  {'ALL',[{lop,imp, {lop,'and',X,Y}, A},
+		  {lop,imp, {lop,'and',X,{lop,'not',Y}}, A},
+		  {lop,imp, {lop,'and',{lop,'not',X},Y}, A},
+		  {lop,imp, {lop,'and',{lop,'not',X},{lop,'not',Y}}, A}
 		 ]},
 	  Vp),
     ?dbg0("~w\n", [[{A, varp:find_symbol(Vp,varp_ast:var_term(A))},
@@ -492,6 +543,7 @@ sat_(Formula, ExpectedModels, Method) ->
     GDo = varp:parse_do(Do),
     case varp:do_run(GDo,Formula,GOpts) of
 	{?DONE,Ms0,_Bs1} ->
+	    %% io:format("Ms0 = ~w\n", [Ms0]),
 	    Ms = [int_model(Mi) || Mi <- Ms0],
 	    %% io:format("Ms = ~w\n", [Ms]),
 	    lists:sort(Ms) == lists:sort(ExpectedModels);
@@ -515,8 +567,18 @@ int_model([{X,{int,Vec}} | Ms]) ->
     [{X,V} | int_model(Ms)];
 int_model([{X,{bit,Vec}} | Ms]) ->
     [{X,Vec} | int_model(Ms)];
+int_model([{{p,<<"x">>,[_Ix]},_Val}|Ms]) -> %% skip boolean in model
+    int_model(Ms);
 int_model([ M | Ms]) ->
     io:format("did not match ~w\n", [M]),
     [M | int_model(Ms)];
 int_model([]) ->
     [].
+
+parse_formula(Text) ->
+    parse_formula(Text, false).
+parse_formula(Text, ICase) ->
+    case varp:parse("*test*", Text, #{icase => ICase}) of
+	{ok,{_Sections,_Assignments,Formula}} ->
+	    Formula
+    end.

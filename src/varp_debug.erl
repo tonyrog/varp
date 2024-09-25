@@ -29,7 +29,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 
 %% enable xref and calculate rank (via xref)
 show_rank(Bs) ->
-    varp_nif:config(Bs#bs.vp, xref, true),
+    varp_nif:setopt(Bs#bs.vp, xref, true),
     N = varp:get_number_of_variables(Bs#bs.vp),
     DMap = degree_map(Bs#bs.vp, 1, N, #{}),
     DList = maps:to_list(DMap),

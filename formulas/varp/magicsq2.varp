@@ -2,19 +2,29 @@
 // All elements must be squre numbers
 // run --carry=false --borrow=false
 // 
+declare A:sz, B:sz, C:sz, D:sz, E:sz, F:sz, G:sz, H:sz, I:sz;
+declare _P:sz, _Q:sz, _K:sz, _M:sz, S:sz;
+declare _A11:((sz+1)/2);
+declare _A12:((sz+1)/2);
+declare _A13:((sz+1)/2);
+declare _A21:((sz+1)/2);
+declare _A22:((sz+1)/2);
+declare _A23:((sz+1)/2);
+declare _A31:((sz+1)/2);
+declare _A32:((sz+1)/2);
+declare _A33:((sz+1)/2);
 
+(A == _A11*_A11) &&
+(B == _A12*_A12) &&
+(C == _A13*_A13) &&
 
-(A:sz == _A11:((sz+1)/2)*_A11:((sz+1)/2)) &&
-// (B:sz == _A12:((sz+1)/2)*_A12:((sz+1)/2)) &&
-(C:sz == _A13:((sz+1)/2)*_A13:((sz+1)/2)) &&
+(D == _A21*_A21) &&
+(E == _A22*_A22) &&
+(F == _A23*_A23) &&
 
-// (D:sz == _A21:((sz+1)/2)*_A21:((sz+1)/2)) &&
-(E:sz == _A22:((sz+1)/2)*_A22:((sz+1)/2)) &&
-// (F:sz == _A23:((sz+1)/2)*_A23:((sz+1)/2)) &&
-
-(G:sz == _A31:((sz+1)/2)*_A31:((sz+1)/2)) &&
-// (H:sz == _A32:((sz+1)/2)*_A32:((sz+1)/2)) &&
-(I:sz == _A33:((sz+1)/2)*_A33:((sz+1)/2)) &&
+(G == _A31*_A31) &&
+(H == _A32*_A32) &&
+(I == _A33*_A33) &&
 
 //
 // Limit to magic square params
@@ -23,26 +33,26 @@
 //   E-m   E+k+m E-k
 //
 
-(_P:sz == _K:sz + _M:sz) &&
-(_Q:sz == _K:sz - _M:sz) &&
-(A:sz == E:sz+_K:sz) && (B:sz == E:sz-_P:sz) && (C:sz == E:sz+_M:sz) &&
-(D:sz == E:sz-_Q:sz) && (F:sz == E:sz+_Q:sz) &&
-(G:sz == E:sz-_M:sz) && (H:sz == E:sz+_P:sz) && (I:sz == E:sz-_K:sz) &&
+(_P == _K + _M) &&
+(_Q == _K - _M) &&
+(A == E+_K) && (B == E-_P) && (C == E+_M) &&
+(D == E-_Q) &&                (F == E+_Q) &&
+(G == E-_M) && (H == E_+P) && (I == E-_K) &&
 
 //
 // All elements must be distinct
 //
-(_M:sz > 0) && (_M:sz < E:sz) &&
-(_K:sz > 0) && (_K:sz < E:sz) &&
-(_K:sz != _M:sz) &&
-(_K:sz != _M:sz+_M:sz) &&
-(_M:sz != _K:sz+_K:sz) &&
+(_M > 0) && (_M < E) &&
+(_K > 0) && (_K < E) &&
+(_K != _M) &&
+(_K != _M+_M) &&
+(_M != _K+_K) &&
 // debug
-(K:sz == _K:sz) &&
-(M:sz == _M:sz) &&
+//(K == _K) &&
+//(M == _M) &&
 
 // output sum in the model
-(S:sz == 3 * E:sz) && 
+(S == 3 * E) && 
 
 true
 

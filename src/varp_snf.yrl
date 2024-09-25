@@ -30,7 +30,7 @@ Unary 1000 prefix_op.
 snf -> literal snf : ['$1' | '$2'].
 snf -> '.' : [].
 
-literal -> '!' pexpr : {'not','$2'}.
+literal -> '!' pexpr : {lop,'not','$2'}.
 literal -> true  : true.
 literal -> false : false.
 literal -> pexpr : '$1'.
@@ -75,30 +75,30 @@ constant -> chrnum : chr('$1').
 expr -> identifier        : id('$1').
 expr -> symbol            : id('$1').
 expr -> constant          : '$1'.
-expr -> bnot_op expr      : {'bnot','$2'}.
+expr -> bnot_op expr      : {lop,'bnot','$2'}.
 expr -> prefix_op expr : 
 	    case op('$1') of
 	       '-' when is_integer('$2') -> -('$2');
 	 	_ ->
-		    {op('$1'),'$2'}
+		    {op,op('$1'),'$2'}
 	    end.
 expr -> '(' expr ')' : '$2'.
 expr -> identifier '(' exprs ')' : 
 	    {call, '$1', '$3'}.
 expr -> expr add_op expr   :
-	    { op('$2'), '$1', '$3'}.
+	    {op, op('$2'), '$1', '$3'}.
 expr -> expr mul_op expr   :
-	    { op('$2'), '$1', '$3'}.
+	    {op, op('$2'), '$1', '$3'}.
 expr -> expr rel_op expr   :
-	    { op=op('$2'),'$1','$3'}.
+	    {op, op=op('$2'),'$1','$3'}.
 expr -> expr band_op expr  :
-	    { op('$2'), '$1', '$3'}.
+	    {op, op('$2'), '$1', '$3'}.
 expr -> expr bor_op  expr  :
-	    { op('$2'), '$1', '$3'}.
+	    {op, op('$2'), '$1', '$3'}.
 expr -> expr bxor_op expr  :
-	    { op=op('$2'), '$1', '$3'}.
+	    {op, op('$2'), '$1', '$3'}.
 expr -> identifier '=' expr  :
-	    {'cassign', '$1', '$3'}.
+	    {lop, '=', '$1', '$3'}.
 
 %% list of expr
 exprs -> expr : ['$1'].
@@ -107,10 +107,10 @@ exprs -> expr ',' exprs : ['$1' | '$3'].
 pexpr -> psymbol                    : { p, '$1', []}.
 pexpr -> psymbol '(' ')'            : { p, '$1', []}.
 pexpr -> psymbol '(' exprs ')'      : { p, '$1', '$3'}.
-pexpr -> pexpr   '[' expr ']'       : {bit_index,'$1','$3'}.
+pexpr -> pexpr   '[' expr ']'       : {bitindex,'$1','$3'}.
 
-psymbol -> 'A' : 'A'.
-psymbol -> 'E' : 'E'.
+psymbol -> 'A' : <<"A">>.
+psymbol -> 'E' : <<"E">>.
 psymbol -> symbol : name('$1').
 
 Erlang code.
@@ -119,8 +119,8 @@ Erlang code.
 
 op({Op,_Ln}) -> Op.
 
-name({symbol,_,Name})       -> list_to_atom(Name);
-name({identifier,_,Name})   -> list_to_atom(Name).
+name({symbol,_,Name})       -> Name;
+name({identifier,_,Name})   -> Name.
 
 id({identifier,_Line,Name}) -> {id,Name};
 id({symbol,_Line,Name})     -> {id,Name}.

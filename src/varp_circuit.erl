@@ -28,7 +28,7 @@
 	 gt_gate/3, gt_gate/4,
 	 gte_gate/3, gte_gate/4,
 	 gate/3, gate/4, gate/5,
-	 ite/4
+	 ite/4, ite/5
 	]).
 
 -export([comparator/3, comparator/5]).
@@ -50,6 +50,10 @@
 -export([gtk/3, gtk/4]).
 -export([gtek/3, gtek/4]).
 
+-export([eq/3]).
+-export([half_adder/3, half_adder/4, half_adder/5]).
+-export([full_adder/3, full_adder/4, full_adder/5, full_adder/6]).
+
 -export([symbol/2]).
 -export([literal/2]).
 -export([symbol_value/2, symbol_value/3]).
@@ -68,6 +72,7 @@
 -export([test/0]).
 -export([test_mon/1]).
 
+-include("varp.hrl").
 %% -compile(export_all).
 
 inv(true) -> false;
@@ -93,9 +98,19 @@ sym(Vp, X, Symbol) ->
     varp_nif:add_symbol(Vp, X, Symbol),
     X.
 
+%% X = Y
+eq(Vp, X, false) -> clause(Vp, [inv(X)]), X;
+eq(Vp, X, true) -> clause(Vp, [X]), X;
+eq(Vp, X, Y) ->
+    clause(Vp, [inv(X),Y]),
+    clause(Vp, [X,inv(Y)]),
+    X.
+
 %% or_clauses(Vp, _X, true, _Z) -> true;
 %% or_clauses(Vp, _X, _Y, true) -> true;
 %% or_clauses(Vp, _X, false false) -> false;
+or_clauses(Vp, X, Y, false) -> 
+    eq(Vp, X, Y);
 or_clauses(Vp, X, Y, Z) ->
     clause(Vp, [inv(X),Y,Z]),
     clause(Vp, [X,inv(Y)]),
@@ -108,14 +123,8 @@ and_clauses(Vp, X, Y, Z) ->
     X.
 
 %% X = Y xor false  =>  X = Y
-xor_clauses(Vp, X, Y, false) ->
-    clause(Vp,[X,inv(Y)]),
-    clause(Vp,[inv(X),Y]),
-    X;
-xor_clauses(Vp, X, false, Z) ->
-    clause(Vp,[X,inv(Z)]),
-    clause(Vp,[inv(X),Z]),
-    X;
+xor_clauses(Vp, X, Y, false) -> eq(Vp, X, Y);
+xor_clauses(Vp, X, false, Z) -> eq(Vp, X, Z);
 xor_clauses(Vp, X, Y, Z) ->
     clause(Vp,[X,inv(Y),Z]),
     clause(Vp,[X,Y,inv(Z)]),
@@ -316,6 +325,20 @@ ite(Vp,I,T,E) ->
     A2 = and_gate(Vp,inv(I),E),
     or_gate(Vp,A1,A2).
 
+ite(Vp,X,true,T,_E) -> eq(Vp, X, T);
+ite(Vp,X,false,_T,E) -> eq(Vp, X, E);
+ite(_Vp,X,_I,X,X) ->  X;
+%% (I & false) | (~I & E) == ~I & E
+ite(Vp,X,I,false,E) ->
+    and_gate(Vp,X,inv(I),E);
+%% (I & T) | (~I & false) == I & T
+ite(Vp,X,I,T,false) ->
+    and_gate(Vp,X,I,T);
+ite(Vp,X,I,T,E) ->
+    A1 = and_gate(Vp,I,T),
+    A2 = and_gate(Vp,inv(I),E),
+    or_gate(Vp,X,A1,A2).
+
 %% (min,max) = SORT(y, z)
 comparator(Vp, Y, Z) ->
     comparator(Vp, Y, Z, var(Vp), var(Vp)).
@@ -344,11 +367,47 @@ minmax(Vp,[X1,X2|Xs],Ys) ->
     {Min,Max} = comparator(Vp,X1,X2),
     minmax(Vp,[Max|Xs],[Min|Ys]).
 
-any(Vp,Ys) -> none_assoc(Vp,'or',Ys).
-any(Vp,X,Ys) -> none_assoc(Vp,'or',X,Ys).
+any(Vp,Ys) -> any_(Vp,Ys,[]).
+any_(_Vp,[true|_], _Acc) -> true;
+any_(Vp,[false|Ys], Acc) -> any_(Vp,Ys,Acc);
+any_(Vp,[Y|Ys],Acc) -> any_(Vp,Ys,[Y|Acc]);
+any_(Vp,[],Acc) ->
+    case Acc of
+	[] -> false;
+	[Y] -> Y;
+	Ys1 -> none_assoc(Vp,'or',Ys1)
+    end.
 
-all(Vp,Ys) -> none_assoc(Vp,'and',Ys).
-all(Vp,X,Ys) -> none_assoc(Vp,'and',X,Ys).
+any(Vp,X,Ys) -> any_(Vp,X,Ys,[]).
+any_(Vp,X,[true|_], _Acc) -> clause(Vp,[X]), X;
+any_(Vp,X,[false|Ys], Acc) -> any_(Vp,X,Ys,Acc);
+any_(Vp,X,[Y|Ys],Acc) -> any_(Vp,X,Ys,[Y|Acc]);
+any_(Vp,X,[],Acc) ->
+    case Acc of
+	[] -> clause(Vp,[inv(X)]);
+	Ys1 -> none_assoc(Vp,'or',X,Ys1)
+    end.
+
+all(Vp,Ys) -> all_(Vp,Ys,[]).
+all_(_Vp,[false|_], _Acc) -> false;
+all_(Vp,[true|Ys], Acc) -> all_(Vp,Ys,Acc);
+all_(Vp,[Y|Ys],Acc) -> all_(Vp,Ys,[Y|Acc]);
+all_(Vp,[],Acc) ->
+    case Acc of
+	[] -> true;
+	[Y] -> Y;
+	Ys1 -> none_assoc(Vp,'and',Ys1)
+    end.
+
+all(Vp,X,Ys) -> all_(Vp,X,Ys,[]).
+all_(Vp,X,[false|_], _Acc) -> clause(Vp,[inv(X)]),X;
+all_(Vp,X,[true|Ys], Acc) -> all_(Vp,X,Ys,Acc);
+all_(Vp,X,[Y|Ys],Acc) -> all_(Vp,X,Ys,[Y|Acc]);
+all_(Vp,X,[],Acc) ->
+    case Acc of
+	[] -> clause(Vp,[X]);
+	Ys1 -> none_assoc(Vp,'and',X,Ys1)
+    end.
 
 none(Vp,Ys) -> inv(any(Vp,Ys)).
 none(Vp,X,Ys) -> inv(any(Vp,X,Ys)).
@@ -476,7 +535,6 @@ eqk(Vp,K,X,Ys) ->
 eqk_(Vp,0,_N,X,Ys) ->
     inv(any(Vp,X,Ys));
 eqk_(_Vp,K,N,_X,_Ys) when K > N -> %% no models
-    %% bind X = false?
     false;
 eqk_(Vp,K,N,X,Ys) when K =:= N ->
     all(Vp,X,Ys);
@@ -487,8 +545,9 @@ eqk_(Vp,K,N,X,Ys) ->
     B1 = all(Vp,B),
     and_gate(Vp, X, inv(A1), B1).
 
-%% sort all ys one lap then or over the
-%% fixme len(ys) < 2
+%% sort all ys one lap then 'or' over the
+one(_Vp, []) -> false;
+one(_Vp, [Y]) -> Y;
 one(Vp, Ys) ->
     one(Vp, var(Vp), Ys).
 
@@ -501,6 +560,36 @@ eq1_(Vp, X, [Y|Ys], Zi, Zs) ->
     eq1_(Vp, X, Ys, Z1, [Z0|Zs]);
 eq1_(Vp, X, [], Zi, Zs) ->
     and_gate(Vp, X, Zi, none(Vp,Zs)).
+
+
+half_adder(Vp, Y, Z) ->
+    half_adder(Vp, varp_circuit:var(Vp), Y, Z).
+
+half_adder(Vp, X, Y, Z) ->
+    half_adder(Vp, X, Y, Z, varp_circuit:var(Vp)).
+
+half_adder(Vp, X, Y, Z, Co) ->
+    S1 = varp_circuit:xor_gate(Vp, X, Y, Z),
+    Co1 = varp_circuit:and_gate(Vp, Co, Y, Z),
+    {S1, Co1}.
+
+full_adder(Vp, Y, Z) ->
+    full_adder(Vp, varp_circuit:var(Vp), Y, Z).
+
+full_adder(Vp, X, Y, Z) ->
+    full_adder(Vp, X, Y, Z, false).
+
+full_adder(Vp, X, Y, Z, Ci) ->
+    full_adder(Vp, X, Y, Z, Ci, varp_circuit:var(Vp)).
+
+full_adder(Vp, X, Y, Z, Ci, Co) ->
+    S1 = varp_circuit:xor_gate(Vp,Y,Z),
+    S2 = varp_circuit:xor_gate(Vp,X,S1,Ci),  %% S2==X!
+    A1 = varp_circuit:and_gate(Vp,S1,Ci),
+    A2 = varp_circuit:and_gate(Vp,Y,Z),
+    Co1 = varp_circuit:or_gate(Vp,Co,A1,A2),
+    {S2, Co1}.
+
 
 %% make a monitor for array Ys
 %% true when all variables in Ys are bound
@@ -539,11 +628,12 @@ test() ->
     true = test_xor(),
     true = test_xnor(),
     true = test_equ(),
+    true = test_half_adder(),
+    true = test_full_adder(),
     true = test_lt(),
     true = test_lte(),
     true = test_gt(),
     true = test_gte(),
-
     true = test_any(),
     true = test_all(),
     true = test_none(),
@@ -582,8 +672,20 @@ test() ->
     ok.
 
 clause(Vp, Ls) ->
+    clause(Vp, Ls, ?DELTA).
+
+clause(Vp, Ls, Set) ->
     %%io:format("clause [~s]\n", [string:join([literal(Vp,L)||L<-Ls], ",")]),
-    varp_nif:add_clause(Vp, Ls).
+    case varp_nif:add_clause(Vp, Ls, Set) of
+	{false,_I} ->
+	    throw(contradiction);
+	false ->
+	    throw(contradiction);	
+	{true,I} -> %% non conflict
+	    I;
+	true ->
+	    true
+    end.
 
 test_gate(Gate, Match) ->
     io:format("GATE: ~s\n", [Gate]),
@@ -652,6 +754,43 @@ eval4(Fun) ->
 		   C <- [false,true],
 		   D <- [false,true]
 	       ]).
+
+eval_half_adder() ->
+    lists:sort([ [{s, A xor B}, {co, A and B},{a,A},{b,B}] || 
+		   A <- [false,true],
+		   B <- [false,true]
+	       ]).
+
+test_half_adder() ->
+    Vp = varp_nif:new(#{xref => true}),
+    half_adder(Vp, 
+	       var(Vp,s), 
+	       var(Vp,a), 
+	       var(Vp,b), 
+	       var(Vp,co)),
+    bt_match(Vp, eval_half_adder()).
+
+eval_full_adder() ->
+    lists:sort([begin
+		    S1 = A xor B,
+		    S2 = S1 xor Ci,
+		    [{s, S2}, {co, (S1 and Ci) or (A and B)},
+		     {a,A},{b,B}, {ci,Ci}] 
+		end || 
+		   A <- [false,true],
+		   B <- [false,true],
+		   Ci <- [false,true]
+	       ]).
+
+test_full_adder() ->
+    Vp = varp_nif:new(#{xref => true}),
+    full_adder(Vp, var(Vp,s),
+	       var(Vp,a),
+	       var(Vp,b),
+	       var(Vp,ci),
+	       var(Vp,co)),
+    bt_match(Vp, eval_full_adder()).
+
     
 test_or() ->
     M = eval2(fun erlang:'or'/2),

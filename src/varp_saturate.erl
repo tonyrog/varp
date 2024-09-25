@@ -81,7 +81,7 @@ options() ->
      ].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
-    varp_formula:config(Bs, max_conflicting, 1),
+    varp_nif:setopt(Bs#bs.vp, max_conflicting, 1),
     K = maps:get(level, Param, 1),
     Q = maps:get(q, Param, 1),
     F = maps:get(f, Param, 1),
@@ -103,7 +103,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
     saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold, true).
 
 saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst) ->
-    varp_nif:config(Bs#bs.vp, xref, true),
+    varp_nif:setopt(Bs#bs.vp, xref, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     N = varp:get_number_of_bound_variables(Bs#bs.vp),
     FriendMap = if F =:= 0 ->
@@ -116,7 +116,7 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst) ->
 	false ->
 	    {?INCONSISTENT,[],Bs1};
 	{Reason,Bs2} -> 
-	    varp_nif:config(Bs2#bs.vp, xref, false),
+	    varp_nif:setopt(Bs2#bs.vp, xref, false),
 	    ?dbg0("saturate limit ~w\n", [Reason]),
 	    {Reason,[],Bs2}
     end.
@@ -179,8 +179,3 @@ lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap) ->
 		Vec1 -> lap_(Bs,Vec1,Q,F,R,Count+1,Subst,FriendMap)
 	    end
     end.
-
--ifdef(DEBUG).
-indent(D) -> lists:duplicate(D, $>).
--endif.
-

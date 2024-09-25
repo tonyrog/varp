@@ -12,7 +12,7 @@
 -include("varp.hrl").
 
 analyze(Vp, Bump, Minimize) ->
-    N = varp_nif:info(Vp, number_of_conflicting_clauses),
+    N = varp_nif:getstat(Vp, number_of_conflicting_clauses),
     analyze_(Vp, Bump, Minimize, 0, N).
 
 analyze_(_Vp, _Bump, _Minimize, N, N) ->

@@ -37,13 +37,12 @@ options() ->
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     N = maps:get(max, Param),
-    %% Print = varp_formula:getopt(Bs,print),
     Timeout = maps:get(timeout, Param, infinity),
-    varp_formula:config(Bs, max_conflicting, 1),
+    varp_nif:setopt(Bs#bs.vp, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     0 = varp_nif:push(Bs#bs.vp), %% assert, may be relaxed
-    put(proof_output, ?GETOPT_BS(Bs, proof_output)),
-    case varp_formula:getopt(Bs1,method) of
+    put(proof_output, varp:getopt(Bs#bs.vp, proof_output)),
+    case varp_nif:getopt(Bs1#bs.vp,method) of
 	collect -> collect(Bs1, 0, N, []);
 	count   -> count(Bs1, 0, N)
     end.
@@ -108,7 +107,7 @@ count(Bs, Count, N) ->
 count_(Bs, Count, N) when N =:= 0; Count < N ->
     case varp_nif:nbcp(Bs#bs.vp) of
 	true ->
-	    case varp_formula:getopt(Bs,print) of
+	    case varp_nif:getopt(Bs#bs.vp,print) of
 		false -> ok;
 		_ -> varp:output_model(Bs,false,Count+1)
 	    end,

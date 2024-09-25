@@ -37,8 +37,8 @@ options() ->
 
 run(Bs, Param) ->
     N = varp:number_of_unbound_variables(Bs#bs.vp),
-    varp_formula:config(Bs, permanent, 0),
-    CMax = varp:info(Bs#bs.vp, permanent),
+    varp_nif:setopt(Bs#bs.vp, permanent, 0),
+    CMax = varp_nif:getopt(Bs#bs.vp, permanent),
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->

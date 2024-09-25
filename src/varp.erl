@@ -9,10 +9,10 @@
 
 -export([start/0, start0/0]).
 -export([main/1]).
--export([do_run/3]).
+-export([do_run/3, do_run/4]).
 
--export([tokens/1]).
--export([parse/1, parse/2]).
+-export([tokens/1, tokens/2]).
+-export([parse/1, parse/2, parse/3]).
 -export([scan_file/1]).
 -export([remove_comments/1]).
 -export([read_file/1]).
@@ -49,8 +49,9 @@
 -export([new/1]).
 -export([clone/1]).
 -export([clone/2]).
--export([info/2]).
--export([config/3]).
+-export([getopt/1,getopt/2,getopt/3]).
+-export([getstat/1,getstat/2]).
+-export([setopt/3, setopt/4]).
 -export([add_variable/1]).
 -export([add_variable/2]).
 -export([add_variable/3]).
@@ -136,8 +137,6 @@
 -export([version/0]).
 -export([i/0]).
 -export([i/1]).
--export([info/1]).
--export([info_keys/0]).
 -export([variable_info/2, variable_info_keys/0]).
 -export([literal_info/2,  literal_info_keys/0]).
 -export([get_latest_binding/1]).
@@ -199,11 +198,16 @@
 
 global_options() ->
     [
+     # { long => "icase",
+	 key => icase,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 short => "i",
+	 description => "Case insensitive keywords and variables."
+       },
      #{ long => "phase",
 	key => phase,
-	spec => {enum,[{"undefined",undefined},{"u",undefined},
-		       {"true", true},{"1",true},
-		       {"false",false},{"0",false}]},
+	spec => {enum,[?BOOL,{"undefined",undefined},{"u",undefined}]},
 	default => true,
 	description => "Inital phase selection."
       },
@@ -224,6 +228,12 @@ global_options() ->
 	spec =>  {enum,[?BOOL]},
 	default => false,
 	description => "Report result in starexec format"
+      },
+     #{ long => "gui",
+	key => gui,
+	spec =>  {enum,[?BOOL]},
+	default => false,
+	description => "Run Varp in GUI mode"
       },
      #{ long => "outdir",
 	key => outdir,
@@ -411,7 +421,7 @@ global_options() ->
 	description => "Show counter statistics"
       },
       #{ long => "help",
-	 short => "h", 
+	 short => "h",
 	 key => help,
 	 spec => void,
 	 default => undefined,
@@ -430,9 +440,13 @@ internal_options() -> %% needed?
 	default => #{},
 	description => "Internal list of all definitions"},
      #{ key => decls,
-	spec => {set,{predpat,atom,term}},
+	spec => {set,{predpat,binary,term}},
 	default => #{},
-	description => "Internal list of all declarations"},     
+	description => "Internal list of all declarations"},
+     #{ key => circuits,
+	spec => {set,{binary,{list,term},{list,term}}},
+	default => [],
+	description => "Internal list of all circuits"},
      #{ key => literals,
 	spec => {set,atom},
 	default => #{},
@@ -480,14 +494,25 @@ main(Args) ->
     Do0 = load_do(Plugins),
     {Do1,Files,GOpts2,Bound0} =
 	process_args(Args, Plugins, [], [], GlobalOptionSpec, GOpts1, []),
+    case maps:get(gui,GOpts2,false) of
+	true ->
+	    varp_wx:start(Bound0),
+	    receive
+		quit -> ok
+	    end,
+	    halt(0);
+	false ->
+	    ok
+    end,
     Bound = maps:from_list(Bound0),
+    GOpts3 = GOpts2#{ meta => Bound },
     Do = if Do1 =/= [] -> Do1;
 	    true -> Do0
 	 end,
-    {ReadIn,{Sections0,Formula0}} =
-	try load_formulas(maps:get(formula,GOpts2,[]), undefined, 'and',
-			  GOpts2) of
-	    {ok,{S0,undefined}}-> {true,{S0,undefined}};
+    {ReadIn,{Sections0,Assignments0,Formula0}} =
+	try load_formulas(maps:get(formula,GOpts3,[]), undefined, 'and',
+			  GOpts3) of
+	    {ok,{S0,A0,undefined}}-> {true,{S0,A0,undefined}};
 	    {ok,R0} -> {false,R0}
 	catch
 	    ?EXCEPTION(error,Error0,Trace0) ->
@@ -495,23 +520,23 @@ main(Args) ->
 		io:format("~p\n", [?GET_STACK(Trace0)]),
 		halt(1)
 	end,
-
-    GOpts3 = section_opts(Sections0, GOpts2#{ meta => Bound }),
+    GOpts4 = section_opts(Sections0, GOpts3),
 
     case Files of
 	[] when not ReadIn ->
-	    varp_run(Do, Formula0, GOpts3);
+	    varp_run(Do, Assignments0, Formula0, GOpts4);
 	[] when ReadIn ->
 	    case read_in() of
 		{ok,<<>>} ->
-		    varp_run(Do, Formula0, GOpts3);
+		    varp_run(Do, Assignments0, Formula0, GOpts4);
 		{ok,Data} ->
-		    try parse("*stdin*", Data, GOpts3) of
-			{ok,{Sections1,Formula}} ->
+		    try parse("*stdin*", Data, GOpts4) of
+			{ok,{Sections1,Assignments,Formula}} ->
+			    Assignments1 = Assignments0 ++ Assignments,
 			    Formula1 = join_f('and',Formula0,Formula),
 			    Sections = append_sections(Sections0,Sections1),
-			    GOpts4 = section_opts(Sections,GOpts3),
-			    varp_run(Do,Formula1,GOpts4)
+			    GOpts5 = section_opts(Sections,GOpts4),
+			    varp_run(Do,Assignments1,Formula1,GOpts5)
 		    catch
 			?EXCEPTION(error,Error1,Trace1) ->
 			    io:format("~s\n", [format_error(Error1)]),
@@ -524,10 +549,11 @@ main(Args) ->
 	[F] -> %% check if batch mode, run tar/zip over all formulas
 	    case archive_type(F) of
 		undefined ->
-		    try load_files([F],Formula0,Sections0,'and',GOpts3) of
-			{ok,{Sections1,Formula,GOpts4}} ->
-			    GOpts5 = section_opts(Sections1, GOpts4),
-			    varp_run(Do,Formula,GOpts5);
+		    try load_files([F],Assignments0,Formula0,Sections0,
+				   'and',GOpts4) of
+			{ok,{Sections1,Assignments,Formula,GOpts5}} ->
+			    GOpts6 = section_opts(Sections1, GOpts5),
+			    varp_run(Do,Assignments,Formula,GOpts6);
 			_Error ->
 			    halt(1)
 		    catch
@@ -537,13 +563,13 @@ main(Args) ->
 			    halt(1)
 		    end;
 		Type -> %% with formula?
-		    run_batch(Do,Type,F,GOpts3)
+		    run_batch(Do,Type,F,GOpts4)
 	    end;
 	Fs ->
-	    try load_files(Fs,Formula0,Sections0,'and',GOpts3) of
-		{ok,{Sections1,Formula,GOpts4}} ->
-		    GOpts5 = section_opts(Sections1, GOpts4),
-		    varp_run(Do,Formula,GOpts5);
+	    try load_files(Fs,Assignments0,Formula0,Sections0,'and',GOpts4) of
+		{ok,{Sections1,Assignments,Formula,GOpts5}} ->
+		    GOpts6 = section_opts(Sections1, GOpts5),
+		    varp_run(Do,Assignments,Formula,GOpts6);
 		_Error ->
 		    halt(1)
 	    catch
@@ -579,7 +605,7 @@ load_option_list(OptionList) when is_list(OptionList) ->
     load_option_list(global_option_spec(), default_options(), OptionList).
 
 load_option_list(OptionSpec,OptMap,[{Key,Value}|Opts]) ->
-    OptMap1 = varp_option:setopt(Key,Value,OptMap,OptionSpec),
+    OptMap1 = varp_option:set_option(Key,Value,OptMap,OptionSpec),
     load_option_list(OptionSpec,OptMap1,Opts);
 load_option_list(_OptionSpec,OptMap,[]) ->
     OptMap.
@@ -616,7 +642,7 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 	    OptMap1 =
 		lists:foldl(
 		  fun({Key,Value}, Mi) ->
-			  try varp_option:setopt(Key,Value,Mi,OptionSpec) of
+			  try varp_option:set_option(Key,Value,Mi,OptionSpec) of
 			      Mj -> Mj
 			  catch
 			      error:badkey ->
@@ -625,7 +651,11 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 			      error:badarg ->
 				  io:format("unsupported value ~w for key ~w\n",
 					    [Value, Key]),
-				  Mi
+				  Mi;
+			      ?EXCEPTION(error,Error,Trace) ->
+				  io:format("~s\n", [format_error(Error)]),
+				  io:format("~p\n", [?GET_STACK(Trace)]),
+				  halt(1)
 			  end
 		  end, OptMap, OptionList),
 	    parse_do_(Ps, PluginMap, [{Mod, OptMap1}|Acc])
@@ -682,9 +712,10 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
     lists:foreach(
       fun(F) ->
 	      AFile = filename:join(ArchiveFile,F),
-	      case load_files([AFile],true,empty_sections(),'and',GOpts) of
-		  {ok,{Sections,Formula,GOpts1}} ->
-		      varp_run(Do,Formula, section_opts(Sections, GOpts1));
+	      case load_files([AFile],[],true,empty_sections(),'and',GOpts) of
+		  {ok,{Sections,Assignments,Formula,GOpts1}} ->
+		      varp_run(Do,Formula,Assignments,
+			       section_opts(Sections, GOpts1));
 		  Error ->
 		      io:format("~s: error ~p\n", [F,Error]),
 		      ok
@@ -692,11 +723,11 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
       end, Fs).
 
 %% command line - display errors and exception as well as results
-varp_run(Do, Formula, GOpts) ->
+varp_run(Do, Assignments, Formula, GOpts) ->
     put(exit_code, 0),
     start_cprof(GOpts),
     start_fprof(GOpts),
-    R = (catch do_run(Do, Formula, GOpts)),
+    R = (catch do_run(Do, Assignments, Formula, GOpts)),  %% try?
     %% R = (do_run(Do, Formula, GOpts)),
     varp_monitor:stop(), %% if started
     case R of
@@ -776,7 +807,8 @@ display_cprof({TCalls,Ms}) ->
 format_error(Err) ->
     case Err of
 	{unbound,Var} ->
-	    ["Variable ", Var, " is unbound\n"];
+	    VarName = varp_formula:format_symbol(Var),
+	    ["Variable ", VarName, " is unbound\n"];
 	{var_out_of_range,Var} ->
 	    VarName = varp_formula:format_symbol(Var),
 	    ["Variable ",VarName," is out of range\n"];
@@ -795,21 +827,26 @@ format_error(Err) ->
 	    io_lib:format("~p\n", [Err])
     end.
 
-
 do_run(Do, Formula, GOpts) ->
-    R = do_run_(Do, Formula, GOpts),
+    do_run(Do, [], Formula, GOpts).
+do_run(Do, Assignments, Formula, GOpts) ->
+    R = do_run_(Do, Assignments, Formula, GOpts),
     garbage_collect(self(),[{type,major}]),
     R.
 
-do_run_(Do, Formula, GOpts) ->
+do_run_(Do, Assignments, Formula, GOpts) ->
     T0 = erlang:monotonic_time(),
     Bs0 = varp_formula:new(GOpts),
     S0 = stat(Bs0),
     ?info(Bs0#bs.option, "pass ~p\n", [build]),
-    {Main,Bs} = case varp_formula:build(Formula,Bs0) of
-		    {{bool,Var0},Bs0_1} -> {Var0,Bs0_1};
-		    {{uint,1,[Var0]},Bs0_1} -> {Var0,Bs0_1};
-		    {undefined,Bs0_1} -> {undefined,Bs0_1}; %% validate etc
+    Bs0_0 = varp_formula:build_assignment_defs(Assignments, Bs0),
+    {Main,Bs} = case varp_formula:build(Formula,Bs0_0) of
+		    {{bool,Var0},Bs0_1} -> 
+			{Var0,Bs0_1};
+		    {{uint,1,[Var0]},Bs0_1} -> 
+			{Var0,Bs0_1};
+		    {undefined,Bs0_1} -> 
+			{undefined,Bs0_1}; %% validate etc
 		    {{_Type,_N,Vs},Bs0_1} -> 
 			VsB = [{bool,Vi} || Vi <- Vs],
 			{{bool,M0},Bs0_2} = varp_formula:any(VsB,Bs0_1),
@@ -831,7 +868,7 @@ do_run_(Do, Formula, GOpts) ->
 	user -> ok;
 	Fd -> file:close(Fd)
     end,
-    case varp_formula:getopt(Bs2, print) of
+    case varp_nif:getopt(Bs2#bs.vp, print) of
 	false -> 
 	    {R,Acc,Bs3};
 	_ ->
@@ -851,6 +888,7 @@ do_run_(Do, Formula, GOpts) ->
 	    display_result(M, Method, Bs3),
 	    {R,Acc,Bs3}
     end.
+
 
 do([{Plugin,Param}|Do],Acc0,Bs) ->
     S0 = stat(Bs),
@@ -964,7 +1002,7 @@ display_result(N, prove,_Bs) when is_integer(N), N>0 ->
 display_result(N, none,_Bs) when is_integer(N), N>0 ->
     io:format("% ~w\n", [N]);
 display_result(?INCONSISTENT, satisfy, Bs) ->
-    case varp_formula:getopt(Bs, starexec) of
+    case varp_nif:getopt(Bs#bs.vp, starexec) of
 	true ->
 	    put(exit_code, 20),
 	    io:format("s UNSATISFIABLE\n");
@@ -997,7 +1035,7 @@ one_model(Bs) ->
     NB = get_number_of_bound_variables(Bs#bs.vp),
     if NV =:= NB ->
 	    Model = output_model(Bs,false,1),
-	    case varp_formula:getopt(Bs,method) of
+	    case varp_nif:getopt(Bs#bs.vp, method) of
 		collect -> [Model];
 		count -> 1
 	    end;
@@ -1006,7 +1044,7 @@ one_model(Bs) ->
     end.
 
 no_models(Bs) ->
-    case varp_formula:getopt(Bs,method) of
+    case varp_nif:getopt(Bs#bs.vp, method) of
 	collect ->
 	    {?INCONSISTENT,[],Bs};
 	count -> 
@@ -1045,7 +1083,7 @@ order_decl([],Opts) ->
     end.
 
 %% load files and form a conjunction over all files
-load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
+load_files([F|Fs],Assignments0,Formula0,Sections,JoinOp,GOpts) ->
     Ext = filename:extension(F),
     if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
 	    case read_file(F) of
@@ -1058,12 +1096,14 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 			    %% io:format("% loaded: ~p\n", [Cnf]),
 			    Formula1 = join_f(JoinOp,Cnf,Formula0),
 			    Sections1 = append_sections(Sections, Sections0),
-			    load_files(Fs,Formula1,Sections1,JoinOp,GOpts);
+			    load_files(Fs,Assignments0,
+				       Formula1,Sections1,JoinOp,GOpts);
 			Snf = {snf,{_NVars,_NClauses,Sections0,_CLs}} ->
 			    %% io:format("% loaded: ~p\n", [Snf]),
 			    Formula1 = join_f(JoinOp,Snf,Formula0),
 			    Sections1 = append_sections(Sections, Sections0),
-			    load_files(Fs,Formula1,Sections1,JoinOp,GOpts)
+			    load_files(Fs,Assignments0,
+				       Formula1,Sections1,JoinOp,GOpts)
 		    end;
 		Error={error,Reason} ->
 		    io:format("Unable to read file ~s (~w)\n",
@@ -1077,14 +1117,14 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 	    case varp_input(Input, F, Meta) of
 		{ok,Formula} ->
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
-		    load_files(Fs,Formula1,Sections,JoinOp,GOpts);
+		    load_files(Fs,Assignments0,Formula1,Sections,JoinOp,GOpts);
 		{ok,MetaF,Formula} ->
 		    %% io:format("Meta = ~p\n", [MetaF]),
 		    Meta1 = maps:merge(Meta, maps:from_list(MetaF)),
 		    %% io:format("Meta1 = ~p\n", [Meta1]),
 		    GOpts1 = maps:put(meta,Meta1,GOpts),
 		    Formula1 = join_f(JoinOp,Formula,Formula0),
-		    load_files(Fs,Formula1,Sections,JoinOp,GOpts1);
+		    load_files(Fs,Assignments0,Formula1,Sections,JoinOp,GOpts1);
 		Error ->
 		    Error
 	    end;
@@ -1092,10 +1132,12 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 	    case read_file(F) of
 		{ok, Data} ->
 		    case parse(F, Data, GOpts) of
-			{ok,{Sections1,Formula}} ->
+			{ok,{Sections1,Assignments,Formula}} ->
 			    %% io:format("% loaded: ~s\n", [F]),
 			    Formula1 = join_f(JoinOp,Formula,Formula0),
-			    load_files(Fs,Formula1,
+			    load_files(Fs,
+				       Assignments0++Assignments,
+				       Formula1,
 				       append_sections(Sections,Sections1),
 				       JoinOp,GOpts);
 			Error ->
@@ -1107,8 +1149,8 @@ load_files([F|Fs],Formula0,Sections,JoinOp,GOpts) ->
 		    Error
 	    end
     end;
-load_files([],Formula,Sections,_JoinOp,GOpts) ->
-    {ok,{Sections,Formula,GOpts}}.
+load_files([],Assignments,Formula,Sections,_JoinOp,GOpts) ->
+    {ok,{Sections,Assignments,Formula,GOpts}}.
 
 
 %% special input format
@@ -1151,16 +1193,16 @@ varp_output([Out | OutputList], Fd, Partial, Model) ->
 varp_output([], _Fd, _Partial, _Model) ->
     {error, no_output}.
 
-mfa_arg({id,Name},Func) ->
-    {list_to_atom(Name),Func,[]};
+mfa_arg(Name,Func) when is_binary(Name) ->
+    {binary_to_atom(Name),Func,[]};
 mfa_arg(M,Func) when is_atom(M) ->
-    {list_to_atom(M),Func,[]};
+    {M,Func,[]};
 mfa_arg({M,F,A},_Func) when is_atom(M), is_atom(F), is_list(A) -> 
     {M,F,A}.
 
 %% possibly emit a model
 output_partial_model(Bs, _R) ->
-    case varp_formula:getopt(Bs,partial) of
+    case varp_nif:getopt(Bs#bs.vp, partial) of
 	true ->
 	    output_model(Bs,true,0);
 	false ->
@@ -1170,7 +1212,7 @@ output_partial_model(Bs, _R) ->
 output_model(Bs,Partial,I) ->
     output_model_header(Bs,Partial,I),
     Model = varp_formula:model(Bs),
-    case varp_formula:getopt(Bs,print) of
+    case varp_nif:getopt(Bs#bs.vp,print) of
 	false ->
 	    Model;
 	Flavour ->
@@ -1192,7 +1234,7 @@ output_model_header(Bs,Partial,_I) ->
 	    put(output_model_header, false),
 	    if Partial -> io:format("PARTIAL\n");
 	       true ->
-		    case varp_formula:getopt(Bs,starexec) of
+		    case varp_nif:getopt(Bs#bs.vp,starexec) of
 			true ->
 			    put(exit_code, 10),
 			    io:format("s SATISFIABLE\n");
@@ -1266,31 +1308,42 @@ fjoin(Fs) -> filename:join(Fs).
 
 %% load/parse formulas given on command line like -f "A && B"
 load_formulas([], A, _JoinOp, _GOpts) ->
-    {ok,{empty_sections(),A}};
+    {ok,{empty_sections(),[],A}};
 load_formulas(Fs, A, JoinOp, GOpts) ->
-    parse_formulas(Fs,A,empty_sections(),JoinOp,GOpts).
+    parse_formulas(Fs,[],A,empty_sections(),JoinOp,GOpts).
 
-parse_formulas([F|Fs], Formula, Sections0,JoinOp,GOpts) ->
+parse_formulas([F|Fs], Assignments, Formula, Sections0,JoinOp,GOpts) ->
     case parse("*command-line*", F, GOpts) of
-	{ok,{Sections1,Formula1}} ->
-	    parse_formulas(Fs, join_f(JoinOp, Formula, Formula1),
+	{ok,{Sections1,Assignments1,Formula1}} ->
+	    parse_formulas(Fs,
+			   Assignments++Assignments1,
+			   join_f(JoinOp, Formula, Formula1),
 			   append_sections(Sections0, Sections1),
 			   JoinOp,GOpts);
 	Error ->
 	    Error
     end;
-parse_formulas([], Formula, Sections, _JoinOp,_GOpts) ->
-    {ok,{Sections,Formula}}.
+parse_formulas([], Assignments, Formula, Sections, _JoinOp,_GOpts) ->
+    {ok,{Sections,Assignments,Formula}}.
 
 empty_sections() ->
-    #{ decls=>#{}, literals=> #{}, syms => #{}, defs=>#{},
-       order=>[],  assert=>[], input=>[], output=>[] }.
+    #{ defs=>#{},
+       decls=>#{}, 
+       circuits => [],
+       literals=> #{},
+       syms => #{},        
+       order=>[],  
+       assert=>[], 
+       input=>[], 
+       output=>[] }.
 
-append_sections(#{ decls:=D0,order:=O0,literals:=Ls0,defs:=Ds0,
+append_sections(#{ decls:=D0,order:=O0,circuits:=C0,
+		   literals:=Ls0,defs:=Ds0,
 		   assert:=A0,input:=I0, output:=T0,syms:=S0 },
-		#{ decls:=D1,order:=O1,literals:=Ls1,defs:=Ds1,
+		#{ decls:=D1,circuits:=C1,order:=O1,literals:=Ls1,defs:=Ds1,
 		   assert:=A1,input:=I1, output:=T1,syms:=S1 }) ->
     #{ decls =>maps:merge(D0,D1),  %% must be fixed!
+       circuits => C0++C1,
        order => O0++O1, 
        literals =>maps:merge(Ls0,Ls1),
        defs => merge_defs(Ds0, Ds1),
@@ -1302,6 +1355,7 @@ append_sections(#{ decls:=D0,order:=O0,literals:=Ls0,defs:=Ds0,
 
 section_opts(#{ decls := Decls,
 		order := Order,
+		circuits := Circuits,
 		literals := Literals,
 		defs := Defs,
 		assert := Assert,
@@ -1312,6 +1366,7 @@ section_opts(#{ decls := Decls,
     GOpts#{
 	   order => order_decl(Order),
 	   decls => Decls,
+	   circuits => Circuits,
 	   defs => Defs,
 	   literals => Literals,
 	   assert => Assert,
@@ -1374,9 +1429,11 @@ file(File) ->
     end.
 
 scan_file(File) ->
+    scan_file(File,false).
+scan_file(File,ICase) ->
     case read_file(File) of
 	{ok,Binary} ->    
-	    tokens(binary_to_list(Binary));
+	    tokens(binary_to_list(Binary),ICase);
 	Error={error,Reason} ->
 	    io:format("Unable to read file ~s (~w)\n",
 		      [File, Reason]),
@@ -1460,34 +1517,41 @@ zip_names([]) ->
 parse(String) ->
     parse("*internal*", String).
 
-parse(File, String) ->
-    parse(File, String, #{}).
+parse(Filename, String) ->
+    parse(Filename, String, #{}).
 
-parse(File, Binary, GOpts) when is_binary(Binary) ->
-    parse(File, binary_to_list(Binary), GOpts);    
-parse(File, String, GOpts) ->
-    case tokens(String) of
-	{ok,Ts} ->
-	    case varp_parse:parse(Ts) of
-		{ok,{Sections,Formula}} ->
-		    case split_sections(Sections,GOpts) of
-			{ok, SectionMap} ->
-			    {ok,{SectionMap,Formula}};
-			Error ->
-			    io:format("~s: Error: ~p\n", [File,Error]),
-			    Error
-		    end;
-		Error={error,{Ln,Mod,Why}} when 
-		      is_integer(Ln), is_atom(Mod) ->
-		    Reason = Mod:format_error(Why),
-		    io:format("~s:~w: ~s\n", [File,Ln,Reason]),
-		    Error;
+parse(Filename, Binary, GOpts) when is_binary(Binary) ->
+    parse(Filename, binary_to_list(Binary), GOpts);    
+parse(Filename, String, GOpts) ->
+    Scan = case maps:get(icase, GOpts, false) of
+	       false -> varp_scan;
+	       true -> varp_scani
+	   end,
+    Scan:init(remove_comments(String)),
+    case varp_parse:parse_and_scan({Scan, one_token, []}) of
+	{ok,{Sections,[],Formula}} ->
+	    case split_sections(Sections,GOpts) of
+		{ok, SectionMap} ->
+		    {ok,{SectionMap,[],Formula}};
 		Error ->
-		    io:format("~s: Error: ~p\n", [File,Error]),
+		    io:format("~s: Error: ~p\n", [Filename,Error]),
 		    Error
 	    end;
+	{ok,{Sections,Assignments,Formula}} ->
+	    case split_sections(Sections,GOpts) of
+		{ok, SectionMap} ->
+		    {ok,{SectionMap,Assignments,Formula}};
+		Error ->
+		    io:format("~s: Error: ~p\n", [Filename,Error]),
+		    Error
+	    end;
+	Error={error,{Ln,Mod,Why}} when 
+	      is_integer(Ln), is_atom(Mod) ->
+	    Reason = Mod:format_error(Why),
+	    io:format("~s:~w: ~s\n", [Filename,Ln,Reason]),
+	    Error;
 	Error ->
-	    io:format("~s: Error: ~p\n", [File, Error]),
+	    io:format("~s: Error: ~p\n", [Filename,Error]),
 	    Error
     end.
 
@@ -1505,6 +1569,9 @@ split_sections([{declare,DeclList}|Sections], Map=#{ decls:=Decl0 },GOpts) ->
 	Error ->
 	    Error
     end;
+split_sections([C={circuit,_Name,_Params,_Defs}|Sections], 
+	       Map=#{ circuits:=Circuits0 },GOpts) ->
+    split_sections(Sections, Map#{ circuits => [C|Circuits0] },GOpts);
 split_sections([{order,Order}|Sections],Map=#{ order:=Order0 },GOpts) ->
     split_sections(Sections, Map#{ order => Order0++Order },GOpts);
 split_sections([{literals,Ls}|Sections],Map=#{ literals:=Ls0 },GOpts) ->
@@ -1543,15 +1610,26 @@ add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
     end;
 add_decls([], Decls, _Bs) ->
     {ok,Decls}.
-    
-string(Binary) when is_binary(Binary) ->
-    string(binary_to_list(Binary));
-string(String) when is_list(String) ->
-    {ok,Ts} = tokens(String),
-    varp_parse:parse(Ts).
 
-tokens(String) ->
-    case varp_scan:string(remove_comments(String)) of
+string(Data) ->
+    string(Data,false).
+string(Binary,ICase) when is_binary(Binary) ->
+    string(binary_to_list(Binary),ICase);
+string(String,ICase) when is_list(String) ->
+    Scan = if ICase -> varp_scani;
+	      true -> varp_scan
+	   end,
+    Scan:init(remove_comments(String)),
+    varp_parse:parse_and_scan({Scan, one_token, []}).
+
+tokens(Data) ->
+    tokens(Data, false).    
+tokens(String,ICase) ->
+    Mod = if ICase -> varp_scani;
+	     true -> varp_scan
+	  end,
+    Mod:init(remove_comments(String)),
+    case Mod:all_tokens() of
 	{ok,Ts,_Ln} -> {ok,Ts};
 	Error -> Error
     end.
@@ -1711,8 +1789,11 @@ literal_info_keys() ->
 
 new(Options) -> varp_nif:new(Options).
 clone(Vp,Opts) -> varp_nif:clone(Vp,Opts).
-info(Vp, Key) -> varp_nif:info(Vp, Key).
-config(Vp,Item,Value) -> varp_nif:config(Vp,Item,Value).
+setopt(Vp,Key,Value) -> varp_nif:setopt(Vp,Key,Value).
+setopt(Vp,Key,Value,System) -> varp_nif:setopt(Vp,Key,Value,System).
+getopt(Vp,Key) -> varp_nif:getopt(Vp,Key).
+getopt(Vp,Key,System) -> varp_nif:getopt(Vp,Key,System).
+getstat(Vp,Key) -> varp_nif:getstat(Vp,Key).
 add_variable(Vp) -> varp_nif:add_variable(Vp).
 add_variable(Vp,IsAtom) -> varp_nif:add_variable(Vp,IsAtom).
 add_variable(Vp,IsAtom,IsUsed) -> varp_nif:add_variable(Vp,IsAtom,IsUsed).
@@ -1846,38 +1927,41 @@ new() ->
     varp_nif:new(#{}).
 
 version() ->
-    varp_nif:info(new(), version).
+    varp_nif:getopt(new(), version).
 
 i() ->
     Vt = new(),
-    _ = [ io:format("~w: ~p\n", [Key,varp_nif:info(Vt, Key)]) || 
+    _ = [ io:format("~w: ~p\n", [Key,varp_nif:getstat(Vt, Key)]) || 
 	    Key <- 
 		[version,
 		 literal_size,
 		 literal_integer,
 		 value_packing,
-		 xref,
-		 hash,
-		 init_phase,
-		 use_phase,
-		 seed,
 		 memory_literal_size,
 		 memory_variable_size,
 		 memory_clause_size,
 		 memory_symbol_size,
 		 memory_size
 		]],
+    _ = [ io:format("~w: ~p\n", [Key,varp_nif:getopt(Vt, Key)]) || 
+	    Key <- 
+		[xref,
+		 hash,
+		 init_phase,
+		 use_phase,
+		 seed
+		]],
     ok.
 
 i(Vp) ->
-    _ = [ io:format("~w: ~p\n", [Key,varp_nif:info(Vp, Key)]) ||
-	    Key <- info_keys()],
+    _ = [ io:format("~w: ~p\n", [Key,varp_nif:getstat(Vp, Key)]) ||
+	    Key <- stat_keys()],
     ok.
 
-info(Vp) ->
-    [ {Key,varp_nif:info(Vp, Key)} || Key <- info_keys()].
+getstat(Vp) ->
+    [ {Key,varp_nif:getstat(Vp, Key)} || Key <- stat_keys()].
 
-info_keys() ->
+stat_keys() ->
     [
      number_of_clauses,
      number_of_dead_clauses,
@@ -1897,17 +1981,35 @@ info_keys() ->
      literal_size,     %% 8,16,32,64 (sizeof literal)
      literal_integer,  %% true,false (integer or pointer)
      value_packing,    %% 1,4,undefined (variable value packing)
-     xref,             %% xref is used (need for saturate with substitution)
-     hash,             %% hash is used
-     init_phase,       %% initial phase value
-     use_phase,        %% used saved phase value
-     seed,
      memory_literal_size,
      memory_variable_size,
      memory_clause_size,
      memory_symbol_size,
      memory_size
     ].
+
+
+getopt(Vp) ->
+    [ {Key,varp_nif:getopt(Vp, Key)} || Key <- option_keys()].
+    
+option_keys() ->
+    [
+     qtype,
+     xref,             %% xref is used (need for saturate with substitution)
+     vsids,
+     hash,             %% hash is used
+     init_phase,       %% initial phase value
+     use_phase,        %% used saved phase value
+     all_used,
+     max_conflicting,
+     seed,
+     %% globally "known" options
+     carry,
+     borrow,
+     overflow,
+     divz
+    ].
+
 
 memory() ->
     memory(new()).
@@ -1920,47 +2022,47 @@ memory(Vp) ->
 	    memory_clause_size,
 	    memory_symbol_size,
 	    memory_size],
-    [ {Key,varp_nif:info(Vp, Key)} || Key <- Keys].
+    [ {Key,varp_nif:getstat(Vp, Key)} || Key <- Keys].
     
 
 get_number_of_variables(Vp) ->
-    varp_nif:info(Vp, number_of_variables).
+    varp_nif:getstat(Vp, number_of_variables).
 
 get_number_of_bound_variables(Vp) ->
-    varp_nif:info(Vp, number_of_bound_variables).
+    varp_nif:getstat(Vp, number_of_bound_variables).
 
 get_number_of_unbound_variables(Vp) ->
-    varp_nif:info(Vp, number_of_unbound_variables).
+    varp_nif:getstat(Vp, number_of_unbound_variables).
 
 get_number_of_clauses(Vp) ->
-    varp_nif:info(Vp, number_of_clauses).
+    varp_nif:getstat(Vp, number_of_clauses).
 
 get_number_of_dead_clauses(Vp) ->
-    varp_nif:info(Vp, number_of_dead_clauses).
+    varp_nif:getstat(Vp, number_of_dead_clauses).
 
 get_number_of_conflicting_clauses(Vp) ->
-    varp_nif:info(Vp, number_of_conflicting_clauses).
+    varp_nif:getstat(Vp, number_of_conflicting_clauses).
 
 get_max_clause_length(Vp) ->
-    varp_nif:info(Vp, max_clause_length).
+    varp_nif:getstat(Vp, max_clause_length).
 
 get_clause_bcp_counter(Vp) ->
-    varp_nif:info(Vp, clause_bcp_counter).
+    varp_nif:getstat(Vp, clause_bcp_counter).
 
 get_clause_bcp_counter(Vp,n) ->
-    varp_nif:info(Vp, clause_n_counter);
+    varp_nif:getstat(Vp, clause_n_counter);
 get_clause_bcp_counter(Vp,2) ->
-    varp_nif:info(Vp, clause_2_counter);
+    varp_nif:getstat(Vp, clause_2_counter);
 get_clause_bcp_counter(Vp,3) ->
-    varp_nif:info(Vp, clause_3_counter);
+    varp_nif:getstat(Vp, clause_3_counter);
 get_clause_bcp_counter(Vp,dead) ->
-    varp_nif:info(Vp, clause_d_counter).
+    varp_nif:getstat(Vp, clause_d_counter).
 
 get_bcp_counter(Vp) ->
-    varp_nif:info(Vp, bcp_counter).
+    varp_nif:getstat(Vp, bcp_counter).
 
 get_conflict_counter(Vp) ->
-    varp_nif:info(Vp, conflict_counter).
+    varp_nif:getstat(Vp, conflict_counter).
 
 %% get the very latest binding
 -spec get_latest_binding(Vp::varp_nif:varp()) ->
@@ -2175,7 +2277,7 @@ bcpv_conflict(Vp, L, I, Vt, Acc) ->
 	    bcpv_(Vp,I,Vt,Acc)
     end.
 
-
+-ifdef(unused).
 bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
     ?dbg1("CCix=~w, Lj=~w\n", [CCix, Lj]),
     ?dbg1("~w=>~s\n", [-Lj,format_clause(V,CCix)]),
@@ -2205,6 +2307,7 @@ bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
 		    bcpv_(V, I, Vt, Acc)
 	    end
     end.
+-endif.
 
 %% Get bindings on all levels, assume a decision
 %% is present on (almost) all levels.
@@ -2223,6 +2326,7 @@ bcpv_bindings_(V, L, Lmax, Acc) when L =< Lmax ->
 bcpv_bindings_(_V, _L, _Lmax, Acc) ->
     lists:append(lists:reverse(Acc)).
 
+-ifdef(unused).
 %% format clause as [~w/0, ~w/1 ~w]
 format_clause(V, Cix) when is_integer(Cix) ->
     format_clause(V, get_clause(V, Cix, undefined,true));
@@ -2238,6 +2342,7 @@ format_lit(V, A) ->
 	true -> io_lib:format("~w/1", [A]);
 	undefined -> io_lib:format("~w", [A])
     end.
+-endif.
 
 %% eval all 2^N combinations of Vt
 %% bcpv_(_V,-1, _Vt, Acc) ->
@@ -2278,6 +2383,7 @@ vtl_(V, J, I, Vt, Acc) ->
 	    vtl_(V, J-1, I, Vt, [-E|Acc])
     end.
 
+-ifdef(unused).
 %% given number I set vars in Vt according to bit
 bindv(V, I, Vt) ->
     bindv(V, tuple_size(Vt), I, Vt).
@@ -2291,7 +2397,7 @@ bindv(V, J, I, Vt) ->
 		 -element(J,Vt)
 	 end,
     varp_nif:bind(V,Xj) andalso bindv(V,J-1,I,Vt).
-
+-endif.
 
 intersect_var(Vp, Var, Bs0) ->
     varp_nif:intersect_var(Vp, Var, Bs0, ?BINDING_AS_TUPLE).
@@ -2372,8 +2478,10 @@ bindings_to_map([A|As], Map) ->
 bindings_to_map([],Map) ->
     Map.
 
+-ifdef(unused).
 install_bindings0(V,Bs) ->
     install_bindings0(V,_Subst=true,Bs).
+-endif.
 
 install_bindings0(V,Subst,[Bt|Bs]) when is_tuple(Bt) ->
     case install_tuple_bindings_(V, 0, Subst, 1, Bt) of

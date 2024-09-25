@@ -25,6 +25,10 @@
 -export([reminder/3]).
 -export([min/3]).
 -export([max/3]).
+-export([bitwise_and/3]).
+-export([bitwise_or/3]).
+-export([bitwise_xor/3]).
+-export([bitwise_not/2]).
 %% compare
 -export([lt/3]).
 -export([lte/3]).
@@ -36,13 +40,12 @@
 -export([vadd/3, vadd/4]).
 -export([vadd_ci/5, vadd_co/4, vadd_co/5, vadd_ci_co/5, vadd_ci_co/6]).
 -export([vsub/3, vsub/4]).
--export([half_adder/3, half_adder/4, half_adder/5]).
--export([full_adder/3, full_adder/4, full_adder/5, full_adder/6]).
+-export([vlt/3]).
 -export([set_status/3]).
 -export([set_overflow/5]).
 
 -export([test/0]).
--compile(export_all).
+%% -compile(export_all).
 
 -include("varp.hrl").
 
@@ -98,9 +101,9 @@ add(Vp, A, B) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {[Ci,Cj|_],Cx} = vadd(Vp,Ax1,Bx1),
-    Carry = varp_nif:get_option(Vp, carry),
+    Carry = varp_nif:getopt(Vp, carry),
     set_status(Vp, Ci, Carry),
-    Overflow = varp_nif:get_option(Vp, overflow),
+    Overflow = varp_nif:getopt(Vp, overflow),
     set_overflow(Vp,Ct,Ci,Cj,Overflow),
     normalize(Ct,length(Cx),Cx).
 
@@ -116,9 +119,9 @@ subtract(Vp, A, B) ->
     Ax1 = vextend(At,Ax,An,Cn),
     Bx1 = vextend(Bt,Bx,Bn,Cn),
     {[Ci,Cj|_],Cx} = vsub(Vp,Ax1,Bx1),
-    Borrow = varp_nif:get_option(Vp, borrow),
+    Borrow = varp_nif:getopt(Vp, borrow),
     set_status(Vp,neg(Ci),Borrow),
-    Overflow = varp_nif:get_option(Vp, overflow),
+    Overflow = varp_nif:getopt(Vp, overflow),
     set_overflow(Vp,Ct,Ci,Cj,Overflow),
     normalize(Ct,length(Cx),Cx).
 
@@ -151,7 +154,7 @@ divide(Vp,Y,{uint,Zm,Zs}) ->
     Ys1 = vextend(Yt,Ys,Yn,K),
     Zs1 = vextend(uint,Zs,Zm,K),
     {Qs,_Rs,DivZero} = vdivrem(Vp,Ys1,Zs1),
-    DivZ = varp_nif:get_option(Vp, divz),
+    DivZ = varp_nif:getopt(Vp, divz),
     set_status(Vp,DivZero,DivZ),
 %%    normalize(Yt,K,Qs).
     normalize(Yt,Qs).
@@ -162,7 +165,7 @@ reminder(Vp, {uint,N,Ys},{uint,M,Zs}) ->
     Ys1 = vextend(uint,Ys,N,K),
     Zs1 = vextend(uint,Zs,M,K),
     {_Qs,Rs,DivZero} = vdivrem(Vp,Ys1,Zs1), %% fixme vrem! 
-    DivZ = varp_nif:get_option(Vp, divz),
+    DivZ = varp_nif:getopt(Vp, divz),
     set_status(Vp,DivZero,DivZ),
     {uint,K,Rs}.
 
@@ -272,6 +275,57 @@ ror(_Vp,A,B) ->
 	    {At,An,Ax3}
     end.
 
+bitwise_not(_Vp, {bool,A}) ->
+    {bool,neg(A)};
+bitwise_not(Vp, A) ->
+    {At,An,Ax} = varg(A),
+    Cx = varp_bitvec:bitwise_not(Vp, Ax),
+    {At,An,Cx}.
+
+bitwise_and(Vp, A, B) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    Cx = varp_bitvec:bitwise_and(Vp, Ax1, Bx1),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {bool,C1};
+       true ->
+	    {Ct,Cn,Cx}
+    end.
+
+bitwise_or(Vp, A, B) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    Cx = varp_bitvec:bitwise_or(Vp,Ax1,Bx1),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {bool,C1};
+       true ->
+	    {Ct,Cn,Cx}
+    end.
+
+bitwise_xor(Vp, A, B) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    Cx = varp_bitvec:bitwise_xor(Vp,Ax1,Bx1),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {bool,C1};
+       true ->
+	    {Ct,Cn,Cx}
+    end.
 
 %% A < B  <=>  A - B < 0 ?
 lt(Vp,{bool,A},{bool,B}) ->
@@ -517,39 +571,62 @@ vadd_(Vp, Xs, Ys, Zs, Ci, Co) ->
     {[Co|Cs], Xs}.
 
 vadd__(Vp, [X], [Y], [Z], Cs=[Ci|_], Co) ->
-    {X,Co} = full_adder(Vp, X, Y, Z, Ci, Co),
+    {X,Co} = varp_circuit:full_adder(Vp, X, Y, Z, Ci, Co),
     [Co|Cs];
 vadd__(Vp, [X|Xs], [Y|Ys], [Z|Zs], Cs=[Ci|_], Co) ->
-    {X,Cx} = full_adder(Vp, X, Y, Z, Ci),
+    {X,Cx} = varp_circuit:full_adder(Vp, X, Y, Z, Ci),
     vadd__(Vp, Xs, Ys, Zs, [Cx|Cs], Co).
 
-half_adder(Vp, Y, Z) ->
-    half_adder(Vp, varp_circuit:var(Vp), Y, Z).
+%% 
+%% Generate carry look-ahead
+%% then feed them into half address also using Gs
+%% G(i) = Y(i)Z(i)
+%% P(i) = Y(i)+Z(i)
+%% C(0) = FALSE | TRUE
+%% C(1) = G(0) + P(0)C(0)
+%% C(2) = G(1) + P(1)G(0)+P(1)P(0)C(0)
+%% C(3) = G(2) + P(2)G(1)+P(2)P(1)G(0)+P(2)P(1)P(0)C(0)
+%% C(4) = G(3) + P(3)G(2)+P(3)P(2)G(1)+P(3)P(2)P(1)G(0)+P(3)P(2)P(1)P(0)C(0)
+%% C(i+1) = G(i) + (P(i)*(Ci))
+%% S(0) = Y(0) xor Z(0)
+%% S(1) = Y(1) xor Z(1) xor C(1)
+%% S(i) = Y(i) xor Z(i) xor C(i)
+%%
+%% vadd_fast(Ys,Zs,C0,Bs) ->
+%%     %% io:format("vadd_fast: ~w, ~w\n", [Ys,Zs]),
+%%     {Gs,Bs1} = map_op('and',Ys,Zs,Bs),
+%%     {Ps,Bs2} = map_op('or',Ys,Zs,Bs1),
+%%     {Cs,Bs3} = carry_lookahead(Gs,Ps,{bool,C0},Bs2),
+%%     vadd_fast_sum(Ys,Zs,Cs,Bs3).
 
-half_adder(Vp, X, Y, Z) ->
-    half_adder(Vp, X, Y, Z, varp_circuit:var(Vp)).
+%% vadd_fast_sum(Ys,Zs,Cs,Bs) ->
+%%     vadd_fast_sum_(Ys,Zs,Cs,[],[],Bs).
 
-half_adder(Vp, X, Y, Z, Co) ->
-    S1 = varp_circuit:xor_gate(Vp, X, Y, Z),
-    Co1 = varp_circuit:and_gate(Vp, Co, Y, Z),
-    {S1, Co1}.
+%% vadd_fast_sum_([Yi|Ys],[Zi|Zs],[Ci|Cs],Sum,Ca,Bs) ->
+%%     {X1,Bs1} = operation('xor',{bool,Yi},{bool,Zi},Bs),
+%%     {{bool,X2},Bs2} = operation('xor',X1,Ci,Bs1),
+%%     vadd_fast_sum_(Ys,Zs,Cs,[X2|Sum],[Ci|Ca],Bs2);
+%% vadd_fast_sum_([],[],[Co],Sum,Ca,Bs) ->
+%%     {[Co|Ca],lists:reverse(Sum),Bs}.
 
-full_adder(Vp, Y, Z) ->
-    full_adder(Vp, varp_circuit:var(Vp), Y, Z).
+%% carry_lookahead(Gs,Ps,C0,Bs) ->
+%%     carry_lookahead_(Gs,Ps,1,length(Gs)+1,[C0],C0,Bs).
 
-full_adder(Vp, X, Y, Z) ->
-    full_adder(Vp, X, Y, Z, false).
+%% carry_lookahead_(_Gs,_Ps,I,I,Cs,_C0,Bs) ->
+%%     {lists:reverse(Cs),Bs};
+%% carry_lookahead_(Gs,Ps,I,N,Cs,C0,Bs) ->
+%%     G = lists:sublist(Gs,I),      %% [G(0),G(1),..G(i)]
+%%     P = lists:sublist(Ps,I),      %% [P(0),P(1),..P(i)]
+%%     {X0,Bs1} = all([C0|P],Bs),
+%%     {Ci,Bs1} = carry_ci(G,tl(P),[X0],Bs),
+%%     carry_lookahead_(Gs,Ps,I+1,N,[Ci|Cs],C0,Bs1).
 
-full_adder(Vp, X, Y, Z, Ci) ->
-    full_adder(Vp, X, Y, Z, Ci, varp_circuit:var(Vp)).
+%% carry_ci([Gn],[],Xs,Bs) ->
+%%     any([Gn|Xs], Bs);
+%% carry_ci([Gi|Gs],P,Xs,Bs) ->
+%%     {Xi,Bs1} = all([Gi|P],Bs),
+%%     carry_ci(Gs,tl(P),[Xi|Xs],Bs1).
 
-full_adder(Vp, X, Y, Z, Ci, Co) ->
-    S1 = varp_circuit:xor_gate(Vp,Y,Z),
-    S2 = varp_circuit:xor_gate(Vp,X,S1,Ci),  %% S2==X!
-    A1 = varp_circuit:and_gate(Vp,S1,Ci),
-    A2 = varp_circuit:and_gate(Vp,Y,Z),
-    Co1 = varp_circuit:or_gate(Vp,Co,A1,A2),
-    {S2, Co1}.
 
 %% Handle carry (Is it wise to backtrack over a Carry variable?)
 set_status(Vp, Ci, false) ->    %% never generate carry
@@ -580,7 +657,6 @@ vite_(Vp,I,[Y|Ys],[Z|Zs],Xs) ->
     vite_(Vp,I,Ys,Zs,[X|Xs]);
 vite_(_Vp,_I,[],[],Xs) ->
     lists:reverse(Xs).
-
 
 vshift_left(K,Xs) when K >= 0 ->
     lists:duplicate(K,false) ++ Xs.
@@ -755,13 +831,17 @@ i_norm(N,_S,Cx) -> {int,N,lists:reverse(Cx)}.
 
 %% TEST
 
-
 test() ->
-    true = test_half_adder(),
-    true = test_full_adder(),
     true = test_abs(3),
     true = test_negate(3),
-
+    true = test_uband(3),
+    true = test_iband(3),
+    true = test_ubor(3),
+    true = test_ibor(3),
+    true = test_ubxor(3),
+    true = test_ibxor(3),
+    true = test_ubnot(3),
+    true = test_ibnot(3),
     true = test_veq(3),
     true = test_vlt(3),
     true = test_umin(3),
@@ -788,7 +868,9 @@ test() ->
     true = test_umult(3),
     true = test_imult(3),
     true = test_udiv(4),
+    %% true = test_idiv(4),
     true = test_urem(4),
+    %% true = test_irem(4),
 
     %% test constant evaluation on bcp should result in model!
     
@@ -879,41 +961,6 @@ eval_u(Fun, N) ->
 	      end
       end, [], U).
 
-eval_half_adder() ->
-    lists:sort([ [{s, A xor B}, {co, A and B},{a,A},{b,B}] || 
-		   A <- [false,true],
-		   B <- [false,true]
-	       ]).
-
-test_half_adder() ->
-    Vp = varp_nif:new(#{xref => true}),
-    half_adder(Vp, 
-	       varp_circuit:var(Vp,s), 
-	       varp_circuit:var(Vp,a), 
-	       varp_circuit:var(Vp,b), 
-	       varp_circuit:var(Vp,co)),
-    varp_circuit:bt_match(Vp, eval_half_adder()).
-
-eval_full_adder() ->
-    lists:sort([begin
-		    S1 = A xor B,
-		    S2 = S1 xor Ci,
-		    [{s, S2}, {co, (S1 and Ci) or (A and B)},
-		     {a,A},{b,B}, {ci,Ci}] 
-		end || 
-		   A <- [false,true],
-		   B <- [false,true],
-		   Ci <- [false,true]
-	       ]).
-
-test_full_adder() ->
-    Vp = varp_nif:new(#{xref => true}),
-    full_adder(Vp, varp_circuit:var(Vp,s),
-	       varp_circuit:var(Vp,a),
-	       varp_circuit:var(Vp,b),
-	       varp_circuit:var(Vp,ci),
-	       varp_circuit:var(Vp,co)),
-    varp_circuit:bt_match(Vp, eval_full_adder()).
 
 
 add_symbol(Vp, {Type,_,Xs}, Var) ->
@@ -1051,7 +1098,7 @@ test_urem(N) ->
     io:format("urem ~w\n", [N]),
     test_uu(N, [{divz,false}], fun reminder/3, fun erlang:'rem'/2).
 
-test_ireminder(N) ->
+test_irem(N) ->
     io:format("irem ~w\n", [N]),
     test_iu(N, [{divz,false}], fun reminder/3, fun erlang:'rem'/2).
 
@@ -1088,6 +1135,40 @@ test_negate(N) ->
     io:format("negate ~w\n", [N]),
     test_i(N, [], fun negate/2, fun erlang:'-'/1).
 
+test_uband(N) ->
+    io:format("uband ~w\n", [N]),
+    test_uu(N, [],   fun bitwise_and/3, fun erlang:'band'/2).
+
+test_iband(N) ->
+    io:format("iband ~w\n", [N]),
+    test_ii(N, [], fun bitwise_and/3, fun erlang:'band'/2).
+
+test_ubor(N) ->
+    io:format("ubor ~w\n", [N]),
+    test_uu(N, [],   fun bitwise_or/3, fun erlang:'bor'/2).
+
+test_ibor(N) ->
+    io:format("ibor ~w\n", [N]),
+    test_ii(N, [],   fun bitwise_or/3, fun erlang:'bor'/2).
+
+test_ubxor(N) ->
+    io:format("ubxor ~w\n", [N]),
+    test_uu(N, [],   fun bitwise_xor/3, fun erlang:'bxor'/2).
+
+test_ibxor(N) ->
+    io:format("ibxor ~w\n", [N]),
+    test_ii(N, [],   fun bitwise_xor/3, fun erlang:'bxor'/2).
+
+test_ubnot(N) ->
+    io:format("ubnot ~w\n", [N]),
+    Mask = (1 bsl N) - 1,
+    test_u(N, [],   fun bitwise_not/2, 
+	   fun(X) -> (bnot X) band Mask end).
+
+test_ibnot(N) ->
+    io:format("ibnot ~w\n", [N]),
+    test_i(N, [],   fun bitwise_not/2, fun erlang:'bnot'/1).
+    
 test_ult(N) ->
     io:format("ult ~w\n", [N]),
     test_uu(N, [], fun lt/3, fun erlang:'<'/2).

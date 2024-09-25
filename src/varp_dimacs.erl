@@ -143,15 +143,6 @@ add_literals([L|Ls],Ln,Acc) ->
 add_literals([],_Ln,Acc) ->
     {false, Acc}.
 
-%% add_literals([L|Ls], Acc) ->
-%%     case list_to_integer(L) of
-%% 	0 -> {true,Acc};
-%% 	I when I < 0 -> add_literals(Ls, [{'not',{p,x,[-I]}}|Acc]);
-%% 	I -> add_literals(Ls, [{p,x,[I]}|Acc])
-%%     end;
-%% add_literals([], Acc) ->
-%%     {false, Acc}.
-
 %% SAT format
 sat(_Bin,_Sect, L, _Vars) ->
     {error,{L,?MODULE,not_implemented}}.
@@ -177,14 +168,14 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 	    Sect1 = scan_section(Comment,Sect),
 	    to_snf_(Bin1,Sect1,Ln+1,Ts0,CLs);
 	{ok,Line,Bin1} ->
-	    case varp_scan:string(Line) of
-		{ok,Ts1,Ln1} ->
+	    case varp:tokens(Line) of
+		{ok,Ts1} ->
 		    Ts2 = Ts0 ++ Ts1,
 		    case has_eol(Ts2) of
 			true ->
 			    case varp_snf:parse(Ts2) of
 				{ok,CL} ->
-				    to_snf_(Bin1,Sect,Ln1,[],[CL|CLs]);
+				    to_snf_(Bin1,Sect,Ln+1,[],[CL|CLs]);
 				{error,{Ln1,Mod,Message}} ->
 				    {error,{Ln1-1+Ln,Mod,Message}};
 				Error ->
@@ -192,14 +183,14 @@ to_snf_(Bin,Sect,Ln,Ts0,CLs) ->
 			    end;
 			false ->
 			    %% check if line is terminated by 0
-			    case varp_snf:parse(Ts2++[{'.',Ln1}]) of
+			    case varp_snf:parse(Ts2++[{'.',Ln}]) of
 				{ok,CL} ->
 				    case lists:last(CL) of
 					0 ->
-					    to_snf_(Bin1,Sect,Ln1,[],
+					    to_snf_(Bin1,Sect,Ln,[],
 						    [(CL--[0])|CLs]);
 					_ ->
-					    to_snf_(Bin1,Sect,Ln1,Ts2,CLs)
+					    to_snf_(Bin1,Sect,Ln,Ts2,CLs)
 				    end;
 				{error,{Ln1,Mod,Message}} ->
 				    {error,{Ln1-1+Ln,Mod,Message}};
@@ -294,8 +285,8 @@ binary_line(Bin) ->
 %%    order <li> ... .
 %% 
 scan_section(Line,Sect=#{ decls := Decls, order := Order, syms := Sym }) ->
-    case varp_scan:string(Line) of
-	{ok,Ts=[{symbol,_,_}|_],_} ->
+    case varp:tokens(Line) of
+	{ok,Ts=[{symbol,_,_}|_]} ->
 	    case parse_symbol(Ts,{identifier,1,"is"}) of
 		{Symbol,[{decnum,_,Num}]} ->
 		    I = list_to_integer(Num),
@@ -305,7 +296,7 @@ scan_section(Line,Sect=#{ decls := Decls, order := Order, syms := Sym }) ->
 		_ ->
 		    Sect
 	    end;
-	{ok,[{declare,_}|Ts=[{symbol,_,_}|_]],_} ->
+	{ok,[{declare,_}|Ts=[{symbol,_,_}|_]]} ->
 	    case parse_symbol(Ts,{':',1}) of
 		{Symbol,[{decnum,_,Size},{'/',_},{signed,_}]} ->
 		    Sz = list_to_integer(Size),

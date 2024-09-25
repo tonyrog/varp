@@ -1,5 +1,5 @@
 %% -*- erlang -*-
-%% VARP scanner
+%% VARP scanner (case insensitive connectives)
 %%
 
 Definitions.
@@ -43,16 +43,16 @@ rank                : {token,{'rank',TokenLine}}.
 degree              : {token,{'degree',TokenLine}}.
 random              : {token,{'random',TokenLine}}.
 identity            : {token,{'identity',TokenLine}}.
-true                : {token,{'true',TokenLine}}.
-false               : {token,{'false',TokenLine}}.
-and                 : {token,{'and',TokenLine}}.
-or                  : {token,{'or',TokenLine}}.
-xor                 : {token,{'xor',TokenLine}}.
-not                 : {token,{'not',TokenLine}}.
-imp                 : {token,{imp,TokenLine}}.
-implies             : {token,{implies,TokenLine}}.
-equ                 : {token,{equ,TokenLine}}.
-equivalent          : {token,{equivalent,TokenLine}}.
+[Tt][Rr][Uu][Ee]    : {token,{'true',TokenLine}}.
+[Ff][Aa][Ll][Ss][Ee] : {token,{'false',TokenLine}}.
+[Aa][Nn][Dd]        : {token,{'and',TokenLine}}.
+[Oo][Rr]            : {token,{'or',TokenLine}}.
+[Xx][Oo][Rr]        : {token,{'xor',TokenLine}}.
+[Nn][Oo][Tt]        : {token,{'not',TokenLine}}.
+[Ii][Mm][Pp]        : {token,{imp,TokenLine}}.
+[Ii][Mm][Pp][Ll][Ii][Ee][Ss]  : {token,{implies,TokenLine}}.
+[Ee][Qq][Uu]        : {token,{equ,TokenLine}}.
+[Ee][Qq][Uu][Ii][Vv][Aa][Ll][Ee][Nn][Tt] : {token,{equivalent,TokenLine}}.
 return              : {token,{return,TokenLine}}.
 A                   : {token,{'A',TokenLine}}.
 E                   : {token,{'E',TokenLine}}.
@@ -72,9 +72,9 @@ PARITY              : {token,{'PARITY',TokenLine}}.
 ODD                 : {token,{'ODD',TokenLine}}.
 EVEN                : {token,{'EVEN',TokenLine}}.
 %% builtin "logic" functions
-abs                 : {token,{'abs',TokenLine}}.
-min                 : {token,{'min',TokenLine}}.
-max                 : {token,{'max',TokenLine}}.
+[Aa][Bb][Ss]        : {token,{'abs',TokenLine}}.
+[Mm][Ii][Nn]        : {token,{'min',TokenLine}}.
+[Mm][Aa][Xx]        : {token,{'max',TokenLine}}.
 
 "(\^.|\.|[^\"])*"   : begin
 			  S = lists:sublist(TokenChars,2,TokenLen-2),

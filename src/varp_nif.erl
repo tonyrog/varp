@@ -11,8 +11,9 @@
 
 -export([new/1]).
 -export([clone/2]).
--export([info/2, get_option/2]).
--export([config/3, set_option/3]).
+-export([getopt/2, getopt/3]).
+-export([setopt/3, setopt/4]).
+-export([getstat/2]).
 -export([add_variable/1]).
 -export([add_variable/2]).
 -export([add_variable/3]).
@@ -121,6 +122,52 @@
 		   max_level | max_bound | min_level | 
 		   number_of_conflicts | number_of_propagations |
 		   number_of_decisions | number_of_bcp.
+-type option_key() ::
+	qtype |       %% queue strategy in bcp
+	xref |        %% use cross references
+	hash |        %% install hash over clauses
+	init_phase |  %% initial phase
+	use_phase |   %% use phase saving
+	seed          %% random seed
+	.
+
+-type stat_key() :: 
+	level |     %% current level
+	size  |     %% number of variables
+	bcp_counter |  %% number of bcp 
+	number_of_bcps |
+	conflict_counter | %% number of conflicts
+	number_of_conflicts |
+	number_of_propagations |
+	number_of_decisions |
+	clause_n_counter |
+	clause_m_counter |
+	clause_2_counter |
+	clause_3_counter |
+	clause_d_counter |
+	mark_counter |
+	decision_counter |
+	number_of_conflicting_clauses |
+	number_of_variables |
+	number_of_clauses |
+	number_of_dead_clauses |
+	number_of_learnt_clauses |
+	number_of_bound_variables |
+	number_of_subst_variables |
+	number_of_unbound_variables |
+	max_level | %% get deepest level (on reset)
+	min_level | %% get shallowest level (on reset)
+	max_bound | %% number of bound variables (since last, and reset)
+	memory_literal_size |
+	memory_variable_size |
+	memory_clause_size |
+	memory_symbol_size |
+	memory_size |
+	version |
+	literal_size |
+	literal_integer |
+	value_packing.
+
 
 -export_type([varp/0]).
 -export_type([variable/0, literal/0, symbol/0]).
@@ -141,7 +188,7 @@ init() ->
 	#{
 	  %% inital variable table size
 	  size  => unsigned(),
-	  %% use lifo/fifo strategy in bcp
+	  %% use queue strategy in bcp
 	  qtype => lifo|fifo|recursive,
 	  %% use cross references
 	  xref  => boolean(),
@@ -172,10 +219,16 @@ new(Options) when is_map(Options) ->
 clone(_Vp, Options) when is_map(Options) ->
     ?nif_stub().
 
-get_option(Vp, Key) ->
-    info(Vp, Key).
+-spec getopt(Vp::varp(), Key::option_key()) ->
+	  (integer()|atom()|string()).
+	  
+getopt(_Vp, Key) when is_atom(Key); is_list(Key) ->
+    ?nif_stub().
+getopt(_Vp, Key, _System) when is_atom(Key); is_list(Key) ->
+    ?nif_stub().
 
-info(_Vp, Key) when is_atom(Key); is_list(Key) ->
+-spec getstat(Vp::varp(), Key::stat_key()) -> integer() | string().
+getstat(_Vp, Key) when is_atom(Key); is_list(Key) ->
     ?nif_stub().
 
 %% set config
@@ -183,10 +236,14 @@ info(_Vp, Key) when is_atom(Key); is_list(Key) ->
 %%    permanent       -- number of clauses that are permanent
 %%    max_conflicting -- max number of conflicting <= MAX_CONFLICTING
 %% 
-set_option(Vp, Key, Value) ->
-    config(Vp, Key, Value).
-
-config(_Vp, Item, _Value) when is_atom(Item) ->
+-spec setopt(Vp::varp(), Key::option_key(), Value::(integer()|atom())) ->
+	  ok.
+setopt(_Vp, _Key, _Value) ->
+    ?nif_stub().
+-spec setopt(Vp::varp(), Key::option_key(), Value::(integer()|atom()),
+	     System::(user|system)) ->
+	  ok.
+setopt(_Vp, _Key, _Value, _System) ->
     ?nif_stub().
 
 -spec add_variable(Vp::varp()) -> integer().

@@ -1,6 +1,11 @@
 // n=27 saturate  order=-rank assoc=left  UNSAT  3:35
 // n=28 saturate  order=-rank assoc=left  UNSAT  14:28
-// ...
+// n=29 saturate  restart=0.2  UNSAT 65.09s
+// n=30 saturate  restart=0.2  UNSAT 284.02s
+// n=31 saturate  restart=0.15  UNSAT 1494.54s
+// n=32 saturate  restart=0.05  UNSAT 2910.78s
+// n=33 saturate  restart=0.1  SAT  443.05s
+// n=34 saturate  restart=0.1  SAT  327.09s
 // n=35 saturate  order=-rank assoc=left  SAT  14:28
 // n=36 saturate  order=-rank assoc=left  SAT  2:46
 //

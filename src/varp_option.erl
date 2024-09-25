@@ -7,8 +7,7 @@
 
 -module(varp_option).
 
--export([getopt/2]).
--export([setopt/4]).
+-export([set_option/4]).
 -export([usage/1, usage/2, usage/3]).
 
 -export([process_args/4]).
@@ -29,6 +28,9 @@
 %%  --long=123
 %%  -l 123
 %%  -l123
+%%
+%%  short boolean (true is part of enum)
+%%   -l -a  | -la | -l1 -a1 | -l=1 -a=1
 %%
 
 %% Given a option list construct a map
@@ -81,7 +83,7 @@ options_spec_list(Spec) ->
 process_args(["--"++OptName|As],Spec,Map,Bound) ->
     case get_long_opt(OptName,Spec) of
 	false -> usage(OptName, Spec);
-	{#{ key:=help },_Val} -> usage(Spec);
+	{#{ key:=help }, Val} -> usage(help, Val, none);
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=Type },Val} ->
 	    case match_value(Type,Val,As) of
@@ -96,11 +98,27 @@ process_args(["-"++OptName|As],Spec,Map,Bound) ->
 	false ->
 	    case get_short_opt(OptName,Spec) of
 		false -> usage(OptName, Spec);
-		{#{ key:=help },_Val} -> usage(Spec);
-		{#{ key:=version },_Val} -> version();
-		{#{ key:=Key,spec:=Type },Val} ->
-		    case match_value(Type,Val,As) of
-			false -> usage(Spec);
+		{#{ key:= help }, Val} -> usage(help, Val, none);
+		{#{ key:= version },_Val} -> version();
+		{#{ key:=Key,spec:=Type},Val} ->
+		    MVal = match_value(Type,Val,As),
+%%		    io:format("match_value: optname=~s, spec=~p val=~p as=~p mval=~p\n", [OptName, Type,Val,As,MVal]),
+		    case MVal of
+			false -> 
+			    %% check if short spec has bool true value
+			    case spec_has_true_value(Type) of
+				true ->
+				    Map1 = insert_value(Key,true,Type,Map),
+				    case tl(OptName) of
+					[] -> 
+					    process_args(As,Spec,Map1,Bound);
+					OptName1 ->
+					    process_args(["-"++OptName1|As],
+							 Spec,Map1,Bound)
+				    end;
+				false ->
+				    usage(Spec)
+			    end;
 			{ok,Value,As1} ->
 			    process_args(As1,Spec,
 					 insert_value(Key,Value,Type,Map),
@@ -119,12 +137,13 @@ process_args(["-"++OptName|As],Spec,Map,Bound) ->
 	    end
     end;
 process_args([Var,"=",Value|As],Spec,Map,Bound) ->
+    V = make_var(Var),
     try list_to_integer(Value) of
 	N ->
-	    process_args(As,Spec,Map,[{Var,N}|Bound])
+	    process_args(As,Spec,Map,[{V,N}|Bound])
     catch
 	error:badarg ->
-	    process_args(As,Spec,Map,[{Var,Value}|Bound])
+	    process_args(As,Spec,Map,[{V,Value}|Bound])
     end;
 process_args([A|As],Spec,Map,Bound) ->
     case string:chr(A,$=) of
@@ -140,14 +159,25 @@ process_args([A|As],Spec,Map,Bound) ->
 			end;
 		   true -> {Value0,As}
 		end,
-	    %% V = list_to_atom(Var),
+	    V = make_var(Var),
 	    case string:to_integer(Value) of
-		{N,""} -> process_args(As1,Spec,Map,[{Var,N}|Bound]);
-		_ -> process_args(As1,Spec,Map,[{Var,Value}|Bound])
+		{N,""} -> process_args(As1,Spec,Map,[{V,N}|Bound]);
+		_ -> process_args(As1,Spec,Map,[{V,Value}|Bound])
 	    end
     end;
 process_args([], _Spec, Map, Bound) ->
     {[], Map, Bound}.
+
+spec_has_true_value({enum,Es}) ->
+    lists:member({"true", true}, Es);
+spec_has_true_value(_) ->
+    false.
+
+
+make_var(String) when is_list(String) ->
+    list_to_binary(String);
+make_var(String) when is_binary(String) ->
+    String.
 
 insert_value(Key, Value, {multiple,_Type}, Map) ->
     List = maps:get(Key, Map, []),
@@ -274,12 +304,12 @@ match_val_({enum,List}, Val) when is_list(List) ->
     end;
 match_val_({list,variable},Val) ->
     %% trick
-    {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
+    {ok,Ts,_} = varp:tokens("{"++Val++"}"),
     {ok,{_Decls,{vec,VarList}}} = varp_parse:parse(Ts),
     {ok, VarList};
 match_val_({list,literal},Val) ->
     %% trick
-    {ok,Ts,_} = varp_scan:string("{"++Val++"}"),
+    {ok,Ts,_} = varp:tokens("{"++Val++"}"),
     {ok,{_Decls,{vec,LiteralList}}} = varp_parse:parse(Ts),
     {ok, LiteralList};
 match_val_({list,Spec}, Val) ->
@@ -331,6 +361,28 @@ print_help({_Key,I=#{ long:=LongOpt, spec:=TypeSpec,
 print_help({Key,#{ key := Key }}) -> %% ignore internal options
     ok.
 
+plugin_help(Name) ->
+    case application:get_env(varp, plugins) of
+	undefined -> 
+	    ok;
+	{ok,Ps} ->
+	    lists:foreach(
+	      fun({_,PluginName,Plugin}) ->
+		      if (Name =:= all) orelse (Name =:= PluginName) ->
+			      io:format("PLUGIN ~s OPTIONS\n", [PluginName]),
+			      OptionList = Plugin:options(),
+			      Spec1 = varp_option:options_spec(OptionList),
+			      lists:foreach(
+				fun(Opt) -> 
+					print_help(Opt) 
+				end, key_options(Spec1));
+			 true ->
+			      ok
+		      end
+	      end, Ps)
+    end.
+    
+
 usage(Spec) ->
     io:format("varp: usage: varp [<plugin> [Options]]* <bindings>* <files>*\n"),
     io:format("OPTIONS\n"),
@@ -338,21 +390,8 @@ usage(Spec) ->
     lists:foreach(fun(Opt) -> 
 			  print_help(Opt) end,
 		  key_options(Spec)),
-    case application:get_env(varp, plugins) of
-	undefined -> 
-	    ok;
-	{ok,Ps} -> 
-	    lists:foreach(
-	      fun({_,PluginName,Plugin}) ->
-		      io:format("PLUGIN ~s OPTIONS\n", [PluginName]),
-		      OptionList =Plugin:options(),
-		      Spec1 = varp_option:options_spec(OptionList),
-		      lists:foreach(
-			fun(Opt) -> 
-				print_help(Opt) 
-			end, key_options(Spec1))
-	      end, Ps)
-    end,
+    %% plugin_help(all).
+    plugin_help(none),
     halt(1).
 
 usage(Opt,_Spec) when is_list(Opt) ->
@@ -374,6 +413,14 @@ usage(Key,Value,Spec) when is_atom(Key) ->
 	false ->
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
+	#{key := help } -> 
+	    if Value =:= none ->
+		    io:format("varp: help\n"),
+		    usage(Spec);
+	       true ->
+		    io:format("varp: help for ~s\n", [Value]),
+		    plugin_help(Value)
+	    end;
 	#{long:=Long,spec:=TypeSpec} ->
 	    io:format("varp: bad argument ~s to option '~s', allowed values are ~s\n", 
 		      [Value,Long,format_spec(TypeSpec)]),
@@ -416,7 +463,7 @@ default_opts_([#{ key := Key, default := Value}|OptionInfoList], OptMap) ->
 default_opts_([], OptMap) ->
     OptMap.
 
-setopt(Key, Value, OptMap, OptSpec) when is_atom(Key) ->
+set_option(Key, Value, OptMap, OptSpec) when is_atom(Key) ->
     ?dbg0("key=~w, value=~w\n", [Key,Value]),
     ?dbg0("OptSpec = ~p\n", [OptSpec]),
 
@@ -613,9 +660,3 @@ is_string([C|Cs]) when is_integer(C), C >= 0, C =< 16#ffffffff ->
     is_string(Cs);
 is_string([]) -> true;
 is_string(_) -> false.
-
-%%
-%% Get options
-%%
-getopt(Key, OptMap) ->
-    ?GETOPT(Key, OptMap).

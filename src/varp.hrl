@@ -46,9 +46,6 @@
 -define(CANCEL,       ?ABORT(user)).
 -define(ERROR,        ?ABORT(error)).
 
--define(GETOPT(Key, Map), maps:get((Key),(Map))).
--define(GETOPT_BS(Bs, Key), ?GETOPT((Key),(Bs)#bs.option)).
-
 -define(LOG_LEVEL_NONE, -1).
 -define(LOG_LEVEL_EMERGENCY, 0).
 -define(LOG_LEVEL_ALERT,     1).
@@ -116,6 +113,14 @@
 -type plit() ::
 	#{ {atom(),ptype(),psize()} => literal()|[literal()] }.
 
+-type cpdecl() :: term().  %% fixme
+-record(circuit,
+	{
+	 name :: binary(),  %% circuit name
+	 params = [] :: [{in,[cpdecl()]}|{out,[cpdecl()]}|{return,cpdecl()}],
+	 defs = []
+	}).
+
 -record(bs,
 	{
 	 option = #{} :: map(), %% the options
@@ -132,6 +137,7 @@
 	 %% Def = {[v1,..vn],F(v1...vn)}
 	 defs=#{} :: #{ pred() => {[atom()],term()}},
 	 decls=#{} :: pdecl(),
+	 circuits=#{} :: #{ binary() => #circuit{} },
 	 subst=[],             %% var/function substitution(s)
 	 literals=#{} :: #{ atom() => true },
 	 assert=[],            %% list of assertions [A1,...An]

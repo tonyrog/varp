@@ -15,6 +15,7 @@
 -export([bitwise_or/3]).
 -export([bitwise_and/3]).
 -export([bitwise_xor/3]).
+-export([bitwise_equ/3]).
 -export([map_op/4]).
 -export([foldl_op/4, foldr_op/4, fold_op/4]).
 
@@ -76,6 +77,12 @@ bitwise_xor(Vp, [Y|Ys], [Z|Zs]) ->
     X = varp_circuit:xor_gate(Vp, Y, Z),
     [X | bitwise_xor(Vp, Ys, Zs)];
 bitwise_xor(_Vp, [], []) ->
+    [].
+
+bitwise_equ(Vp, [Y|Ys], [Z|Zs]) ->
+    X = varp_circuit:equ_gate(Vp, Y, Z),
+    [X | bitwise_equ(Vp, Ys, Zs)];
+bitwise_equ(_Vp, [], []) ->
     [].
 
 %% Apply same operator on two vectors

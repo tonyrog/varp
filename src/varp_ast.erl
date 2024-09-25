@@ -25,12 +25,8 @@ build(Tree, Vp, State) ->
 	true -> true;
 	false -> false;
 	{'p', Sym, Args}   -> var(Sym, Args, Vp, State);
-	{'not', A}         -> unary('not',A,Vp,State);
-	{'and', A1, A2}    -> binary('and',A1,A2,Vp,State);
-	{'or', A1, A2}     -> binary('or',A1,A2,Vp,State);
-	{'imp', A1, A2}    -> binary('imp',A1,A2,Vp,State);
-	{'xor', A1, A2}    -> binary('xor',A1,A2,Vp,State);
-	{'equ', A1, A2}    -> binary('equ',A1,A2,Vp,State);
+	{lop, Op, A}       -> unary(Op,A,Vp,State);
+	{lop, Op, A,B}     -> binary(Op,A,B,Vp,State);
 	{'ALL',As}         -> nary('all',As,Vp,State);
 	{'ANY',As}         -> nary('any',As,Vp,State);
 	{'NONE',As}        -> nary('none',As,Vp,State);
@@ -126,9 +122,9 @@ cond_bin(Op, L, R, _Vp, State) ->
     Ret.
 
 var_term({p,V,[]}) ->
-    {atom_to_list(V), []};
+    {V, []};
 var_term({p,V,Args}) ->
-    {atom_to_list(V), [to_term(A) || A <- Args]}.
+    {V, [to_term(A) || A <- Args]}.
 
 %% convert tree to term form
 

@@ -38,13 +38,13 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     ?dbg("Decls = ~p\n", [Bs#bs.decls]),
     ?dbg("Var = ~p\n", [Bs#bs.vs]),
     T = case maps:get(type, Param) of
-	    undefined -> varp_formula:getopt(Bs, proof_output);
+	    undefined -> varp_nif:getopt(Bs#bs.vp, proof_output);
 	    Type -> Type
 	end,
     F = case maps:get(file, Param) of
 	    "" ->
-		File = varp_formula:getopt(Bs, proof_file),
-		Dir  = varp_formula:getopt(Bs, outdir),
+		File = varp_nif:getopt(Bs#bs.vp, proof_file),
+		Dir  = varp_nif:getopt(Bs#bs.vp, outdir),
 		if Dir =:= "" -> File;
 		   true -> filename:join(Dir, File)
 		end;
@@ -140,7 +140,7 @@ read_text_clause(Fd, Bs) ->
 	    {c, Text};
 	{ok,Line} ->
 	    %% io:format("~s", [Line]),
-	    case varp_scan:string(binary_to_list(Line)) of
+	    case varp:tokens(binary_to_list(Line)) of
 		{ok,[{identifier,_Ln,"d"}|Ts],Ln1} ->
 		    text_clause(Fd, Bs, Ts, Ln1, [], d);
 		{ok,[{identifier,_Ln,"a"}|Ts],Ln1} ->
@@ -154,7 +154,7 @@ read_text_clause(Fd, Bs, Acc, Type) ->
     case file:read_line(Fd) of
 	eof -> eof;
 	{ok,Line} ->
-	    case varp_scan:string(binary_to_list(Line)) of
+	    case varp:tokens(binary_to_list(Line)) of
 		{ok,Ts,Ln1} ->
 		    text_clause(Fd, Bs, Ts, Ln1, Acc, Type)
 	    end

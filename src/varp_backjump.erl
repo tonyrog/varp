@@ -177,15 +177,15 @@ options() ->
 	 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     MaxConflicting = maps:get(max_conflicts,Param),
-    varp:config(Bs#bs.vp, max_conflicting, MaxConflicting),
-    varp:config(Bs#bs.vp, xref, false), %% not while building clauses
+    varp_nif:setopt(Bs#bs.vp, max_conflicting, MaxConflicting),
+    varp_nif:setopt(Bs#bs.vp, xref, false), %% not while building clauses
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     _KeepSize  = keep_size(Bs, Param, MaxLearned),
-    set_bcp_counter(Bs, varp:info(Bs#bs.vp, bcp_counter)),
+    set_bcp_counter(Bs, varp:getstat(Bs#bs.vp, bcp_counter)),
     start_restart_timer(Param),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
-    M0  = #m { method = varp_formula:getopt(Bs1,method),
+    M0  = #m { method = varp_nif:getopt(Bs1#bs.vp,method),
 	       max = maps:get(max, Param) },
     init(Bs1, Param, MaxLearned, M0).
 
@@ -420,7 +420,7 @@ reorder_(Bs,  N, Reorder) ->
 	    Timeout = proplists:get_value(timeout,Opts,infinity),
 	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
 	_ ->
-	    Seed = varp_formula:getopt(Bs,seed),
+	    Seed = varp_nif:getopt(Bs#bs.vp,seed),
 	    varp:order_sort(Bs#bs.vp,random,Seed)
     end.
 
@@ -479,7 +479,7 @@ restart_by_counter(Bs, Param) ->
     case maps:get(restart_counter,Param) of
 	0 -> false;
 	RestartCounter ->
-	    BcpCounter = varp:info(Bs#bs.vp, bcp_counter),
+	    BcpCounter = varp:getstat(Bs#bs.vp, bcp_counter),
 	    PrevCounter = get_bcp_counter(Bs),
 	    if (BcpCounter - PrevCounter) >= RestartCounter ->
 		    set_bcp_counter(Bs, BcpCounter),
@@ -583,11 +583,11 @@ display_stat(Bs,Param) ->
 		      [counters:get(Bs#bs.counters,
 				    ?COUNTER_MINIMIZE_COUNT)]),
 	    io:format("number_of_marks: ~w\n", 
-		      [varp:info(Bs#bs.vp, mark_counter)]),
+		      [varp:getstat(Bs#bs.vp, mark_counter)]),
 	    io:format("number_of_decisions: ~w\n", 
-		      [varp:info(Bs#bs.vp, decision_counter)]),
+		      [varp:getstat(Bs#bs.vp, decision_counter)]),
 	    io:format("number_of_conflicts: ~w\n", 
-		      [varp:info(Bs#bs.vp, conflict_counter)]),
+		      [varp:getstat(Bs#bs.vp, conflict_counter)]),
 	    ok;
 	delta ->
 	    io:format("Backjump deltas used\n", []),

@@ -65,8 +65,9 @@ create(Parent, {textctrl, Param}, NameMap) ->
     Type = maps:get(type, Param, string),
     Min = maps:get(min, Param, undefined),
     Max = maps:get(max, Param, undefined),
-    W = wxTextCtrl:new(Parent, maps:get(id, Param, ?wxID_ANY),
-		       get_options(Param)),
+    ID = maps:get(id, Param, ?wxID_ANY),
+    Options = get_options(Param),
+    W = wxTextCtrl:new(Parent, ID, Options),
     connect(Param, W),
     {W,add_name(Param, W, #wi{type=Type,min=Min,max=Max}, NameMap)};
 create(Parent, {spinctrl, Param}, NameMap) ->
@@ -134,7 +135,7 @@ create(Parent,{decimal,Param},NameMap) ->
 	{vertical,#{ label=>maps:get(label,Param,"") },
 	 [
 	  {textctrl,#{ type => decimal,
-		       options => [{value,maps:get(value,Param,0)},
+		       options => [{value,maps:get(value,Param,"")},
 				   {style,
 				    maps:get(style,Param,default)}
 				  ],
@@ -219,11 +220,13 @@ choices([Name | Choices], I, Names, Enums) ->
 choices([], _I, Names, Enums) ->
     {lists:reverse(Names), lists:reverse(Enums)}.
 
+-ifdef(not_used).
 set_enums(Widget, Enums) ->
     lists:foreach(
       fun({I,Enum}) ->
 	      wxControlWithItems:setClientData(Widget,I,Enum)
       end, Enums).
+-endif.
 
 add_name(Param, Widget, WI, NameMap) ->
     case maps:get(name, Param, undefined) of
@@ -300,11 +303,11 @@ part_f([]) -> true;   %% partial ok
 part_f(_) -> false.
 
 
-text_edit(Codes) ->
-    text_fwd(0, [], [],  Codes).
+%%text_edit(Codes) ->
+%%    text_fwd(0, [], [],  Codes).
 
-text_edit(Text, Codes) ->
-    text_fwd(0, [], Text, Codes).
+%% text_edit(Text, Codes) ->
+%%    text_fwd(0, [], Text, Codes).
 
 text_edit(Pos, Text, Codes) ->
     text_fwd(Pos, [], Text, Codes).
@@ -316,8 +319,8 @@ text_fwd(I, Bs, [A|As], Codes) ->
 %%text_fdw(_, [], As, Codes) ->
 %%    text_ed(Code, Bs, As).
 
-text_ed(Codes) ->
-    text_ed(Codes, [], []).
+%% text_ed(Codes) ->
+%%    text_ed(Codes, [], []).
 
 text_ed([?WXK_BACK|Cs], [_|Bs], As) ->
     text_ed(Cs, Bs, As);

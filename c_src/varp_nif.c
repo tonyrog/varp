@@ -30,6 +30,8 @@
 #include "dynarr.h"
 #include "dynvar.h"
 #include "dynvec.h"
+// hash of atoms
+#include "atom_hash.h"
 
 #include "xnif_funcs.h"
 
@@ -221,11 +223,14 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
 #define NIF_LIST \
     NIF( "new",                 1,  varp_new )	 \
     NIF( "clone",               2,  varp_clone ) \
-    NIF( "info",                2,  varp_info )	  \
-    NIF( "config",              3,  varp_config )	\
-    NIF( "add_variable",        1,  varp_add_variable ) \
-    NIF( "add_variable",        2,  varp_add_variable ) \
-    NIF( "add_variable",        3,  varp_add_variable ) \
+    NIF( "getopt",              2,  varp_getopt )	 \
+    NIF( "getopt",              3,  varp_getopt )	 \
+    NIF( "setopt",              3,  varp_setopt )	 \
+    NIF( "setopt",              4,  varp_setopt )	 \
+    NIF( "getstat",             2,  varp_getstat )       \
+    NIF( "add_variable",        1,  varp_add_variable )  \
+    NIF( "add_variable",        2,  varp_add_variable )  \
+    NIF( "add_variable",        3,  varp_add_variable )  \
     NIF( "add_variables",       2,  varp_add_variables ) \
     NIF( "add_variables",       3,  varp_add_variables ) \
     NIF( "add_variables",       4,  varp_add_variables ) \
@@ -594,6 +599,7 @@ typedef struct _subscription_t {   // :dlink_t in dlist_t
 
 #define NUM_CSET 4
 
+
 typedef struct _varp_config_t
 {
     qtype_t  qtype;      // literal queue is fifo/lifo/recursive
@@ -628,8 +634,15 @@ typedef struct _varp_clone_opt_t {
     bool_t queue;
 } varp_clone_opt_t;
 
+typedef struct _varp_option_t {
+    ERL_NIF_TERM key;    // atom
+    uint8_t*     data;   // binary data
+    size_t       size;   // binary len
+} varp_option_t;
+
 typedef struct _varp_t {
     varp_config_t opt;        // varp configs
+    dynvar(varp_option_t*, xopt); // external options stored here
     uint32_t cnum[NUM_CSET];  // number of clauses (not counting holes)
     uint32_t coffs[NUM_CSET]; // offset for clause iterator
     uint32_t cfree[NUM_CSET]; // number of clauses marked as free
@@ -744,10 +757,11 @@ ErlNifFunc varp_funcs[] =
 #define LOAD_ATOM_STRING(name,string)			\
     atm_##name = enif_make_atom(env,string)
 
-
 #define EQUAL_KEY(env, name, arg)				\
     (((arg) == ATOM(name)) || (equal_string(env, ATOM(name), arg)))
 
+DECL_ATOM(user);
+DECL_ATOM(system);
 // Exceptions
 DECL_ATOM(arg0);
 DECL_ATOM(arg1);
@@ -879,6 +893,138 @@ DECL_ATOM(memory_size);
 #define VARP_ALLOC(n)       enif_alloc((n))
 #define VARP_REALLOC(ptr,n) enif_realloc((ptr),(n))
 #define VARP_FREE(ptr)      enif_free((ptr))
+
+
+// hashed varp atoms
+enum {
+    OPT_SIZE,
+    OPT_MAX_CONFLICTING,
+    OPT_XREF,
+    OPT_VSIDS,
+    OPT_HASH,
+    OPT_QTYPE,
+    OPT_USE_PHASE,
+    OPT_ALL_USED,
+    OPT_INIT_PHASE,
+    OPT_SEED,
+    OPT_CARRY,
+    OPT_BORROW,
+    OPT_OVERFLOW,
+    OPT_DIVZ,
+    OPT_LAST
+};
+
+helem_t opt_elems[] =
+{
+    HELEM(ATOM(size), OPT_SIZE),
+    HELEM(ATOM(max_conflicting), OPT_MAX_CONFLICTING),
+    HELEM(ATOM(xref), OPT_XREF),
+    HELEM(ATOM(vsids), OPT_VSIDS),
+    HELEM(ATOM(hash), OPT_HASH),    
+    HELEM(ATOM(qtype), OPT_QTYPE),
+    HELEM(ATOM(use_phase), OPT_USE_PHASE),
+    HELEM(ATOM(all_used), OPT_ALL_USED),
+    HELEM(ATOM(init_phase), OPT_INIT_PHASE),
+    HELEM(ATOM(seed), OPT_SEED),
+    HELEM(ATOM(carry), OPT_CARRY),
+    HELEM(ATOM(borrow), OPT_BORROW),
+    HELEM(ATOM(overflow), OPT_OVERFLOW),
+    HELEM(ATOM(divz), OPT_DIVZ),
+    { .next = NULL, .atm_ptr = NULL, .enm = 0, .hval = 0}    
+};
+
+#define OPT_HASH_SIZE     (2*(sizeof(opt_elems)/sizeof(helem_t))+1)
+// #define MAX_OPT (2*OPT_LAST)
+
+enum {
+    STAT_LEVEL,
+    STAT_SIZE,
+    STAT_BCP_COUNTER,
+    STAT_NUMBER_OF_BCPS,
+    STAT_CONFLICT_COUNTER,
+    STAT_NUMBER_OF_CONFLICTS,
+    STAT_NUMBER_OF_PROPAGATIONS,
+    STAT_NUMBER_OF_DECISIONS,
+    STAT_CLAUSE_N_COUNTER,
+    STAT_CLAUSE_M_COUNTER,
+    STAT_CLAUSE_2_COUNTER,
+    STAT_CLAUSE_3_COUNTER,
+    STAT_CLAUSE_D_COUNTER,
+    STAT_MARK_COUNTER,
+    STAT_DECISION_COUNTER,
+    STAT_NUMBER_OF_CONFLICTING_CLAUSES,
+    STAT_NUMBER_OF_VARIABLES,
+    STAT_NUMBER_OF_CLAUSES,
+    STAT_NUMBER_OF_DEAD_CLAUSES,
+    STAT_NUMBER_OF_LEARNT_CLAUSES,
+    STAT_NUMBER_OF_SUBST_VARIABLES,
+    STAT_NUMBER_OF_BOUND_VARIABLES,
+    STAT_NUMBER_OF_UNBOUND_VARIABLES,
+    STAT_MAX_LEVEL,
+    STAT_MIN_LEVEL,
+    STAT_MAX_BOUND,
+    STAT_MEMORY_LITERAL_SIZE,
+    STAT_MEMORY_VARIABLE_SIZE,
+    STAT_MEMORY_CLAUSE_SIZE,
+    STAT_MEMORY_SYMBOL_SIZE,
+    STAT_MEMORY_SIZE,
+    STAT_VERSION,
+    STAT_LITERAL_SIZE,
+    STAT_LITERAL_INTEGER,
+    STAT_VALUE_PACKING,
+    STAT_LAST
+};
+
+// #define MAX_STAT (2*STAT_LAST)    
+
+helem_t stat_elems[] =
+{
+    HELEM(ATOM(level), STAT_LEVEL),
+    HELEM(ATOM(size), STAT_SIZE),
+    HELEM(ATOM(bcp_counter), STAT_BCP_COUNTER),
+    HELEM(ATOM(number_of_bcps), STAT_NUMBER_OF_BCPS),
+    HELEM(ATOM(conflict_counter), STAT_CONFLICT_COUNTER),
+    HELEM(ATOM(number_of_conflicts), STAT_NUMBER_OF_CONFLICTS),
+    HELEM(ATOM(number_of_propagations), STAT_NUMBER_OF_PROPAGATIONS),
+    HELEM(ATOM(number_of_decisions), STAT_NUMBER_OF_DECISIONS),
+    HELEM(ATOM(clause_n_counter), STAT_CLAUSE_N_COUNTER),
+    HELEM(ATOM(clause_m_counter), STAT_CLAUSE_M_COUNTER),
+    HELEM(ATOM(clause_2_counter), STAT_CLAUSE_2_COUNTER),
+    HELEM(ATOM(clause_3_counter), STAT_CLAUSE_3_COUNTER),
+    HELEM(ATOM(clause_d_counter), STAT_CLAUSE_D_COUNTER),
+    HELEM(ATOM(mark_counter), STAT_MARK_COUNTER),
+    HELEM(ATOM(decision_counter), STAT_DECISION_COUNTER),
+    HELEM(ATOM(number_of_conflicting_clauses), STAT_NUMBER_OF_CONFLICTING_CLAUSES),
+    HELEM(ATOM(number_of_variables), STAT_NUMBER_OF_VARIABLES),
+    HELEM(ATOM(number_of_clauses), STAT_NUMBER_OF_CLAUSES),
+    HELEM(ATOM(number_of_dead_clauses), STAT_NUMBER_OF_DEAD_CLAUSES),
+    HELEM(ATOM(number_of_learnt_clauses), STAT_NUMBER_OF_LEARNT_CLAUSES),
+    HELEM(ATOM(number_of_subst_variables), STAT_NUMBER_OF_SUBST_VARIABLES),
+    HELEM(ATOM(number_of_bound_variables), STAT_NUMBER_OF_BOUND_VARIABLES),    
+    HELEM(ATOM(number_of_unbound_variables), STAT_NUMBER_OF_UNBOUND_VARIABLES),
+    HELEM(ATOM(max_level), STAT_MAX_LEVEL),
+    HELEM(ATOM(min_level), STAT_MIN_LEVEL),
+    HELEM(ATOM(max_bound), STAT_MAX_BOUND),
+    HELEM(ATOM(memory_literal_size), STAT_MEMORY_LITERAL_SIZE),
+    HELEM(ATOM(memory_variable_size), STAT_MEMORY_VARIABLE_SIZE),
+    HELEM(ATOM(memory_clause_size), STAT_MEMORY_CLAUSE_SIZE),
+    HELEM(ATOM(memory_symbol_size), STAT_MEMORY_SYMBOL_SIZE),
+    HELEM(ATOM(memory_size), STAT_MEMORY_SIZE),
+    HELEM(ATOM(version), STAT_VERSION),
+    HELEM(ATOM(literal_size), STAT_LITERAL_SIZE),
+    HELEM(ATOM(literal_integer), STAT_LITERAL_INTEGER),
+    HELEM(ATOM(value_packing), STAT_VALUE_PACKING),
+    { .next = NULL, .atm_ptr = NULL, .enm = 0, .hval = 0}    
+};
+
+#define STAT_HASH_SIZE     (2*(sizeof(stat_elems)/sizeof(helem_t))+1)
+
+
+typedef struct {
+    helem_t* opt_hash[OPT_HASH_SIZE];
+    helem_t* stat_hash[STAT_HASH_SIZE];
+} nif_ctx_t;
+
 
 static heap_t* new_heap_block(size_t size)
 {
@@ -1091,6 +1237,23 @@ static void varp_set_seed(varp_t* vp, uint64_t seed)
     }
 }
 
+// get a key (atom or an existing atom from string)
+static int get_key(ErlNifEnv* env, ERL_NIF_TERM arg, ERL_NIF_TERM* keyp)
+{
+    if (enif_is_atom(env, arg)) {
+	*keyp = arg;
+	return 1;
+    }
+    else {
+	char buf[256];
+	if (enif_get_string(env,arg,buf,sizeof(buf),ERL_NIF_LATIN1) <= 0)
+	    return 0;
+	if (!enif_make_existing_atom(env,buf,keyp,ERL_NIF_LATIN1))
+	    return 0;
+	return 1;
+    }
+}
+    
 static int equal_string(ErlNifEnv* env, ERL_NIF_TERM atm, ERL_NIF_TERM arg)
 {
     char buf[256];
@@ -2961,20 +3124,30 @@ static int vif_ignore_config(ErlNifEnv* env,const ERL_NIF_TERM value,
 }
 
 // set config parameters
-static int vif_config(ErlNifEnv* env,
-		      const ERL_NIF_TERM key,
+static int vif_setopt(ErlNifEnv* env,
+		      const ERL_NIF_TERM key_arg,
 		      const ERL_NIF_TERM value,
 		      varp_config_t* opt)
 {
-    if (EQUAL_KEY(env, size, key)) {
+    nif_ctx_t* ctx = (nif_ctx_t*) enif_priv_data(env);
+    int optval;
+    ERL_NIF_TERM key;
+
+    if (!get_key(env, key_arg, &key))
+	return 0;
+    if ((optval = lookup_atom(ctx->opt_hash, OPT_HASH_SIZE, key)) < 0)
+	return 0;
+    switch(optval) {
+    case OPT_SIZE: {
 	if (EQUAL_KEY(env, default, value))
 	    opt->vsize = DEFAULT_MAP_VSIZE;
 	else if (!vif_get_size_t(env, value, &opt->vsize))
 	    return 0;
 	else if ((opt->vsize < 2) || (opt->vsize > INIT_MAP_VSIZE))
 	    return 0;
+	return 1;
     }
-    else if (EQUAL_KEY(env, qtype, key)) {
+    case OPT_QTYPE: {
 	if (EQUAL_KEY(env, fifo, value))
 	    opt->qtype = q_fifo;
 	else if (EQUAL_KEY(env, lifo, value))
@@ -2983,36 +3156,38 @@ static int vif_config(ErlNifEnv* env,
 	    opt->qtype = q_recursive;
 	else
 	    return 0;
+	return 1;
     }
-    else if (EQUAL_KEY(env, xref, key))
+    case OPT_XREF:
 	return vif_bool_config(env, value, &opt->xref);
-    else if (EQUAL_KEY(env, vsids, key))
+    case OPT_VSIDS:
 	return vif_bool_config(env, value, &opt->vsids);
-    else if (EQUAL_KEY(env, hash, key))
+    case OPT_HASH:
 	return vif_bool_config(env, value, &opt->hash);
-    else if (EQUAL_KEY(env, use_phase, key))
+    case OPT_USE_PHASE:
 	return vif_bool_config(env, value, &opt->use_phase);
-    else if (EQUAL_KEY(env, all_used, key))
+    case OPT_ALL_USED:
 	return vif_bool_config(env, value, &opt->all_used);
-    else if (EQUAL_KEY(env, init_phase, key))
+    case OPT_INIT_PHASE:
 	return vif_ival_config(env, value, &opt->init_phase);
-    else if (EQUAL_KEY(env, carry, key))
+    case OPT_CARRY:
 	return vif_ignore_config(env, value, &opt->carry);
-    else if (EQUAL_KEY(env, borrow, key))
+    case OPT_BORROW:
 	return vif_ignore_config(env, value, &opt->borrow);
-    else if (EQUAL_KEY(env, overflow, key))
+    case OPT_OVERFLOW:
 	return vif_ignore_config(env, value, &opt->overflow);
-    else if (EQUAL_KEY(env, divz, key))
+	case OPT_DIVZ:
 	return vif_ignore_config(env, value, &opt->divz);
-    else if (EQUAL_KEY(env, seed, key)) {
+    case OPT_SEED: {
 	uint64_t seed;
 	if (!enif_get_uint64(env, value, &seed))
 	    return 0;
 	opt->seed = seed;
+	return 1;
     }
-    else
+    default:
 	return 0;
-    return 1;
+    }
 }
 
 static int vif_new_config(ErlNifEnv* env,
@@ -3020,7 +3195,7 @@ static int vif_new_config(ErlNifEnv* env,
 			  const ERL_NIF_TERM value,
 			  varp_new_opt_t* opt)
 {
-    if (!vif_config(env, key, value, &opt->config))
+    if (!vif_setopt(env, key, value, &opt->config))
 	return 0;
     return 1;
 }
@@ -3030,7 +3205,7 @@ static int vif_clone_config(ErlNifEnv* env,
 			    const ERL_NIF_TERM value,
 			    varp_clone_opt_t* opt)
 {
-    if (!vif_config(env, key, value, &opt->config)) {
+    if (!vif_setopt(env, key, value, &opt->config)) {
 	if (EQUAL_KEY(env, level, key)) {
 	    int level;
 	    if (!enif_get_int(env, value, &level)) return 0;
@@ -3258,6 +3433,9 @@ static int setup(varp_t* vp, varp_config_t* config)
     size_t vsize, csize;
     int i;
 
+    if (dynvar_init(vp->xopt, 8) < 0)
+	goto error;
+    
     vp->opt = *config;
 
     vsize = MAX(1, vp->opt.vsize);
@@ -3581,9 +3759,11 @@ static ERL_NIF_TERM add_symbol(ErlNifEnv* env, varp_t* vp, ERL_NIF_TERM sym,
     }
 
     if ((sp = symbol_create(vp, lit, n, &bin, hvalue,
-			    is_term, is_scalar)) == NULL)
+			    is_term, is_scalar)) == NULL) {
+	enif_release_binary(&bin);
 	return enif_make_badarg(env);
-
+    }
+    enif_release_binary(&bin);    
     if (symbol_insert(vp, sp) < 0)
 	return enif_make_badarg(env);
 
@@ -3713,7 +3893,7 @@ static ERL_NIF_TERM varp_find_symbol(ErlNifEnv* env, int argc,
 		for (i = 0; i < (int)n; i++)
 		    element[i] = external_l(env, sp->lit[i]);
 		// element[i] = enif_make_int(env, export_l(sp->lit[i]));
-		r = enif_make_list_from_array(env, element, n);
+		r = enif_make_list_from_array(env,element,n);
 	    } STK_END0(element);
 	}
 	return r;
@@ -6404,182 +6584,101 @@ static ERL_NIF_TERM make_ignore(ErlNifEnv* env, ignore_t value)
     default:    return ATOM(undefined);
     }
 }
-    
-// get information
-static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
-			      const ERL_NIF_TERM argv[])
+
+// get stat information
+static ERL_NIF_TERM varp_getstat(ErlNifEnv* env, int argc,
+				 const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
+    nif_ctx_t* ctx = (nif_ctx_t*) enif_priv_data(env);    
     varp_t* vp;
-
+    int stat;
+    ERL_NIF_TERM key;
+    
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    // FIXME: hash argv[1] atom! use atom_hash
-    if (EQUAL_KEY(env, bcp_counter, argv[1])) {
+    if (!get_key(env, argv[1], &key))
+	return enif_raise_exception(env, ATOM(arg1));    
+
+    if ((stat = lookup_atom(ctx->stat_hash, STAT_HASH_SIZE, key)) < 0) {
+	return enif_raise_exception(env, ATOM(arg1));
+    }
+    switch(stat) {
+    case STAT_LEVEL:
+	return enif_make_uint(env, vp->level);
+    case STAT_SIZE:
+	return enif_make_uint(env, vp->opt.vsize);
+    case STAT_BCP_COUNTER:
+    case STAT_NUMBER_OF_BCPS:	 // ALIAS
 	return enif_make_uint64(env, vp->counter[BCP_COUNTER]);
-    }
-    if (EQUAL_KEY(env, number_of_bcps, argv[1])) { // ALIAS
-	return enif_make_uint64(env, vp->counter[BCP_COUNTER]);
-    }
-    if (EQUAL_KEY(env, conflict_counter, argv[1]) ) {
+    case STAT_CONFLICT_COUNTER:
+    case STAT_NUMBER_OF_CONFLICTS: // ALIAS
 	return enif_make_uint64(env, vp->counter[CONFLICT_COUNTER]);
-    }
-    if (EQUAL_KEY(env, number_of_conflicts, argv[1]) ) {  // ALIAS
-	return enif_make_uint64(env, vp->counter[CONFLICT_COUNTER]);
-    }
-    if (EQUAL_KEY(env, number_of_propagations, argv[1]) ) {
+    case STAT_NUMBER_OF_PROPAGATIONS:
 	return enif_make_uint64(env, vp->counter[PROPAGATION_COUNTER]);
-    }    
-    if (EQUAL_KEY(env, number_of_decisions, argv[1]) ) {
+    case STAT_NUMBER_OF_DECISIONS:
 	return enif_make_uint64(env, vp->counter[DECISION_COUNTER]);
-    }
-    if (EQUAL_KEY(env, clause_n_counter, argv[1])) {
+    case STAT_CLAUSE_N_COUNTER:
 	return enif_make_uint64(env, vp->counter[CLAUSE_N_COUNTER]);
-    }
-    if (EQUAL_KEY(env, clause_m_counter, argv[1])) {
+    case STAT_CLAUSE_M_COUNTER:	
 	return enif_make_uint64(env, vp->counter[CLAUSE_MON_COUNTER]);
-    }    
-    if (EQUAL_KEY(env, clause_2_counter, argv[1])) {
+    case STAT_CLAUSE_2_COUNTER:
 	return enif_make_uint64(env, vp->counter[CLAUSE_2_COUNTER]);
-    }
-    if (EQUAL_KEY(env, clause_3_counter, argv[1])) {
+    case STAT_CLAUSE_3_COUNTER:
 	return enif_make_uint64(env, vp->counter[CLAUSE_3_COUNTER]);
-    }
-    if (EQUAL_KEY(env, clause_d_counter, argv[1])) {
+    case STAT_CLAUSE_D_COUNTER:
 	return enif_make_uint64(env, vp->counter[CLAUSE_DEAD_COUNTER]);
-    }
-    if (EQUAL_KEY(env, mark_counter, argv[1]) ) {
+    case STAT_MARK_COUNTER:
 	return enif_make_uint64(env, vp->counter[MARK_COUNTER]);
-    }
-    if (EQUAL_KEY(env, decision_counter, argv[1]) ) {
+    case STAT_DECISION_COUNTER:
 	return enif_make_uint64(env, vp->counter[DECISION_COUNTER]);
-    }    
-    if (EQUAL_KEY(env, max_conflicting, argv[1])) {
-	return enif_make_int(env, vp->max_conflicting);
-    }
-    if (EQUAL_KEY(env, number_of_conflicting_clauses, argv[1])) {
+    case STAT_NUMBER_OF_CONFLICTING_CLAUSES:
 	return enif_make_int(env, vp->num_conflicting);
-    }
-    if (EQUAL_KEY(env, number_of_variables, argv[1])) {
+    case STAT_NUMBER_OF_VARIABLES:
 	return enif_make_int(env, dynvar_size(vp->var_map)-1);
-    }
-    if (EQUAL_KEY(env, number_of_clauses, argv[1])) {
+    case STAT_NUMBER_OF_CLAUSES:
 	return enif_make_int(env, get_number_of_clauses(vp));
-    }
-    if (EQUAL_KEY(env, number_of_dead_clauses, argv[1])) {
+    case STAT_NUMBER_OF_DEAD_CLAUSES: {
 	int n = vp->cdead[DELTA]+vp->cdead[GAMMA]+
 	    vp->cdead[BETA]+vp->cdead[ALPHA];
 	return enif_make_int(env, n);
     }
-    if (EQUAL_KEY(env, number_of_learnt_clauses, argv[1])) {
+    case STAT_NUMBER_OF_LEARNT_CLAUSES:
 	return enif_make_int(env, vp->cnum[1]);
-    }
-    if (EQUAL_KEY(env, number_of_bound_variables, argv[1])) {
+    case STAT_NUMBER_OF_BOUND_VARIABLES:
 	return enif_make_int(env, get_num_bound(vp));
-    }
-    if (EQUAL_KEY(env, number_of_subst_variables, argv[1])) {
+    case STAT_NUMBER_OF_SUBST_VARIABLES:
 	return enif_make_int(env, vp->num_subst);
-    }
-    if (EQUAL_KEY(env, number_of_unbound_variables, argv[1])) {
+    case STAT_NUMBER_OF_UNBOUND_VARIABLES: {
 	int n = (dynvar_size(vp->var_map)-1) - get_num_bound(vp);
 	return enif_make_int(env, n);
     }
-
-    if (EQUAL_KEY(env, level, argv[1])) {
-	return enif_make_uint(env, vp->level);
-    }
-    if (EQUAL_KEY(env, size, argv[1])) {
-	return enif_make_uint(env, vp->opt.vsize);
-    }
-    if (EQUAL_KEY(env, qtype, argv[1])) {
-	switch(vp->opt.qtype) {
-	case q_lifo: return ATOM(lifo);
-	case q_fifo: return ATOM(fifo);
-	case q_recursive: return ATOM(recursive);
-	default: return ATOM(undefined);
-	}
-    }
-    if (EQUAL_KEY(env, carry, argv[1])) {
-	return make_ignore(env, vp->opt.carry);
-    }
-    if (EQUAL_KEY(env, borrow, argv[1])) {
-	return make_ignore(env, vp->opt.borrow);
-    }
-    if (EQUAL_KEY(env, overflow, argv[1])) {
-	return make_ignore(env, vp->opt.overflow);
-    }
-    if (EQUAL_KEY(env, divz, argv[1])) {
-	return make_ignore(env, vp->opt.divz);
-    }    
-    
-    if (EQUAL_KEY(env, max_level, argv[1])) {
+    case STAT_MAX_LEVEL: {
 	int val = get_and_reset_max_level(vp);
 	return enif_make_int(env, val);
     }
-    if (EQUAL_KEY(env, min_level, argv[1])) {
+    case STAT_MIN_LEVEL: {
 	int val = get_and_reset_min_level(vp);
 	return enif_make_int(env, val);
     }
-    if (EQUAL_KEY(env, max_bound, argv[1])) {
+    case STAT_MAX_BOUND: {
 	size_t val = get_and_reset_max_bound(vp);
 	return enif_make_ulong(env, (unsigned long)val);
     }
-    if (EQUAL_KEY(env, literal_size, argv[1])) {
-	return enif_make_uint(env, 8*sizeof(lit_t));
-    }
-    if (EQUAL_KEY(env, literal_integer, argv[1])) {
-	return enif_make_boolean(env, true);
-    }
-    if (EQUAL_KEY(env, value_packing, argv[1])) {
-	return enif_make_boolean(env, true);
-    }
-    if (EQUAL_KEY(env, xref, argv[1])) {
-	return enif_make_boolean(env, vp->opt.xref);
-    }
-    if (EQUAL_KEY(env, vsids, argv[1])) {
-	return enif_make_boolean(env, vp->opt.vsids);
-    }    
-    if (EQUAL_KEY(env, hash, argv[1])) {
-	return enif_make_boolean(env, vp->opt.hash);
-    }
-    if (EQUAL_KEY(env, init_phase, argv[1])) {
-	switch(vp->opt.init_phase) {
-	case I_TRUE: return enif_make_boolean(env, 1);
-	case I_FALSE: return enif_make_boolean(env, 0);
-	case I_UNDEF: return enif_make_undefined(env);
-	default: return enif_make_badarg(env); // internal?
-	}
-    }
-    if (EQUAL_KEY(env, use_phase, argv[1])) {
-	return enif_make_boolean(env, vp->opt.use_phase);
-    }
-    if (EQUAL_KEY(env, all_used, argv[1])) {
-	return enif_make_boolean(env, vp->opt.all_used);
-    }
-    if (EQUAL_KEY(env, version, argv[1])) {
-	return enif_make_string(env, VARP_VSN, ERL_NIF_LATIN1);
-    }
-    if (EQUAL_KEY(env, seed, argv[1])) {
-	return enif_make_uint64(env, vp->opt.seed);
-    }
-    // MEMORY stats
-    if (EQUAL_KEY(env, memory_literal_size, argv[1])) {
+
+    case STAT_MEMORY_LITERAL_SIZE:
 	return enif_make_uint(env, sizeof(literal_t));
-    }
-    // both pos and neg litterals are included in the variable structure!
-    if (EQUAL_KEY(env, memory_variable_size, argv[1])) {
+
+    case STAT_MEMORY_VARIABLE_SIZE:
 	return enif_make_uint(env, sizeof(variable_t));
-    }
-    // clause structure overhead size
-    if (EQUAL_KEY(env, memory_clause_size, argv[1])) {
+
+    case STAT_MEMORY_CLAUSE_SIZE:
 	return enif_make_uint(env, sizeof(clause_t));
-    }    
-    if (EQUAL_KEY(env, memory_symbol_size, argv[1])) {
+    case STAT_MEMORY_SYMBOL_SIZE:
 	return enif_make_uint(env, sizeof(symbol_t));
-    }    
-    // memory size of variables / clauses - fixme add everything!
-    if (EQUAL_KEY(env, memory_size, argv[1])) {
+    case STAT_MEMORY_SIZE: {
+	// memory size of variables / clauses - fixme add everything!
 	unsigned int size =
 	    sizeof(varp_t) + 
 	    dynvar_size(vp->var_map)*sizeof(variable_t) +
@@ -6597,41 +6696,185 @@ static ERL_NIF_TERM varp_info(ErlNifEnv* env, int argc,
 	size += dynvar_size(vp->var_lev)*sizeof(varlev_t);
 	return enif_make_uint(env, size);	
     }
-    return enif_make_badarg(env);
+    case STAT_VERSION:
+	return enif_make_string(env, VARP_VSN, ERL_NIF_LATIN1);
+    case STAT_LITERAL_SIZE:
+	return enif_make_uint(env, 8*sizeof(lit_t));
+    case STAT_LITERAL_INTEGER:
+	return enif_make_boolean(env, true);
+    case STAT_VALUE_PACKING:
+	return enif_make_boolean(env, true);
+    default:
+	return enif_raise_exception(env, ATOM(arg1));
+    }
 }
 
-// set config
-static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
-			      const ERL_NIF_TERM argv[])
+
+static int addopt(varp_t* vp)
+{
+    size_t i = dynvar_size(vp->xopt);
+    if (dynvar_resize(vp->xopt, i+1) < 0)
+	return -1;
+    memset(&vp->xopt[i], 0, sizeof(varp_option_t));
+    return (int) i;
+}
+
+static int findopt(varp_t* vp, ERL_NIF_TERM key)
+{
+    int i;
+    for (i = 0; i < (int)dynvar_size(vp->xopt); i++) {
+	if (vp->xopt[i].key == key)
+	    return i;
+    }
+    return -1;
+}
+
+// get option value
+static ERL_NIF_TERM varp_getopt(ErlNifEnv* env, int argc,
+				const ERL_NIF_TERM argv[])
 {
     UNUSED(argc);
+    nif_ctx_t* ctx = (nif_ctx_t*) enif_priv_data(env);
     varp_t* vp;
+    int is_system = 2;
+    int opt;
     ERL_NIF_TERM key;
-    ERL_NIF_TERM value;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
 	return enif_make_badarg(env);
 
-    key = argv[1];
-    value = argv[2];
+    if (!get_key(env, argv[1], &key))
+	return enif_raise_exception(env, ATOM(arg1));
 
-    if (EQUAL_KEY(env, max_conflicting, key)) {
+    if (argc >= 3) {
+	if (EQUAL_KEY(env, user, argv[2]))
+	    is_system = 0;
+	else if (EQUAL_KEY(env, system, argv[2]))
+	    is_system = 1;
+	else
+	    return enif_raise_exception(env, ATOM(arg2));
+    }
+
+    if ((opt = lookup_atom(ctx->opt_hash, OPT_HASH_SIZE, key)) < 0) {
+	// check "user/plugin" defined options
+	int i;
+	ERL_NIF_TERM term;
+	if ((i = findopt(vp, key)) < 0) {
+	    if (is_system == 1)
+		return enif_raise_exception(env, ATOM(arg1));
+	    return ATOM(undefined);
+	}
+	// ERL_NIF_BIN2TERM_SAFE ?
+	enif_binary_to_term(env, vp->xopt[i].data, vp->xopt[i].size, &term, 0);
+	return term;
+    }
+    switch(opt) {
+    case OPT_QTYPE:
+	switch(vp->opt.qtype) {
+	case q_lifo: return ATOM(lifo);
+	case q_fifo: return ATOM(fifo);
+	case q_recursive: return ATOM(recursive);
+	default: return ATOM(undefined);
+	}
+    case OPT_XREF:
+	return enif_make_boolean(env, vp->opt.xref);
+    case OPT_VSIDS:
+	return enif_make_boolean(env, vp->opt.vsids);
+    case OPT_HASH:
+	return enif_make_boolean(env, vp->opt.hash);
+    case OPT_INIT_PHASE:
+	switch(vp->opt.init_phase) {
+	case I_TRUE: return enif_make_boolean(env, 1);
+	case I_FALSE: return enif_make_boolean(env, 0);
+	case I_UNDEF: return enif_make_undefined(env);
+	default: return enif_make_badarg(env); // internal?
+	}
+    case OPT_USE_PHASE:
+	return enif_make_boolean(env, vp->opt.use_phase);
+    case OPT_ALL_USED:
+	return enif_make_boolean(env, vp->opt.all_used);
+    case OPT_MAX_CONFLICTING:
+	return enif_make_int(env, vp->max_conflicting);
+    case OPT_SEED:
+	return enif_make_uint64(env, vp->opt.seed);
+    case OPT_CARRY:
+	return make_ignore(env, vp->opt.carry);
+    case OPT_BORROW:
+	return make_ignore(env, vp->opt.borrow);
+    case OPT_OVERFLOW:
+	return make_ignore(env, vp->opt.overflow);
+    case OPT_DIVZ:
+	return make_ignore(env, vp->opt.divz);
+    default:
+	return enif_raise_exception(env, ATOM(arg1));
+    }
+}
+
+// set config
+static ERL_NIF_TERM varp_setopt(ErlNifEnv* env, int argc,
+				const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    nif_ctx_t* ctx = (nif_ctx_t*) enif_priv_data(env);    
+    varp_t* vp;
+    ERL_NIF_TERM key;
+    ERL_NIF_TERM value;
+    int is_system = 2;  // not set
+    int opt;
+    
+    if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
+	return enif_make_badarg(env);
+
+    if (!get_key(env, argv[1], &key))
+	goto bad_key;	
+    value = argv[2];
+    // FIXME hash table over all options! 
+    if (argc >= 4) {
+	if (EQUAL_KEY(env, user, argv[3]))
+	    is_system = 0;
+	else if (EQUAL_KEY(env, system, argv[3]))
+	    is_system = 1;
+	else
+	    return enif_raise_exception(env, ATOM(arg3));
+    }
+    if ((opt = lookup_atom(ctx->opt_hash, OPT_HASH_SIZE, key)) < 0) {
+	ErlNifBinary bin;
+	int i;
+	if ((i = findopt(vp, key)) < 0) {
+	    if (is_system == 1) {
+		// we can not add new user options when system=1
+		return enif_raise_exception(env, ATOM(arg1));
+	    }
+	    if ((i = addopt(vp)) < 0) {
+		enif_release_binary(&bin);
+		return enif_raise_exception(env, ATOM(memory_limit));
+	    }
+	    vp->xopt[i].key = key;
+	}
+	if (!enif_term_to_binary(env, value, &bin))
+	    return enif_raise_exception(env, ATOM(arg2));
+	// create or update
+	vp->xopt[i].data = VARP_REALLOC(vp->xopt[i].data, bin.size);
+	memcpy(vp->xopt[i].data, bin.data, bin.size);
+	vp->xopt[i].size = bin.size;
+	enif_release_binary(&bin);
+	return enif_make_ok(env);
+    }
+    switch(opt) {
+    case OPT_MAX_CONFLICTING: {
 	int ivalue;
 	if (!enif_get_int(env, value, &ivalue) || (ivalue < 0))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	if ((ivalue == 0) || (ivalue > MAX_CONFLICTING))
 	    vp->max_conflicting = MAX_CONFLICTING;
 	else
 	    vp->max_conflicting = ivalue;
 	return enif_make_ok(env);
     }
-    
-    if (EQUAL_KEY(env, xref, key)) {
+    case OPT_XREF: {
 	int enable;
-
 	if (!enif_get_boolean(env, value, &enable))
-	    return enif_make_badarg(env);
-
+	    goto bad_value;
 	if (enable && !vp->opt.xref) { // xref all clauses
 	    int i, si;
 	    vp->opt.xref = true;
@@ -6655,11 +6898,10 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
-    
-    if (EQUAL_KEY(env, vsids, key)) {
+    case OPT_VSIDS: {
 	int enable;
 	if (!enif_get_boolean(env, value, &enable))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	if (enable && !vp->opt.vsids) {
 	    cdlist_renumber(&vp->order_list);
 	    vp->opt.vsids = true;
@@ -6669,11 +6911,10 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
-    
-    if (EQUAL_KEY(env, hash, key)) {
+    case OPT_HASH: {
 	int enable;
 	if (!enif_get_boolean(env, value, &enable))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	if (enable && !vp->opt.hash) {      // hash all clauses
 	    size_t n = vp->cnum[DELTA]+vp->cnum[GAMMA]+vp->cnum[BETA];
 	    size_t size = next_pow2(n);
@@ -6694,8 +6935,7 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	}
 	return enif_make_ok(env);
     }
-    
-    if (EQUAL_KEY(env, qtype, key)) {
+    case OPT_QTYPE: {
 	if (EQUAL_KEY(env, fifo, value))
 	    vp->opt.qtype = q_fifo;
 	else if (EQUAL_KEY(env, lifo, value))
@@ -6703,59 +6943,60 @@ static ERL_NIF_TERM varp_config(ErlNifEnv* env, int argc,
 	else if (EQUAL_KEY(env, recursive, value))
 	    vp->opt.qtype = q_recursive;
 	else
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	return enif_make_ok(env);
     }
-    
-    if (EQUAL_KEY(env, use_phase, key)) {
+    case OPT_USE_PHASE: {
 	if (!vif_bool_config(env, value, &vp->opt.use_phase))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	return enif_make_ok(env);
     }
-
-    if (EQUAL_KEY(env, all_used, key)) {
+    case OPT_ALL_USED: {
 	if (!vif_bool_config(env, value, &vp->opt.all_used))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	return enif_make_ok(env);
     }
-    
-    if (EQUAL_KEY(env, init_phase, key)) {
+    case OPT_INIT_PHASE: {
 	if (!vif_ival_config(env, value, &vp->opt.init_phase))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	return enif_make_ok(env);
     }
-
-    if (EQUAL_KEY(env, carry, key)) {
-	if (!vif_ignore_config(env, value, &vp->opt.carry))
-	    return enif_make_badarg(env);
-	return enif_make_ok(env);	
-    }
-    if (EQUAL_KEY(env, borrow, key)) {
-	if (!vif_ignore_config(env, value, &vp->opt.borrow))
-	    return enif_make_badarg(env);
-	return enif_make_ok(env);	
-    }
-
-    if (EQUAL_KEY(env, overflow, key)) {
-	if (!vif_ignore_config(env, value, &vp->opt.overflow))
-	    return enif_make_badarg(env);
-	return enif_make_ok(env);
-    }
-    if (EQUAL_KEY(env, divz, key)) {
-	if (!vif_ignore_config(env, value, &vp->opt.divz))
-	    return enif_make_badarg(env);
-	return enif_make_ok(env);
-    }
-    
-    if (EQUAL_KEY(env, seed, key)) {
+    case OPT_SEED: {
 	uint64_t seed;
 	if (!enif_get_uint64(env, value, &seed))
-	    return enif_make_badarg(env);
+	    goto bad_value;
 	varp_set_seed(vp, seed);
 	return enif_make_ok(env);
     }
-    
-    return enif_make_badarg(env);
+    // defined user options
+    case OPT_CARRY: {
+	if (!vif_ignore_config(env, value, &vp->opt.carry))
+	    goto bad_value;
+	return enif_make_ok(env);	
+    }
+    case OPT_BORROW: {
+	if (!vif_ignore_config(env, value, &vp->opt.borrow))
+	    goto bad_value;
+	return enif_make_ok(env);	
+    }
+    case OPT_OVERFLOW: {
+	if (!vif_ignore_config(env, value, &vp->opt.overflow))
+	    goto bad_value;
+	return enif_make_ok(env);
+    }
+    case OPT_DIVZ: {
+	if (!vif_ignore_config(env, value, &vp->opt.divz))
+	    goto bad_value;
+	return enif_make_ok(env);
+    }
+    default:
+	return enif_raise_exception(env, ATOM(arg1));
+    }
+bad_key:
+    return enif_raise_exception(env, ATOM(arg1));
+
+bad_value:
+    return enif_raise_exception(env, ATOM(arg2));    
 }
 
 //
@@ -7226,7 +7467,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     else if (vif_get_cix(env, vp, argv[2], &cix)) {
 	if ((cp = get_clause(vp, cix)) == NULL) {
 	    DBG0("get_clause: cix=%d\r\n", cix);
-	    return enif_raise_exception(env, ATOM(arg2));	    
+	    return enif_raise_exception(env, ATOM(arg2));
 	}
 	lit = cp->lit;
 	len = cp->size;
@@ -8701,8 +8942,10 @@ NIF_LIST
 #endif
 
 
-static void load_atoms(ErlNifEnv* env)
+static int load_atoms(ErlNifEnv* env)
 {
+    LOAD_ATOM(user);
+    LOAD_ATOM(system);    
     LOAD_ATOM(arg0);
     LOAD_ATOM(arg1);
     LOAD_ATOM(arg2);
@@ -8826,7 +9069,8 @@ static void load_atoms(ErlNifEnv* env)
     LOAD_ATOM(memory_clause_size);
     LOAD_ATOM(memory_variable_size);
     LOAD_ATOM(memory_symbol_size);
-    LOAD_ATOM(memory_size);    
+    LOAD_ATOM(memory_size);
+    return 0;
 }
 
 static void varp_down(ErlNifEnv* env, void* obj,
@@ -8882,6 +9126,7 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     UNUSED(env);
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
+    nif_ctx_t* ctx;    
 
     DBG("varp_load called\r\n");
 
@@ -8891,12 +9136,19 @@ static int varp_load(ErlNifEnv* env, void** priv_data, ERL_NIF_TERM load_info)
     rinit.stop = varp_stop;
     rinit.down = varp_down;
 
+    if ((ctx = (nif_ctx_t*) enif_alloc(sizeof(nif_ctx_t))) == NULL)
+	return -1;    
+
     // Create resource types
     varp_res = enif_open_resource_type_x(env, "varp", &rinit,
 					 ERL_NIF_RT_CREATE,
 					 &tried);
-    load_atoms(env);
-    *priv_data = 0;
+    if (load_atoms(env) < 0)
+	return -1;
+    hash_helems("opt", ctx->opt_hash, OPT_HASH_SIZE, opt_elems);
+    hash_helems("stat", ctx->stat_hash, STAT_HASH_SIZE, stat_elems);
+    
+    *priv_data = ctx;
     return 0;
 }
 
@@ -8906,7 +9158,8 @@ static int varp_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data,
     ErlNifResourceFlags tried;
     UNUSED(load_info);
     ErlNifResourceTypeInit rinit;
-
+    nif_ctx_t* ctx = (nif_ctx_t*) *old_priv_data;
+    
     DBG("varp_upgrade called\r\n");
 
     rinit.dtor = varp_dtor;
@@ -8917,8 +9170,12 @@ static int varp_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data,
 					 ERL_NIF_RT_CREATE |
 					 ERL_NIF_RT_TAKEOVER,
 					 &tried);
-    load_atoms(env);
 
+    if (load_atoms(env) < 0)
+	return -1;
+    hash_helems("opt", ctx->opt_hash, OPT_HASH_SIZE, opt_elems);
+    hash_helems("stat", ctx->stat_hash, STAT_HASH_SIZE, stat_elems);
+    
     *priv_data = *old_priv_data;
     return 0;
 }
@@ -8926,8 +9183,10 @@ static int varp_upgrade(ErlNifEnv* env, void** priv_data, void** old_priv_data,
 static void varp_unload(ErlNifEnv* env, void* priv_data)
 {
     UNUSED(env);
-    UNUSED(priv_data);
+    nif_ctx_t* ctx = (nif_ctx_t*) priv_data;    
+
     DBG("varp_unload called\r\n");
+    enif_free(ctx);    
 }
 
 ERL_NIF_INIT(varp_nif, varp_funcs,
