@@ -756,7 +756,7 @@ save(S, Overwrite) ->
 solve(Mode, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp:tokens(Meta) of
-	{ok,Ts,_} ->
+	{ok,Ts} ->
 	    case parse_bindings(Ts) of
 		{ok,L} ->
 		    solve(Mode, S, L);
@@ -1022,7 +1022,7 @@ add_extension(Path, Ext) ->
 export(Type, File, S) ->
     Meta  = wxTextCtrl:getValue(S#s.meta),
     case varp:tokens(Meta) of
-	{ok,Ts,_} ->
+	{ok,Ts} ->
 	    case parse_bindings(Ts) of
 		{ok,L} ->
 		    export(Type, File, S, L);
@@ -1148,22 +1148,22 @@ output_model(_Fd, Partial, Model, S) ->
 parse_bindings(Ts) ->
     parse_bindings_(Ts, []).
 
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{decnum,_Ln3,Int}|Ts],
+parse_bindings_([{symbol,_Ln1,Name},{'=',_Ln2},{decnum,_Ln3,Int}|Ts],
 		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,10)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{hexnum,_Ln3,Int}|Ts],
+parse_bindings_([{symbol,_Ln1,Name},{'=',_Ln2},{hexnum,_Ln3,Int}|Ts],
 		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,16)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{octnum,_Ln3,Int}|Ts],
+parse_bindings_([{symbol,_Ln1,Name},{'=',_Ln2},{octnum,_Ln3,Int}|Ts],
 		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,8)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{binnum,_Ln3,Int}|Ts],
+parse_bindings_([{symbol,_Ln1,Name},{'=',_Ln2},{binnum,_Ln3,Int}|Ts],
 		Acc) ->
     parse_bindings_(Ts, [{Name, list_to_integer(Int,2)}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{string,_Ln3,Str}|Ts],
+parse_bindings_([{symbol,_Ln1,Name},{'=',_Ln2},{string,_Ln3,Str}|Ts],
 		Acc) ->
     parse_bindings_(Ts, [{Name, Str}|Acc]);
-parse_bindings_([{identifier,_Ln1,Name},{'=',_Ln2},{identifier,_Ln3,Str}|Ts],
+parse_bindings_([{symbol,_Ln1,Name},{'=',_Ln2},{symbol,_Ln3,Str}|Ts],
 		Acc) ->
     %% lookup value? is this done later?
     parse_bindings_(Ts, [{Name,Str}|Acc]);
@@ -1179,14 +1179,15 @@ parse_bindings_([], Acc) ->
     {ok,lists:reverse(Acc)}.
 
 parse(String, Meta) ->
-    case varp:tokens(String) of
-	{ok,[{identifier,_,"c"}|_Ts]} ->
-	    parse_dimacs(String);
-	{ok,[{identifier,_,"p"}|_Ts]} ->
-	    parse_dimacs(String);
-	{ok,Ts} ->
-	    case varp_parse:parse(Ts) of
-		{ok,{Sections,Formula}} ->
+    ICase = false,  %% Fixme: icase option
+    Scan = if ICase -> varp_scani;
+	      true -> varp_scan
+	   end,
+    case varp_dimacs:detect_data(String) of
+	false ->
+	    Scan:init(varp:remove_comments(String)),
+	    case varp_parse:parse_and_scan({Scan, one_token, []}) of
+		{ok,{Sections,_Assignments,Formula}} ->
 		    GOpts = #{ meta => Meta },
 		    try varp:split_sections(Sections,GOpts) of
 			{ok, SectionMap} ->
@@ -1199,7 +1200,8 @@ parse(String, Meta) ->
 		    end;
 		Error -> Error
 	    end;
-	Error -> Error
+	{ok,_CnfType} ->
+	    parse_dimacs(String)
     end.
 
 parse_dimacs(String) ->

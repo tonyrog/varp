@@ -9,6 +9,8 @@
 
 -export([load/1, save/2, detect/1]).
 -export([detect_binary/1]).
+-export([detect_string/1]).
+-export([detect_data/1]).
 -export([parse/1]).
 -export([format/1]).
 -export([from_cnf/1]).
@@ -35,6 +37,33 @@ detect(File) ->
 	    detect_binary(Bin);
 	Error -> Error
     end.
+
+detect_data(Data) when is_binary(Data) ->
+    detect_binary(Data);
+detect_data(String) when is_list(String) ->
+    detect_string(String).
+
+detect_string(String) ->
+    case string:split(String, "\n") of
+	[[]] ->
+	    false;
+	[[$c|_Comment] | String1] ->
+	    detect_string(String1);
+	[[$p,$\s|Line] | _String1] ->
+	    case string:tokens(Line, " \r") of
+		["snf", _Variables, _Clauses] ->
+		    {true,snf};
+		["cnf", _Variables, _Clauses] ->
+		    {true,cnf};
+		["sat", _Variables] ->
+		    {true,sat};
+		_ ->
+		    false
+	    end;
+	[_|_] ->
+	    false
+    end.
+
 
 detect_binary(Bin) ->
     case binary_line(Bin) of
