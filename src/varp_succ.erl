@@ -56,7 +56,7 @@ succ(Bs, Param) ->
 
 succ(Fd, Type, Bs) ->
     N = count_number_of_clauses(Bs),
-    M = varp:info(Bs#bs.vp, number_of_unbound_variables),
+    M = varp_nif:getstat(Bs#bs.vp, number_of_unbound_variables),
     case Type of
 	cnf ->
 	    io:format(Fd, "p cnf ~w ~w\n", [M, N]);

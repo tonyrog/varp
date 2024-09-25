@@ -7,8 +7,9 @@
 
 -module(varp_tune).
 
--export([run/1]).
--export([run/2]).
+-export([run/1, run/2]).
+-export([show/1, save/2]).
+
 
 -export([demo/0]).
 -export([demo_factor/0]).
@@ -148,8 +149,8 @@ statistics(Bs, T0) ->
     T1 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T1-T0,native,microsecond),
     Ts = Time/1000000,
-    ConflictCounter = varp:info(Bs#bs.vp, conflict_counter),
-    BcpCounter = varp:info(Bs#bs.vp, bcp_counter),
+    ConflictCounter = varp_nif:getstat(Bs#bs.vp, conflict_counter),
+    BcpCounter = varp_nif:getstat(Bs#bs.vp, bcp_counter),
     %% number of clauses create...?
     {{statistics,
       [{conflicts,ConflictCounter},
@@ -159,13 +160,51 @@ varp_filename(File) ->
     filename:join([code:lib_dir(varp),"formulas","varp",File]).
 
 demo() ->
-    run("pigeon.varp", [{"n",8}]).
+    show(run("pigeon.varp", [{<<"n">>,8}])).
 
 demo_factor() ->
-    run("is_prime.varp", [{"n", 8014003}]).
+    show(run("is_prime.varp", [{<<"n">>, 8014003}])).
 
 demo_factor2() ->
-    run("is_prime.varp", [{"n", 2225513363}]).
+    show(run("is_prime.varp", [{<<"n">>, 2225513363}])).
+
+demo_perm() -> demo_perm(27).
+demo_perm(N) ->
+    show(run("perm.varp", [{<<"n">>, N}])).
+
+show(Input={N,ResList}) ->
+    io:format("total results = ~w\n", [N]),
+    NumSave = 10,
+    io:format("show ~w fastest\n", [NumSave]),
+    ResList1 = 
+	lists:filter(fun(Res) ->
+			     not lists:member({result,timeout}, Res)
+		     end, ResList),    
+    ResList2 = lists:sort(fun(A, B) ->
+				  proplists:get_value(time, A, time) < 
+				      proplists:get_value(time, B)
+			  end, ResList1),
+    Fastest = hd(ResList2),
+    Slowest = lists:last(ResList2),
+    io:format("Fastest: ~fs\n", [proplists:get_value(time,Fastest)]),
+    io:format("Slowest: ~fs\n", [proplists:get_value(time,Slowest)]),
+
+    Len = length(ResList2),
+    if Len =< NumSave ->
+	    display_runs(ResList2);
+       true ->
+	    {ResList3,_} = lists:split(NumSave, ResList2),
+	    display_runs(ResList3)
+    end,
+    Input.
+
+
+display_runs(ResList) ->
+    emit_header(user, hd(ResList)), io:put_chars(user, "\n"),
+    lists:foreach(fun(R) ->
+			  emit_row(user, R),
+			  io:put_chars(user, "\n")
+		  end, ResList).
 
 save(_File, Error={error,_}) ->
     Error;
@@ -215,19 +254,22 @@ run(File, Meta) when is_map(Meta) ->
     {ok,Bin} = file:read_file(varp_filename(File)),
     case parse(binary_to_list(Bin), Meta) of
 	{ok,{Sections,Form}} ->
-	    lists2:gfold(
-	      fun(Params, {I,ResList}) ->
-		      io:format("RUN ~w: ", [I]),
-		      %% FIXME: save each result in a file 
-		      %% so we do not loose results in case of crash
+	    grid_search(
+	      fun(I,Params) ->
 		      case run1(Sections,Form,Meta,Params) of
-			  [] -> {I,ResList};
-			  Res ->
-			      Res1 = [{run,I}|Res]++Params,
-			      {I+1,[Res1|ResList]}
+			  [] -> [];
+			  Res -> 
+			      Row = [{run,I}|Params]++Params,
+			      if I =:= 1 ->
+				      emit_header(user, Row),
+				      io:put_chars(user, "\n");
+				 true -> ok
+			      end,
+			      emit_row(user,Row),
+			      io:put_chars(user, "\n"),
+			      Res
 		      end
 	      end,
-	      {1,[]},
 	      [{global,global_params()},
 	       {backjump,backjump_params()}]);
 	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->
@@ -292,14 +334,15 @@ run1(Sections, Form, Meta, [{global,Global},{backjump,BjParams}]) ->
 
 
 parse(String, Meta) ->
-    case varp:tokens(String) of
-	{ok,[{identifier,_,"c"}|_Ts]} ->
-	    parse_dimacs(String);
-	{ok,[{identifier,_,"p"}|_Ts]} ->
-	    parse_dimacs(String);
-	{ok,Ts} ->
-	    case varp_parse:parse(Ts) of
-		{ok,{Sections,Formula}} ->
+    ICase = false,  %% Fixme: icase option
+    Scan = if ICase -> varp_scani;
+	      true -> varp_scan
+	   end,
+    case varp_dimacs:detect_data(String) of
+	false ->
+	    Scan:init(varp:remove_comments(String)),
+	    case varp_parse:parse_and_scan({Scan, one_token, []}) of
+		{ok,{Sections,_Assignments,Formula}} ->
 		    GOpts = #{ meta => Meta },
 		    try varp:split_sections(Sections,GOpts) of
 			{ok, SectionMap} ->
@@ -312,7 +355,8 @@ parse(String, Meta) ->
 		    end;
 		Error -> Error
 	    end;
-	Error -> Error
+	{ok,_CnfType} ->
+	    parse_dimacs(String)
     end.
 
 parse_dimacs(String) ->
@@ -325,6 +369,7 @@ parse_dimacs(String) ->
 	Error ->
 	    Error
     end.
+
 
 write_csv(Result) ->
     write_csv("tune.csv", Result).
@@ -352,9 +397,15 @@ emit_csv(Fd, Result) ->
 emit_header(Fd,[{_Key,Value}|Tail]) when is_list(Value) ->
     emit_header(Fd, Value), emit_header(Fd, Tail);
 emit_header(Fd, [{Key,_Value}|Tail]) ->
-    io:format(Fd, "\"~s\"; ", [Key]), emit_header(Fd, Tail);
+    io:format(Fd, "\"~s\"; ", [uppercase(Key)]), 
+    emit_header(Fd, Tail);
 emit_header(_Fd, []) ->
     ok.
+
+uppercase(Key) when is_atom(Key) ->
+    string:uppercase(atom_to_list(Key));
+uppercase(Key) when is_list(Key) ->
+     string:uppercase(Key).
 
 emit_row(Fd, [{_Key,Value}|Tail]) when is_list(Value) ->
     emit_row(Fd, Value), emit_row(Fd, Tail);
@@ -369,8 +420,45 @@ emit_row(_Fd, []) ->
     ok.
 
 
-    
+grid_search(Run, GrpList) ->
+    gfold(fun(Params,{I,ResList}) ->
+		  case Run(I,Params) of
+		      [] -> {I,ResList};
+		      Res ->
+			  Res1 = [{run,I}|Res]++Params,
+			  {I+1,[Res1|ResList]}
+		  end
+	  end,
+	  {1,[]},
+	  GrpList).
 
-    
-    
-    
+%% gfold (multi/grouped/zip)
+%% fold over group of keyvalues lists
+%%   
+%%  gfold(Fun, Acc, [{Group::key(),[{Key::key(),[Value::term()]}]}])
+%%
+%%  gfold(Fun, Acc, [{a,[{x,[1,2]},{y,[3]}]}, {b,[{u,[4,5]}]}])
+%%
+%%  callback on:
+%%     [{a,[{x,1},{y,3}]},{b,[{u,4}]}]
+%%     [{a,[{x,1},{y,3}]},{b,[{u,5}]}]
+%%     [{a,[{x,2},{y,3}]},{b,[{u,4}]}]
+%%     [{a,[{x,2},{y,3}]},{b,[{u,5}]}]
+%%
+gfold(Fun, Acc, GrpList) ->
+    gfold(Fun, Acc, GrpList, [], []).
+
+gfold(Fun, Acc, [{Grp,[{Key,[Value]}|KVs]} | GrpList], Acc1, Acc2) ->
+    gfold(Fun, Acc, [{Grp,KVs}|GrpList], [{Key,Value}|Acc1], Acc2);
+
+gfold(Fun, Acc, [{Grp,[{Key,[Value|Vs]}|KVs]} | GrpList], Acc1, Acc2) ->
+    Ai = gfold(Fun, Acc, [{Grp,KVs}|GrpList], [{Key,Value}|Acc1], Acc2),
+    gfold(Fun, Ai, [{Grp,[{Key,Vs}|KVs]}|GrpList], Acc1, Acc2);
+gfold(Fun, Acc, [{Grp,[{_Key,[]}|KVs]} | GrpList], Acc1, Acc2) ->
+    gfold(Fun, Acc, [{Grp,KVs} | GrpList], Acc1, Acc2);
+
+gfold(Fun, Acc, [{Grp,[]} | GrpList], Acc1, Acc2) ->
+    gfold(Fun, Acc, GrpList, [], [{Grp,lists:reverse(Acc1)}|Acc2]);
+
+gfold(Fun, Acc, [], [], Acc2) ->
+    Fun(lists:reverse(Acc2), Acc).

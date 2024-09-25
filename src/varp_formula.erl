@@ -1765,6 +1765,11 @@ operation_(Op, A,B, Bs) ->
 operation('bnot', A, Bs) ->
     B = varp_arith:bitwise_not(Bs#bs.vp,A),
     {B, Bs};
+operation('not', {bool,A}, Bs) ->
+    {lnot(A), Bs};
+operation('not', A, Bs) ->
+    B = varp_arith:neq(Bs#bs.vp,A,{uint,1,[false]}),
+    {{bool,B}, Bs};
 
 operation('neg', A, Bs) ->
     case vconst(A) of
