@@ -214,5 +214,7 @@ test(Text) ->
 	    0;
 	true ->
 	    varp_nif:push(Vp),
-	    varp_circuit:bt_all(Vp)
+	    {N,_} = varp_circuit:bt_all(Vp, undefined, []),
+	    io:format("~w models found\n", [N]),
+	    N
     end.

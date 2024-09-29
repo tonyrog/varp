@@ -54,6 +54,8 @@
 -export([half_adder/3, half_adder/4, half_adder/5]).
 -export([full_adder/3, full_adder/4, full_adder/5, full_adder/6]).
 
+-export([clause/2, clause/3]).
+
 -export([symbol/2]).
 -export([literal/2]).
 -export([symbol_value/2, symbol_value/3]).
@@ -69,6 +71,7 @@
 %% TEST
 -export([bcp_match/2]).
 -export([bt_match/2]).
+-export([bt_all/3]).
 -export([test/0]).
 -export([test_mon/1]).
 
@@ -956,10 +959,6 @@ bt(Vp) ->
 	false ->
 	    true  %% model
     end.
-
-%% limit>=1 !
-%%bt_all(Vp) ->
-%%    bt_all(Vp, undefined, undefined).
 
 bt_all(Vp, Limit, Acc) ->
     T0 = erlang:monotonic_time(),

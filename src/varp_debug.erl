@@ -37,7 +37,7 @@ show_rank(Bs) ->
     lists:foreach(
       fun({Li,Rank}) ->
 	      io:format("~w: ~s\n", 
-			[Rank, varp_formula:format_lit(Bs, Li)])
+			[Rank, varp_format:format_lit(Bs, Li)])
       end, lists:sublist(SList, 20)).
 
 

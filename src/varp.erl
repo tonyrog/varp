@@ -8,6 +8,7 @@
 -module(varp).
 
 -export([start/0, start0/0]).
+-export([xref/0]).
 -export([main/1]).
 -export([do_run/3, do_run/4]).
 
@@ -47,7 +48,6 @@
 
 %% varp_nif api
 -export([new/1]).
--export([clone/1]).
 -export([clone/2]).
 -export([getopt/1,getopt/2,getopt/3]).
 -export([getstat/1,getstat/2]).
@@ -123,7 +123,7 @@
 -export([clauseset_size/2]).
 -export([clauseset_offset/2, clauseset_offset/3]).
 -export([clauseset_sort/2]).
--export([clauseset_first/1, clauseset_first/2]).
+-export([clauseset_first/2]).
 -export([clauseset_next/2]).
 -export([unmark/1]).
 -export([mark/2, mark/3]).
@@ -468,7 +468,15 @@ internal_options() -> %% needed?
 	default => #{},  %% map
 	description => "Internal map of symbols" }
     ].
-    
+
+xref() ->
+    {ok, _XPid} = xref:start(x, []),
+    xref:add_release(x, code:lib_dir(), {name, otp}),
+    xref:add_application(x, code:lib_dir(varp)),
+    Res = xref:analyze(x, undefined_functions),
+    xref:stop(x),
+    Res.
+
 
 vsn() ->
     case application:get_key(varp,vsn) of
@@ -807,21 +815,21 @@ display_cprof({TCalls,Ms}) ->
 format_error(Err) ->
     case Err of
 	{unbound,Var} ->
-	    VarName = varp_formula:format_symbol(Var),
+	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ", VarName, " is unbound\n"];
 	{var_out_of_range,Var} ->
-	    VarName = varp_formula:format_symbol(Var),
+	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ",VarName," is out of range\n"];
 	{empty_clause, _Where} ->
 	    ["Empty clause not allowed\n"];
 	{arity_mismatch,Var} ->
-	    VarName = varp_formula:format_symbol(Var),
+	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ",VarName, " can only have ", "one arity"];
 	{bitsize_mismatch,Var} ->
-	    VarName = varp_formula:format_symbol(Var),
+	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ",VarName, " can only have one size"];
 	{shift_not_constant,B} ->
-	    BStr = varp_formula:format_symbol(B),
+	    BStr = varp_format:format_symbol(B),
 	    ["Shift value ",BStr," must be constant "];
 	_ ->
 	    io_lib:format("~p\n", [Err])
@@ -1897,10 +1905,6 @@ intersect_marks(Vp, Bs) -> varp_nif:intersect_marks(Vp, Bs).
 intersect_var(Vp, _Var, Bs0, AsTuple) -> varp_nif:intersect_var(Vp, _Var, Bs0, AsTuple).
 get_marked(Vp, Tuple) -> varp_nif:get_marked(Vp, Tuple).
 
-%% return index to first clause | false
-clauseset_first(Vp) ->
-    clauseset_first(Vp, ?DELTA).
-
 %% Get all clauses in queue
 get_queue(Vp) ->
     case queue_first(Vp) of
@@ -1917,9 +1921,6 @@ get_queue_(Vp,I,Acc) ->
 
 get_clauses(Vp,Var) ->
     get_clauses(Vp,Var,literal).
-
-clone(Vp) ->
-    clone(Vp, #{}).
 
 -spec new() -> varp_nif:varp().
 	  

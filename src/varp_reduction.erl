@@ -36,7 +36,7 @@ options() ->
 
 
 run(Bs, Param) ->
-    N = varp:number_of_unbound_variables(Bs#bs.vp),
+    N = varp:get_number_of_unbound_variables(Bs#bs.vp),
     varp_nif:setopt(Bs#bs.vp, permanent, 0),
     CMax = varp_nif:getopt(Bs#bs.vp, permanent),
     Type = maps:get(type, Param),
@@ -66,7 +66,7 @@ red(Bs,X,N,CMax,Type) ->
 
 add_var(Bs,V,CMax,Type) ->
     ?dbg("reduction=~s,cmax=~w,type=~w\n",
-	 [varp_formula:format_lit(Bs,V),CMax,Type]),
+	 [varp_format:format_lit(Bs,V),CMax,Type]),
     case Type of
 	pos ->
 	    Is = get_delta_clauses(Bs,V,CMax),
@@ -145,22 +145,20 @@ intersect(A,B) ->
     A -- (A -- B).
 
 or_clause(Bs, CL) ->
-    %% add option to add the new clauses?
-    %% io:put_chars([varp_formula:format_clause(Bs,CL),"\n"]),
-    varp_formula:or_clause(Bs, CL).
+    varp_circuit:clause(Bs#bs.vp,CL).
 
 -ifdef(not_used).
 
 emit_def(Bs, Yj, Cs) ->
-    io:format("~s == ", [varp_formula:format_lit(Bs,Yj)]),
+    io:format("~s == ", [varp_format:format_lit(Bs,Yj)]),
     lists:foreach(
       fun({_Y,[X1]}) ->
-	      io:format("{~s}|",[varp_formula:format_lit(Bs,X1)]);
+	      io:format("{~s}|",[varp_format:format_lit(Bs,X1)]);
 	 ({_Y,[X1|Xs]}) ->
-	      io:format("{~s",[varp_formula:format_lit(Bs,X1)]),
+	      io:format("{~s",[varp_format:format_lit(Bs,X1)]),
 	      lists:foreach(
 		fun(Xi) ->
-			io:format("&~s", [varp_formula:format_lit(Bs,Xi)])
+			io:format("&~s", [varp_format:format_lit(Bs,Xi)])
 		end, Xs),
 	      io:format("}|")
       end, Cs),

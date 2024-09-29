@@ -33,7 +33,7 @@ options() ->
       }].
 
 run(Bs, Param) when is_record(Bs,bs), is_map(Param) ->
-    N = varp:number_of_unbound_variables(Bs#bs.vp),
+    N = varp:get_number_of_unbound_variables(Bs#bs.vp),
     Type = maps:get(type, Param),
     case maps:get(size, Param) of
 	0 ->
@@ -61,7 +61,7 @@ rat(Bs,X,N,Type) ->
 
 rat_var(Bs,V,Type) ->
     ?dbg("rat=~s,cmax=~w,type=~w\n",
-	 [varp_formula:format_lit(Bs,V),CMax,Type]),
+	 [varp_format:format_lit(Bs,V),CMax,Type]),
     case Type of
 	pos ->
 	    Is = get_delta_clauses(Bs,V),

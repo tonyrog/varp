@@ -1137,7 +1137,7 @@ output_model(_Fd, Partial, Model, S) ->
        true ->
 	    ok
     end,
-    List = [ varp_formula:format_binding(B) ||
+    List = [ varp_format:format_binding(B) ||
 	       B <- varp_formula:filter_bindings(Model),
 	       Partial orelse (element(2,B) =/= false) ],
     Chars = lists:join(",", List),
@@ -1319,15 +1319,15 @@ mon_loop(Bs,Param,Mon,StartTime,PrevInfo) ->
 	    response(From, ok);
 	{varp, {_X,_Y}, Info} ->
 	    ?dbg("varp_wx monitor: substitut (~w=>~w) ~s => ~s,info=~w\n",
-		 [_Y,_X, varp_formula:format_lit(Bs,_Y),
-		  varp_formula:format_lit(Bs,_X),Info]),
+		 [_Y,_X, varp_format:format_lit(Bs,_Y),
+		  varp_format:format_lit(Bs,_X),Info]),
 	    Info1 = mon_loop_collect(Info),
 	    Info2 = merge_info(Info1, PrevInfo),
 	    update_info(Param,StartTime,Info2),
 	    mon_loop(Bs,Param,Mon,StartTime,Info2);
 	{varp, _X, Info} ->
 	    ?dbg("varp_wx monitor: permanent (~w=1) ~s = ~w,info=~w\n",
-		 [_X,varp_formula:format_lit(Bs,_X), 1, Info]),
+		 [_X,varp_format:format_lit(Bs,_X), 1, Info]),
 	    Info1 = mon_loop_collect(Info),
 	    Info2 = merge_info(Info1, PrevInfo),
 	    update_info(Param,StartTime,Info2),

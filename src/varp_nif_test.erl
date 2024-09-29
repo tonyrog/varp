@@ -1310,7 +1310,7 @@ clone1() ->
     %% print_clauses(V),
     %% dump_variables(V, [X1,X2,X3,X4,X5,X6]),
 
-    W = varp_nif:clone(V),
+    W = varp_nif:clone(V, #{}),
 
     varp_nif:push(W),
     false = varp_nif:nbcp(W),

@@ -63,7 +63,7 @@ succ(Fd, Type, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [M, N])
     end,
-    I = varp_nif:clauseset_first(Bs#bs.vp),
+    I = varp_nif:clauseset_first(Bs#bs.vp, delta),
     succ_(Fd, Type, I, Bs).
 
 succ_(_Fd,_Type,false,Bs) ->
@@ -176,7 +176,7 @@ clause_bn_(Bs, Xi, CL, Acc) ->
 
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp, delta), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;

@@ -8173,6 +8173,15 @@ static ERL_NIF_TERM varp_clause_info(ErlNifEnv* env, int argc,
 				    enif_make_int(env, export_l(cp->lit[1])));
 	return enif_make_boolean(env, 0);
     }
+    if (argv[2] == ATOM(set)) {  // clause set
+	switch(GET_SI(cix)) {
+	case ALPHA: return ATOM(alpha);
+	case BETA: return ATOM(beta);
+	case GAMMA: return ATOM(gamma);
+	case DELTA: return ATOM(delta);
+	default: return ATOM(undefined);
+	}
+    }
     return enif_make_badarg(env);
 }
 

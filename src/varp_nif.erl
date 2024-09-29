@@ -585,7 +585,7 @@ clause_info(_Vp,Index,_What)
     ?nif_stub().
 
 clause_info(Vp,Index) ->
-    [{What,clause_info(Vp,Index,What)}||What<-[status,watch,length]].
+    [{What,clause_info(Vp,Index,What)}||What<-[status,watch,length,set]].
 
 -spec del_clause(Vp::varp(), integer()|[literal()]) -> ok.
 del_clause(_Vp,Index)

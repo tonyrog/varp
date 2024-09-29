@@ -79,7 +79,7 @@ emit_fd(Fd, Type, Symbols, Raw, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [NumVars, NumClauses])
     end,
-    cnf_(Fd, Type, Raw, varp:clauseset_first(Bs#bs.vp), VarMap, Bs).
+    cnf_(Fd, Type, Raw, varp:clauseset_first(Bs#bs.vp, delta), VarMap, Bs).
 
 
 cnf_(_Fd,_Type,_Raw,false,_VarMap,Bs) ->
@@ -102,9 +102,9 @@ format_cnf_clause(_Bs,CL,_,VarMap) ->
      " 0"].
 
 format_snf_clause(Bs,CL,debug,_VarMap) ->
-    [lists:join(" ", [varp_formula:format_lit(Bs,L,true)||L<-CL]), "."];
+    [lists:join(" ", [varp_format:format_lit(Bs,L,true)||L<-CL]), "."];
 format_snf_clause(Bs,CL,_,_VarMap) ->
-    [lists:join(" ", [varp_formula:format_lit(Bs,L,false)||L<-CL]), "."].
+    [lists:join(" ", [varp_format:format_lit(Bs,L,false)||L<-CL]), "."].
 
 %% emit symbols as comments
 %% 'c' <symbol> is <literal-number>
@@ -119,7 +119,7 @@ emit_symbols(Fd, true, Bs, VarMap) ->
 	      case maps:find(Value, VarMap) of
 		  {ok, Value1} ->
 		      io:format(Fd, "c ~s is ~w\n", 
-				[varp_formula:format_symbol(Key),Value1]);
+				[varp_format:format_symbol(Key),Value1]);
 		  error -> 
 		      ok
 	      end
@@ -133,7 +133,7 @@ renumerate_clauses(Bs, Raw) ->
     renumerate_clauses(Bs, Raw, #{}, 0).
 
 renumerate_clauses(Bs, Raw, VarMap, NumClauses) ->
-    renumerate_clauses(Bs, varp:clauseset_first(Bs#bs.vp),
+    renumerate_clauses(Bs, varp:clauseset_first(Bs#bs.vp, delta),
 		       Raw, VarMap, NumClauses).
 
 renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses) ->
@@ -176,7 +176,7 @@ translate_literal(L, VarMap) when L > 0 ->
 -ifdef(unused).
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varp:clauseset_first(Bs#bs.vp), 0).
+    count_number_of_clauses_(Bs, varp:clauseset_first(Bs#bs.vp, delta), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;

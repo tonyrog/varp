@@ -28,6 +28,7 @@
 -export([bitwise_and/3]).
 -export([bitwise_or/3]).
 -export([bitwise_xor/3]).
+-export([bitwise_equ/3]).
 -export([bitwise_not/2]).
 %% compare
 -export([lt/3]).
@@ -326,6 +327,23 @@ bitwise_xor(Vp, A, B) ->
        true ->
 	    {Ct,Cn,Cx}
     end.
+
+bitwise_equ(Vp, A, B) ->
+    {At,An,Ax} = varg(A),
+    {Bt,Bn,Bx} = varg(B),
+    Cn = erlang:max(An,Bn),
+    Ax1 = vextend(At,Ax,An,Cn),
+    Bx1 = vextend(Bt,Bx,Bn,Cn),
+    Cx = varp_bitvec:bitwise_equ(Vp,Ax1,Bx1),
+    Ct = mix_type(At,Bt),
+    if Ct =:= bool ->
+	    [C1] = Cx,
+	    {bool,C1};
+       true ->
+	    {Ct,Cn,Cx}
+    end.
+
+
 
 %% A < B  <=>  A - B < 0 ?
 lt(Vp,{bool,A},{bool,B}) ->

@@ -79,13 +79,13 @@ loop(Bs, Mon) ->
 	{varp, {X,Y}, _Info} ->
 	    io:format("monitor: substitut (~w=>~w) ~s => ~s\n", 
 		      [Y,X,
-		       varp_formula:format_lit(Bs,Y),
-		       varp_formula:format_lit(Bs,X)
+		       varp_format:format_lit(Bs,Y),
+		       varp_format:format_lit(Bs,X)
 		      ]),
 	    loop(Bs, Mon);
 	{varp, X, _Info} ->
 	    io:format("monitor: permanent ~s\n", 
-		      [varp_formula:format_lit(Bs,X)]),
+		      [varp_format:format_lit(Bs,X)]),
 	    loop(Bs, Mon);
 	stop ->
 	    ok;

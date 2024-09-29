@@ -526,9 +526,9 @@ format_symbol(Sym) ->
     format_symbol(false, Sym).
 
 format_symbol(false, Sym) ->
-    lists:flatten(varp_formula:format_internal_symbol(Sym));
+    lists:flatten(varp_format:format_internal_symbol(Sym));
 format_symbol(true, Sym) ->
-    [$! | lists:flatten(varp_formula:format_internal_symbol(Sym))].
+    [$! | lists:flatten(varp_format:format_internal_symbol(Sym))].
 
 sat(Formula, ExpectedModels) ->
     sat_(Formula, ExpectedModels, backtrack).
