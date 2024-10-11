@@ -61,7 +61,7 @@ format_var(Bs,X,Bound) ->
 format_bnd(_Bs, _X, Var, false) ->
     format_symbol(Var);
 format_bnd(Bs, X, Var, true) ->
-    Value = case varp:value(Bs#bs.vp, X) of
+    Value = case varp_nif:value(Bs#bs.vp, X) of
 		true -> "/1";
 		false -> "/0";
 		_ -> ""
@@ -69,7 +69,7 @@ format_bnd(Bs, X, Var, true) ->
     format_symbol(Var) ++ Value;
 format_bnd(Bs, X, Var, level) ->
     L = varp_nif:implication_level(Bs#bs.vp, X), 
-    Value = case varp:value(Bs#bs.vp, X) of
+    Value = case varp_nif:value(Bs#bs.vp, X) of
 		true -> "=1@"++integer_to_list(L);
 		false -> "=0@"++integer_to_list(L);
 		_ -> ""
@@ -143,11 +143,14 @@ format_p({bitindex,Var,Index}) ->
 format_p({index,Var,Index}) ->
     [format_p(Var),"[",integer_to_list(Index), "]"].
 
-%% format varp_nif symbol {Name,[param()]}
+%% format varp_nif symbol {Name,[param()]}  varp_nif:get_symbol
 format_internal_symbol({SymName,Params}) when is_binary(SymName) ->
     [binary_to_list(SymName) | format_params(Params)];
-format_internal_symbol({SymName,Params}) when is_list(SymName) ->
-    [SymName | format_params(Params)].
+format_internal_symbol({{SymName,Params},bool,1,0}) ->
+    [binary_to_list(SymName) | format_params(Params)];
+format_internal_symbol({{SymName,Params},_Type,_N,Pos}) ->
+    [binary_to_list(SymName), format_params(Params) | ["[",integer_to_list(Pos),"]"]].
+
 
 format_params([]) -> "";
 format_params(As) when is_list(As) ->

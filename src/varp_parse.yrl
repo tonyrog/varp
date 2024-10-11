@@ -57,6 +57,7 @@ assignment_defs -> assignment_def : ['$1'].
 assignment_defs -> assignment_defs assignment_def : '$1'++['$2'].
 
 assignment_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
+assignment_def -> cname '(' arg_list ')' ';'  : { cop, str('$1'), '$3'}.
 
 definition_list -> definition : ['$1'].
 definition_list -> definition_list definition : '$1'++['$2'].
@@ -69,7 +70,7 @@ definition -> 'assert' expr ';'        : {assert,'$2'}.
 definition -> 'input' sym ';'  : {input,'$2'}.
 definition -> 'output' sym ';' : {output,'$2'}.
 definition -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
-		  add_circuit_def({circuit, '$2', '$3', '$5'}).
+		  varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
 
 circuit_params -> '(' ')' : [].
 circuit_params -> '(' circuit_param_decls ')' : '$2'.
@@ -98,7 +99,7 @@ circuit_defs -> circuit_defs circuit_def : '$1' ++ ['$2'].
 %% oexpr must be output args, lexpr may contain both in and out id's
 circuit_def -> 'declare' pdecls ';' : {declare,'$2'}.
 circuit_def -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
-		   add_circuit_def({circuit, '$2', '$3', '$5'}).
+		   varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
 circuit_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
     
 primary_expr -> 'min': <<"min">>.
@@ -381,8 +382,9 @@ sexpr -> sym : '$1'.
 pexpr -> sym               : { p, '$1', []}.
 pexpr -> sym '(' ')'       : { p, '$1', []}.
 pexpr -> sym '(' expr ')'  : { p, '$1', comma_list('$3')}.
-pexpr -> cname '(' arg_list ')'  : { cop, str('$1'), comma_list('$3')}.
+pexpr -> cname '(' arg_list ')'  : { cop, str('$1'), '$3'}.
 
+arg_list -> '$empty' : [].
 arg_list -> arg : ['$1'].
 arg_list -> arg_list ',' arg : '$1'++['$3'].
 
@@ -392,7 +394,6 @@ arg -> sym '=' lexpr : {'=','$1','$3'}.
 sym -> 'A'        : <<"A">>.
 sym -> 'E'        : <<"E">>.
 sym -> symbol     : str('$1').
-
 
 Erlang code.
 
@@ -445,16 +446,6 @@ machine_sizeof(double)  ->
 %%    application:get_enc(varp, endian, little).
 init() ->
     %% io:format("INIT\n"),
-    init_circuit_defs(),
+    varp_formula:init_circuit_def(),
     ok.
 
-%% keep defined circuits to allow parser to know what
-%% symbols are predicates and what symbols are circuits
-init_circuit_defs() ->
-    put(circuit_defs, #{}).
-
-add_circuit_def(C={circuit,Name,_Params,_Defs}) ->
-    %% io:format("add circuit ~s\n", [Name]),
-    CDef = get(circuit_defs),
-    put(circuit_defs, CDef#{ Name => circuit }),
-    C.

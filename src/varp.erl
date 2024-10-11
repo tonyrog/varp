@@ -9,6 +9,7 @@
 
 -export([start/0, start0/0]).
 -export([xref/0]).
+-export([test/0]).
 -export([main/1]).
 -export([do_run/3, do_run/4]).
 
@@ -43,93 +44,10 @@
 -export([check_timeout_or_cancel/3]).
 -export([decision_clause/1, decision_clause/2]).
 -export([block_clause/1]).
--export([make_psym/2]).
 -export([format_error/1]).
-
-%% varp_nif api
--export([new/1]).
--export([clone/2]).
--export([getopt/1,getopt/2,getopt/3]).
--export([getstat/1,getstat/2]).
--export([setopt/3, setopt/4]).
--export([add_variable/1]).
--export([add_variable/2]).
--export([add_variable/3]).
--export([add_variables/2]).
--export([add_variables/3]).
--export([add_variables/4]).
--export([del_variable/2]).
--export([add_symbol/3]).
--export([del_symbol/2]).
--export([get_symbol/2]).
--export([find_symbol/2]).
--export([first_symbol/1]).
--export([next_symbol/2]).
--export([variable_info/3]).
--export([literal_info/3]).
--export([value/2]).
--export([level/1]).
--export([bound/2]).
--export([bind/2, bind/3]).
--export([decide/2, decide/3]).
--export([subst/3]).
--export([implication_clause/2]).
--export([implication_level/2]).
--export([conflicting_clause/1]).
--export([conflicting_clause/2]).
--export([conflict/3, conflict/4]).
--export([minimize/2, minimize/3]).
--export([is_variable/2]).
--export([is_bound/2]).
--export([is_equal/3]).
--export([isused/2, isused/3]).
--export([isatom/2, isatom/3]).
--export([set_phase/2, phase/2]).
--export([push/1]).
--export([pop/1, pop/2]).
--export([undo/1]).
--export([bcp/1, bcp/2, bcp/3]).
--export([nbcp/1]).
--export([vbcp/2, vbcp/3]).
--export([add_clause/2]).
--export([add_clause/3]).
--export([find_clause/2]).
--export([get_clause/2]).
--export([get_clause/3]).
--export([get_clause/4]).
--export([del_clause/2]).
--export([move_clause/3]).
--export([compress_clause/2]).
--export([clean_clause/2]).
--export([get_clauses/2]).
--export([get_clauses/3]).
--export([use_clause/2]).
--export([clause_info/2,clause_info/3]).
--export([get_undo_state/2]).
--export([get_nbindings/2, get_nbindings/3, get_nbindings/4]). 
--export([get_bindings/1, get_bindings/2, get_bindings/3, get_bindings/4]).
--export([get_number_of_bindings/2]).
+-export([getopts/1]).
+-export([getstat/1]).
 -export([get_queue/1]).
--export([queue_first/1]).
--export([queue_next/2]).
--export([queue_clear/1]).
--export([get_decision/2]).
--export([order_sort/2, order_sort/3, order_sort/4]).
--export([order_first/2, order_last/2]).
--export([order_first/3, order_last/3]).
--export([next_unbound/1, next_unbound/2]).
--export([bump/3]).
--export([subscribe/2]).
--export([clauseset_size/2]).
--export([clauseset_offset/2, clauseset_offset/3]).
--export([clauseset_sort/2]).
--export([clauseset_first/2]).
--export([clauseset_next/2]).
--export([unmark/1]).
--export([mark/2, mark/3]).
--export([intersect_marks/2]).
--export([intersect_var/4]).
--export([get_marked/2]).
 
 %% variants
 -export([new/0]).
@@ -176,6 +94,7 @@
 -export([intersect_var0/4]).
 -export([make_friend_map/1]).
 -export([order_all/1, phase_all/1]).
+-export([find_decl/2, find_decl/3]).
 
 -define(BINDING_AS_TUPLE, true).
 
@@ -477,6 +396,13 @@ xref() ->
     xref:stop(x),
     Res.
 
+%% Hmm mabe make this a bit more structured?
+test() ->
+    varp_nif_test:all(),
+    varp_circuit:test(),
+    varp_arith:test(),
+    varp_test:all().
+
 
 vsn() ->
     case application:get_key(varp,vsn) of
@@ -735,20 +661,20 @@ varp_run(Do, Assignments, Formula, GOpts) ->
     put(exit_code, 0),
     start_cprof(GOpts),
     start_fprof(GOpts),
-    R = (catch do_run(Do, Assignments, Formula, GOpts)),  %% try?
-    %% R = (do_run(Do, Formula, GOpts)),
-    varp_monitor:stop(), %% if started
-    case R of
-	{'EXIT',{Error, _Where}} ->
+    try do_run(Do, Assignments, Formula, GOpts) of
+	Result -> Result
+    catch
+	?EXCEPTION(error,Error,Trace) ->
 	    io:format("~s\n", [format_error(Error)]),
-	    stop_cprof(GOpts, false),
-	    stop_fprof(GOpts, false),
-	    ok;
-	_ ->
-	    stop_cprof(GOpts, true),
-	    stop_fprof(GOpts, true),
-	    R
+	    io:format("~p\n", [?GET_STACK(Trace)]),
+	    put(exit_code, 1),
+	    ok
+    after
+	varp_monitor:stop(), %% if started
+	stop_cprof(GOpts, false),
+	stop_fprof(GOpts, false)
     end.
+
 
 start_cprof(GOpts) ->
     case maps:get(cprof, GOpts) of
@@ -851,7 +777,7 @@ do_run_(Do, Assignments, Formula, GOpts) ->
     {Main,Bs} = case varp_formula:build(Formula,Bs0_0) of
 		    {{bool,Var0},Bs0_1} -> 
 			{Var0,Bs0_1};
-		    {{uint,1,[Var0]},Bs0_1} -> 
+		    {{uint,1,[Var0]},Bs0_1} ->
 			{Var0,Bs0_1};
 		    {undefined,Bs0_1} -> 
 			{undefined,Bs0_1}; %% validate etc
@@ -867,7 +793,7 @@ do_run_(Do, Assignments, Formula, GOpts) ->
     show_info(S1, S0, Ts, Bs),
 
     Timeout = maps:get(timeout, GOpts, infinity),
-    Bs1 = varp:set_global_timeout(Bs, Timeout),
+    Bs1 = set_global_timeout(Bs, Timeout),
     Bs2 = Bs1#bs { main = Main },
     {R,Acc,Bs3} = do(Do,[],Bs2),
     Method = method(Do),
@@ -904,6 +830,9 @@ do([{Plugin,Param}|Do],Acc0,Bs) ->
     T0 = erlang:monotonic_time(),
     try Plugin:run(Bs, Param) of
 	{Result,Acc1,Bs1} ->
+	    %% io:format("dump (~p)\n", [Plugin]),
+	    %% varp_nif_test:dump(Bs1#bs.vp, true),
+
 	    T1 = erlang:monotonic_time(),
 	    S1 = stat(Bs1),
 	    Time = erlang:convert_time_unit(T1-T0,native,microsecond),
@@ -1600,24 +1529,40 @@ split_sections([{output,Name}|Sections], Map=#{ output:=Output0 },GOpts) ->
 split_sections([], Map, _GOpts) ->
     {ok, Map}.
 
--ifdef(PSYM_ARITY).
-make_psym(Sym,Args) -> {Sym,length(Args)}.
--else.
-make_psym(Sym,_Args) -> Sym.
--endif.
-
 add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
     Size = varp_formula:eval_meta(SExpr, Bs),
-    PSym = make_psym(Sym,Args),
-    case maps:find(PSym, Decls) of
+    case maps:find(Sym, Decls) of
 	error ->
-	    Decls1 = maps:put(PSym, {PType,length(Args),Size}, Decls),
+	    Decls1 = maps:put(Sym, {PType,length(Args),Size}, Decls),
 	    add_decls(Ds, Decls1, Bs);
 	{ok,_} ->
 	    {error, {symbol, Sym, already_declared}}
     end;
 add_decls([], Decls, _Bs) ->
     {ok,Decls}.
+
+find_decl(Sym, Decls) ->
+    find_decl(Sym, Decls, false).
+
+find_decl(Sym, Decls, _ICase=false) ->
+    maps:find(Sym, Decls);
+find_decl(Sym, Decls, _ICase=true) ->
+    USym = string:uppercase(Sym),
+    I = maps:iterator(Decls),
+    find_decl_(USym, I).
+
+find_decl_(UName, I) ->
+    case maps:next(I) of
+	none -> 
+	    error;
+	{Name,{PType,Arity,Size},I1} ->
+	    case string:uppercase(Name) of
+		UName ->
+		    {ok,{PType,Arity,Size}};
+		_ -> 
+		    find_decl_(UName, I1)
+	    end
+    end.
 
 string(Data) ->
     string(Data,false).
@@ -1793,134 +1738,19 @@ literal_info(Vp,Index) ->
 literal_info_keys() ->
     [mark, inqueue, degree, user, xref, symbol].
 
-%% VARP_NIF wrapper
-
-new(Options) -> varp_nif:new(Options).
-clone(Vp,Opts) -> varp_nif:clone(Vp,Opts).
-setopt(Vp,Key,Value) -> varp_nif:setopt(Vp,Key,Value).
-setopt(Vp,Key,Value,System) -> varp_nif:setopt(Vp,Key,Value,System).
-getopt(Vp,Key) -> varp_nif:getopt(Vp,Key).
-getopt(Vp,Key,System) -> varp_nif:getopt(Vp,Key,System).
-getstat(Vp,Key) -> varp_nif:getstat(Vp,Key).
-add_variable(Vp) -> varp_nif:add_variable(Vp).
-add_variable(Vp,IsAtom) -> varp_nif:add_variable(Vp,IsAtom).
-add_variable(Vp,IsAtom,IsUsed) -> varp_nif:add_variable(Vp,IsAtom,IsUsed).
-add_variables(Vp,Num) -> varp_nif:add_variables(Vp,Num).
-add_variables(Vp,Num,IsAtom) -> varp_nif:add_variables(Vp,Num,IsAtom).
-add_variables(Vp,Num,IsAtom,IsUsed) -> varp_nif:add_variables(Vp,Num,IsAtom,IsUsed).
-del_variable(Vp, Index) -> varp_nif:del_variable(Vp, Index).
-add_symbol(Vp,Lit, Name) -> varp_nif:add_symbol(Vp,Lit, Name).
-del_symbol(Vp,Name) -> varp_nif:del_symbol(Vp,Name).
-get_symbol(Vp,Lit) -> varp_nif:get_symbol(Vp,Lit).
-find_symbol(Vp,Name) -> varp_nif:find_symbol(Vp,Name).
-first_symbol(Vp) -> varp_nif:first_symbol(Vp).
-next_symbol(Vp,Symbol) -> varp_nif:next_symbol(Vp,Symbol).
-variable_info(Vp,Index,What) -> varp_nif:variable_info(Vp,Index,What).
-literal_info(Vp,Index,What) -> varp_nif:literal_info(Vp,Index,What).
-level(Vp) -> varp_nif:level(Vp).
-value(Vp,Lit) -> varp_nif:value(Vp,Lit).
-bound(Vp,Lit) -> varp_nif:bound(Vp,Lit).
-bind(Vp, X) -> varp_nif:bind(Vp, X).
-bind(Vp,X,Level) -> varp_nif:bind(Vp,X,Level).
-decide(Vp,X) -> varp_nif:decide(Vp,X).
-decide(Vp,X,Level) -> varp_nif:decide(Vp,X,Level).
-subst(Vp,X,Y) -> varp_nif:subst(Vp,X,Y).
-implication_clause(Vp,Lit) -> varp_nif:implication_clause(Vp,Lit).
-implication_level(Vp,Lit) -> varp_nif:implication_level(Vp,Lit).
-conflicting_clause(Vp) -> varp_nif:conflicting_clause(Vp).
-conflicting_clause(Vp,Index) -> varp_nif:conflicting_clause(Vp,Index).
-conflict(Vp,Bump,IndexOrClause) -> varp_nif:conflict(Vp,Bump,IndexOrClause).
-conflict(Vp,Bump,IndexOrClause,UnitLiteral) ->
-    varp_nif:conflict(Vp,Bump,IndexOrClause,UnitLiteral).
-minimize(Vp,CluseIndex) -> varp_nif:minimize(Vp,CluseIndex).
-minimize(Vp,CluseIndex,Style) -> varp_nif:minimize(Vp,CluseIndex,Style).
-is_variable(Vp,Lit) -> varp_nif:is_variable(Vp,Lit).
-is_bound(Vp,Lit) -> varp_nif:is_bound(Vp,Lit).
-is_equal(Vp,LitA,LitB) -> varp_nif:is_equal(Vp,LitA,LitB).
-isused(Vp,Var) -> varp_nif:isused(Vp,Var).
-isused(Vp,Var,Status) -> varp_nif:isused(Vp,Var,Status).
-isatom(Vp,Var) -> varp_nif:isatom(Vp,Var).
-isatom(Vp,Var,Status) -> varp_nif:isatom(Vp,Var,Status).
-set_phase(Vp, Lit) -> varp_nif:set_phase(Vp, Lit).
-phase(Vp, Var) -> varp_nif:phase(Vp, Var).
-pop(Vp) -> varp_nif:pop(Vp).
-pop(Vp,Level) -> varp_nif:pop(Vp,Level).
-push(Vp) -> varp_nif:push(Vp).
-undo(Vp) -> varp_nif:undo(Vp).
-bcp(Vp) -> varp_nif:bcp(Vp).
-bcp(Vp,TurboLiteralList) -> varp_nif:bcp(Vp,TurboLiteralList).
-bcp(Vp,TurboLiteralList,TurboAll) -> varp_nif:bcp(Vp,TurboLiteralList,TurboAll).
-nbcp(Vp) -> varp_nif:nbcp(Vp).
-vbcp(Vp,Xs) -> varp_nif:vbcp(Vp,Xs).
-vbcp(Vp,Xs,SingleLevel) -> varp_nif:vbcp(Vp,Xs,SingleLevel).
-clauseset_size(Vp, Si) -> varp_nif:clauseset_size(Vp, Si).
-add_clause(Vp,Ls) -> varp_nif:add_clause(Vp,Ls).
-add_clause(Vp,Ls,Si) -> varp_nif:add_clause(Vp,Ls,Si).
-find_clause(Vp,Ls) -> varp_nif:find_clause(Vp,Ls).
-get_clause(Vp,Index) -> varp_nif:get_clause(Vp,Index).
-get_clause(Vp,Index,Skip) -> varp_nif:get_clause(Vp,Index,Skip).
-get_clause(Vp,Index,SkipLiteral,Raw) ->
-    varp_nif:get_clause(Vp,Index,SkipLiteral,Raw).
-compress_clause(Vp,Index) -> varp_nif:compress_clause(Vp,Index).
-use_clause(Vp,Index) -> varp_nif:use_clause(Vp,Index).
-bump(Vp,Lit,Bump) -> varp_nif:bump(Vp,Lit,Bump).
-subscribe(Vp,Event) -> varp_nif:subscribe(Vp,Event).
-clause_info(Vp,Index,What) -> varp_nif:clause_info(Vp,Index,What).
-clause_info(Vp,Index) -> varp_nif:clause_info(Vp,Index).
-del_clause(Vp,Index) -> varp_nif:del_clause(Vp,Index).
-move_clause(Vp,Index,Si) -> varp_nif:move_clause(Vp,Index,Si).
-clean_clause(Vp,Index) -> varp_nif:clean_clause(Vp,Index).
-get_clauses(Vp,Var,How) -> varp_nif:get_clauses(Vp,Var,How).
-queue_first(Vp) -> varp_nif:queue_first(Vp).
-queue_next(Vp, Lit) -> varp_nif:queue_next(Vp, Lit).
-queue_clear(Vp) -> varp_nif:queue_clear(Vp).
-get_decision(Vp, Level) -> varp_nif:get_decision(Vp, Level).
-get_undo_state(Vp, Level) -> varp_nif:get_undo_state(Vp, Level).
-get_nbindings(Vp,Count) -> varp_nif:get_nbindings(Vp,Count).
-get_nbindings(Vp,Count,AsTrail) -> varp_nif:get_nbindings(Vp,Count,AsTrail).
-get_nbindings(Vp,Count,AsTrail,AsTuple) -> varp_nif:get_nbindings(Vp,Count,AsTrail,AsTuple).
-get_bindings(Vp) -> varp_nif:get_bindings(Vp).
-get_bindings(Vp, Level) -> varp_nif:get_bindings(Vp,Level).
-get_bindings(Vp, Level, Trail) -> varp_nif:get_bindings(Vp,Level,Trail).
-get_bindings(Vp, Level, Trail, AsTuple) -> varp_nif:get_bindings(Vp, Level, Trail, AsTuple).
-get_number_of_bindings(Vp, Level) -> varp_nif:get_number_of_bindings(Vp, Level).
-order_first(Vp, List) -> varp_nif:order_first(Vp, List).
-order_last(Vp, List) -> varp_nif:order_last(Vp, List).
-order_first(Vp, List, SetPhase) -> varp_nif:order_first(Vp, List, SetPhase).
-order_last(Vp, List, SetPhase) -> varp_nif:order_last(Vp, List, SetPhase).
-order_sort(Vp, Key1) -> varp_nif:order_sort(Vp, Key1).
-order_sort(Vp, Key1, KeyArg) -> varp_nif:order_sort(Vp, Key1, KeyArg).
-order_sort(Vp, Key1, Key2, Arg) -> varp_nif:order_sort(Vp, Key1, Key2, Arg).
-clauseset_offset(Vp, Si) -> varp_nif:clauseset_offset(Vp, Si).
-clauseset_offset(Vp, Si, Offset) -> varp_nif:clauseset_offset(Vp, Si, Offset).
-clauseset_sort(Vp, Si) -> varp_nif:clauseset_sort(Vp, Si).
-clauseset_first(Vp, Si) -> varp_nif:clauseset_first(Vp, Si).
-clauseset_next(Vp, Ix) -> varp_nif:clauseset_next(Vp, Ix).
-next_unbound(Vp) -> varp_nif:next_unbound(Vp).
-next_unbound(Vp, Previous) -> varp_nif:next_unbound(Vp, Previous).
-unmark(Vp) -> varp_nif:unmark(Vp).
-mark(Vp, Bs) -> varp_nif:mark(Vp, Bs).
-mark(Vp, Bs, Clear) -> varp_nif:mark(Vp, Bs, Clear).
-intersect_marks(Vp, Bs) -> varp_nif:intersect_marks(Vp, Bs).
-intersect_var(Vp, _Var, Bs0, AsTuple) -> varp_nif:intersect_var(Vp, _Var, Bs0, AsTuple).
-get_marked(Vp, Tuple) -> varp_nif:get_marked(Vp, Tuple).
-
 %% Get all clauses in queue
 get_queue(Vp) ->
-    case queue_first(Vp) of
+    case varp_nif:queue_first(Vp) of
 	false -> [];
 	I ->
 	    get_queue_(Vp,I,[I])
     end.
 
 get_queue_(Vp,I,Acc) ->
-    case queue_next(Vp,I) of
+    case varp_nif:queue_next(Vp,I) of
 	false -> lists:reverse(Acc);
 	J -> get_queue_(Vp,J,[J|Acc])
     end.
-
-get_clauses(Vp,Var) ->
-    get_clauses(Vp,Var,literal).
 
 -spec new() -> varp_nif:varp().
 	  
@@ -1990,7 +1820,7 @@ stat_keys() ->
     ].
 
 
-getopt(Vp) ->
+getopts(Vp) ->
     [ {Key,varp_nif:getopt(Vp, Key)} || Key <- option_keys()].
     
 option_keys() ->
@@ -2008,9 +1838,9 @@ option_keys() ->
      carry,
      borrow,
      overflow,
-     divz
+     divz,
+     icase
     ].
-
 
 memory() ->
     memory(new()).
@@ -2070,7 +1900,7 @@ get_conflict_counter(Vp) ->
 	  {Var::integer(),Value::integer()}|false.
 
 get_latest_binding(Vp) ->
-    case get_nbindings(Vp,1,false) of
+    case varp_nif:get_nbindings(Vp,1,false) of
 	[B={Var,_Val}|_] when is_integer(Var) -> B;
 	_ -> false
     end.

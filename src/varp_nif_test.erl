@@ -23,8 +23,8 @@ all() ->
     Failed = 
 	lists:foldl(
 	  fun(Test,Failed) ->
-		  io:format("< ~w: ", [Test]),
-		  case sync_apply(?MODULE, Test, []) of
+		  io:format("< ~w: ", [erlang:fun_info(Test,name)]),
+		  case Test() of
 		      ok -> 
 			  io:format("> OK\n"),
 			  Failed;
@@ -33,36 +33,60 @@ all() ->
 			  Failed+1
 		  end
 	  end, 0, 
-	  [test0, test1, test2, test3,
-	   symbols, clause_simplify,
-	   bcp2, bcp3, bcp4, bcp_turbo1,
-	   clause_bcp, clause_learn_d1, clause_learn_a1,
-	   watch_1,
+	  [fun test0/0, 
+	   fun test1/0,
+	   fun test2/0,
+	   fun test3/0,
+	   fun symbols/0,
+	   fun more_symbols/0,
+	   fun clause_basic/0,
+	   fun clause_simplify/0,
+	   fun bcp2/0, 
+	   fun bcp3/0,
+	   fun bcp4/0, 
+	   fun bcp_turbo1/0,
+	   fun clause_bcp/0,
+	   fun clause_learn_d1/0,
+	   fun clause_learn_a1/0,
+	   fun watch_1/0,
 	   %% mark intersect
-	   intersect1, intersect2, intersect_var0,
-	   intersect_var1, intersect_var2,
+	   fun intersect1/0,
+	   fun intersect2/0, 
+	   fun intersect_var0/0,
+	   fun intersect_var1/0,
+	   fun intersect_var2/0,
 	   
 	   %% order checks
-	   order_identity, order_degree,
-	   order_rank, order_first,
-	   order_last,
-	   order_first_and_last,
-	   order_random,
+	   fun order_identity/0,
+	   fun order_degree/0,
+	   fun order_rank/0,
+	   fun order_first/0,
+	   fun order_last/0,
+	   fun order_first_and_last/0,
+	   fun order_random/0,
 	   %% uorder
-	   uorder_basic,
-	   uorder_bump,
-	   uorder_bt,
+	   fun uorder_basic/0,
+	   fun uorder_bump/0,
+	   fun uorder_bt/0,
 	   
-	   subst0a, subst0b, subst0c, subst0d, 
-	   subst1, subst2, subst3, subst4, subst5, subst6,
-	   cnf_install,
-	   cnf_delete_sort,
-	   cnf_sort_offset_delete,
-	   decide1,
+	   fun subst0a/0,
+	   fun subst0b/0, 
+	   fun subst0c/0,
+	   fun subst0d/0, 
+	   fun subst1/0,
+	   fun subst2/0,
+	   fun subst3/0,
+	   fun subst4/0, 
+	   fun subst5/0,
+	   fun subst6/0,
+	   fun cnf_install/0,
+	   fun cnf_delete_sort/0,
+	   fun cnf_sort_offset_delete/0,
+	   fun decide1/0,
 	   
 	   %% partial eval
-	   build_all,
-	   build_any
+	   fun build_all/0,
+	   fun build_any/0
 	  ]),
     if Failed > 0 ->
 	    io:format("~w FAILED CASES\n", [Failed]);
@@ -209,53 +233,178 @@ test3() ->
     [X3,X4,X5,X6] = get_clause(V, C2),
     [X5,X6,X7] = get_clause(V, C3),
 
-    true = lists:sort([C0]) =:= lists:sort(varp:get_clauses(V, X1)),
+    true = lists:sort([C0]) =:= lists:sort(varp_nif:get_clauses(V, X1)),
 
-    true = lists:sort([C0,C1]) =:= lists:sort(varp:get_clauses(V, X2)),
-    true = lists:sort([C0,C1,C2]) =:= lists:sort(varp:get_clauses(V, X3)),
-    true = lists:sort([C1,C2]) =:= lists:sort(varp:get_clauses(V, X4)),
-    true = lists:sort([C2,C3]) =:= lists:sort(varp:get_clauses(V, X5)),
-    true = lists:sort([C2,C3]) =:= lists:sort(varp:get_clauses(V, X6)),
-    true = lists:sort([C3]) =:= lists:sort(varp:get_clauses(V, X7)),
+    true = lists:sort([C0,C1]) =:= lists:sort(varp_nif:get_clauses(V, X2)),
+    true = lists:sort([C0,C1,C2]) =:= lists:sort(varp_nif:get_clauses(V, X3)),
+    true = lists:sort([C1,C2]) =:= lists:sort(varp_nif:get_clauses(V, X4)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varp_nif:get_clauses(V, X5)),
+    true = lists:sort([C2,C3]) =:= lists:sort(varp_nif:get_clauses(V, X6)),
+    true = lists:sort([C3]) =:= lists:sort(varp_nif:get_clauses(V, X7)),
 
-    ?verbose("X5 clauses = ~p\n", [varp:get_clauses(V, X5)]),
-    ?verbose("X6 clauses = ~p\n", [varp:get_clauses(V, X6)]),
-    ?verbose("X7 clauses = ~p\n", [varp:get_clauses(V, X7)]),
+    ?verbose("X5 clauses = ~p\n", [varp_nif:get_clauses(V, X5)]),
+    ?verbose("X6 clauses = ~p\n", [varp_nif:get_clauses(V, X6)]),
+    ?verbose("X7 clauses = ~p\n", [varp_nif:get_clauses(V, X7)]),
 
     true = varp_nif:bcp(V),
     varp_nif:push(V),
     true = varp_nif:bind(V, X2),
     true = varp_nif:bind(V, X3),
-    {varp:get_bindings_list(V, 1), varp:get_number_of_clauses(V)}.
+    [X2,X3] = varp:get_bindings_list(V, 1),
+    4 = varp:get_number_of_clauses(V),
+    ok.
 
 symbols() ->
     V = varp_nif:new(#{}),
     X1 = var(V),
     {X2,X7} = varp_nif:add_variables(V, 6),
-    ok = varp_nif:add_symbol(V, X1, "X1"),
-    ok = varp_nif:add_symbol(V, lists:seq(X2,X7), "X27"),
-    X1 = varp_nif:find_symbol(V, "X1"),
-    [X2,_X3,_X4,_X5,_X6,X7] = varp_nif:find_symbol(V, "X27"),
+    ok = varp_nif:add_symbol(V, {"X1",[]}, X1, bool),
+    ok = varp_nif:add_symbol(V, {"X27",[]}, lists:seq(X2,X7), uint),
+    {bool,X1} = varp_nif:find_symbol(V, {"X1",[]}),
+    {uint,[X2,_X3,_X4,_X5,_X6,X7]} = varp_nif:find_symbol(V, {"X27",[]}),
     ok.
 
-symbol_as_uint(V, Sym) ->
-    b2u([case varp_nif:value(V,X) of
-	     ?T -> 1;
-	     ?F -> 0
-	 end || X <- varp_nif:find_symbol(V, Sym)]).
+more_symbols() ->
+    V = varp_nif:new(#{}),
+    {A1,A8} = varp_nif:add_variables(V, 8),    
+    {B1,B8} = varp_nif:add_variables(V, 8),    
+    X = varp_nif:add_variable(V),
+    Y = varp_nif:add_variable(V),
+    As = lists:seq(A1,A8),
+    varp_nif:add_symbol(V, {<<"A">>,[]},As,uint),
+    Bs = lists:seq(B1,B8),
+    varp_nif:add_symbol(V, {<<"B">>,[]}, Bs, int),
+    varp_nif:add_symbol(V, {<<"X">>,[]}, X, bool),
+    varp_nif:add_symbol(V, {<<"Y">>,[]}, Y, bool),
+    {uint,As} = varp_nif:find_symbol(V, {<<"A">>,[]}),
+    {int, Bs} = varp_nif:find_symbol(V, {<<"B">>,[]}),
+    {bool,X} = varp_nif:find_symbol(V, {<<"X">>,[]}),
+    {bool,Y} = varp_nif:find_symbol(V, {<<"Y">>,[]}),
+    false = varp_nif:find_symbol(V, {<<"Z">>,[]}),
 
-b2u(Ds) ->
-    b2u(Ds,0,0).
+    set_value(V, {{<<"A">>,[]},uint,8}, As, 137),
+    set_value(V, {{<<"B">>,[]},int,8}, Bs, 18),
 
-b2i(Ds) ->
-    U = b2u(Ds,0,0),
-    N = length(Ds),
-    (1 bsl (N-1)) - U.
+    varp_nif:bind(V, X),
+    varp_nif:bind(V, -Y),
 
-b2u([D|Ds],Shift,Sum) ->
-    b2u(Ds,Shift+1,(D bsl Shift)+Sum);
-b2u([],_,Sum) ->
-    Sum.
+    Ms1 = get_model(V),
+    io:format("Ms1 = ~p\n", [Ms1]),
+    [] = (Ms1  --
+	      [{{{<<"A">>,[]},uint,8},137},
+	       {{{<<"B">>,[]},int,8},18},
+	       {{{<<"X">>,[]},bool,1},true},
+	       {{{<<"Y">>,[]},bool,1},false}]),
+
+    varp_nif:push_symbols(V),
+
+    {C1,C8} = varp_nif:add_variables(V, 8),
+    Cs = lists:seq(C1,C8),
+    varp_nif:add_symbol(V, {<<"B">>,[]}, Cs, int),
+    {int,Cs} = varp_nif:find_symbol(V, {<<"B">>,[]}),
+    false = varp_nif:find_symbol(V, {<<"A">>,[]}),
+    false = varp_nif:find_symbol(V, {<<"Z">>,[]}),
+    
+    set_value(V, {{<<"B">>,[]},int,8}, Cs, 42),
+
+    varp_nif:pop_symbols(V),
+
+    Ms2 = get_model(V),
+    [] = (Ms2  --
+	      [{{{<<"A">>,[]},uint,8},137},
+	       {{{<<"B">>,[]},int,8},18},
+	       {{{<<"X">>,[]},bool,1},true},
+	       {{{<<"Y">>,[]},bool,1},false}]),
+    ok.
+
+set_value(V, {{_Name,_Args},bool,1}, Ci, Value) ->
+    case Value of
+	false ->
+	    varp_nif:bind(V, -Ci);
+	true ->
+	    varp_nif:bind(V, Ci)
+    end,
+    ok;
+set_value(V, {{_Name,_Args},_Type,NBits}, Cs, Value) ->
+    _ = [case ((Value bsr I) band 1) of
+	     0 -> 
+		 varp_nif:bind(V, -Ci);
+	     1 -> 
+		 varp_nif:bind(V, Ci)
+	 end || {I,Ci} <- lists:zip(lists:seq(0,NBits-1),Cs)],
+    ok.
+
+
+get_model(V) ->
+    N = varp:get_number_of_variables(V),
+    N = varp:get_number_of_bound_variables(V),
+    get_model_(V, 1, N, []).
+
+get_model_(V, I, N, Model) when I =< N ->
+    case varp_nif:variable_info(V, I, symbol) of
+	[{Var={_Name,_Args},bool,1,0}] -> %% fixme handle all
+	    Value = varp_nif:value(V,I),
+	    Model1 = [{{Var,bool,1},Value}|Model],
+	    get_model_(V, I+1, N, Model1);
+	[{Var={_Name,_Args},Type,Len,Pos}] ->
+	    Bit = case varp_nif:value(V,I) of
+		      ?T -> 1 bsl Pos;
+		      ?F -> 0
+		  end,
+	    Model1 = add_bit({Var,Type,Len}, Bit, Model),
+	    get_model_(V, I+1, N, Model1);
+	[] ->
+	    get_model_(V, I+1, N, Model)
+    end;
+get_model_(_V, I, N, Model) when I > N ->
+    %% adjust values - fixme handle partial values as before!
+    %% and sort on name
+    Model1 = lists:map(
+	       fun({Var={_Name,int,NBits},Value}) ->
+		       NN = (1 bsl (NBits-1)),
+		       if Value >= NN -> 
+			       {Var, NN - Value};
+			  true ->
+			       {Var, Value}
+		       end;
+		  ({Var, Value}) ->
+		       {Var, Value}
+	       end, Model),
+    lists:sort(fun({{A,_AType,_ALen},_Av},{{B,_BType,_BLen},_Bv}) ->
+		       A =< B
+	       end, Model1).
+
+
+add_bit(Var, Bit, Model) ->
+    case lists:keytake(Var, 1, Model) of
+	{value,{Var,Value},Model1} ->
+	    Value1 = Value bor Bit,
+	    [{Var,Value1}|Model1];
+	false ->
+	    [{Var,Bit}|Model]
+    end.
+    
+
+%% Test all basic simplifications
+clause_basic() ->
+    V = varp_nif:new(#{}),    
+    {1,2} = varp_nif:add_variables(V, 2),
+
+    false = clause(V, [?F, ?F]),
+    true  = clause(V, [?T, 1]),
+    true  = clause(V, [1, ?T]),
+
+    varp_nif:push(V),
+    true = clause(V, [?F, 1]),
+    true = varp_nif:value(V, 1),
+    varp_nif:pop(V),
+
+    varp_nif:push(V),
+    true = clause(V, [1, ?F]),
+    true = varp_nif:value(V, 1),
+    varp_nif:pop(V),
+    
+    ok.
 
 
 %% Test all clause simplifications
@@ -292,8 +441,8 @@ clause_simplify() ->
 
 bcp2() ->
     V = varp_nif:new(#{}),
-    X = var(V, <<"X">>),
-    Y = var(V, <<"Y">>),
+    X = var(V, {<<"X">>,[]}),
+    Y = var(V, {<<"Y">>,[]}),
     clause(V, [X, Y]),
 
     [Y] = eval_bindings(V, [-X]),
@@ -304,9 +453,9 @@ bcp2() ->
 
 bcp3() ->
     V = varp_nif:new(#{}),
-    X = var(V, <<"X">>),
-    Y = var(V, <<"Y">>),
-    Z = var(V, <<"Z">>),
+    X = var(V, {<<"X">>,[]}),
+    Y = var(V, {<<"Y">>,[]}),
+    Z = var(V, {<<"Z">>,[]}),
     _Cix = clause(V, [X, Y, Z]),
 
     [Z] = eval_bindings(V, [-X,-Y]),
@@ -316,10 +465,10 @@ bcp3() ->
 
 bcp4() ->
     V = varp_nif:new(#{}),
-    X = var(V, <<"X">>),
-    Y = var(V, <<"Y">>),
-    Z = var(V, <<"Z">>),
-    T = var(V, <<"T">>),
+    X = var(V, {<<"X">>,[]}),
+    Y = var(V, {<<"Y">>,[]}),
+    Z = var(V, {<<"Z">>,[]}),
+    T = var(V, {<<"T">>,[]}),
     _Cix = clause(V, [X, Y, Z, T]),
 
     [T] = eval_bindings(V, [-X,-Y,-Z]),
@@ -331,12 +480,12 @@ bcp4() ->
 
 vbcp() ->
     V = varp_nif:new(#{}),
-    X1 = var(V, <<"X1">>),
-    X2 = var(V, <<"X2">>),
-    X3 = var(V, <<"X3">>),
-    X4 = var(V, <<"X4">>),
-    X5 = var(V, <<"X5">>),
-    X6 = var(V, <<"X6">>),
+    X1 = var(V, {<<"X1">>,[]}),
+    X2 = var(V, {<<"X2">>,[]}),
+    X3 = var(V, {<<"X3">>,[]}),
+    X4 = var(V, {<<"X4">>,[]}),
+    X5 = var(V, {<<"X5">>,[]}),
+    X6 = var(V, {<<"X6">>,[]}),
     _ = clause(V, [-X1, X2]),
     _ = clause(V, [-X3, X4]),
     _ = clause(V, [-X4, X5]),
@@ -359,20 +508,18 @@ vbcp() ->
     {2,X3} = varp_nif:vbcp(V, [X1, X3, -X4], true),
     varp_nif:pop(V, L).
     
-    
-
 bcp_turbo1() ->
     V = varp_nif:new(#{xref=>true}),
-    X = var(V, <<"X">>),
-    Y = var(V, <<"Y">>),
-    Y1 = var(V, <<"Y1">>),
-    Y2 = var(V, <<"Y2">>),
-    Y3 = var(V, <<"Y3">>),
-    A  = var(V, <<"A">>),
-    B  = var(V, <<"B">>),
-    Z1 = var(V, <<"Z1">>),
-    Z2 = var(V, <<"Z2">>),
-    Z3 = var(V, <<"Z3">>),
+    X = var(V, {<<"X">>,[]}),
+    Y = var(V, {<<"Y">>,[]}),
+    Y1 = var(V, {<<"Y1">>,[]}),
+    Y2 = var(V, {<<"Y2">>,[]}),
+    Y3 = var(V, {<<"Y3">>,[]}),
+    A  = var(V, {<<"A">>,[]}),
+    B  = var(V, {<<"B">>,[]}),
+    Z1 = var(V, {<<"Z1">>,[]}),
+    Z2 = var(V, {<<"Z2">>,[]}),
+    Z3 = var(V, {<<"Z3">>,[]}),
 
     clause(V, [-X,A]),
     clause(V, [-X,B]),
@@ -395,9 +542,9 @@ bcp_turbo1() ->
 
 bcp_add() ->
     V = varp_nif:new(#{}),
-    X = var(V, <<"X">>),
-    Y = var(V, <<"Y">>),
-    Z = var(V, <<"Z">>),
+    X = var(V, {<<"X">>,[]}),
+    Y = var(V, {<<"Y">>,[]}),
+    Z = var(V, {<<"Z">>,[]}),
     varp_nif:push(V),
     varp_nif:bind(V, -Y),
     _Cix1 = clause(V, [X, Y, Z]),
@@ -433,7 +580,8 @@ sat_no_bcp() ->
 		  {imp, X1, X6},
 		  {imp, X6, X7}]}, Vp),
     varp_nif:bind(Vp, F),
-    Bs = saturate_var(Vp,  varp_nif:find_symbol(Vp,{"X1",[]})),
+    {bool,L1} = varp_nif:find_symbol(Vp,{"X1",[]}),
+    Bs = saturate_var(Vp,  L1),
     install_bindings(Vp, Bs),
     saturate_lap(Vp).
 
@@ -547,7 +695,7 @@ clause_bcp() ->
     V4 = varp_nif:value(V, X4),
     true = V4 =:= undefined,
 
-    true.
+    ok.
 
 %% 
 %% add clause with bindings
@@ -608,12 +756,12 @@ or_bcp_bindings() ->
 %% pigeon=3
 p3() ->
     V = varp_nif:new(#{}),
-    X1 = var(V, <<"P(1,1)">>),
-    X2 = var(V, <<"P(1,2)">>),
-    X3 = var(V, <<"P(2,1)">>),
-    X4 = var(V, <<"P(2,2)">>),
-    X5 = var(V, <<"P(3,1)">>),
-    X6 = var(V, <<"P(3,2)">>),
+    X1 = var(V, {<<"P">>,[1,1]}),
+    X2 = var(V, {<<"P">>,[1,2]}),
+    X3 = var(V, {<<"P">>,[2,1]}),
+    X4 = var(V, {<<"P">>,[2,2]}),
+    X5 = var(V, {<<"P">>,[3,1]}),
+    X6 = var(V, {<<"P">>,[3,2]}),
     clause(V, [X1,X2]),
     clause(V, [X3, X4]),
     clause(V, [X5, X6]),
@@ -628,18 +776,18 @@ p3() ->
 %% pigeon=4
 p4() ->
     V = varp_nif:new(#{}),
-    X1 = var(V, <<"P(1,1)">>),
-    X2 = var(V, <<"P(1,2)">>),
-    X3 = var(V, <<"P(1,3)">>),
-    X4 = var(V, <<"P(2,1)">>),
-    X5 = var(V, <<"P(2,2)">>),
-    X6 = var(V, <<"P(2,3)">>),
-    X7 = var(V, <<"P(3,1)">>),
-    X8 = var(V, <<"P(3,2)">>),
-    X9 = var(V, <<"P(3,3)">>),
-    X10 = var(V, <<"P(4,1)">>),
-    X11 = var(V, <<"P(4,2)">>),
-    X12 = var(V, <<"P(4,3)">>),
+    X1 = var(V, {<<"P">>,[1,1]}),
+    X2 = var(V, {<<"P">>,[1,2]}),
+    X3 = var(V, {<<"P">>,[1,3]}),
+    X4 = var(V, {<<"P">>,[2,1]}),
+    X5 = var(V, {<<"P">>,[2,2]}),
+    X6 = var(V, {<<"P">>,[2,3]}),
+    X7 = var(V, {<<"P">>,[3,1]}),
+    X8 = var(V, {<<"P">>,[3,2]}),
+    X9 = var(V, {<<"P">>,[3,3]}),
+    X10 = var(V,{<<"P">>,[4,1]}),
+    X11 = var(V,{<<"P">>,[4,2]}),
+    X12 = var(V,{<<"P">>,[4,3]}),
 
     clause(V, [X1,X2,X3]),
     clause(V, [X4,X5,X6]),
@@ -683,23 +831,25 @@ nbcp_p3() ->
 nbcp_p4() ->
     P4 = p4(),
     ok = symlist_sort_first(P4,
-			    [<<"P(1,2)">>,
-			     <<"P(2,1)">>,
-			     <<"P(2,3)">>,
-			     <<"P(3,2)">>,
-			     <<"P(4,1)">>,
-			     <<"P(4,3)">>,
-			     <<"P(1,1)">>,
-			     <<"P(1,3)">>,
-			     <<"P(2,2)">>,
-			     <<"P(3,1)">>,
-			     <<"P(3,3)">>,
-			     <<"P(4,2)">>]),
+			    [{<<"P">>,[1,2]},
+			     {<<"P">>,[2,1]},
+			     {<<"P">>,[2,3]},
+			     {<<"P">>,[3,2]},
+			     {<<"P">>,[4,1]},
+			     {<<"P">>,[4,3]},
+			     {<<"P">>,[1,1]},
+			     {<<"P">>,[1,3]},
+			     {<<"P">>,[2,2]},
+			     {<<"P">>,[3,1]},
+			     {<<"P">>,[3,3]},
+			     {<<"P">>,[4,2]}]),
     varp_nif:push(P4),
-    nbcp_loop(P4).
+    contradiction = nbcp_loop(P4),
+    ok.
 
 symlist_sort_first(V, SymList) ->
-    varp_nif:order_first(V, [varp_nif:find_symbol(V, Sym) || Sym <- SymList]).
+    varp_nif:order_first(V, [element(2,varp_nif:find_symbol(V, Sym)) ||
+				Sym <- SymList]).
 
 nbcp_loop(V) ->
     false = varp_nif:nbcp(V),
@@ -715,12 +865,12 @@ nbcp_loop(V) ->
     
 order_install() ->
     V = varp_nif:new(#{}),
-    X1 = var(V, <<"X1">>),
-    X2 = var(V, <<"X2">>),
-    X3 = var(V, <<"X3">>),
-    X4 = var(V, <<"X4">>),
-    X5 = var(V, <<"X5">>),
-    X6 = var(V, <<"X6">>),
+    X1 = var(V, {<<"X1">>,[]}),
+    X2 = var(V, {<<"X2">>,[]}),
+    X3 = var(V, {<<"X3">>,[]}),
+    X4 = var(V, {<<"X4">>,[]}),
+    X5 = var(V, {<<"X5">>,[]}),
+    X6 = var(V, {<<"X6">>,[]}),
     Y1 = var(V),
     Y2 = var(V),
     Y3 = var(V),
@@ -741,7 +891,7 @@ order_install() ->
 
 order_identity() ->    
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
-    ok = varp:order_sort(V, identity),
+    ok = varp_nif:order_sort(V, identity),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
@@ -754,10 +904,10 @@ order_degree() ->
     %% d(X5) = 5
     %% d(X6) = 6
 
-    ok = varp:order_sort(V, '-degree'),
+    ok = varp_nif:order_sort(V, '-degree'),
     [X6, X5, X4, X3, X2, X1] = varp:order_all(V),
 
-    ok = varp:order_sort(V, '+degree'),
+    ok = varp_nif:order_sort(V, '+degree'),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
@@ -770,10 +920,10 @@ order_rank() ->
     %% r(X5) = 1/7+1/6+1/5+1/4+1/3
     %% r(X6) = 1/7+1/6+1/5+1/4+1/3+1/2
 
-    ok = varp:order_sort(V, '-rank'),
+    ok = varp_nif:order_sort(V, '-rank'),
     [X6, X5, X4, X3, X2, X1] = varp:order_all(V),
 
-    ok = varp:order_sort(V, '+rank'),
+    ok = varp_nif:order_sort(V, '+rank'),
     [X1, X2, X3, X4, X5, X6] = varp:order_all(V),
     ok.
 
@@ -805,7 +955,7 @@ order_random() ->
 order_first() ->
     {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
     %% first check
-    ok = varp:order_sort(V, identity, undefined, 0),
+    ok = varp_nif:order_sort(V, identity, undefined, 0),
     ok = varp_nif:order_first(V, [X5, X6]),
     [X5, X6, X1, X2, X3, X4] = varp:order_all(V),
     ok.
@@ -950,7 +1100,9 @@ subst0a() ->
     %% print_clauses(V,true),
     Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
-    Bs.
+    %% FIXME: test something?
+    ok.
+
 
 subst0b() ->
     V = varp_nif:new(#{xref=>true}),
@@ -971,7 +1123,8 @@ subst0b() ->
     %% print_clauses(V,true),
     Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
-    Bs.
+    %% FIXME: test something?
+    ok.
 
 subst0c() ->
     V = varp_nif:new(#{xref=>true}),
@@ -992,7 +1145,8 @@ subst0c() ->
     %% print_clauses(V,true),
     Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
-    Bs.
+    %% FIXME: test something?
+    ok.
 
 subst0d() ->
     V = varp_nif:new(#{xref=>true}),
@@ -1010,7 +1164,8 @@ subst0d() ->
     %% print_clauses(V,true),
     Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
-    Bs.
+    %% FIXME: test something?
+    ok.
     
 %% simply substitute {X2,X3},{X2,-X3} [X4/X3] => {X2,X4},{X2,-X4}
 subst1() ->
@@ -1100,7 +1255,8 @@ subst4() ->
     true = varp_nif:bcp(V),
     Bs = varp_nif:get_bindings(V,0),
     ?verbose("bindings@0 = ~w\n", [Bs]),
-    Bs.
+    %% FIXME: test something?
+    ok.
 
 subst5() ->
     V = varp_nif:new(#{xref=>true}),
@@ -1130,7 +1286,9 @@ subst5() ->
     true = varp_nif:bcp(V),
     Bs = [X3,X4,X6] = lists:sort(varp:get_bindings_list(V,0)),
     ?verbose("bindings@0 = ~w\n", [Bs]),
-    Bs.
+    %% FIXME: test something?
+    ok.
+
 
 subst6() ->
     V = varp_nif:new(#{xref=>true}),
@@ -1246,7 +1404,7 @@ watch_1() ->
     X5 = var(V),
 
     C1 = clause(V, [X1,X2,X3,X4,X5]),
-    CL = varp:get_clause(V, C1),
+    CL = varp_nif:get_clause(V, C1),
     io:format("CL = ~w\n", [CL]),
 
     %% X4=0
@@ -1287,12 +1445,12 @@ watch_1() ->
 
 clone1() ->
     V = varp_nif:new(#{}),
-    X1 = var(V, <<"P(1,1)">>),
-    X2 = var(V, <<"P(1,2)">>),
-    X3 = var(V, <<"P(2,1)">>),
-    X4 = var(V, <<"P(2,2)">>),
-    X5 = var(V, <<"P(3,1)">>),
-    X6 = var(V, <<"P(3,2)">>),
+    X1 = var(V, {<<"P">>,[1,1]}),
+    X2 = var(V, {<<"P">>,[1,2]}),
+    X3 = var(V, {<<"P">>,[2,1]}),
+    X4 = var(V, {<<"P">>,[2,2]}),
+    X5 = var(V, {<<"P">>,[3,1]}),
+    X6 = var(V, {<<"P">>,[3,2]}),
 
     clause(V, [X1,X2]),
     clause(V, [X3, X4]),
@@ -1315,7 +1473,7 @@ clone1() ->
     varp_nif:push(W),
     false = varp_nif:nbcp(W),
 
-    %% print_clauses(W),
+    print_clauses(W),
     %% dump_variables(W, [X1,X2,X3,X4,X5,X6]),
     ok.
 
@@ -1348,32 +1506,34 @@ decide1() ->
 %% Check that install of variables partial evaluate!
 build_all() ->
     Vp = varp_nif:new(#{}),
-    X1 = var(Vp, {'P',[1]}),
-    X2 = var(Vp, {'P',[2]}),
-    X3 = var(Vp, {'P',[3]}),
-    X4 = var(Vp, {'P',[4]}),
-    X5 = var(Vp, {'P',[5]}),
+    X1 = var(Vp, {"P",[1]}),
+    X2 = var(Vp, {"P",[2]}),
+    X3 = var(Vp, {"P",[3]}),
+    X4 = var(Vp, {"P",[4]}),
+    X5 = var(Vp, {"P",[5]}),
     
     varp_nif:bind(Vp, -X3),
 
     F = varp_circuit:all(Vp, [X1,X2,X3,X4,X5]),
     print_clauses(Vp,false,true),
-    false = varp_nif:value(Vp, F).
+    false = varp_nif:value(Vp, F),
+    ok.
 
 %% Check that install of variables partial evaluate!
 build_any() ->
     Vp = varp_nif:new(#{}),
-    X1 = var(Vp, {'P',[1]}),
-    X2 = var(Vp, {'P',[2]}),
-    X3 = var(Vp, {'P',[3]}),
-    X4 = var(Vp, {'P',[4]}),
-    X5 = var(Vp, {'P',[5]}),
+    X1 = var(Vp, {"P",[1]}),
+    X2 = var(Vp, {"P",[2]}),
+    X3 = var(Vp, {"P",[3]}),
+    X4 = var(Vp, {"P",[4]}),
+    X5 = var(Vp, {"P",[5]}),
     
     varp_nif:bind(Vp, X3),
 
     F = varp_circuit:any(Vp, [X1,X2,X3,X4,X5]),
     %% print_clauses(Vp,false,true),
-    true = varp_nif:value(Vp, F).
+    true = varp_nif:value(Vp, F),
+    ok.
     
 
 %% install and check integrity
@@ -1388,7 +1548,8 @@ cnf_install(N,M,K) ->
     _ = install_cnf(V, CNF, delta),
     verify_xref(V, CNF),
     verify_hash(V, CNF),
-    V.    
+    ok.
+
 
 %% install random 3-CNF
 %% remove clause 5
@@ -1411,7 +1572,7 @@ cnf_delete_sort(N, M, K) ->
     varp_nif:clauseset_sort(V, delta),
     verify_xref(V, CNF1),
     verify_hash(V, CNF1),
-    V.
+    ok.
 
 %% install random 3-CNF
 %% use_clauses
@@ -1440,18 +1601,18 @@ cnf_sort_offset_delete(N, M, K) ->
     ok = delete_clauses(V, delta),
     varp_nif:clauseset_offset(V, delta, 0),
     verify_xref(V, CNF1),
-    verify_hash(V, CNF1),    
-    V.
+    verify_hash(V, CNF1),
+    ok.
 
 clause_learn_d1() ->
     V = varp_nif:new(#{}),
     ok = varp_nif:setopt(V, max_conflicting, 1),
-    A = var(V, <<"A">>),  %% 1
-    B = var(V, <<"B">>),  %% 2
-    C = var(V, <<"C">>),  %% 3
-    X = var(V, <<"X">>),  %% 4
-    Y = var(V, <<"Y">>),  %% 5
-    Z = var(V, <<"Z">>),  %% 6
+    A = var(V, {<<"A">>,[]}),  %% 1
+    B = var(V, {<<"B">>,[]}),  %% 2
+    C = var(V, {<<"C">>,[]}),  %% 3
+    X = var(V, {<<"X">>,[]}),  %% 4
+    Y = var(V, {<<"Y">>,[]}),  %% 5
+    Z = var(V, {<<"Z">>,[]}),  %% 6
     clause(V, [A,B]),
     clause(V, [B,C]),
     clause(V, [-A,-X,Y]),  %% Y=1
@@ -1507,12 +1668,12 @@ clause_learn_d1() ->
 clause_learn_a1() ->
     V = varp_nif:new(#{}),
     ok = varp_nif:setopt(V, max_conflicting, 1),
-    A = var(V, <<"A">>),  %% 1
-    B = var(V, <<"B">>),  %% 2
-    C = var(V, <<"C">>),  %% 3
-    X = var(V, <<"X">>),  %% 4
-    Y = var(V, <<"Y">>),  %% 5
-    Z = var(V, <<"Z">>),  %% 6
+    A = var(V, {<<"A">>,[]}),  %% 1
+    B = var(V, {<<"B">>,[]}),  %% 2
+    C = var(V, {<<"C">>,[]}),  %% 3
+    X = var(V, {<<"X">>,[]}),  %% 4
+    Y = var(V, {<<"Y">>,[]}),  %% 5
+    Z = var(V, {<<"Z">>,[]}),  %% 6
     clause(V, [A,B]),
     clause(V, [B,C]),
     clause(V, [-A,-X,Y]),  %% Y=1
@@ -1874,13 +2035,13 @@ clause_learn_g3(Type) ->
 
 implication_depth() ->
     V = varp_nif:new(#{}),
-    Y1 = var(V, <<"Y1">>),
-    Y2 = var(V, <<"Y2">>),
-    Y3 = var(V, <<"Y3">>),
-    Y4 = var(V, <<"Y4">>),
-    Y5 = var(V, <<"Y5">>),
-    Y6 = var(V, <<"Y6">>),
-    X  = var(V, <<"X">>),
+    Y1 = var(V, {<<"Y1">>,[]}),
+    Y2 = var(V, {<<"Y2">>,[]}),
+    Y3 = var(V, {<<"Y3">>,[]}),
+    Y4 = var(V, {<<"Y4">>,[]}),
+    Y5 = var(V, {<<"Y5">>,[]}),
+    Y6 = var(V, {<<"Y6">>,[]}),
+    X  = var(V, {<<"X">>,[]}),
     clause(V, [-X, Y1]),
     clause(V, [-X, Y2]),
     clause(V, [-Y1,-Y2,Y3]),
@@ -1915,12 +2076,17 @@ get_sym_clause(Vp, Cix) ->
 get_sym_literal(Vp, Li) ->
     case varp_nif:variable_info(Vp, Li, symbol) of
 	[] -> "?";
-	[{S,_}|_] ->
-	    Sym = binary_to_list(S),
-	    if Li < 0 -> [$!|Sym];
-	       true -> Sym
+	[{{Name,Args},_Type,_Len,_Pos}|_] ->
+	    NameStr = binary_to_list(Name) ++ format_args(Args),
+	    if Li < 0 -> [$!|NameStr];
+	       true -> NameStr
 	    end
     end.
+
+format_args([]) ->
+    "";
+format_args(Args) ->
+    lists:flatten(["(",[io_lib:format("~p", [A]) || A <- Args],")"]).
 
 get_marked(Vp) ->
     lists:sort(varp_nif:get_marked(Vp, false)).
@@ -2403,7 +2569,7 @@ dump(V, Verb) ->
 	    lists:foreach(
 	      fun({Key, Value}) ->
 		      io:format("  ~s: ~p\n", [Key,Value])
-	      end, varp:getopt(V));
+	      end, varp:getopts(V));
        true -> ok
     end,
     io:format("VARIABLES\n"),
@@ -2464,22 +2630,22 @@ dump_variables(V, List) ->
 
 dump_variables(V, List, Verb) ->
     lists:foreach(
-      fun(X) ->
+      fun(I) ->
 	      Keys = varp:variable_info_keys() -- [implication,symbol,level],
-	      Sym = var_sym(V, X),
-	      Level = varp_nif:variable_info(V,X,level),
-	      Value = varp_nif:value(V, X),
-	      io:format("~w: ~s = ~w @~w\n", [X, Sym, Value,Level]),
+	      Sym = var_sym(V, I),
+	      Level = varp_nif:variable_info(V,I,level),
+	      Value = varp_nif:value(V, I),
+	      io:format("~w: ~s = ~w @~w\n", [I, Sym, Value,Level]),
 	      if Verb ->
 		      lists:foreach(
 			fun(Key) ->
 				io:format("  ~s: ~p\n", 
-					  [Key,varp_nif:variable_info(V,X,Key)])
+					  [Key,varp_nif:variable_info(V,I,Key)])
 			end, Keys),
-		      io:format(" +xref: ~p\n", [get_cix_list(V,X,literal)]),
-		      io:format(" +watch: ~p\n", [get_cix_list(V,X,watch)]),
-		      io:format(" -xref: ~p\n", [get_cix_list(V,-X,literal)]),
-		      io:format(" -watch: ~p\n", [get_cix_list(V,-X,watch)]);
+		      io:format(" +xref: ~p\n", [get_cix_list(V,I,literal)]),
+		      io:format(" +watch: ~p\n", [get_cix_list(V,I,watch)]),
+		      io:format(" -xref: ~p\n", [get_cix_list(V,-I,literal)]),
+		      io:format(" -watch: ~p\n", [get_cix_list(V,-I,watch)]);
 		 true ->
 		      ok
 	      end
@@ -2491,19 +2657,24 @@ lit_sym(V, X) when X < 0 ->
     [$!|var_sym(V, -X)].
 
 var_sym(V, X) ->
-    case varp_nif:variable_info(V,X,symbol) of
+    case varp_nif:get_symbol(V,X) of
 	[] -> no_symbol;
-	[{S,_}|_] -> var_str(S)
+	[{ISym,bool,1,0}|_] -> var_str(ISym);
+	[{ISym,_Type,_Len,Pos}|_] ->
+	    var_str(ISym)++"["++integer_to_list(Pos)++"]"
     end.
     
 var_str({p,P,As}) -> var_str(P,As);
-var_str({P,As}) when is_list(As) -> var_str(P,As);
+var_str({P,As}) -> var_str(P,As);
 var_str(P) when is_list(P) -> P;
 var_str(P) when is_binary(P) -> binary_to_list(P);
 var_str(P) when is_atom(P) -> atom_to_list(P).
 
+var_str(P,[]) ->
+    binary_to_list(P);
 var_str(P,As) ->
-    P ++ "(" ++ string:join([var_arg(Ai) || Ai <- As], ",") ++ ")".
+    binary_to_list(P) ++
+	"(" ++ string:join([var_arg(Ai) || Ai <- As], ",") ++ ")".
 
 var_arg({F,As}) ->
     F ++ "(" ++ string:join([var_arg(Ai) || Ai <- As], ",") ++ ")";
@@ -2531,7 +2702,7 @@ var(Vp) ->
 
 var(Vp, Sym) ->
     Var = varp_nif:add_variable(Vp),
-    varp_nif:add_symbol(Vp, Var, Sym),
+    varp_nif:add_symbol(Vp, Sym, Var, bool),
     varp_nif:isused(Vp, Var, true),
     Var.
 

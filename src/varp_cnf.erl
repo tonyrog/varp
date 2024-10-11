@@ -79,7 +79,7 @@ emit_fd(Fd, Type, Symbols, Raw, Bs) ->
 	snf ->
 	    io:format(Fd, "p snf ~w ~w\n", [NumVars, NumClauses])
     end,
-    cnf_(Fd, Type, Raw, varp:clauseset_first(Bs#bs.vp, delta), VarMap, Bs).
+    cnf_(Fd, Type, Raw, varp_nif:clauseset_first(Bs#bs.vp, delta), VarMap, Bs).
 
 
 cnf_(_Fd,_Type,_Raw,false,_VarMap,Bs) ->
@@ -111,19 +111,24 @@ format_snf_clause(Bs,CL,_,_VarMap) ->
 %% ...
 emit_symbols(_Fd, false, _Bs, _VarMap) ->
     ok;
-emit_symbols(Fd, true, Bs, VarMap) ->
-    maps:fold(
-      fun (Key,_Value,Acc) when is_integer(Key) ->
-	      Acc;
-	  (Key,Value,_Acc) ->
-	      case maps:find(Value, VarMap) of
-		  {ok, Value1} ->
-		      io:format(Fd, "c ~s is ~w\n", 
-				[varp_format:format_symbol(Key),Value1]);
-		  error -> 
+emit_symbols(Fd, true, Bs, _VarMap) ->
+    N = varp:get_number_of_variables(Bs#bs.vp),
+    lists:foreach(
+      fun(I) ->
+	      case varp_nif:get_symbol(Bs#bs.vp,I) of
+		  [{Sym={_Name,_Args},bool,1,0}] ->
+		      Value = varp_nif:value(Bs#bs.vp,I),
+		      io:format(Fd, "c ~s is ~w\n",
+				[varp_format:format_symbol(Sym),Value]);
+		  _ ->
 		      ok
 	      end
-      end, [], Bs#bs.vs).
+      end,
+      lists:seq(1,N)).
+
+			  
+
+
 
 %%
 %% Count clause, and variabels. Also construct a
@@ -133,7 +138,7 @@ renumerate_clauses(Bs, Raw) ->
     renumerate_clauses(Bs, Raw, #{}, 0).
 
 renumerate_clauses(Bs, Raw, VarMap, NumClauses) ->
-    renumerate_clauses(Bs, varp:clauseset_first(Bs#bs.vp, delta),
+    renumerate_clauses(Bs, varp_nif:clauseset_first(Bs#bs.vp, delta),
 		       Raw, VarMap, NumClauses).
 
 renumerate_clauses(_Bs, false, _Raw, VarMap, NumClauses) ->
@@ -176,7 +181,7 @@ translate_literal(L, VarMap) when L > 0 ->
 -ifdef(unused).
 %% count number of active clauses
 count_number_of_clauses(Bs) ->
-    count_number_of_clauses_(Bs, varp:clauseset_first(Bs#bs.vp, delta), 0).
+    count_number_of_clauses_(Bs, varp_nif:clauseset_first(Bs#bs.vp, delta), 0).
 
 count_number_of_clauses_(_Bs, false, N) ->
     N;

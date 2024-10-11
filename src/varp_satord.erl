@@ -83,7 +83,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 		  sat -> Ls;
 		  unsat -> [-Li || Li <- Ls]
 	      end,
-    varp:order_first(Bs#bs.vp, Assumed),
+    varp_nif:order_first(Bs#bs.vp, Assumed),
     {?CONTINUE,[],Bs}.
 
 rounds(_Vp, 0, _Size, _N, Map) ->

@@ -20,20 +20,21 @@
 -export([add_variables/2]).
 -export([add_variables/3]).
 -export([add_variables/4]).
--export([del_variable/2]).
--export([add_symbol/3]).
+-export([add_symbol/4]).
 -export([del_symbol/2]).
 -export([get_symbol/2]).
 -export([find_symbol/2]).
 -export([first_symbol/1]).
 -export([next_symbol/2]).
+-export([push_symbols/1]).
+-export([pop_symbols/1]).
 -export([variable_info/3]).
 -export([literal_info/3]).
 -export([level/1]).
 -export([value/2]).
 -export([bound/2]).
--export([bind/2, bind/3]).
--export([decide/2, decide/3]).
+-export([bind/2]).
+-export([decide/2]).
 -export([subst/3]).
 -export([implication_clause/2]).
 -export([implication_level/2]).
@@ -64,6 +65,7 @@
 -export([move_clause/3]).
 -export([compress_clause/2]).
 -export([clean_clause/2]).
+-export([get_clauses/2]).
 -export([get_clauses/3]).
 -export([use_clause/2]).
 -export([clause_info/2,clause_info/3]).
@@ -110,7 +112,8 @@
 -type variable() :: pos_integer().
 -type unsigned() :: non_neg_integer().
 -type literal() :: integer().
--type symbol() :: binary() | string() | term().
+-type symbol() :: {Name::iolist(),[Index::term()]}.
+-type symbol_type() :: bool | int | uint | bit.
 -type sort_key() :: atom() | string().
 -type sort_value() :: integer().
 -type binding() :: literal() | {literal(),literal()}.
@@ -170,7 +173,7 @@
 
 
 -export_type([varp/0]).
--export_type([variable/0, literal/0, symbol/0]).
+-export_type([variable/0, literal/0, symbol/0, symbol_type/0]).
 -export_type([sort_key/0,sort_value/0]).
 -export_type([binding/0, bindings/0]).
 -export_type([level/0]).
@@ -279,24 +282,25 @@ add_variables(_Vp, Num, IsAtom, IsUsed) when
       is_integer(Num), Num>0, is_boolean(IsAtom), is_boolean(IsUsed) ->
     ?nif_stub().
 
-del_variable(_Vp, _Index) when is_integer(_Index) ->
+-spec add_symbol(Vp::varp(),Sym::symbol(),
+		 Lit::literal()|[Lit::literal()],
+		 Type::symbol_type())-> ok.
+add_symbol(_Vp, _Sym={_Name, _Index}, Lit, _Type)  when is_integer(Lit); is_list(Lit) ->
     ?nif_stub().
 
--spec add_symbol(Vp::varp(),Lit::literal()|[Lit::literal()], Name::term())-> ok.
-add_symbol(_Vp, Lit, _Name)  when is_integer(Lit); is_list(Lit) ->
-    ?nif_stub().
-
--spec del_symbol(Vp::varp(), Name::term()) -> ok.
+-spec del_symbol(Vp::varp(), Sym::symbol()) -> ok.
 del_symbol(_Vp, _Name)  ->
     ?nif_stub().
 
 %% aliases
--spec get_symbol(Vp::varp(), Lit::literal()) -> [{term(),Pos::integer()}].
+-spec get_symbol(Vp::varp(), Lit::literal()) -> 
+	  [{Sym::symbol(),Type::symbol_type(),Len::integer(),Pos::integer()}].
 get_symbol(Vp, Lit) when is_integer(Lit) ->
     variable_info(Vp, Lit, symbol).
 
 %% find variable index from variable name (term or binary)
--spec find_symbol(Vp::varp(), Name::term()) -> false | literal() | [literal()].
+-spec find_symbol(Vp::varp(), Sym::symbol()) -> 
+	  false | {Type::symbol_type(),literal() | [literal()]}.
 find_symbol(_Vp, _Name) ->
     ?nif_stub().
 
@@ -308,6 +312,14 @@ first_symbol(_Vp) ->
 -spec next_symbol(Vp::varp(), Symbol::symbol()) -> false | symbol().
 next_symbol(_Vp, _Symbol) ->
     ?nif_stub().
+
+-spec push_symbols(Vp::varp()) -> ok.
+push_symbols(_Vp) ->
+	?nif_stub().
+
+-spec pop_symbols(Vp::varp()) -> ok.
+pop_symbols(_Vp) ->
+	?nif_stub().
 
 %%
 %% What::implication|implication_clause|level|degree|is_atom|symbol
@@ -346,24 +358,10 @@ bound(_Vp, Lit) when is_integer(Lit) ->
 bind(_Vp, X) when is_integer(X) ->
     ?nif_stub().
 
-%% bind literal at level
--spec bind(Vp::varp(), X::literal(), Level::level()) -> boolean().
-
-bind(_Vp, X, Level) when is_integer(X),
-			 is_integer(Level) ->
-    ?nif_stub().
-
 %% decide literal, affected by phase!
 -spec decide(Vp::varp(), X::literal()) -> boolean().
 
 decide(_Vp, X) when is_integer(X) ->
-    ?nif_stub().
-
-%% decide literal at level, affected by phase!
--spec decide(Vp::varp(), X::literal(), Level::level()) -> boolean().
-
-decide(_Vp, X, Level) when is_integer(X),
-			   is_integer(Level) ->
     ?nif_stub().
 
 %% X/Y substitute Y for X, replace all instances of Y with X
@@ -600,6 +598,9 @@ move_clause(_Vp,_Index,_Si) when
 
 clean_clause(_Vp,Index)
   when is_integer(Index), Index >= 0 ->
+    ?nif_stub().
+
+get_clauses(_Vp,Var) when is_integer(Var) ->
     ?nif_stub().
 
 get_clauses(_Vp,Var,How)

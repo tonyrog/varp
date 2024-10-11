@@ -83,9 +83,9 @@ max                 : {token,{'max',TokenLine}}.
 
 {L}({L}|{D})*	    : 
   Name = list_to_binary(TokenChars),  %% utf8?
-  case find_circuit(Name) of
+  case varp_formula:is_circuit_def(Name, false) of
       false -> {token,{symbol,TokenLine,Name}};
-      _C -> {token,{cname,TokenLine,Name}}
+      true -> {token,{cname,TokenLine,Name}}
   end.
 
 
@@ -189,17 +189,4 @@ all_tokens_(Acc) ->
 	    {ok, lists:reverse(Acc), Loc};
 	Error ->
 	    Error
-    end.
-
-
-%% defs contains the list of all definitions
-find_circuit(Name) ->
-    case get(circuit_defs) of
-	undefined -> false;
-	CDef ->
-	    case maps:find(Name, CDef) of
-		{ok,circuit} -> true;
-		error -> false;
-		_ -> false
-	    end
     end.

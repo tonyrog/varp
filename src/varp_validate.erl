@@ -202,16 +202,14 @@ eval_sym({bit_index,Sym,Index},Bs) ->
 eval_arg(V) when is_integer(V) -> V;
 eval_arg({const,V}) -> V.
 
-empty_vs(Bs) ->    
-    (Bs#bs.vs =:= undefined) orelse  (maps:size(Bs#bs.vs) =:= 0).
-
-variable(V, Bs) ->
-    case empty_vs(Bs) of
-	true ->
-	    io:format("Error: Symbols are not present for ~p\n", [V]),
-	    throw({error,{symbol, V}});
+variable({p,Name,Args}, Bs) ->
+    Var = {Name,Args},
+    case varp_nif:find_symbol(Bs#bs.vp, Var) of
 	false ->
-	    maps:get(V, Bs#bs.vs)
+	    io:format("Error: Symbols are not present for ~p\n", [Var]),
+	    throw({error,{symbol, Var}});
+	{_Type,V} ->
+	    V
     end.
 
 close_proof_output(Bs) ->

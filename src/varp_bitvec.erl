@@ -11,13 +11,14 @@
 -export([from_unsigned/1, from_unsigned/2]).
 -export([from_signed/1, from_signed/2]).
 -export([from_bitstring/1, from_bitstring/2]).
--export([bitwise_not/2]).
--export([bitwise_or/3]).
--export([bitwise_and/3]).
--export([bitwise_xor/3]).
--export([bitwise_equ/3]).
--export([map_op/4]).
--export([foldl_op/4, foldr_op/4, fold_op/4]).
+-export([bitwise_not/2, bitwise_not/3]).
+-export([bitwise_or/3, bitwise_or/4]).
+-export([bitwise_and/3, bitwise_and/4]).
+-export([bitwise_xor/3, bitwise_xor/4]).
+-export([bitwise_equ/3, bitwise_equ/4]).
+-export([bitwise1/3, bitwise1/4]).
+-export([bitwise2/4, bitwise2/5]).
+-export([foldl_op/4, foldr_op/4, fold_op/4, fold_op/5]).
 
 -define(bool(Y), element((Y)+1,{false,true})).
 
@@ -53,55 +54,107 @@ from_bitstring(Bin,N) when is_bitstring(Bin), is_integer(N), N > 0 ->
 	    {bit,N,lists:reverse(Bits)}
     end.
 
-
 new(Vp,N) when is_integer(N), N > 0 ->
     {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=true, _IsUsed=true),
     lists:seq(First, Last).
 
-bitwise_not(_Vp, Ys) ->
-    [varp_circuit:inv(Yi) || Yi <- Ys].
+bitwise_not(Vp, Ys) ->
+    N = length(Ys),
+    bitwise1(Vp,'not',new(Vp,N),Ys).
 
-bitwise_and(Vp, [Y|Ys], [Z|Zs]) ->
-    X = varp_circuit:and_gate(Vp, Y, Z),
-    [X | bitwise_and(Vp, Ys, Zs)];
-bitwise_and(_Vp, [], []) ->
-    [].
+bitwise_not(Vp, Xs, Ys) ->
+    bitwise1(Vp,'not',Xs,Ys).
 
-bitwise_or(Vp, [Y|Ys], [Z|Zs]) ->
-    X = varp_circuit:or_gate(Vp, Y, Z),
-    [X | bitwise_or(Vp, Ys, Zs)];
-bitwise_or(_Vp, [], []) ->
-    [].
+bitwise_and(Vp, Ys, Zs) ->
+    bitwise_and(Vp, undefined, Ys, Zs).
 
-bitwise_xor(Vp, [Y|Ys], [Z|Zs]) ->
-    X = varp_circuit:xor_gate(Vp, Y, Z),
-    [X | bitwise_xor(Vp, Ys, Zs)];
-bitwise_xor(_Vp, [], []) ->
-    [].
+bitwise_and(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
+    N = min(length(Ys), length(Zs)),
+    bitwise2(Vp,'and',new(Vp,N),Ys,Zs);
+bitwise_and(Vp, Xs, Ys, Zs) when is_list(Xs), is_list(Ys), is_list(Zs) ->
+    bitwise2(Vp,'and',Xs,Ys,Zs).
 
-bitwise_equ(Vp, [Y|Ys], [Z|Zs]) ->
-    X = varp_circuit:equ_gate(Vp, Y, Z),
-    [X | bitwise_equ(Vp, Ys, Zs)];
-bitwise_equ(_Vp, [], []) ->
-    [].
+bitwise_or(Vp, Ys, Zs) ->
+    bitwise_or(Vp, undefined, Ys, Zs).
+bitwise_or(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
+    N = min(length(Ys), length(Zs)),
+    bitwise2(Vp,'or',new(Vp,N),Ys,Zs);
+bitwise_or(Vp,Xs,Ys,Zs) ->
+    bitwise2(Vp,'or',Xs,Ys,Zs).
+
+bitwise_xor(Vp, Ys, Zs) ->
+    bitwise_xor(Vp, undefined, Ys, Zs).
+bitwise_xor(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
+    N = min(length(Ys), length(Zs)),
+    bitwise2(Vp,'xor',new(Vp,N),Ys,Zs);    
+bitwise_xor(Vp,Xs,Ys,Zs) ->
+    bitwise2(Vp,'xor',Xs,Ys,Zs).
+
+bitwise_equ(Vp, Ys, Zs) ->
+    bitwise_equ(Vp, undefined, Ys, Zs).
+bitwise_equ(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
+    N = min(length(Ys), length(Zs)),
+    bitwise2(Vp,'equ',new(Vp,N),Ys,Zs);    
+bitwise_equ(Vp,Xs,Ys,Zs) ->
+    bitwise2(Vp,'equ',Xs,Ys,Zs).
+
+bitwise1(Vp,Op,Ys) when is_list(Ys) ->
+    N = length(Ys),
+    bitwise1(Vp,Op,new(Vp,N),Ys).
+
+bitwise1(Vp,Op,Xs,Ys) when is_list(Xs), is_list(Ys) ->
+    bitwise1_(Vp,Op,Xs,Ys,[]);
+bitwise1(Vp,Op,Xs,Y)  when is_boolean(Y); is_integer(Y) ->
+    bitwisey_(Vp,Op,Xs,Y,[]).
+
+bitwise1_(Vp,Op,[X|Xs],[Y|Ys],As) ->
+    A = varp_circuit:gate(Vp,Op,X,Y),
+    bitwise1_(Vp,Op,Xs,Ys,[A|As]);
+bitwise1_(_Vp,_Op,[],[],As) ->
+    lists:reverse(As).
 
 %% Apply same operator on two vectors
-map_op(Vp,Op,Ys,Zs) when is_list(Zs) ->
-    map_op_(Vp,Op,Ys,Zs,[]);
-map_op(Vp,Op,Ys,Z) when is_boolean(Z); is_integer(Z) ->
-    map_opz_(Vp,Op,Ys,Z,[]).
+bitwise2(Vp,Op,Ys,Zs) when is_list(Ys), is_list(Zs) ->
+    N = min(length(Ys), length(Zs)),
+    bitwise2(Vp,Op,new(Vp,N),Ys,Zs);
+bitwise2(Vp,Op,Ys,Z) when is_boolean(Z); is_integer(Z) ->
+    bitwisez_(Vp,Op,Ys,Z,[]).
 
-map_op_(Vp,Op,[Y|Ys],[Z|Zs],Xs) ->
-    X = varp_circuit:gate(Vp,Op,Y,Z),
-    map_op_(Vp,Op,Ys,Zs,[X|Xs]);
-map_op_(_Vp,_Op,[],[],Xs) ->
-    lists:reverse(Xs).
+bitwise2(Vp,Op,Xs,Ys,Zs) when is_list(Xs), is_list(Ys), is_list(Zs) ->
+    bitwise2_(Vp,Op,Xs,Ys,Zs,[]);
+bitwise2(Vp,Op,Xs,Ys,Z)  when is_boolean(Z); is_integer(Z) ->
+    bitwisez_(Vp,Op,Xs,Ys,Z,[]).
 
-map_opz_(Vp,Op,[Y|Ys],Z,Xs) ->
+bitwise2_(Vp,Op,[X|Xs],[Y|Ys],[Z|Zs],As) ->
+    A = varp_circuit:gate(Vp,Op,X,Y,Z),
+    bitwise2_(Vp,Op,Xs,Ys,Zs,[A|As]);
+bitwise2_(_Vp,_Op,[],[],[],As) ->
+    lists:reverse(As).
+
+%%map_op_(Vp,Op,[Y|Ys],[Z|Zs],Xs) ->
+%%    X = varp_circuit:gate(Vp,Op,Y,Z),
+%%    map_op_(Vp,Op,Ys,Zs,[X|Xs]);
+%%map_op_(_Vp,_Op,[],[],Xs) ->
+%%    lists:reverse(Xs).
+
+bitwisez_(Vp,Op,[Y|Ys],Z,As) ->
     X = varp_circuit:gate(Vp,Op,Y,Z),
-    map_opz_(Vp,Op,Ys,Z,[X|Xs]);
-map_opz_(_Vp,_Op,[],_Z,Xs) ->
-    lists:reverse(Xs).
+    bitwisez_(Vp,Op,Ys,Z,[X|As]);
+bitwisez_(_Vp,_Op,[],_Z,As) ->
+    lists:reverse(As).
+
+bitwisez_(Vp,Op,[X|Xs],[Y|Ys],Z,As) ->
+    X1 = varp_circuit:gate(Vp,Op,X,Y,Z),
+    bitwisez_(Vp,Op,Xs,Ys,Z,[X1|As]);
+bitwisez_(_Vp,_Op,[],[],_Z,As) ->
+    lists:reverse(As).
+
+
+bitwisey_(Vp,Op,[X|Xs],Y,As) ->
+    X1 = varp_circuit:gate(Vp,Op,X,Y),
+    bitwisey_(Vp,Op,Xs,Y,[X1|As]);
+bitwisey_(_Vp,_Op,[],_Y,As) ->
+    lists:reverse(As).
 
 fold_op(Vp, Op, D, As) ->
     foldl_op(Vp, Op, D, As).
@@ -127,3 +180,19 @@ foldr_op_(Vp,Op,[A1,A2]) ->
 foldr_op_(Vp,Op,[A1|As]) ->
     A2 = foldr_op_(Vp,Op,As),
     varp_circuit:gate(Vp,Op,A1,A2).
+
+%% Fold operator Op over a variable vector assign X
+fold_op(Vp,Op,X,D,As) ->
+    foldl_op(Vp,Op,X,D,As).
+
+%% Fold operator Op over a variable vector
+foldl_op(Vp,_Op,X,D,[]) -> varp_circuit:set(Vp,X,D);
+foldl_op(Vp,_Op,X,_D,[A]) -> varp_circuit:set(Vp,X,A);
+foldl_op(Vp,Op,X,_D,[A|As]) -> foldl_op_(Vp,Op,X,A,As).
+
+foldl_op_(Vp,Op,X,A1,[A2]) ->
+    varp_circuit:gate(Vp,Op,X,A1,A2);
+foldl_op_(Vp,Op,X,A1,[A2|As]) ->
+    A = varp_circuit:gate(Vp,Op,A1,A2),
+    foldl_op_(Vp,Op,X,A,As).
+

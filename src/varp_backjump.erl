@@ -182,7 +182,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     MaxLearned = max_learned(Bs,Param),
     _KeepSize  = keep_size(Bs, Param, MaxLearned),
-    set_bcp_counter(Bs, varp:getstat(Bs#bs.vp, bcp_counter)),
+    set_bcp_counter(Bs, varp_nif:getstat(Bs#bs.vp, bcp_counter)),
     start_restart_timer(Param),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     M0  = #m { method = varp_nif:getopt(Bs1#bs.vp,method),
@@ -236,7 +236,7 @@ main(Bs,Param,MaxLearned,MR) ->
 		    %% a working jump level (maybe just one up?)
 		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 		    %% FIXME: DELTA is maybe not the correct place!?
-		    varp_formula:add_clause(Bs, Block, ?DELTA),
+		    varp_circuit:clause(Bs, Block, ?DELTA),
 		    %% we start with simple restart
 		    case MR#m.method of
 			collect ->
@@ -410,9 +410,9 @@ reorder_(Bs,  N, Reorder) ->
 	    case proplists:get_value(sort, Opts, []) of
 		[] -> ok;
 		[Key1] ->
-		    varp:order_sort(Bs#bs.vp,Key1,Seed);
+		    varp_nif:order_sort(Bs#bs.vp,Key1,Seed);
 		[Key1,Key2] ->
-		    varp:order_sort(Bs#bs.vp,Key1,Key2,Seed)
+		    varp_nif:order_sort(Bs#bs.vp,Key1,Key2,Seed)
 	    end;
 	{ok,{saturate,Opts}} ->
 	    ?dbg0("Saturate: ~p\n", [Opts]),
@@ -421,7 +421,7 @@ reorder_(Bs,  N, Reorder) ->
 	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
 	_ ->
 	    Seed = varp_nif:getopt(Bs#bs.vp,seed),
-	    varp:order_sort(Bs#bs.vp,random,Seed)
+	    varp_nif:order_sort(Bs#bs.vp,random,Seed)
     end.
 
 
@@ -479,7 +479,7 @@ restart_by_counter(Bs, Param) ->
     case maps:get(restart_counter,Param) of
 	0 -> false;
 	RestartCounter ->
-	    BcpCounter = varp:getstat(Bs#bs.vp, bcp_counter),
+	    BcpCounter = varp_nif:getstat(Bs#bs.vp, bcp_counter),
 	    PrevCounter = get_bcp_counter(Bs),
 	    if (BcpCounter - PrevCounter) >= RestartCounter ->
 		    set_bcp_counter(Bs, BcpCounter),
@@ -583,11 +583,11 @@ display_stat(Bs,Param) ->
 		      [counters:get(Bs#bs.counters,
 				    ?COUNTER_MINIMIZE_COUNT)]),
 	    io:format("number_of_marks: ~w\n", 
-		      [varp:getstat(Bs#bs.vp, mark_counter)]),
+		      [varp_nif:getstat(Bs#bs.vp, mark_counter)]),
 	    io:format("number_of_decisions: ~w\n", 
-		      [varp:getstat(Bs#bs.vp, decision_counter)]),
+		      [varp_nif:getstat(Bs#bs.vp, decision_counter)]),
 	    io:format("number_of_conflicts: ~w\n", 
-		      [varp:getstat(Bs#bs.vp, conflict_counter)]),
+		      [varp_nif:getstat(Bs#bs.vp, conflict_counter)]),
 	    ok;
 	delta ->
 	    io:format("Backjump deltas used\n", []),

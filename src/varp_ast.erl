@@ -63,11 +63,11 @@ var(Sym, Args, Vp, State) ->
     case varp_nif:find_symbol(Vp, Term1) of
 	false ->
 	    Var = varp_nif:add_variable(Vp, _IsAtom=true, _IsUsed=true),
-	    varp_nif:add_symbol(Vp, Var, Term1),
+	    varp_nif:add_symbol(Vp, Term1, Var, bool),
 	    Var;
-	Var when is_integer(Var) ->
+	{bool,Var} when is_integer(Var) ->
 	    Var;
-	Vec when is_list(Vec) ->
+	{_Type,Vec} when is_list(Vec) ->
 	    Vec
     end.
 

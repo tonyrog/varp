@@ -13,9 +13,10 @@
 -export([build_assignment_defs/2]).
 -export([new/0, new/1]).
 -export([add_variable/1, add_variable/2]).
--export([variable/2, alias/3]).
+-export([variable/2]).
+%% -export([alias/3]).
+%% -export([set_var/3, add_var/4]).
 -export([print_model/4]).
--export([find_var/2, get_var/2]).
 -export([uint64/2, uint32/2, uint16/2, uint8/2]).
 -export([filter_bindings/1]).
 
@@ -23,33 +24,36 @@
 -export([proof_output/3]).
 -export([want_proof_output/1]).
 
-%% building with operations
--export([operation/4, operation/3]).
--export([all/2, any/2]).
--export([eqk/3, gtk/3]).
+-export([all/2, any/2, all/3, any/3, one/2, one/3, none/2, none/3]).
+-export([eqk/4, gtk/4]).
 -export([subst/3]).
 
-%% varp_nif wrappers
--export([getopt/2]).
 -export([order_first/2]).
 -export([order_last/2]).
--export([model/1, model/2]).
+-export([model/1]).
 -export([intersect_bindings/3]).
 -export([install_bindings/3]).
--export([model_variables/2]).
 -export([each_unbound/2]).
 -export([each_variable/2]).
 -export([fold_unbound/3]).
 -export([eval_meta/2]).
--export([add_clause/2, add_clause/3]).
 -export([del_clause/2]).
 -export([del_unused_clauses/1]).
 -export([clean_clauses/1, clean_clauses/2]).
--export([set_var/3, add_var/4]).
+
 -export([const_vector/2, const_vector/3]).
 -export([const_vector/4]).
 
 -export([vconst/1]).
+
+%% interna circuit lookup from scanner
+-export([init_circuit_def/0]).
+-export([add_circuit_def/1]).
+-export([is_circuit_def/2]).
+-export([find_circuit_def/3]).
+%% internal (test)
+-export([operation1/3, operation1/4]).
+-export([operation2/4, operation2/5]).
 
 -include("varp.hrl").
 
@@ -68,7 +72,8 @@ new(OptMap) when is_map(OptMap) ->
 		 hash       => maps:get(hash,OptMap),
 		 init_phase => maps:get(phase,OptMap),
 		 use_phase  => maps:get(use_phase,OptMap),
-		 seed       => maps:get(seed,OptMap)
+		 seed       => maps:get(seed,OptMap),
+		 icase      => maps:get(icase,OptMap)
 	       },
     Vp  = varp_nif:new(NewOpts),
     %% transfer some options to vp:setopt(Vp, ...)
@@ -87,7 +92,7 @@ new(OptMap) when is_map(OptMap) ->
     varp_nif:setopt(Vp, proof_file, Proof_Filename, user),
     varp_nif:setopt(Vp, outdir, Proof_Dirname, user),
 
-    Symbols  = maps:get(syms,OptMap),
+%%    Symbols  = maps:get(syms,OptMap),
     Counters = counters:new(?NUM_COUNTERS, []),
     Delta1   = counters:new(1024, []),
     Delta2   = counters:new(1024, []),
@@ -112,7 +117,7 @@ new(OptMap) when is_map(OptMap) ->
 	       end,
     #bs {
        option = OptMap,
-       vs = Symbols,
+%%       vs = Symbols,
        meta     = maps:get(meta,OptMap),
        defs     = maps:get(defs,OptMap),
        decls    = maps:get(decls,OptMap),
@@ -134,53 +139,6 @@ make_circuit_map(Circuits) when is_map(Circuits) ->
 make_circuit_map(Circuits) when is_list(Circuits) ->
     maps:from_list([{Name,C} || C={circuit,Name,_Params,_Defs} <- Circuits]).
 
-add_variable(Bs) ->
-    varp_nif:add_variable(Bs#bs.vp, false, true).
-
-%% Create a variable and mark all atoms as used
-add_variable(Bs, IsAtom) ->
-    varp_nif:add_variable(Bs#bs.vp, IsAtom, true).
-
-%% add symbol name to literal 
--spec add_symbol(Bs::#bs{}, L::integer(), Sym::term()|iolist()) ->
-		       ok.
-add_symbol(Bs, L, Sym) ->
-    %% io:format("add_symbol: ~p ~p\n", [L, Sym]),
-    varp_nif:add_symbol(Bs#bs.vp, L, Sym).
-
-%% build an OR gate with Y as output and Xs as input
-%% Y = X1 xor X2 .. xor Xn
-xor_gate(Bs,Y,Xs) ->
-    %% gate(Bs, 'xor', Y, Xs).
-    varp_circuit:parity(Bs#bs.vp, Y, Xs).
-
-add_clause(Bs,Ls) ->
-    add_clause(Bs,Ls,?DELTA).
-
-add_clause(Bs,Ls,Set) ->
-    ?dbg("add clause: ~s\n", [format_clause(Bs,Ls)]),
-    case varp_nif:add_clause(Bs#bs.vp,Ls,Set) of
-	{false,_I} ->
-	    throw(contradiction);
-	false ->
-	    throw(contradiction);
-	{true,I} -> %% non conflict
-	    ?dcall(fun() ->
-			   CL = varp_nif:get_clause(Bs#bs.vp, I),
-			   Flags = varp_nif:clause_info(Bs#bs.vp, I),
-			   {W0,W1} = proplists:get_value(watch, Flags, {-1,-1}),
-			   io:format("~w:(~w,~w) ~s\n",
-				     [I,W0,W1,format_clause(Bs,CL)])
-		   end),
-	    I;
-	true ->
-	    %% io:format("clause : DEAD {~w,~w}\n", [Op,Ls]),
-	    ?dcall(fun() ->
-			   io:format("dead clause: ~s\n", 
-				     [format_clause(Bs,Ls)])
-		   end),
-	    true
-    end.
 
 %% Check if proof output is active
 want_proof_output(Bs) ->
@@ -239,23 +197,52 @@ clean_clauses_(Bs, I) ->
     clean_clauses_(Bs, varp_nif:clauseset_next(Bs#bs.vp, I)).
 
 
-is_temporary({p,<<$$,_/binary>>,_}) -> true;
-is_temporary(_) -> false.
+%% is_temporary({p,<<$$,_/binary>>,_}) -> true;
+%% is_temporary(_) -> false.
 
-make_variable(V, Bs) ->
-    case is_temporary(V) of
-	true ->
-	    N = add_variable(Bs, false),
-	    add_symbol(Bs, N, varp_format:format_symbol(V)),
-	    {{bool,N}, alias(V,N,Bs)};
+%% add symbol name to literal 
+-spec add_symbol(Bs::#bs{}, 
+		 Sym::{Name::iolist(),Index::[term()]},
+		 L::integer(), Type::atom()) ->
+	  ok.
+add_symbol(Bs, Sym, L, Type) ->
+    %% io:format("add_symbol: ~p ~p ~p\n", [Sym, L, Type]),
+    varp_nif:add_symbol(Bs#bs.vp, Sym, L, Type).
+
+add_variable(Bs) ->
+    varp_nif:add_variable(Bs#bs.vp, false, true).
+
+%% Create a variable and mark all atoms as used
+add_variable(Bs, IsAtom) ->
+    varp_nif:add_variable(Bs#bs.vp, IsAtom, true).
+
+find_var({p,Name,Args}, Bs) ->
+    Sym = {Name,Args},
+    case varp_nif:find_symbol(Bs#bs.vp, Sym) of
 	false ->
-	    N = add_variable(Bs, true),
-	    add_symbol(Bs, N, varp_format:format_symbol(V)),
-	    {{bool,N}, alias(V,N,Bs)}
+	    io:format("find_var ~p = error\n", [Sym]),
+	    error;
+	Val -> 
+	    io:format("find_var ~p = ~p\n", [Sym,Val]),
+	    {ok,Val}
+    end;
+find_var({Type,Name,Args}, Bs) ->
+    Sym = {Name,Args},
+    case varp_nif:find_symbol(Bs#bs.vp, Sym) of
+	false ->
+	    io:format("find_var ~p = error\n", [Sym]),
+	    error;
+	Val -> 
+	    io:format("find_var ~p = ~p\n", [Sym,Val]),
+	    {ok,{Type,length(Val),Val}}
     end.
+    
 
-getopt(Bs, Item) ->
-    maps:get(Bs#bs.option, Item).
+make_variable({p,Name,Args}, Bs) ->
+    L = add_variable(Bs, true),
+    Var = {Name,Args},
+    add_symbol(Bs, Var, L, bool),
+    {{bool,L}, Bs}.
 
 order_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
@@ -272,7 +259,7 @@ order_first(Bs, VarList) ->
 variable_list_(Bs, [X|Vs], Acc) when is_integer(X) ->
     variable_list_(Bs, Vs, [X|Acc]);
 variable_list_(Bs, [V|Vs], Acc) ->
-    case build_(V, Bs) of
+    case bld(V, Bs) of
 	{{bool,X}, Bs1} ->
 	    ?dbg0("~w = ~w\n", [V, X]),
 	    variable_list_(Bs1, Vs, [X|Acc]);
@@ -371,7 +358,7 @@ variable(V, Bs) ->
 			    ?dbg0("~p = ~p\n", [Bnd2,Def]),
 			    Meta = maps:merge(Bs#bs.meta,maps:from_list(Bnd2)),
 			    ?dbg0("meta bind: ~p\n", [Meta]),
-			    {R,Bs1} = build__(Def, Bs#bs { meta=Meta}),
+			    {R,Bs1} = bld(Def, Bs#bs { meta=Meta}),
 			    ?dbg0("R = ~p\n", [R]),
 			    %% Meta1 = lists:nthtail(length(Bnd2),Bs1#bs.meta),
 			    {R,Bs1#bs { meta=Bs#bs.meta}}
@@ -379,8 +366,8 @@ variable(V, Bs) ->
 		_ ->
 		    make_variable(W, Bs)
 	    end;
-	{ok,N} when is_integer(N) ->
-	    {{bool,N},Bs};
+%%	{ok,N} when is_integer(N) ->
+%%	    {{bool,N},Bs};
 	{ok,Val} ->
 	    {Val,Bs}
     end.
@@ -427,8 +414,7 @@ expand_meta(V,_Bs) ->
     V.
 
 match_def(P, As, Defs) ->
-    PSym = {P,length(As)},
-    List = maps:get(PSym, Defs, []),
+    List = maps:get(P, Defs, []),
     match_def_list(List,As).
 
 match_def_list([{Fs,Def}|Ds],As) ->
@@ -481,7 +467,6 @@ bind_meta([V|Vs], Bs, Acc, Bnd) ->
 bind_meta([], _Bs, Acc, Bnd) ->
     {lists:reverse(Acc),lists:reverse(Bnd)}.
 
-
 %% bind a "meta" variable
 push_meta(V,I,Bs) ->
     Bs#bs { meta = maps:put(V, I, Bs#bs.meta)}.
@@ -489,62 +474,67 @@ push_meta(V,I,Bs) ->
 pop_meta(Bs, Meta) ->
     Bs#bs { meta = Meta }.
 
--spec alias(V::var(),N::integer(),Bs::#bs{}) -> #bs{}.
 
-alias(V,N,Bs) ->
-    case find_var(N,Bs) of
-	error ->
-	    set_var(V,N,Bs);
-	{ok,Alias} ->
-	    add_var(V,N,Alias,Bs)
-    end.
+%% keep defined circuits to allow parser to know what
+%% symbols are predicates and what symbols are circuits
+init_circuit_def() ->
+    put(circuit_defs, #{}).
 
-find_var(V, Bs) ->
-    Val = find_var_(V, Bs),
-    ?dbg0("find_var ~p = ~p\n", [V,Val]),
-    Val.
+add_circuit_def(C={circuit,Name,_Params,_Defs}) ->
+    io:format("add circuit ~s\n", [Name]),
+    CDef = get(circuit_defs),
+    put(circuit_defs, CDef#{ Name => true }),
+    C.
 
-find_var_(V, Bs) ->
-    case maps:get(icase, Bs#bs.option, false) of
-	false ->
-	    maps:find(V, Bs#bs.vs);
-	true ->
-	    case V of
-		{p,P,Ps} ->
-		    UP = string:uppercase(P),
-		    maps:find({p,UP,Ps}, Bs#bs.vs);
-		_ ->
-		    maps:find(V, Bs#bs.vs)
+%% installed in dictionary, called from scanner!
+find_circuit_def(Name, Defs, _ICase=false) ->
+    case lists:keyfind(Name, 2, Defs) of
+	{_,C} -> {ok, C};
+	false -> error
+    end;
+find_circuit_def(Name, Defs, _ICase=true) ->
+    UName = string:uppercase(Name),
+    find_circuit_def_(UName, Defs).
+
+find_circuit_def_(UName, [C={circuit,Name,_Params,_Defs}|Defs]) ->
+    case string:uppercase(Name) of
+	UName -> {ok,C};
+	_ -> find_circuit_def_(UName, Defs)
+    end;
+find_circuit_def_(_UName, []) -> error.
+
+
+%% installed in dictionary, called from scanner!
+is_circuit_def(Name, ICase) ->
+    case get(circuit_defs) of
+	undefined -> false;
+	CDef ->
+	    case ICase of
+		false ->
+		    maps:get(Name, CDef, false);
+		true ->
+		    I = maps:iterator(CDef),
+		    UName = string:uppercase(Name),
+		    is_circuit_def_(UName, I)
 	    end
     end.
 
-get_var(V, Bs) ->
-    case maps:get(icase, Bs#bs.option, false) of
-	false ->
-	    maps:get(V, Bs#bs.vs);
-	true ->
-	    case V of
-		{p,P,Ps} ->
-		    UP = string:uppercase(P),
-		    maps:get({p,UP,Ps}, Bs#bs.vs)
+is_circuit_def_(UName, I) ->
+    case maps:next(I) of
+	none -> false;
+	{Name,true,I1} ->
+	    case string:uppercase(Name) of
+		UName -> true;
+		_ -> is_circuit_def_(UName, I1)
 	    end
     end.
 
-set_var(Var, Vi, Bs) ->
-    Vs = Bs#bs.vs,
-    ?dbg("set_var ~w => ~w\n", [Var, Vi]),
-    Vs1 = Vs#{ Var => Vi,  Vi => [Var] },
-    Bs#bs { vs = Vs1 }.
+set(undefined, Y, Bs) -> {Y, Bs};
+set(X, Y, Bs) -> operation1('=',X,Y,Bs).
 
-add_var(Var, Vi, Alias,Bs) ->
-    Vs = Bs#bs.vs,
-    ?dbg("add_var ~w => ~w\n", [Var, Vi]),
-    Vs1 = Vs#{ Var => Vi, Vi => [Var|Alias] },
-    Bs#bs { vs = Vs1 }.
-
-fold_var(Fun, Acc, Bs) ->
-    maps:fold(Fun, Acc, Bs#bs.vs).
-
+icase(Bs) ->    
+    maps:get(icase, Bs#bs.option, false).
+    
 %%
 %% Generate the variable rules from a formula
 %%
@@ -552,14 +542,14 @@ build(F) ->
     build(F,varp:default_options()).
 
 build(F,Opts) when is_list(Opts) ->
-    build1(F, new(Opts));
+    bld1(F, new(Opts));
 build(F,Opts) when is_map(Opts) ->
-    build1(F, new(Opts));
+    bld1(F, new(Opts));
 build(F,Bs) when is_record(Bs, bs) ->
-    build1(F, Bs).
+    bld1(F, Bs).
 
-build1(F, Bs) ->
-    try build__(F, Bs) of
+bld1(F, Bs) ->
+    try bld(F, Bs) of
       	Value -> Value
     catch
       	throw:contradiction -> 
@@ -568,25 +558,16 @@ build1(F, Bs) ->
 	    io:format("error: ~w\n~p\n", [Error,?GET_STACK(Stack)])
     end.
 
-build__(F, Bs) ->
-    %% io:format("build__ ~p\n", [F]),
-    R={_F1,_Bs1} = build_(F, Bs),
-    %% io:format("build__ => ~p\n", [_F1]),
-    %% io:format("Bs1 = ~p\n", [_Bs1]),
-    R.
+bld(Y, Bs) ->
+    bld(undefined,Y,Bs).
 
-build_(undefined, Bs) ->
-    {undefined, Bs};
-build_(true, Bs) ->
-    {{bool,?T}, Bs};
-build_(false, Bs) ->
-    {{bool,?F}, Bs};
-build_({literal,X}, Bs) when is_integer(X) ->
-    {{bool,X}, Bs};
-
-build_(V, Bs) when is_binary(V) -> %% variable (and meta)
+bld(_X,undefined, Bs) -> {undefined, Bs};
+bld(X,true,Bs) ->  set(X,{bool,?T},Bs);
+bld(X,false,Bs) -> set(X,{bool,?F},Bs);
+bld(X,{literal,Y}, Bs) when is_integer(Y) -> set(X,{bool,Y},Bs); %% FIXME???
+bld(X,V,Bs) when is_binary(V) -> %% variable (and meta)
     Arity = 0,
-    case maps:find(V,Bs#bs.decls) of
+    case varp:find_decl(V,Bs#bs.decls,icase(Bs)) of
 	error ->
 	    W = eval_meta(V,Bs),
 	    if W >=0 ->
@@ -603,7 +584,7 @@ build_(V, Bs) when is_binary(V) -> %% variable (and meta)
 	{ok,{PType,_Arity,Size}} ->
 	    var_vector(PType,V,Size,Bs)
     end;
-build_(W, Bs) when is_integer(W) ->
+bld(X,W,Bs) when is_integer(W) ->
     if W < 0 ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs);
@@ -611,7 +592,7 @@ build_(W, Bs) when is_integer(W) ->
 	    N = varp_math:unsigned_size(W),
 	    const_vector(uint,W,N,Bs)
     end;
-build_({const,W}, Bs) when is_integer(W) ->
+bld(X,{const,W}, Bs) when is_integer(W) ->
     if W < 0 ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs);
@@ -620,35 +601,31 @@ build_({const,W}, Bs) when is_integer(W) ->
 	    const_vector(uint,W,N,Bs)
     end;
 %% built in integer functions (fixme)
-build_({p,<<"abs">>,[A]}, Bs) ->
-    {Y,Bs1} = build__(A, Bs),
-    operation_('abs', Y, Bs1);
-build_({p,<<"min">>,[A,B]}, Bs) ->
-    {A1,Bs1} = build__(A, Bs),
-    {B1,Bs2} = build__(B, Bs1),
-    operation_('min', A1, B1, Bs2);
-build_({p,<<"max">>,[A,B]}, Bs) ->
-    {A1,Bs1} = build__(A, Bs),
-    {B1,Bs2} = build__(B, Bs1),
-    operation_('max', A1, B1, Bs2);
-build_(V={p,P,Ps}, Bs) ->
-    PSym = case maps:get(icase, Bs#bs.option, false) of
-	       false -> varp:make_psym(P, Ps);
-	       true -> varp:make_psym(string:uppercase(P), Ps)
-	   end,
-    Arity = length(Ps),
-    case maps:find(PSym,Bs#bs.decls) of
+bld(X,{p,<<"abs">>,[A]}, Bs) ->
+    {Y,Bs1} = bld(A, Bs),
+    operation1('abs',X,Y,Bs1);
+bld(X,{p,<<"min">>,[A,B]}, Bs) ->
+    {A1,Bs1} = bld(A, Bs),
+    {B1,Bs2} = bld(B, Bs1),
+    operation2('min',X,A1,B1,Bs2);
+bld(X,{p,<<"max">>,[A,B]}, Bs) ->
+    {A1,Bs1} = bld(A, Bs),
+    {B1,Bs2} = bld(B, Bs1),
+    operation2('max',X,A1,B1,Bs2);
+bld(X, V={p,P,Args}, Bs) ->
+    Arity = length(Args),
+    case varp:find_decl(P,Bs#bs.decls,icase(Bs)) of
 	error ->
-	    Decls1 = maps:put(PSym,{bool,Arity,1},Bs#bs.decls),
+	    Decls1 = maps:put(P,{bool,Arity,1},Bs#bs.decls),
 	    variable(V, Bs#bs { decls = Decls1 });
 	{ok,{bool,Arity1,1}} when Arity =/= Arity1 ->
 	    error({arity_mismatch,P});
 	{ok,{bool,Arity,1}} ->
-	    variable(V, Bs);
+	    variable({p,P,Args}, Bs);
 	{ok,{PType,_Arity,Size}} ->
 	    var_vector(PType,V,Size,Bs)
     end;
-build_({PType,SExpr,PExpr},Bs) when
+bld(X,{PType,SExpr,PExpr},Bs) when
       PType =:= uint; PType =:= int; PType =:= bit ->
     if is_atom(PExpr) ->
 	    Vn = atom_to_list(PExpr),
@@ -670,7 +647,7 @@ build_({PType,SExpr,PExpr},Bs) when
 		    Error
 	    end
     end;
-build_({expr,Expr}, Bs) ->
+bld(X,{expr,Expr}, Bs) ->
     W = eval_meta(Expr,Bs),
     if W >=0 ->
 	    N = varp_math:unsigned_size(W),
@@ -679,248 +656,240 @@ build_({expr,Expr}, Bs) ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs)
     end;
-build_({vec,Fs}, Bs) ->
-    {Xs,Bs1} = build_list(Fs, Bs),
-    Xs1 = join_vector(Xs),
-    %% io:format("vec=~p, join=~p\n", [Xs, Xs1]),
-    {{bit,length(Xs1),[bit(X)||X <- Xs1]},Bs1};
+bld(X,{vec,Fs}, Bs) ->
+    {Ys,Bs1} = bld_list(Fs, Bs),
+    Ys1 = join_vector(Ys),
+    %% io:format("vec=~p, join=~p\n", [Ys, Ys1]),
+    {{bit,length(Ys1),[bit(Y)||Y <- Ys1]},Bs1};
 
-build_({bitindex,A,I},Bs) ->
+bld(X,{bitindex,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
     case A of
 	{p,P,Ps} ->  %% check if declared
-	    PSym = varp:make_psym(P, Ps),
-	    case maps:find(PSym, Bs#bs.decls) of
+	    case varp:find_decls(P, Bs#bs.decls, icase(Bs)) of
 		error ->
 		    variable({index,A,I1}, Bs);
 		{ok,{PType,_,PSize}} ->
 		    case var_vector(PType,A,PSize,Bs) of
-			{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
-			{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
-			{{bit,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
-			{{bool,X},Bs1}    -> {{bool,X},Bs1}
+			{{uint,N,Ys},Bs1} -> {select_bool(I1,N,Ys), Bs1};
+			{{int,N,Ys},Bs1}  -> {select_bool(I1,N,Ys), Bs1};
+			{{bit,N,Ys},Bs1}  -> {select_bool(I1,N,Ys), Bs1};
+			{{bool,Y},Bs1}    -> {{bool,Y},Bs1}
 		    end
 	    end;
 	_ ->
-	    case build__(A, Bs) of
-		{{uint,N,Xs},Bs1} -> {select_bool(I1,N,Xs), Bs1};
-		{{int,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
-		{{bit,N,Xs},Bs1}  -> {select_bool(I1,N,Xs), Bs1};
-		{{bool,X},Bs1}    -> {{bool,X},Bs1}
-                %% X -> {select_bool(I1,1,[X]),Bs}
+	    case bld(A, Bs) of
+		{{uint,N,Ys},Bs1} -> {select_bool(I1,N,Ys), Bs1};
+		{{int,N,Ys},Bs1}  -> {select_bool(I1,N,Ys), Bs1};
+		{{bit,N,Ys},Bs1}  -> {select_bool(I1,N,Ys), Bs1};
+		{{bool,Y},Bs1}    -> {{bool,Y},Bs1}
+                %% Y -> {select_bool(I1,1,[Y]),Bs}
 	    end
     end;
 
-build_({bitrange,A,I,J,S},Bs) ->
+bld(X,{bitrange,A,I,J,S},Bs) ->
     I1 = eval_meta(I,Bs),
     J1 = eval_meta(J,Bs),
     S1 = eval_meta(S,Bs),
-    case build__(A, Bs) of
-	{{uint,N,Xs}, Bs1} -> {select_range(I1,J1,S1,N,Xs), Bs1};
-	{{int,N,Xs}, Bs1}  -> {select_range(I1,J1,S1,N,Xs), Bs1};
-	{{bit,N,Xs}, Bs1}  -> {select_range(I1,J1,S1,N,Xs), Bs1};
-	{{bool,X}, Bs1}    -> {select_range(I1,J1,S1,1,[X]), Bs1}
+    case bld(A, Bs) of
+	{{uint,N,Ys}, Bs1} -> {select_range(I1,J1,S1,N,Ys), Bs1};
+	{{int,N,Ys}, Bs1}  -> {select_range(I1,J1,S1,N,Ys), Bs1};
+	{{bit,N,Ys}, Bs1}  -> {select_range(I1,J1,S1,N,Ys), Bs1};
+	{{bool,Y}, Bs1}    -> {select_range(I1,J1,S1,1,[Y]), Bs1}
     end;
 
 %% Fixme: implement shift for variable argument
-build_({'shl',A,K},Bs) ->
-    {Y,Bs1} = build__(A,Bs),
-    {Z,Bs2} = build__(K,Bs1),
-    operation_('shl',Y,Z,Bs2);
-build_({'rol',A,K},Bs) ->
-    {Y,Bs1} = build__(A,Bs),
-    {Z,Bs2} = build__(K,Bs1),
-    operation_('rol',Y,Z,Bs2);
-build_({'shr',A,K},Bs) ->
-    {Y,Bs1} = build__(A,Bs),
-    {Z,Bs2} = build__(K,Bs1),
-    operation_('shr',Y,Z,Bs2);
-build_({'ror',A,K},Bs) ->
-    {Y,Bs1} = build__(A,Bs),
-    {Z,Bs2} = build__(K,Bs1),
-    operation_('ror',Y,Z,Bs2);
+bld(X,{'shl',A,K},Bs) ->
+    {Y,Bs1} = bld(A,Bs),
+    {Z,Bs2} = bld(K,Bs1),
+    operation2('shl',X,Y,Z,Bs2);
+bld(X,{'rol',A,K},Bs) ->
+    {Y,Bs1} = bld(A,Bs),
+    {Z,Bs2} = bld(K,Bs1),
+    operation2('rol',X,Y,Z,Bs2);
+bld(X,{'shr',A,K},Bs) ->
+    {Y,Bs1} = bld(A,Bs),
+    {Z,Bs2} = bld(K,Bs1),
+    operation2('shr',X,Y,Z,Bs2);
+bld(X,{'ror',A,K},Bs) ->
+    {Y,Bs1} = bld(A,Bs),
+    {Z,Bs2} = bld(K,Bs1),
+    operation2('ror',X,Y,Z,Bs2);
 
-build_({cnf,{[],[],_Sections}},Bs) ->
-    build__(false, Bs);
-build_({cnf,{Vars,_Clauses,_Sections,Cs}},Bs) 
+bld(X,{cnf,{[],[],_Sections}},Bs) ->
+    bld(false, Bs);
+bld(X,{cnf,{Vars,_Clauses,_Sections,Cs}},Bs) 
   when is_list(Cs) ->
-    %% CNF only works as first formula! variables
-    %% must be numerated 1..Vars
-    {1,Vars} = varp_nif:add_variables(Bs#bs.vp, Vars),
-    %% fixme bind all literals in Ls = TRUE
-    lists:foreach(fun(CL) ->
-			  use_clause(Bs#bs.vp, CL),
-			  try varp_nif:add_clause(Bs#bs.vp, CL) of
-			      {false,_I} ->
-				  throw(contradiction);
-			      false ->
-				  throw(contradiction);
-			      _ -> ok
-			  catch
-			      error:_ ->
-				  if CL =:= [] -> 
-					  error(empty_clause);
-				     true ->
-					  MV = lists:max([abs(L)||L<-CL]),
-					  if MV > Vars ->
-						  error({var_out_of_range,MV});
-					     true ->
-						  error(add_clause)
-					  end
-				  end
-			  end
-		  end, Cs),
-    {{bool,?T}, Bs};
+    Bs1 = build_cnf(Vars,Cs,Bs),
+    {{bool,?T}, Bs1};
 
-build_({snf,{[],[],_Sections}},Bs) ->
-    build__(false, Bs);
-build_({snf,{_Vars,_Clauses,_Sections,Cs}},Bs) 
+bld(_X,{snf,{[],[],_Sections}},Bs) ->
+    bld(false, Bs);
+bld(_X,{snf,{_Vars,_Clauses,_Sections,Cs}},Bs) 
   when is_list(Cs) ->
     Bs1 = build_snf(Cs, Bs),
     {{bool,?T}, Bs1};
 
-build_({subst,Rx,Py,F},Bs) ->
+bld(X,{subst,Rx,Py,F},Bs) ->
     Bs1 = Bs#bs { subst = [{Rx,Py}|Bs#bs.subst]},
-    build__(F, Bs1);
-build_({subst,SList,F},Bs) ->
+    bld(X,F,Bs1);
+bld(X,{subst,SList,F},Bs) ->
     Bs1 = Bs#bs { subst = SList++Bs#bs.subst},
-    build__(F, Bs1);
+    bld(X,F,Bs1);
 
-build_({lop,':=', L, R}, Bs) ->
-    {Y,Bs1} = build__(R, Bs),
-    operation_(':=', L, Y, Bs1);
-build_({lop,'=', L, R}, Bs) ->
-    {Y,Bs1} = build__(R, Bs),
-    operation_('=', L, Y, Bs1);
-build_({lop,Op,A}, Bs) ->
-    {Y,Bs1} = build__(A, Bs),
-    operation_(Op, Y, Bs1);    
-build_({lop,Op,A,B}, Bs) ->
-    {Y,Bs1} = build__(A, Bs),
-    {Z,Bs2} = build__(B, Bs1),
-    operation_(Op,Y,Z,Bs2);
-build_({lop,ite,C,T,E}, Bs) ->
-    {Cf,Bs1} = build__(C, Bs),
-    {Tf,Bs2} = build__(T, Bs1),
-    {Ef,Bs3} = build__(E, Bs2),
-    ite(Cf, Tf, Ef, Bs3);
+bld(_X,{lop,':=',L,R}, Bs) ->
+    {Y,Bs1} = bld(R, Bs),
+    operation1(':=',L,Y,Bs1);
+bld(_X,{lop,'=',L,R}, Bs) ->
+    {Y,Bs1} = bld(R, Bs),
+    operation1('=',L,Y,Bs1);
+bld(X,{lop,Op,A}, Bs) ->
+    {Y,Bs1} = bld(A, Bs),
+    operation1(Op, X, Y, Bs1);
+bld(X,{lop,Op,A,B}, Bs) ->
+    {Y,Bs1} = bld(A, Bs),
+    {Z,Bs2} = bld(B, Bs1),
+    operation2(Op,X,Y,Z,Bs2);
+bld(X,{lop,ite,C,T,E}, Bs) ->
+    {Cf,Bs1} = bld(C, Bs),
+    {Tf,Bs2} = bld(T, Bs1),
+    {Ef,Bs3} = bld(E, Bs2),
+    ite(X,Cf,Tf,Ef,Bs3);
 
-build_({'ALL',Fs}, Bs) ->
-    {Xs,Bs1} = build_args(Fs,Bs),
-    all(Xs, Bs1);
-build_({'ANY',Fs}, Bs) ->
-    {Xs,Bs1} = build_args(Fs,Bs),
-    any(Xs, Bs1);
-build_({'NONE',Fs}, Bs) ->
-    {Xs,Bs1} = build_args(Fs,Bs),
-    none(Xs, Bs1);
-build_({'ONE',Fs}, Bs) ->
-    {Xs,Bs1} = build_args(Fs,Bs),
-    one(Xs, Bs1);
-build_({'SUM',Ys}, Bs) ->
-    {Xs,Bs1} = build_args(Ys,Bs),
-    sum(Xs, Bs1);
-build_({'PROD',Ys}, Bs) ->
-    {Xs,Bs1} = build_args(Ys,Bs),
-    prod(Xs, Bs1);
-build_({'PARITY',Ys}, Bs) ->
-    {Xs,Bs1} = build_args(Ys,Bs),
-    parity(Xs, Bs1);
-build_({'ODD',Ys}, Bs) ->
-    {Xs,Bs1} = build_args(Ys,Bs),
-    parity(Xs, Bs1);
-build_({'EVEN',Ys}, Bs) ->
-    {Xs,Bs1} = build_args(Ys,Bs),
-    {Y,Bs2} = parity(Xs, Bs1),
-    {negate(Y),Bs2};
-
+bld(X,{'ALL',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    all(X,Ys1,Bs1);
+bld(X,{'ANY',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    any(X,Ys1,Bs1);
+bld(X,{'NONE',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    none(X,Ys1,Bs1);
+bld(X,{'ONE',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    one(X,Ys1,Bs1);
+bld(X,{'SUM',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    sum(X,Ys1,Bs1);
+bld(X,{'PROD',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    prod(X,Ys1,Bs1);
+bld(X,{'PARITY',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    Y = varp_circuit:parity(Bs1#bs.vp,X,circuit_args(Ys1)),
+    {{bool,Y},Bs1};
+bld(X,{'ODD',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    Y = varp_circuit:parity(Bs1#bs.vp,X,circuit_args(Ys1)),
+    {{bool,Y},Bs1};
+bld(X,{'EVEN',Ys}, Bs) ->
+    {Ys1,Bs1} = bld_args(Ys,Bs),
+    Y = varp_circuit:parity(Bs1#bs.vp,X,circuit_args(Ys1)),
+    {{bool,lnot(Y)},Bs1};
 %% Quatifer version
-build_({{'ALL',Qs}, F}, Bs) ->
+bld(X,{{'ALL',Qs}, F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    all(Ys,Bs1);
-build_({{'ANY',Qs},F}, Bs) ->
+    all(X,Ys,Bs1);
+bld(X,{{'ANY',Qs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    any(Ys,Bs1);
-build_({{'NONE',Qs},F}, Bs) ->
+    any(X,Ys,Bs1);
+bld(X,{{'NONE',Qs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    none(Ys,Bs1);
-build_({{'ONE',Qs},F}, Bs) ->
+    none(X,Ys,Bs1);
+bld(X,{{'ONE',Qs},F}, Bs) ->
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    eqk(1, Ys, Bs1);
+    eqk(1,X,Ys,Bs1);
 
-build_({{'EQ',[X1|Qs]},F}, Bs) ->
+bld(X,{{'EQ',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
-	    eqk(K, Ys, Bs1)
+	    eqk(K,X,Ys, Bs1)
     end;
-build_({{'NEQ',[X1|Qs]},F}, Bs) ->
+bld(X,{{'NEQ',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
-	    {X,Bs2} = eqk(K, Ys, Bs1),
-	    {negate(X),Bs2}
+	    neqk(K,X,Ys, Bs1)
     end;
-build_({{'GT',[X1|Qs]},F}, Bs) ->
+bld(X,{{'GT',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if is_integer(K),K >= 0 ->
-	    gtk(K,Ys,Bs1)
+	    gtk(K,X,Ys,Bs1)
     end;
-build_({{'GTE',[X1|Qs]},F}, Bs) ->
+bld(X,{{'GTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 0 ->
-	    any(Ys,Bs1);
+	    any(X,Ys,Bs1);
        is_integer(K),K >= 0 ->
-	    gtk(K-1,Ys,Bs1)
+	    gtk(K-1,X,Ys,Bs1)
     end;
-build_({{'LT',[X1|Qs]},F}, Bs) ->
+bld(X,{{'LT',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 1 ->
-	    none(Ys,Bs1);
+	    none(X,Ys,Bs1);
        is_integer(K),K > 1 ->
 	    N = length(Ys),
-	    gtk(N-K, lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
+	    gtk(N-K,X,lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
-build_({{'LTE',[X1|Qs]},F}, Bs) ->
+bld(X,{{'LTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
     if K =:= 0 ->
-	    none(Ys,Bs1);
+	    none(X,Ys,Bs1);
        is_integer(K),K > 0 ->
 	    N = length(Ys),
-	    gtk(N-K-1, lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
+	    gtk(N-K-1,X,lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
-build_({{'SUM',Qs}, F}, Bs) ->
+bld(X,{{'SUM',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
-    sum(Xs,Bs1);
-build_({{'PROD',Qs}, F}, Bs) ->
+    sum(X,Xs,Bs1);
+bld(X,{{'PROD',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_iquant(F,Qs,Bs),
-    prod(Xs,Bs1);
-build_({{'PARITY',Qs}, F}, Bs) ->
+    prod(X,Xs,Bs1);
+bld(X,{{'PARITY',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_quant(F,Qs,Bs),
-    parity(Xs,Bs1);
-build_({{'ODD',Qs}, F}, Bs) ->
+    Y = varp_circuit:parity(Bs1#bs.vp,X,circuit_args(Xs)),
+    {{bool,Y},Bs1};
+bld(X,{{'ODD',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_quant(F,Qs,Bs),
-    parity(Xs,Bs1);
-build_({{'EVEN',Qs}, F}, Bs) ->
+    Y = varp_circuit:odd(Bs1#bs.vp,X,circuit_args(Xs)),
+    {{bool,Y},Bs1};
+bld(X,{{'EVEN',Qs}, F}, Bs) ->
     {Xs,Bs1} = build_quant(F,Qs,Bs),
-    {Y,Bs2} = parity(Xs,Bs1),
-    {negate(Y),Bs2};
-build_({cop, Name, Args}, Bs) ->
-    %% locate circuit definition
-    case maps:find(Name, Bs#bs.circuits) of
+    Y = varp_circuit:even(Bs1#bs.vp,X,circuit_args(Xs)),
+    {{bool,Y},Bs1};
+bld(X,{cop, Name, Args}, Bs) ->
+    case find_circuit_def(Name, Bs#bs.circuits, icase(Bs)) of
 	{ok, Circuit} ->
 	    build_circuit(Circuit, Args, Bs);
 	error ->
 	    io:format("circuit ~p not defined\n", [Name]),
 	    error({circuit_undefined, Name})
-    end;
-build_(Form, _Bs) ->
-    io:format("NOT IMPLEMENTED: ~p\n", [Form]),
-    throw(not_implemented).
+    end.
+
+%% build one or more arguments
+bld_args(Fs,Bs) when is_list(Fs) ->
+    bld_list(Fs, Bs);
+bld_args(F,Bs) ->
+    case bld(F, Bs) of
+	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
+	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
+	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1}
+    end.
+
+bld_list(Fs, Bs) ->
+    bld_list_(Fs, [], Bs).
+    
+bld_list_([F|Fs],Acc,Bs) ->
+    {X,Bs1} = bld(F,Bs),
+    bld_list_(Fs,[X|Acc],Bs1);
+bld_list_([],Acc,Bs) ->
+    {lists:reverse(Acc),Bs}.
+
 
 %%
 %% Build circuit
@@ -941,20 +910,19 @@ build_(Form, _Bs) ->
 %%  Return true if there is no return parameter
 %%   
 build_circuit(Circuit, Args, Bs) ->
-    io:format("build circuit = ~p ~p\n",
-	      [Circuit, Args]),
+    io:format("build circuit = ~p ~p\n", [Circuit, Args]),
     {{bool,?T}, Bs}.
 
 
-%% build  [ oexpr := lexpr ';' ]
+%% build  [ oexpr = lexpr ';' ]
 %% here we could/should generate Oexpr then pass the 
 %% output to the left expression to be used as gate/circuit output?
 build_assignment_defs([{lop,'=',OExpr,LExpr}|Assignments], Bs0) ->
-    {Y,Bs1} = build(LExpr,Bs0),
-    {X,Bs2} = build(OExpr,Bs1),
-    {{bool,Z},Bs3} = operation('eq',X,Y,Bs2),
-    xor_gate(Bs3,?F,[Z,?T]),
-    build_assignment_defs(Assignments, Bs3);
+    {X,Bs1} = bld(OExpr,Bs0),    %% or bld1?
+    {_Y,Bs2} = bld(X,LExpr,Bs1),  %% or bld1?
+    %% {{bool,Z},Bs3} = operation2('eq',X,Y,Bs2),
+    %% varp_circuit:xor_gate(Bs3#bs.vp, ?F, Z, ?T),
+    build_assignment_defs(Assignments, Bs2);
 build_assignment_defs([], Bs) ->
     Bs.
 
@@ -964,21 +932,40 @@ build_assignment_defs([], Bs) ->
 %% literal integers
 %% in the snf case the literals are symbols
 %%
-build_snf([CL|CLs], Bs) ->
-    {Xs,Bs1} = build_args(CL,Bs),
-    Ls = [L || {bool,L} <- Xs],
-    try add_clause(Bs1,Ls) of
-	{false,_I} ->
-	    throw(contradiction);
-	false ->
-	    throw(contradiction);
-	_ ->
-	    build_snf(CLs, Bs1)
+build_cnf(Cs,Vars,Bs) ->
+    %% CNF only works as first formula! variables
+    %% must be numerated 1..Vars
+    {1,Vars} = varp_nif:add_variables(Bs#bs.vp, Vars), %% yes, so match!
+    build_cnf_(Cs, Vars, Bs).
+
+build_cnf_([CL|CLs], Vars, Bs) ->
+    use_clause(Bs#bs.vp, CL),
+    try varp_circuit:clause(Bs#bs.vp, CL) of
+	_IndexOrTrue ->
+	    build_cnf_(CLs, Vars, Bs)
     catch
-	?EXCEPTION(error,Reason,Stack) ->
-	    io:format("snf error: ~w\n~p\n", [Reason,?GET_STACK(Stack)]),
-	    error(Reason)
+	thrown:_ ->
+	    if CL =:= [] -> 
+		    error(empty_clause);
+	       true ->
+		    MV = lists:max([abs(L)||L<-CL]),
+		    if MV > Vars ->
+			    error({var_out_of_range,MV});
+		       true ->
+			    error(add_clause)
+		    end
+	    end
     end;
+build_cnf_([],_Vars,Bs) ->
+    Bs.
+
+
+
+build_snf([CL|CLs], Bs) ->
+    {Xs,Bs1} = bld_args(CL,Bs),
+    Ls = [L || {bool,L} <- Xs],
+    varp_circuit:clause(Bs1,Ls),
+    build_snf(CLs, Bs1);
 build_snf([], Bs) ->
     Bs.
 
@@ -1005,7 +992,7 @@ build_quant_(F, [Expr|Qs], Bs) ->
 	true -> build_quant_(F, Qs, Bs)
     end;
 build_quant_(F, [], Bs) ->
-    case build__(F, Bs) of
+    case bld(F, Bs) of
 	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
 	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
 	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
@@ -1066,7 +1053,7 @@ build_iquant_(F, [Expr|Qs], Bs) ->
 	true -> build_iquant_(F, Qs, Bs)
     end;
 build_iquant_(F, [], Bs) ->
-    case build__(F, Bs) of
+    case bld(F, Bs) of
 	{{bool,X},Bs1} -> {[{uint,1,[X]}], Bs1};
 	{X,Bs1} -> {[X],Bs1}
     end.
@@ -1282,9 +1269,8 @@ next([_Aj], _Acc) -> [].
     
 
 lookup_or_add_decl({p,P,Ps},PType,Size,Bs) ->
-    PSym = varp:make_psym(P,Ps),
     Arity = length(Ps),
-    case maps:find(PSym,Bs#bs.decls) of
+    case varp:find_decl(P,Bs#bs.decls,icase(Bs)) of
 	{ok,Type={PType,Arity,Size}} ->
 	    {ok,Type,Bs};
 	{ok,Type={_PType1,Arity1,Size1}} ->
@@ -1297,7 +1283,7 @@ lookup_or_add_decl({p,P,Ps},PType,Size,Bs) ->
 	    end;
 	error ->
 	    Type = {PType,Arity,Size},
-	    Decls1 = maps:put(PSym, Type, Bs#bs.decls),
+	    Decls1 = maps:put(P, Type, Bs#bs.decls),
 	    {ok, Type, Bs#bs { decls = Decls1 }}
     end.
 
@@ -1327,7 +1313,9 @@ uint8(V,Bs) ->
 %% generate a constant vector
 const_vector(Type,Value,Size,Bs) when is_integer(Value) ->
     N = eval_meta(Size,Bs),
-    {const_vector_(N-1,Type,N,[],Value),Bs}.
+    V = const_vector_(N-1,Type,N,[],Value),
+    %% io:format("const vector : ~p\n", [V]),
+    {V,Bs}.
 
 const_vector(Type,Value,N) when is_integer(Value), is_integer(N) ->
     const_vector_(N-1,Type,N,[],Value).
@@ -1350,6 +1338,7 @@ const_vector_(I,Type,N,Cs,Value) ->
     end.
 
 %% Install alias vector
+-ifdef(not_used).
 alias_vector(Bs,T,V,Size,Xs) ->
     N = eval_meta(Size,Bs),
     alias_vector_(Bs,0,T,N,Xs,V).
@@ -1359,69 +1348,93 @@ alias_vector_(Bs,I,T,N,[X|Xs],V) ->
     alias_vector_(Bs1,I+1,T,N,Xs,V);
 alias_vector_(Bs,_I,_T,_N,[],_V) ->
     Bs.
+-endif.
     
 %% generate a variable vector, bits 
-%% X[3] X[2] X[1] X[0]  return as little endian [X[0],X[1],X[2],X[3]]
-var_vector(Type,V,Size,Bs) ->
-    VV = expand_meta(V,Bs),
-    Size1 = eval_meta(Size,Bs),
-    var_vector_(0,Size1,Type,[],VV,Bs).
+%% X[n-1] X[2] X[1] X[0]  return as little endian [X[0],X[1],X[2],X[n-1]]
+var_vector(Type,V,N,Bs) ->
+    {p,Name,Args} = expand_meta(V,Bs),
+    N1 = eval_meta(N,Bs),
+    Sym = {Name,Args},
+    case varp_nif:find_symbol(Bs#bs.vp, Sym) of
+	{Type,Ls} ->
+	    %% io:format("var_vector (~w) ~p = ~p\n", [N1,Sym,{Type,Ls}]),
+	    {{Type,length(Ls),Ls},Bs};
+	false ->
+	    {V1,Vn} = varp_nif:add_variables(Bs#bs.vp, N1, true, true),
+	    Ls = lists:seq(V1,Vn),
+	    Var = {Name,Args},
+	    add_symbol(Bs, Var, Ls, Type),
+	    %% io:format("add var_vector (~w) ~p = ~p\n", [N1,Sym,{Type,Ls}]),
+	    {{Type,N1,Ls},Bs}
+    end.
 
-var_vector_(Size,Size,Type,Xs,_V,Bs) -> 
-    {{Type,Size,lists:reverse(Xs)},Bs};
-var_vector_(I,Size,Type,Xs,V,Bs) ->
-    {{bool,Xi},Bs1} = variable({Type,V,Size,I},Bs),
-    var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
+%%
+%%var_vector_(Size,Size,Type,Xs,_V,Bs) -> 
+%%    {{Type,Size,lists:reverse(Xs)},Bs};
+%%var_vector_(I,Size,Type,Xs,V,Bs) ->
+%%    {{bool,Xi},Bs1} = variable({Type,V,Size,I},Bs),
+%%    var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
 
-all(As, Bs) ->
-    X = varp_circuit:all(Bs#bs.vp, circuit_args(As)),
-    {{bool,X},Bs}.
+all(A,Bs) -> all(undefined,A,Bs).
+all(X,As,Bs) ->
+    X1 = varp_circuit:all(Bs#bs.vp,X,circuit_args(As)),
+    {{bool,X1},Bs}.
 
-any(As, Bs) ->
-    X = varp_circuit:any(Bs#bs.vp, circuit_args(As)),
-    {{bool,X},Bs}.    
+any(A,Bs) -> any(undefined,A,Bs).
+any(X,As,Bs) ->
+    X1 = varp_circuit:any(Bs#bs.vp,X,circuit_args(As)),
+    {{bool,X1},Bs}.    
 
-none(As,Bs) ->
-    X = varp_circuit:none(Bs#bs.vp, circuit_args(As)),
-    {{bool,X},Bs}.
+none(A,Bs) -> none(undefined,A,Bs).
+none(X,As,Bs) ->
+    X1 = varp_circuit:none(Bs#bs.vp,X,circuit_args(As)),
+    {{bool,X1},Bs}.
 
-one(Xs, Bs) ->
-    eqk(1,Xs,Bs).
+one(A,Bs) -> one(undefined,A,Bs).
+one(X,As, Bs) -> eqk(1,X,As,Bs).
 
-sum([], Bs) ->
-    const_vector(uint,0,1,Bs);
-sum([X], Bs) ->
-    {X, Bs};
-sum([X|Xs], Bs) ->
-    {Xn,Bs1} = sum(Xs,Bs),
-    operation_('add', X, Xn, Bs1).
+sum(As, Bs) ->
+    sum(undefined,As,Bs).
 
-prod([], Bs) ->
-    const_vector(uint,1,1,Bs);
-prod([X], Bs) ->
-    {X, Bs};
-prod([X|Xs], Bs) ->
-    {Xn,Bs1} = prod(Xs,Bs),
-    operation_('mul', X, Xn, Bs1).
+sum(X,[],Bs) -> {V, Bs1} = const_vector(uint,0,1,Bs), set(X,V,Bs1);
+sum(X, [A], Bs) -> set(X,A,Bs);
+sum(X, [A|As], Bs) ->
+    {X1,Bs1} = sum_(As,Bs),
+    operation2('add', X, A, X1, Bs1).
 
-parity([], Bs) ->
-    {{bool,?F},Bs};
-parity([X|Xs],Bs) ->
-    parity(X, Xs, Bs).
+sum_([Y], Bs) -> {Y, Bs};
+sum_([Y|Ys], Bs) ->
+    {Yn,Bs1} = sum(Ys,Bs),
+    operation2('add', Y, Yn, Bs1).
 
-parity(X, [], Bs) ->
-    {X, Bs};
-parity(X, [Xi|Xs], Bs) ->
-    {Y,Bs1} = operation('xor',X,Xi,Bs),
-    parity(Y,Xs,Bs1).
 
-eqk(K,Xs,Bs) ->
-    X = varp_circuit:eqk(Bs#bs.vp, K, circuit_args(Xs)),
-    {{bool,X},Bs}.
+prod(As, Bs) ->
+    prod(undefined,As,Bs).
 
-gtk(K,Xs,Bs) ->
-    X = varp_circuit:gtk(Bs#bs.vp, K, circuit_args(Xs)),
-    {{bool,X},Bs}.
+prod(X,[],Bs) -> {V, Bs1} = const_vector(uint,1,1,Bs), set(X,V,Bs1);
+prod(X, [A], Bs) -> set(X,A,Bs);
+prod(X, [A|As], Bs) ->
+    {X1,Bs1} = prod_(As,Bs),
+    operation2('mul', X, A, X1, Bs1).
+
+prod_([Y], Bs) -> {Y, Bs};
+prod_([Y|Ys], Bs) ->
+    {Yn,Bs1} = prod(Ys,Bs),
+    operation2('mul', Y, Yn, Bs1).
+
+
+eqk(K,X,Ys,Bs) ->
+    X1 = varp_circuit:eqk(Bs#bs.vp,K,X,circuit_args(Ys)),
+    {{bool,X1},Bs}.
+
+neqk(K,X,Ys,Bs) ->
+    X1 = varp_circuit:neqk(Bs#bs.vp,K,X,circuit_args(Ys)),
+    {{bool,X1},Bs}.
+
+gtk(K,X,Ys,Bs) ->
+    X1 = varp_circuit:gtk(Bs#bs.vp,K,X,circuit_args(Ys)),
+    {{bool,X1},Bs}.
 
 negate({bool,X}) -> {bool,lnot(X)}.
 
@@ -1466,14 +1479,6 @@ vset_size(_Xs,0,_D) -> [];
 vset_size([],I,D) -> lists:duplicate(I,D);
 vset_size([X|Xs],I,D) -> [X|vset_size(Xs,I-1,D)].
 
-build_args(Fs,Bs) when is_list(Fs) ->
-    build_list(Fs, Bs);
-build_args(F,Bs) ->
-    case build__(F, Bs) of
-	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
-	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
-	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1}
-    end.
 
 circuit_args(Xs) ->
     [X || {bool,X} <- Xs].
@@ -1513,253 +1518,213 @@ join_vector([X|Xs]) ->
 join_vector([]) ->
     [].
 
-build_list(Fs, Bs) ->
-    build_list_(Fs, [], Bs).
-    
-build_list_([F|Fs],Acc,Bs) ->
-    {X,Bs1} = build__(F,Bs),
-    build_list_(Fs,[X|Acc],Bs1);
-build_list_([],Acc,Bs) ->
-    {lists:reverse(Acc),Bs}.
-
-
-operation_(Op, A, Bs) ->
-    %% io:format("operation: ~w ~w\n", [Op,[A]]),
-    operation(Op,A,Bs).
-
-operation_(Op, A,B, Bs) ->
-    %% io:format("operation: ~w ~w\n", [Op,[A,B]]),
-    operation(Op,A,B,Bs).
-
 %%
 %% Unary operator
 %%
-operation('bnot', A, Bs) ->
-    B = varp_arith:bitwise_not(Bs#bs.vp,A),
-    {B, Bs};
-operation('not', {bool,A}, Bs) ->
-    {lnot(A), Bs};
-operation('not', A, Bs) ->
-    B = varp_arith:neq(Bs#bs.vp,A,{uint,1,[false]}),
+operation1(Op, {bool,A}, Bs) ->
+    B = case Op of
+	'not' ->
+		varp_circuit:gate(Bs#bs.vp,'not',A)
+	end,
     {{bool,B}, Bs};
+operation1(Op, A, Bs) ->
+    X = case Op of
+	    'bnot' ->
+		varp_arith:bitwise_not(Bs#bs.vp,A);
+	    'not' ->
+		B = varp_arith:neq(Bs#bs.vp,A,{uint,1,[false]}),
+		{bool,B};
+	    'neg' ->
+		case vconst(A) of
+		    false ->
+			varp_arith:negate(Bs#bs.vp,A);
+		    Av ->
+			Av1 = -Av,
+			An1 = varp_math:signed_size(Av1),
+			const_vector_(An1-1,int,An1,[],Av1)
+		end;
+	    'abs' ->
+		varp_arith:abs(Bs#bs.vp,A)
+	end,
+    {X, Bs}.
 
-operation('neg', A, Bs) ->
-    case vconst(A) of
-	false ->
-	    B = varp_arith:negate(Bs#bs.vp,A),
-	    {B, Bs};
-	Av ->
-	    Av1 = -Av,
-	    An1 = varp_math:signed_size(Av1),
-	    {const_vector_(An1-1,int,An1,[],Av1),Bs}
-    end;
-operation('abs', A, Bs) ->
-    B = varp_arith:abs(Bs#bs.vp,A),
-    {B, Bs}.
+%% Operation with assignment to X
+operation1(Op, {bool,X}, {bool,A}, Bs) ->
+    X1 = case Op of
+	     'not' -> varp_circuit:gate(Bs#bs.vp,'not',X,A);
+	     '=' -> varp_circuit:set(Bs#bs.vp, X, A)
+	 end,
+    {{bool,X1}, Bs};
+%% operation1(':=',X,Y={T,Size,Ys},Bs) when ?is_vec_type(T) ->
+%%     {Y, alias_vector(Bs,T,X,Size,Ys)};
+operation1(Op, X, A, Bs) ->
+    X1 = case Op of
+	    'bnot' ->
+		varp_arith:bitwise_not(Bs#bs.vp,X,A);
+	    'not' ->
+		 Xb = varp_arith:neq(Bs#bs.vp,X,A,{uint,1,[false]}),
+		 {bool,Xb};
+	    'neg' ->
+		 case vconst(A) of
+		     false ->
+			 varp_arith:negate(Bs#bs.vp,X,A);
+		     Av ->
+			 Av1 = -Av,
+			 An1 = varp_math:signed_size(Av1),
+			 const_vector_(An1-1,int,An1,[],Av1)
+			 %% assign to X!!!
+		 end;
+	    'abs' ->
+		 varp_arith:abs(Bs#bs.vp,X,A)
+	end,
+    {X1, Bs}.
 
 %%
 %% Binary operator
 %%
-operation('and',{bool,?F},{bool,_Z}, Bs) ->    {{bool,?F},Bs};
-operation('and',{bool,_Y},{bool,?F}, Bs) ->    {{bool,?F},Bs};
-operation('and',{bool,?T},{bool,Z}, Bs) ->    {{bool,Z},Bs};
-operation('and',{bool,Y},{bool,?T}, Bs) ->    {{bool,Y},Bs};
-operation('and',{bool,Y},{bool,Z}, Bs) ->
-    X = varp_circuit:and_gate(Bs#bs.vp, Y, Z),
+operation2(Op,{bool,Y},{bool,Z}, Bs) ->
+    X = case Op of
+	    'and' -> varp_circuit:and_gate(Bs#bs.vp, Y, Z);
+	    'or' ->  varp_circuit:or_gate(Bs#bs.vp, Y, Z);
+	    'imp' -> varp_circuit:imp_gate(Bs#bs.vp, Y, Z);
+	    'equ' -> varp_circuit:equ_gate(Bs#bs.vp, Y, Z);
+	    'xor' -> varp_circuit:xor_gate(Bs#bs.vp, Y, Z);
+	    'nimp' -> varp_circuit:nimp_gate(Bs#bs.vp, Y, Z);
+	    'nand' -> varp_circuit:nand_gate(Bs#bs.vp, Y, Z);
+	    'nor' -> varp_circuit:nor_gate(Bs#bs.vp, Y, Z);
+	    'lt' -> varp_circuit:lt_gate(Bs#bs.vp, Y, Z);
+	    'gt' -> varp_circuit:gt_gate(Bs#bs.vp, Y, Z);
+	    'lte' -> varp_circuit:lte_gate(Bs#bs.vp, Y, Z);
+	    'gte' -> varp_circuit:gte_gate(Bs#bs.vp, Y, Z);
+	    'eq' -> varp_circuit:equ_gate(Bs#bs.vp, Y, Z);
+	    'neq' -> varp_circuit:xor_gate(Bs#bs.vp, Y, Z)
+	end,
     {{bool,X},Bs};
-
-operation('band',A,B,Bs) ->
-    C = varp_arith:bitwise_and(Bs#bs.vp,A,B),
-    {C, Bs};
-
-operation('or',{bool,?F},{bool,?F}, Bs) -> {{bool,?F},Bs};
-operation('or',{bool,?T},{bool,_Z}, Bs) -> {{bool,?T},Bs};
-operation('or',{bool,_Y},{bool,?T}, Bs) -> {{bool,?T},Bs};
-operation('or',{bool,?F},{bool,Z}, Bs) -> {{bool,Z},Bs};
-operation('or',{bool,Y},{bool,?F}, Bs) -> {{bool,Y},Bs};
-operation('or',{bool,Y},{bool,Z}, Bs) ->
-    X = varp_circuit:or_gate(Bs#bs.vp, Y, Z),
-    {{bool,X},Bs};
-    
-operation('bor',A,B,Bs) ->
-    C = varp_arith:bitwise_or(Bs#bs.vp,A,B),
-    {C, Bs};
-
-operation('imp',{bool,?F},{bool,?T}, Bs) ->  {{bool,?T},Bs};
-operation('imp',{bool,?F},{bool,?F}, Bs) -> {{bool,?T},Bs};
-operation('imp',{bool,?T},{bool,?T}, Bs) ->   {{bool,?T},Bs};
-operation('imp',{bool,?T},{bool,?F}, Bs) ->  {{bool,?F},Bs};
-operation('imp',{bool,Y},{bool,Z}, Bs) ->
-    X = varp_circuit:imp_gate(Bs#bs.vp, Y, Z),
-    {{bool,X},Bs};
-operation('imp',A,B,Bs) ->
-    {An,Bs1} = operation_('~',A,Bs),
-    operation_('|',An,B,Bs1);
-
-operation('equ',{bool,?F},{bool,Z},Bs) -> {{bool,lnot(Z)},Bs};
-operation('equ',{bool,?T},{bool,Z},Bs) -> {{bool,Z},Bs};
-operation('equ',{bool,Y},{bool,?T},Bs) -> {{bool,Y},Bs};
-operation('equ',{bool,Y},{bool,?F},Bs) -> {{bool,lnot(Y)},Bs};
-operation('equ',{bool,Y},{bool,Z},Bs) ->
-    %% X = add_variable(Bs),
-    %% {{bool,X},xor_gate(Bs,X,[lnot(Y),Z])};
-    X = varp_circuit:xor_gate(Bs#bs.vp, lnot(Y), Z),
-    {{bool,X},Bs};
-
-operation('equ',A,B,Bs) ->
-    C = varp_arith:bitwise_equ(Bs#bs.vp,A,B),
-    {C,Bs};
-
-operation('xor',{bool,?F},{bool,Z}, Bs) -> {{bool,Z},Bs};
-operation('xor',{bool,?T},{bool,Z}, Bs) -> {{bool,lnot(Z)},Bs};
-operation('xor',{bool,Z},{bool,?F}, Bs) -> {{bool,Z},Bs};
-operation('xor',{bool,Z},{bool,?T}, Bs) -> {{bool,lnot(Z)},Bs};
-operation('xor',{bool,Y},{bool,Z}, Bs) ->
-    X = varp_circuit:xor_gate(Bs#bs.vp, Y, Z),
-    {{bool,X},Bs};
-
-operation('bxor',A,B,Bs) ->
-    C = varp_arith:bitwise_xor(Bs#bs.vp,A,B),
-    {C, Bs};
-
-operation('lt',A,B,Bs) ->
-    C = varp_arith:lt(Bs#bs.vp,A,B),
-    {{bool,C},Bs};
-operation('gt',{bool,Y},{bool,Z},Bs) ->  %% Y > Z
-    operation_('and', {bool,Y}, negate({bool,Z}), Bs);
-operation('gt',Y,Z,Bs) ->
-    operation_('lt', Z, Y, Bs);
-operation('lte',Y,Z,Bs) ->
-    {C,Bs1} = operation_('lt', Z, Y, Bs),
-    {negate(C),Bs1};
-operation('gte',Y,Z,Bs) ->
-    operation_('lte',Z,Y,Bs);
-
-operation('neq',A={bool,_},B={bool,_},Bs) ->
-    operation_('xor',A,B,Bs);
-operation('neq',Y,Z,Bs) ->
-    {C,Bs1} = operation_('eq', Y, Z, Bs),
-    {negate(C),Bs1};
-
-operation('eq',A,B,Bs) ->
-    Eq = varp_arith:eq(Bs#bs.vp,A,B),
-    {{bool,Eq},Bs};
-
-%%
-%% Alias operation
-%%
-operation(':=',V,X={T,Size,Xs},Bs) when ?is_vec_type(T) ->
-    {X, alias_vector(Bs,T,V,Size,Xs)};
-operation(':=',V,X={bool,Xb},Bs) ->
-    {X, alias(V,Xb,Bs)};
-
-%% operator '=' is kind of assignment but really a 
-%% equality test and check of overflow bits
-operation('=',R,L,Bs) ->
-    %% FIXME: same as '==' but check overflow / truncate 
-    operation('equ',R,L,Bs);
-
-operation('shl',A,B,Bs) ->
-    C = varp_arith:shl(Bs#bs.vp, A, B),
-    {C, Bs};
-
-operation('shr',A,B,Bs) ->
-    C = varp_arith:shr(Bs#bs.vp, A, B),
-    {C, Bs};
-	    
-%% rotate left
-operation('rol',A,B,Bs) ->
-    C = varp_arith:rol(Bs#bs.vp, A, B),
-    {C, Bs};
-
-%% rotate right
-operation('ror',A,B,Bs) ->
-    C = varp_arith:ror(Bs#bs.vp, A, B),
-    {C, Bs};
-
-operation('add',A,B,Bs) ->
-    C = varp_arith:add(Bs#bs.vp, A, B),
-    {C, Bs};
-
-operation('sub',A,B,Bs) ->
-    C = varp_arith:subtract(Bs#bs.vp, A, B),
-    {C, Bs};
-
-operation('mul',A,B,Bs) ->
-    C = varp_arith:multiply(Bs#bs.vp, A, B),
-    {C, Bs};
-
-%% DivZero  could be used to generate a Exception output
-%% Signed?
-operation('div',Y,Z,Bs) ->
-    Q = varp_arith:divide(Bs#bs.vp, Y, Z),
-    {Q, Bs};
-
-%% DivZero  could be used to generate a Exception output
-%% Signed?
-operation('rem',Y,Z,Bs) ->
-    R = varp_arith:reminder(Bs#bs.vp,Y,Z),
-    {R, Bs};
-
-operation('min',A,B,Bs) ->
-    C = varp_arith:min(Bs#bs.vp, A, B),
-    {C, Bs};
-
-operation('max',A,B,Bs) ->
-    C = varp_arith:max(Bs#bs.vp, A, B),
+%% operation2(':=',V,X={T,Size,Xs},Bs) when ?is_vec_type(T) ->
+%%     {X, alias_vector(Bs,T,V,Size,Xs)};
+%% operation2(':=',V,X={bool,Xb},Bs) ->
+%%     {X, alias(V,Xb,Bs)};
+operation2(Op,A,B,Bs) ->
+    C = case Op of 
+	    'band' -> varp_arith:bitwise_and(Bs#bs.vp,A,B);
+	    'bor' -> varp_arith:bitwise_or(Bs#bs.vp,A,B);
+	    'bxor' -> varp_arith:bitwise_xor(Bs#bs.vp,A,B);
+	    'imp' -> An = varp_arith:bitwise_not(Bs#bs.vp,A),
+		     varp_arith:bitwise_or(Bs#bs.vp,An,B);
+	    'equ' -> varp_arith:bitwise_equ(Bs#bs.vp,A,B);
+	    'lt' -> X = varp_arith:lt(Bs#bs.vp,A,B),{bool,X};
+	    'lte' -> X = varp_arith:lte(Bs#bs.vp,A,B),{bool,X};
+	    'gt' -> X = varp_arith:gt(Bs#bs.vp,A,B),{bool,X};
+	    'gte' -> X = varp_arith:gte(Bs#bs.vp,A,B),{bool,X};
+	    'eq' -> X = varp_arith:eq(Bs#bs.vp,A,B),{bool,X};
+	    'neq' -> X = varp_arith:neq(Bs#bs.vp,A,B),{bool,X};
+	    'shl' -> varp_arith:shl(Bs#bs.vp,A,B);
+	    'shr' -> varp_arith:shr(Bs#bs.vp,A,B);
+	    'rol' -> varp_arith:rol(Bs#bs.vp,A,B);
+	    'ror' -> varp_arith:ror(Bs#bs.vp,A,B);
+	    'add' -> varp_arith:add(Bs#bs.vp,A,B);
+	    'sub' -> varp_arith:subtract(Bs#bs.vp,A,B);
+	    'mul' -> varp_arith:multiply(Bs#bs.vp,A,B);
+	    'div' -> varp_arith:divide(Bs#bs.vp,A,B);
+	    'rem' -> varp_arith:reminder(Bs#bs.vp,A,B);
+	    'min' -> varp_arith:min(Bs#bs.vp,A,B);
+	    'max' -> varp_arith:max(Bs#bs.vp,A,B);
+	    %% operator '=' is kind of assignment but really a 
+	    %% equality test and check of overflow bits
+	    %% FIXME: same as '==' but check overflow / truncate 
+	    '=' -> X = varp_arith:set(Bs#bs.vp,A,B),{bool,X}
+	end,
     {C, Bs}.
+
+%% like operation2 but result is predetermined in X
+operation2(Op,undefined,Y,Z,Bs) ->
+    operation2(Op,Y,Z,Bs);
+operation2(Op,{bool,X},{bool,Y},{bool,Z}, Bs) ->
+    %% X1 is "normally" equal to X
+    X1 = case Op of
+	    'and' -> varp_circuit:and_gate(Bs#bs.vp, X, Y, Z);
+	    'or' ->  varp_circuit:or_gate(Bs#bs.vp, X, Y, Z);
+	    'imp' -> varp_circuit:imp_gate(Bs#bs.vp, X, Y, Z);
+	    'equ' -> varp_circuit:equ_gate(Bs#bs.vp, X, Y, Z);
+	    'xor' -> varp_circuit:xor_gate(Bs#bs.vp, X, Y, Z);
+	    'nimp' -> varp_circuit:nimp_gate(Bs#bs.vp, X, Y, Z);
+	    'nand' -> varp_circuit:nand_gate(Bs#bs.vp, X, Y, Z);
+	    'nor' -> varp_circuit:nor_gate(Bs#bs.vp, X, Y, Z);
+	    'lt' -> varp_circuit:lt_gate(Bs#bs.vp, X, Y, Z);
+	    'gt' -> varp_circuit:gt_gate(Bs#bs.vp, X, Y, Z);
+	    'lte' -> varp_circuit:lte_gate(Bs#bs.vp, X, Y, Z);
+	    'gte' -> varp_circuit:gte_gate(Bs#bs.vp, X, Y, Z);
+	    'eq' -> varp_circuit:equ_gate(Bs#bs.vp, X, Y, Z);
+	    'neq' -> varp_circuit:xor_gate(Bs#bs.vp, X, Y, Z)
+	end,
+    {{bool,X1},Bs};
+%% operation2(':=',X,Y={bool,Yb},Bs) ->
+%%     {Y, alias(X,Yb,Bs)};
+operation2(Op,X,Y,Z,Bs) ->
+    X1 = case Op of 
+	     'band' -> varp_arith:bitwise_and(Bs#bs.vp,X,Y,Z);
+	     'bor' -> varp_arith:bitwise_or(Bs#bs.vp,X,Y,Z);
+	     'bxor' -> varp_arith:bitwise_xor(Bs#bs.vp,X,Y,Z);
+	     'imp' -> Yn = varp_arith:bitwise_not(Bs#bs.vp,Y),
+		     varp_arith:bitwise_or(Bs#bs.vp,X,Yn,Z);
+	     'equ' -> varp_arith:bitwise_equ(Bs#bs.vp,X,Y,Z);
+	     'lt' -> Xb = varp_arith:lt(Bs#bs.vp,X,Y,Z), {bool,Xb};
+	     'lte' -> Xb = varp_arith:lte(Bs#bs.vp,X,Y,Z), {bool,Xb};
+	     'gt' -> Xb = varp_arith:gt(Bs#bs.vp,X,Y,Z), {bool,Xb};
+	     'gte' -> Xb = varp_arith:gte(Bs#bs.vp,X,Y,Z), {bool,Xb};
+	     'eq' -> Xb = varp_arith:eq(Bs#bs.vp,X,Y,Z), {bool,Xb};
+	     'neq' -> Xb = varp_arith:neq(Bs#bs.vp,X,Y,Z),{bool,Xb};
+	     'shl' -> varp_arith:shl(Bs#bs.vp,X,Y,Z);
+	     'shr' -> varp_arith:shr(Bs#bs.vp,X,Y,Z);
+	     'rol' -> varp_arith:rol(Bs#bs.vp,X,Y,Z);
+	     'ror' -> varp_arith:ror(Bs#bs.vp,X,Y,Z);
+	     'add' -> varp_arith:add(Bs#bs.vp,X,Y,Z);
+	     'sub' -> varp_arith:subtract(Bs#bs.vp,X,Y,Z);
+	     'mul' -> varp_arith:multiply(Bs#bs.vp,X,Y,Z);
+	     'div' -> varp_arith:divide(Bs#bs.vp,X,Y,Z);
+	     'rem' -> varp_arith:reminder(Bs#bs.vp,X,Y,Z);
+	     'min' -> varp_arith:min(Bs#bs.vp,X,Y,Z);
+	     'max' -> varp_arith:max(Bs#bs.vp,X,Y,Z);
+	     %% operator '=' is kind of assignment but really a 
+	     %% equality test and check of overflow bits
+	     %% FIXME: same as '==' but check overflow / truncate 
+	     '=' -> Xb = varp_arith:eq(Bs#bs.vp,X,Y,Z), {bool,Xb}
+	 end,
+    {X1, Bs}.
 
 %%
 %% if-then-else circuit
 %%  (I & T) | (~I & E)
 %%
-ite({bool,?T},T,_E, Bs) ->
-    {T,Bs};
-ite({bool,?F},_T,E, Bs) -> 
-    {E,Bs};
-ite(_I,X,X, Bs) ->
-    {X,Bs};
-%% (I & false) | (~I & E) == ~I & E
-ite(I,{bool,?F},E, Bs) ->
-    operation('and',negate(I),E,Bs);
-%% (I & T) | (~I & false) == I & T
-ite(I,T,{bool,?F}, Bs) ->
-    operation('and',I,T,Bs);
-ite(I,T,E, Bs) ->
-    {A1,Bs1} = operation('and',I,T,Bs),
-    {A2,Bs2} = operation('and',negate(I),E,Bs1),
-    operation('or',A1,A2,Bs2).
-
-
-model_variables(Bs,[]) ->
-    List = fold_var(
-	     fun(true,_,Acc) -> Acc;
-		(false,_,Acc) -> Acc;
-		(_X,Y,Acc) when is_integer(Y) ->
-		     [Y | Acc];
-		(_,_, Acc) -> Acc
-	     end, [], Bs),
-    lists:sort(List);
-model_variables(Bs,Ws) ->
-    lists:map(fun(W) -> get_var(W,Bs) end, Ws).
+ite(X,{bool,?T},T,_E, Bs) -> set(X,T,Bs);
+ite(X,{bool,?F},_T,E, Bs) -> set(X,E,Bs);
+ite(X,_Cond,Y,Y, Bs) -> set(X,Y,Bs);
+%% (Cond & false) | (~Cond & E) == ~Cond & E
+ite(X,Cond,{bool,?F},E, Bs) -> operation2('and',X,negate(Cond),E,Bs);
+%% (Cond & T) | (~Cond & false) == Cond & T
+ite(X,Cond,T,{bool,?F}, Bs) -> operation2('and',X,Cond,T,Bs);
+ite(X,Cond,T,E, Bs) ->
+    {A1,Bs1} = operation2('and',Cond,T,Bs),
+    {A2,Bs2} = operation2('and',negate(Cond),E,Bs1),
+    operation2('or',X,A1,A2,Bs2).
 
 each_unbound(Bs, Fun) ->
-    each_unbound_(Bs, Fun, varp:next_unbound(Bs#bs.vp)).
+    each_unbound_(Bs, Fun, varp_nif:next_unbound(Bs#bs.vp)).
 
 each_unbound_(_Bs, _Fun, false) ->
     ok;
 each_unbound_(Bs, Fun, Xi) ->
     Fun(Xi),
-    each_unbound_(Bs, Fun, varp:next_unbound(Bs#bs.vp,Xi)).
+    each_unbound_(Bs, Fun, varp_nif:next_unbound(Bs#bs.vp,Xi)).
 
 fold_unbound(Bs, Fun, Acc) ->
-    fold_unbound_(Bs, Fun, Acc, varp:next_unbound(Bs#bs.vp)).
+    fold_unbound_(Bs, Fun, Acc, varp_nif:next_unbound(Bs#bs.vp)).
 
 fold_unbound_(_Bs, _Fun, Acc, false) ->
     Acc;
 fold_unbound_(Bs, Fun, Acc, Xi) ->
     Acc1 = Fun(Xi, Acc),
-    fold_unbound_(Bs, Fun, Acc1, varp:next_unbound(Bs#bs.vp, Xi)).
+    fold_unbound_(Bs, Fun, Acc1, varp_nif:next_unbound(Bs#bs.vp, Xi)).
 
 each_variable(Bs, Fun) ->
     each_variable_(Bs, Fun, 1, varp_nif:getstat(Bs#bs.vp, number_of_variables)+1).
@@ -1780,14 +1745,14 @@ each_variable_(Bs, Fun, X, N) ->
 %% Partial numbers look like {x,{int,{$*,$1,$0,..,$*,$1}}}
 %%
 model(Bs) ->
-    model(Bs#bs.vp, Bs#bs.vs).
+    model_(Bs#bs.vp).
     
-model(Vp, Vs) ->
-    lists:keysort(1, collect_model(Vp,Vs)).
+model_(Vp) ->
+    lists:keysort(1, collect_model(Vp)).
 
-collect_model(Vp,Vs) ->
-    case maps:size(Vs) of
-	0 -> %% fixme mixed model! CNF with is declarations
+collect_model(Vp) ->
+    case varp_nif:first_symbol(Vp) of
+	false -> %% fixme mixed model! CNF with is declarations
 	    N = varp:get_number_of_variables(Vp),
 	    lists:foldr(
 	      fun(I,Acc) ->
@@ -1798,37 +1763,51 @@ collect_model(Vp,Vs) ->
 		      end
 	      end, [], lists:seq(1, N));
 	_ ->
-	    maps:fold(
-	      fun (?T,_,Ms) -> Ms;
-		  (?F,_,Ms) -> Ms;
-		  (Y,Xs,Ms) when is_integer(Y) ->
-		      model_vars(Vp,Vs,Xs,Y,Ms);
-		  (_, _, Ms) -> Ms
-	      end, [], Vs)
+	    N = varp:get_number_of_variables(Vp),
+	    lists:foldr(
+	      fun(I,Acc) ->
+		      case varp_nif:get_symbol(Vp,I) of
+			  [] -> Acc;
+			  [{Sym={Name,Args},bool,1,0}] ->
+			      Value = varp_nif:value(Vp,I),
+			      [{{p,Name,Args},Value}|Acc];
+			  [{Sym={Name,Args},Type,Len,Pos}] ->
+			      Value = varp_nif:value(Vp,I),
+			      V = case Value of
+				      ?T -> $1;
+				      ?F -> $0;
+				      _  -> $*
+				  end,
+			      %% io:format("I = ~w, value = ~p\n",[I,Value]),
+			      model_setvec(Type,{p,Name,Args},Len,Pos,V,Acc)
+		      end
+	      end, [], lists:seq(1, N))
     end.
 
-model_vars(Vp,Vs,[{Type,X,N,I}|Xs],Y,Ms) ->
+
+model_vars(Vp,[{Type,X,N,I}|Xs],Y,Ms) ->
     V = case varp_nif:value(Vp, Y) of
 	    ?T -> $1;
 	    ?F -> $0;
 	    _  -> $*
 	end,
-    model_vars(Vp,Vs,Xs,Y,model_setvec(Type,X,N,I,V,Ms));
-model_vars(Vp,Vs,[X|Xs],Y,Ms) ->
+    model_vars(Vp,Xs,Y,model_setvec(Type,X,N,I,V,Ms));
+model_vars(Vp,[X|Xs],Y,Ms) ->
     case varp_nif:value(Vp, Y) of
 	?T ->
-	    model_vars(Vp,Vs,Xs,Y,[{X,true}|Ms]);
+	    model_vars(Vp,Xs,Y,[{X,true}|Ms]);
 	?F ->
-	    model_vars(Vp,Vs,Xs,Y,[{X,false}|Ms]);
+	    model_vars(Vp,Xs,Y,[{X,false}|Ms]);
 	_ ->
-	    model_vars(Vp,Vs,Xs,Y,Ms)
+	    model_vars(Vp,Xs,Y,Ms)
     end;
-model_vars(_Vp,_Vs,[],_Y,Ms) ->
+model_vars(_Vp,[],_Y,Ms) ->
     Ms.
 
 %% int/uint/bit is represented as ascii vector {Type,{$0|$1|$*,...}}
 %% where the bit tuple is MSB (high to low) 
 model_setvec(Type,X,N,I,V,Ms) ->
+    %% io:format("setvec ~p ~p ~p ~p ~p\n", [Type,X,N,I,V]),
     case lists:keytake(X, 1, Ms) of
 	{value,{X,{Type,Bits}},Ms1} ->
 	    Bits1 = setelement(N-I,Bits,V),
@@ -1957,22 +1936,11 @@ proof_output_text(Fd, Bs, Prefix, Clause) ->
 	    file:write(Fd, Chars)
     end.
 
-empty_vs(Bs) ->    
-    (Bs#bs.vs =:= undefined) orelse  (maps:size(Bs#bs.vs) =:= 0).
-
 proof_literal(Bs,Li) ->
-    EmptyVs = empty_vs(Bs),
-    if EmptyVs -> integer_to_list(Li);	    
-       Li < 0 ->
-	    case maps:find(-Li, Bs#bs.vs) of
-		error -> integer_to_list(Li);
-		{ok,[{p,<<"x">>,[I]}]} -> integer_to_list(-I);
-		{ok,[P|_]} -> [$!|varp_format:format_symbol(P)]
-	    end;
-       Li > 0 ->
-	    case maps:find(Li, Bs#bs.vs) of
-		error -> integer_to_list(Li);
-		{ok,[{p,<<"x">>,[I]}]} -> integer_to_list(I);
-		{ok,[P|_]} -> varp_format:format_symbol(P)
-	    end
+    case varp_nif:get_literal(Bs#bs.vp,Li) of
+	[] -> integer_to_list(Li);
+	[{{<<"x">>,[I]},bool,1,0}] when Li < 0  -> integer_to_list(-I);
+	[{P,bool,1,0}] when Li < 0  -> [$!|varp_format:format_symbol(P)];
+	[{{<<"x">>,[I]},bool,1,0}] when Li > 0  -> integer_to_list(I);
+	[{P,bool,1,0}] when Li > 0  -> [$!|varp_format:format_symbol(P)]
     end.

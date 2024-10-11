@@ -41,7 +41,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     varp_nif:setopt(Bs#bs.vp, max_conflicting, 1),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     0 = varp_nif:push(Bs#bs.vp), %% assert, may be relaxed
-    put(proof_output, varp:getopt(Bs#bs.vp, proof_output)),
+    put(proof_output, varp_nif:getopt(Bs#bs.vp, proof_output)),
     case varp_nif:getopt(Bs1#bs.vp,method) of
 	collect -> collect(Bs1, 0, N, []);
 	count   -> count(Bs1, 0, N)
@@ -65,7 +65,7 @@ collect(Bs, Count, N, Acc) ->
 collect_(Bs, Count, N, Acc) when N =:= 0; Count < N ->
     case varp_nif:nbcp(Bs#bs.vp) of
 	true ->
-	    %% io:format("model: ~p\n", [varp_nif:get_all_bindings(Bs#bs.vp)]),
+	    %% io:format("model: ~p\n", [varp:get_all_bindings(Bs#bs.vp)]),
 	    Model = varp:output_model(Bs,false,Count+1),
 	    case varp_nif:undo(Bs#bs.vp) of
 		true ->

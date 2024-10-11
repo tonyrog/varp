@@ -19,7 +19,7 @@ analyze_(_Vp, _Bump, _Minimize, N, N) ->
     [];
 analyze_(Vp, Bump, Minimize, I, N) ->
     CCix = varp_nif:conflicting_clause(Vp, I),
-    ?dbg0("analyze Clause: ~w\n", [varp:get_clause(Vp, CCix)]),
+    ?dbg0("analyze Clause: ~w\n", [varp_nif:get_clause(Vp, CCix)]),
     case varp_nif:conflict(Vp, Bump, CCix) of
 	undefined ->  %% duplicate
 	    analyze_(Vp, Bump, Minimize, I+1, N);
@@ -31,13 +31,13 @@ analyze_(Vp, Bump, Minimize, I, N) ->
 		     analyze_(Vp, Bump, Minimize, I+1, N)];
 		Type -> %% local/recursive
 		    ?dbg0("minimize ~s Clause[~w]: ~w\n", 
-			  [Type, Len0, varp:get_clause(Vp, Cix)]),
+			  [Type, Len0, varp:get_clause_nif(Vp, Cix)]),
 		    case varp_nif:minimize(Vp, Cix, Type) of
 			undefined -> %% duplicate
 			    analyze_(Vp, Bump, Minimize, I+1, N);
 			Len ->
 			    ?dbg0("Clause'[~w]: save=~w, ~w\n",
-				  [Len,Len0-Len,varp:get_clause(Vp, Cix)]),
+				  [Len,Len0-Len,varp_nif:get_clause(Vp, Cix)]),
 			    [{Len,Len0-Len,Cix}|
 			     analyze_(Vp, Bump, Minimize, I+1, N)]
 		    end

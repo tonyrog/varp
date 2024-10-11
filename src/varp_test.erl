@@ -11,7 +11,7 @@
 -define(DEBUG, true).
 -include("varp.hrl").
 
--define(var(X), {p,<<(X)>>,[]}).
+-define(p(X), {p,<<(X)>>,[]}).
 
 all() ->
     Failed = 
@@ -70,38 +70,38 @@ sync_apply(Mod, Fun, Args) ->
 
 parse() ->
     %% variables
-    ?var("A") = parse_formula("A"),
-    {lop,'not',?var("A")} = parse_formula("not A"),
+    ?p("A") = parse_formula("A"),
+    {lop,'not',?p("A")} = parse_formula("not A"),
 
     %% connectives
-    {lop,'and',{lop,'not',?var("A")},?var("B")} = parse_formula("not A and B"),
-    {lop,'and',?var("A"),?var("B")} = parse_formula("A and B"),
-    {lop,'and',?var("A"),?var("B")} = parse_formula("A AND B", true),
-    {lop,'and',?var("A"),?var("B")} = parse_formula("A && B"),
+    {lop,'and',{lop,'not',?p("A")},?p("B")} = parse_formula("not A and B"),
+    {lop,'and',?p("A"),?p("B")} = parse_formula("A and B"),
+    {lop,'and',?p("A"),?p("B")} = parse_formula("A AND B", true),
+    {lop,'and',?p("A"),?p("B")} = parse_formula("A && B"),
 
-    {lop,'or',?var("A"),?var("B")} = parse_formula("A or B"),
-    {lop,'or',?var("A"),?var("B")} = parse_formula("A OR B", true),
-    {lop,'or',?var("A"),?var("B")} = parse_formula("A || B"),
+    {lop,'or',?p("A"),?p("B")} = parse_formula("A or B"),
+    {lop,'or',?p("A"),?p("B")} = parse_formula("A OR B", true),
+    {lop,'or',?p("A"),?p("B")} = parse_formula("A || B"),
 
-    {lop,'imp',?var("A"),?var("B")} = parse_formula("A imp B"),
-    {lop,'imp',?var("A"),?var("B")} = parse_formula("A Implies B", true),
-    {lop,'imp',?var("A"),?var("B")} = parse_formula("A -> B"),
+    {lop,'imp',?p("A"),?p("B")} = parse_formula("A imp B"),
+    {lop,'imp',?p("A"),?p("B")} = parse_formula("A Implies B", true),
+    {lop,'imp',?p("A"),?p("B")} = parse_formula("A -> B"),
 
-    {lop,'xor',?var("A"),?var("B")} = parse_formula("A xor B"),
-    {lop,'xor',?var("A"),?var("B")} = parse_formula("A XOR B", true),
+    {lop,'xor',?p("A"),?p("B")} = parse_formula("A xor B"),
+    {lop,'xor',?p("A"),?p("B")} = parse_formula("A XOR B", true),
 
-    {lop,'equ',?var("A"),?var("B")} = parse_formula("A equ B"),
-    {lop,'equ',?var("A"),?var("B")} = parse_formula("A equivalent B"),
-    {lop,'equ',?var("A"),?var("B")} = parse_formula("A Equivalent B", true),
-    {lop,'equ',?var("A"),?var("B")} = parse_formula("A <-> B"),
+    {lop,'equ',?p("A"),?p("B")} = parse_formula("A equ B"),
+    {lop,'equ',?p("A"),?p("B")} = parse_formula("A equivalent B"),
+    {lop,'equ',?p("A"),?p("B")} = parse_formula("A Equivalent B", true),
+    {lop,'equ',?p("A"),?p("B")} = parse_formula("A <-> B"),
     
     %% arith
-    {lop,'mul',?var("A"),?var("B")} = parse_formula("A * B"),
-    {lop,'div',?var("A"),?var("B")} = parse_formula("A / B"),
-    {lop,'rem',?var("A"),?var("B")} = parse_formula("A % B"),
+    {lop,'mul',?p("A"),?p("B")} = parse_formula("A * B"),
+    {lop,'div',?p("A"),?p("B")} = parse_formula("A / B"),
+    {lop,'rem',?p("A"),?p("B")} = parse_formula("A % B"),
 
-    {lop,'add',?var("A"),?var("B")} = parse_formula("A + B"),
-    {lop,'sub',?var("A"),?var("B")} = parse_formula("A - B"),
+    {lop,'add',?p("A"),?p("B")} = parse_formula("A + B"),
+    {lop,'sub',?p("A"),?p("B")} = parse_formula("A - B"),
 
     %% arith in quantifier
     {{'ALL',[{op,'=',<<"i">>,{range,{const,1},{const,2}}}]},
@@ -140,8 +140,8 @@ inc() ->
     ok.
 
 add() ->
-    X = ?var("X"),
-    Y = ?var("Y"),
+    X = ?p("X"),
+    Y = ?p("Y"),
 
     true = sat({lop,'eq', {lop,'add',{int,4,3},{uint,4,2}}, {int,4,5}},
 	       [[]]),
@@ -171,7 +171,7 @@ add() ->
     ok.
 
 sub() ->
-    X = ?var("X"),
+    X = ?p("X"),
     true = sat({lop,'eq', {lop,'sub',{int,4,3},{uint,4,2}}, {int,4,1}},
 	       [[]]),
     true = sat({lop,'eq', {lop,'sub',{int,4,3},{uint,4,2}}, {int,4,X}},
@@ -179,8 +179,8 @@ sub() ->
     ok.
 
 mul() ->
-    X = ?var("X"),
-    Y = ?var("Y"),
+    X = ?p("X"),
+    Y = ?p("Y"),
 
     true = sat({lop,'eq', {lop,'mul',{uint,4,3},{uint,4,2}}, {uint,8,6}},
 		    [[]]),
@@ -206,8 +206,8 @@ mul() ->
     ok.
 
 'div'() ->
-    X = ?var("X"),
-    Y = ?var("Y"),
+    X = ?p("X"),
+    Y = ?p("Y"),
 
     true = sat({lop,'eq', {lop,'div',{uint,4,3},{uint,4,2}}, {uint,4,1}},
 	       [[]]),
@@ -224,27 +224,27 @@ mul() ->
     ok.
 
 cmp_1() ->
-    X = ?var("X"),
+    X = ?p("X"),
     true = sat({lop,'lt', {uint,4,X},{uint,4,2}},
 	       [[{X,0}],[{X,1}]]).
 
 cmp_2() ->
-    X = ?var("X"),
+    X = ?p("X"),
     true = sat({lop,'lt', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(-8,1)]).
 
 cmp_3() ->
-    X = ?var("X"),
+    X = ?p("X"),
     true = sat({lop, 'gt', {uint,4,X},{uint,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,15)]).
 
 cmp_4() ->
-    X = ?var("X"),
+    X = ?p("X"),
     true = sat({lop,'gt', {int,4,X},{int,4,2}},
 	       [[{X,V}] || V <- lists:seq(3,7)]).
 
 shift() ->
-    X = ?var("X"),
+    X = ?p("X"),
 
     true = sat({lop,'eq', {lop,'shl',{uint,4,3}, {uint,1,1}}, {uint,4,6}},
 	       [[]]),
@@ -261,7 +261,7 @@ shift() ->
     ok.
 
 rotate() ->
-    X = ?var("X"),
+    X = ?p("X"),
 
     true = sat({lop,'eq', {lop,'rol',{uint,4,X}, {uint,1,1}}, {uint,4,X}},
 	       [[{X,15}], [{X,0}]]),
@@ -286,9 +286,9 @@ rotate() ->
 %%
 equation1() ->
     N = 8,
-    Xv = ?var("X"),
-    Yv = ?var("Y"),
-    Zv = ?var("Z"),
+    Xv = ?p("X"),
+    Yv = ?p("Y"),
+    Zv = ?p("Z"),
     X = {uint,N,Xv},
     Y = {uint,N,Yv},
     Z = {uint,N,Zv},
@@ -314,9 +314,9 @@ sat(
 %% solve 7x + 11y + 26z = 123
 equation2() ->
     N = 10,
-    Xv = ?var("X"),
-    Yv = ?var("Y"),
-    Zv = ?var("Z"),
+    Xv = ?p("X"),
+    Yv = ?p("Y"),
+    Zv = ?p("Z"),
     X = {uint,N,Xv},
     Y = {uint,N,Yv},
     Z = {uint,N,Zv},
@@ -332,13 +332,13 @@ equation2() ->
 
 saturate_a1() ->
     Vp = varp_nif:new(#{ xref => true }),
-    X1 = ?var("X1"),
-    X2 = ?var("X2"),
-    X3 = ?var("X3"),
-    X4 = ?var("X4"),
-    X5 = ?var("X5"),
-    X6 = ?var("X6"),
-    X7 = ?var("X7"),
+    X1 = ?p("X1"),
+    X2 = ?p("X2"),
+    X3 = ?p("X3"),
+    X4 = ?p("X4"),
+    X5 = ?p("X5"),
+    X6 = ?p("X6"),
+    X7 = ?p("X7"),
     F = varp_ast:build(
 	  {'ALL',[{lop,imp, X1, X2},
 		  {lop,imp, {lop,'not',X1}, X2},
@@ -366,11 +366,11 @@ saturate_a1() ->
     
 saturate_a2() ->
     Vp = varp_nif:new(#{ xref => true }),
-    X = ?var("X"),
-    A = ?var("A"),
-    B = ?var("B"),
-    C = ?var("C"),
-    D = ?var("D"),
+    X = ?p("X"),
+    A = ?p("A"),
+    B = ?p("B"),
+    C = ?p("C"),
+    D = ?p("D"),
     F = varp_ast:build(
 	  {'ALL',[{lop,imp, X, {'ALL',[A,{lop,'not',B},C,{lop,'not',D}]}},
 		  {lop,imp, {lop,'not',X}, {'ALL',[A,{lop,'not',B},{lop,'not',C},D]}}]},
@@ -388,9 +388,9 @@ saturate_a2() ->
     
 saturate_b1() ->
     Vp = varp_nif:new(#{ xref => true }),
-    X = ?var("X"),
-    Y = ?var("Y"),
-    A = ?var("A"),
+    X = ?p("X"),
+    Y = ?p("Y"),
+    A = ?p("A"),
     F = varp_ast:build(
 	  {'ALL',[{lop,imp, {lop,'and',X,Y}, A},
 		  {lop,imp, {lop,'and',X,{lop,'not',Y}}, A},
@@ -398,9 +398,9 @@ saturate_b1() ->
 		  {lop,imp, {lop,'and',{lop,'not',X},{lop,'not',Y}}, A}
 		 ]},
 	  Vp),
-    ?dbg0("~w\n", [[{A, varp:find_symbol(Vp,varp_ast:var_term(A))},
-		    {X, varp:find_symbol(Vp,varp_ast:var_term(X))},
-		    {Y, varp:find_symbol(Vp,varp_ast:var_term(Y))}]]),
+    ?dbg0("~w\n", [[{A, varp_nif:find_symbol(Vp,varp_ast:var_term(A))},
+		    {X, varp_nif:find_symbol(Vp,varp_ast:var_term(X))},
+		    {Y, varp_nif:find_symbol(Vp,varp_ast:var_term(Y))}]]),
     varp_nif:bind(Vp, F),
     true = varp_nif:bcp(Vp),
 
@@ -433,16 +433,16 @@ saturate_c1() ->
 		  {imp, {'ALL',[X,Y,Z]}, A}
 		 ]},
 	  Vp),
-    ?dbg0("~w\n", [[{A, varp:find_symbol(Vp,varp_ast:var_term(A))},
-		    {X, varp:find_symbol(Vp,varp_ast:var_term(X))},
-		    {Y, varp:find_symbol(Vp,varp_ast:var_term(Y))},
-		    {Z, varp:find_symbol(Vp,varp_ast:var_term(Z))}]]),
+    ?dbg0("~w\n", [[{A, varp_nif:find_symbol(Vp,varp_ast:var_term(A))},
+		    {X, varp_nif:find_symbol(Vp,varp_ast:var_term(X))},
+		    {Y, varp_nif:find_symbol(Vp,varp_ast:var_term(Y))},
+		    {Z, varp_nif:find_symbol(Vp,varp_ast:var_term(Z))}]]),
     varp_nif:bind(Vp, F),
     true = varp_nif:bcp(Vp),
     %% varp:vec_sat_lap(Vp,3,0,0,0),
-    Xi = varp:find_symbol(Vp,varp_ast:var_term(X)),
-    Yi = varp:find_symbol(Vp,varp_ast:var_term(Y)),
-    Zi = varp:find_symbol(Vp,varp_ast:var_term(Z)),
+    {bool,Xi} = varp_nif:find_symbol(Vp,varp_ast:var_term(X)),
+    {bool,Yi} = varp_nif:find_symbol(Vp,varp_ast:var_term(Y)),
+    {bool,Zi} = varp_nif:find_symbol(Vp,varp_ast:var_term(Z)),
     varp:vec_sat(Vp, [Xi,Yi,Zi]),
 					
     Bs = [binding(Vp, Var) || Var <- [X,Y,Z,A]],
@@ -482,11 +482,11 @@ saturate_c2() ->
 		   {'and',A,B}}
 		 ]},
 	  Vp),
-    _Ai = varp:find_symbol(Vp,varp_ast:var_term(A)),
-    _Bi = varp:find_symbol(Vp,varp_ast:var_term(B)),
-    Xi = varp:find_symbol(Vp,varp_ast:var_term(X)),
-    Yi = varp:find_symbol(Vp,varp_ast:var_term(Y)),
-    Zi = varp:find_symbol(Vp,varp_ast:var_term(Z)),
+    {bool,_Ai} = varp_nif:find_symbol(Vp,varp_ast:var_term(A)),
+    {bool,_Bi} = varp_nif:find_symbol(Vp,varp_ast:var_term(B)),
+    {bool,Xi} = varp_nif:find_symbol(Vp,varp_ast:var_term(X)),
+    {bool,Yi} = varp_nif:find_symbol(Vp,varp_ast:var_term(Y)),
+    {bool,Zi} = varp_nif:find_symbol(Vp,varp_ast:var_term(Z)),
 
     ?dbg0("~w\n", [[{A,_Ai},{B,_Bi},{X,Xi},{Y,Yi},{Z,Zi}]]),
     varp_nif:bind(Vp, F),
@@ -506,16 +506,16 @@ saturate_c2() ->
     
 binding(Vp, X={p,_,_}) ->
     XSym = varp_ast:var_term(X),
-    case varp:find_symbol(Vp, XSym) of
-	Xi when is_integer(Xi) ->
+    case varp_nif:find_symbol(Vp, XSym) of
+	{bool,Xi} when is_integer(Xi) ->
 	    XName = format_symbol(false, XSym),
-	    case varp:bound(Vp,Xi) of
+	    case varp_nif:bound(Vp,Xi) of
 		true -> {XName, t};
 		false -> {XName, f};
 		undefined -> {XName, u};
 		Yi ->
-		    case varp:variable_info(Vp, abs(Yi), symbol) of
-			[{Y,_}] ->
+		    case varp_nif:get_symbol(Vp, abs(Yi)) of
+			[Y] ->
 			    YName = format_symbol(Yi < 0, Y),
 			    {XName, YName}
 		    end

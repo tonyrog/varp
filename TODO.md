@@ -35,14 +35,14 @@
 
 semantics best decribed with an example!
 
-[E! x=1..3][E! x=1..3]P(x,y)
+[E! x=1..3][E! y=1..3]P(x,y)
 
    ONE(
       ONE(P(1,1),P(1,2),P(1,3)),
       ONE(P(2,1),P(2,2),P(2,3)),
       ONE(P(3,1),P(3,2),P(3,3)))
 
-[E! x=1..3,x=1..3]P(x,y)
+[E! x=1..3,y=1..3]P(x,y)
 
    ONE(
       P(1,1),P(1,2),P(1,3),
@@ -90,9 +90,9 @@ semantics best decribed with an example!
 
      (first,last) = add_variables(vp, 5 [,is_atom])
 
-     add_symbol(vp, 5, "X(1,2)")
-     add_symbol(vp, 5, "Y(2,2)")
-     add_symbol(vp, [5,3,2] "Z(1)")
+     add_symbol(vp, 5, "X", [1,2])
+     add_symbol(vp, 5, "Y", [2,2])
+     add_symbol(vp, [5,3,2] "Z", [1])
      
         variable 5 is both X(1,2), Y(2,2) and Z(1)[0]
 

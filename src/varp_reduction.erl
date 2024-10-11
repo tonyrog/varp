@@ -59,7 +59,7 @@ red(Bs,_X, 0,_CMax,_Type) ->
     {?CONTINUE,[],Bs};
 red(Bs,X,N,CMax,Type) ->
     Bs1 = add_var(Bs,X,CMax,Type),
-    case varp:next_unbound(Bs1#bs.vp,X) of
+    case varp_nif:next_unbound(Bs1#bs.vp,X) of
 	false -> {?CONTINUE,[],Bs1};
 	X1 -> red(Bs1,X1,N-1,CMax,Type)
     end.
@@ -184,5 +184,5 @@ get_clause(Bs, I, Skip) ->
 
 %% Return clauses in Delta
 get_delta_clauses(Bs, L, CMax) ->
-    CLs = varp:get_clauses(Bs#bs.vp,L,literal),
+    CLs = varp_nif:get_clauses(Bs#bs.vp,L,literal),
     [I || I <- CLs, I < CMax].

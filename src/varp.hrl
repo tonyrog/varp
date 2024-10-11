@@ -103,8 +103,6 @@
 	       {int,pred(),Size::psize(),Pos::integer()} |
 	       {bit,pred(),Size::psize(),Pos::integer()}.
 
-%% -define(PSYM_ARITY, true).
-
 -type pdecl() ::
 	#{ {atom(),arity()} => {ptype(),arity(),psize()}, %% PSYM_ARITY
 	   atom()           => {ptype(),arity(),psize()} %% !PSYM_ARITY
@@ -128,7 +126,7 @@
 	 d1 :: reference(),   %% histogram delta1 counters(1024)
 	 d2 :: reference(),   %% histogram delta2 counters(1024)
 	 clen :: reference(), %% histogram clause len counters(1024)
-	 vs :: map(),         %% map() model variables var <=> Vn
+%%	 vs :: map(),         %% map() model variables var <=> Vn
 	 vp :: reference(),   %% varc instance
 	 t_global :: reference(), %% global timer 
 	 t_local :: reference(),  %% local timer
