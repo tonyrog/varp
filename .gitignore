@@ -1,4 +1,31 @@
-*.so
-*.o
+# editor and dependency droppings
 *~
 .*.d
+
+# build output
+*.so
+*.o
+*.beam
+ebin/*.beam
+ebin/varp.app
+src/varp_parse.erl
+src/varp_scan.erl
+src/varp_scani.erl
+src/varp_snf.erl
+c_src/varp_nif.s
+c_src/bind
+build/
+dist/
+__pycache__/
+
+# packaged applications
+*.AppImage
+*.AppDir/
+*.dmg
+Varp-*/
+
+# run output
+proof.out
+*.trace
+tune.out
+tune1.out

@@ -994,7 +994,9 @@ unbound(Vp) ->
 %% check basic variable unbound variables
 uorder_basic() ->
     Vp = varp_nif:new(#{}),
-    {1,10} = varp_nif:add_variables(Vp, 10),
+    %% note: add_variables/2,3 default to IsUsed=true, be explicit here
+    %% since this case tests the used/unused ordering
+    {1,10} = varp_nif:add_variables(Vp, 10, _IsAtom=false, _IsUsed=false),
     [] = unbound(Vp),
     varp_nif:isused(Vp, 5, true),
     [5] = unbound(Vp),

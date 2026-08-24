@@ -62,7 +62,7 @@ var(Sym, Args, Vp, State) ->
     Term1 = {P, As1},
     case varp_nif:find_symbol(Vp, Term1) of
 	false ->
-	    Var = varp_nif:add_variable(Vp, _IsAtom=true, _IsUsed=true),
+	    Var = varp_nif:add_variable(Vp, _IsAtom=true),
 	    varp_nif:add_symbol(Vp, Term1, Var, bool),
 	    Var;
 	{bool,Var} when is_integer(Var) ->

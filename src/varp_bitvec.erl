@@ -55,7 +55,7 @@ from_bitstring(Bin,N) when is_bitstring(Bin), is_integer(N), N > 0 ->
     end.
 
 new(Vp,N) when is_integer(N), N > 0 ->
-    {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=true, _IsUsed=true),
+    {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=true),
     lists:seq(First, Last).
 
 bitwise_not(Vp, Ys) ->

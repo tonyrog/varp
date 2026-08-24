@@ -16,7 +16,7 @@ options() ->
     [#{ long => "sort",
 	key => sort,
 	spec => {list,{enum,[?ORDER]}},
-	default => identity,
+	default => [identity],
 	description => "Specifiy variable order."
       },
       #{ long => "seed",
@@ -87,6 +87,8 @@ order_literals(Bs, Param) ->
 	[Key1,Key2] ->
 	    varp_nif:order_sort(Bs#bs.vp,Key1,Key2,Seed);
 	[Key1] ->
+	    varp_nif:order_sort(Bs#bs.vp,Key1,Seed);
+	Key1 when is_atom(Key1) ->
 	    varp_nif:order_sort(Bs#bs.vp,Key1,Seed)
     end,
     Bs1 = case maps:get(first,Param) of

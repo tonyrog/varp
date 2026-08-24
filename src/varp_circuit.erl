@@ -73,6 +73,7 @@
 -export([bcp_match/2]).
 -export([bt_match/2]).
 -export([bt_all/3]).
+-export([bt/1, model/2]).
 -export([test/0]).
 -export([test_mon/1]).
 -export([test_or_clause/0]).
@@ -80,30 +81,41 @@
 -include("varp.hrl").
 %% -compile(export_all).
 
+-type literal() :: varp_nif:literal().
+-type symbol() :: varp_nif:symbol().
+-type varp() :: varp_nif:varp().
+
+-spec inv(literal()) -> literal().
 inv(?T) -> ?F;
 inv(?F) -> ?T;
 inv(X) -> -X.
 
+-spec var(Vp::varp()) -> literal().
 var(Vp) ->
     var(Vp, undefined).
 var(Vp, Symbol) ->
-    X = varp_nif:add_variable(Vp, _IsAtom=false, _IsUsed=true),
+    X = varp_nif:add_variable(Vp, _IsAtom=false),
     sym(Vp, X, Symbol).
 
+-spec vars(Vp::varp(), N::pos_integer()) -> [literal()].
 vars(Vp, N) when is_integer(N), N > 0 ->
-    {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=false, _IsUsed=true),
+    {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=false),
     lists:seq(First, Last).
 
+-spec atom(Vp::varp(), Symbol::symbol()) -> literal().
 atom(Vp, Symbol) ->
-    X = varp_nif:add_variable(Vp, _IsAtom=true, _IsUsed=true),
+    X = varp_nif:add_variable(Vp, _IsAtom=true),
     sym(Vp, X, Symbol).
 
+-spec sym(Vp::varp(), X::literal()|Xs::[literal()], 
+			 Symbol::symbol()) -> literal().
 sym(_Vp, X, undefined) -> X;
 sym(Vp, X, Symbol) ->
     varp_nif:add_symbol(Vp, {Symbol,[]}, X, bool),
     X.
 
 %% X = Y  - assignment
+-spec set(Vp::varp(), X::literal(), Y::literal()) -> literal().
 set(Vp, X, false) -> clause(Vp, [inv(X)]), X;
 set(Vp, X, true) -> clause(Vp, [X]), X;
 set(Vp, X, Y) ->
@@ -111,6 +123,8 @@ set(Vp, X, Y) ->
     clause(Vp, [X,inv(Y)]),
     X.
 
+-spec or_clauses(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 or_clauses(Vp, X, Y, false) -> 
     set(Vp, X, Y);
 or_clauses(Vp, X, Y, Z) ->
@@ -120,11 +134,15 @@ or_clauses(Vp, X, Y, Z) ->
     X.
 
 %% x = y AND z ( x = -(-y OR -z) )
+-spec and_clauses(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 and_clauses(Vp, X, Y, Z) ->
     or_clauses(Vp, inv(X), inv(Y), inv(Z)),
     X.
 
 %% X = Y xor false  =>  X = Y
+-spec xor_clauses(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 xor_clauses(Vp, X, Y, false) -> set(Vp, X, Y);
 xor_clauses(Vp, X, false, Z) -> set(Vp, X, Z);
 xor_clauses(Vp, X, Y, Z) ->
@@ -135,28 +153,36 @@ xor_clauses(Vp, X, Y, Z) ->
     X.
 
 %% x = not y
+-spec inv_clauses(Vp::varp(), X::literal(), Y::literal()) -> literal().
 inv_clauses(Vp, X, Y) ->
     clause(Vp,[X,Y]),
     clause(Vp,[inv(X),inv(Y)]),
     X.
 
+-spec inv_gate(Vp::varp(), Y::literal()) -> literal().
 inv_gate(Vp, Y) ->
     inv_gate(Vp, var(Vp), Y).
 
+-spec inv_gate(Vp::varp(), X::literal(), Y::literal()) -> literal().
 inv_gate(Vp, undefined, Y) -> inv_gate(Vp, Y);
 inv_gate(Vp, X, Y) ->
     inv_clauses(Vp, X, Y).
 
+-spec inv_pin(Vp::varp(), Y::literal()) -> literal().
 inv_pin(_Vp, Y) ->
     inv(Y).
 
 %% x = y OR z
+-spec or_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 or_gate(_Vp,?F,Z) -> Z;
 or_gate(_Vp,Y,?F) -> Y;
 or_gate(_Vp,_Y,?T) -> ?T;
 or_gate(_Vp,?T,_Z) -> ?T;
 or_gate(Vp, Y, Z) -> or_gate(Vp, var(Vp), Y, Z).
 
+-spec or_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 or_gate(Vp, undefined, Y, Z) -> or_gate(Vp, Y, Z);
 or_gate(Vp,X,?F,Z) -> set(Vp,X,Z);
 or_gate(Vp,X,Y,?F) -> set(Vp,X,Y);
@@ -166,39 +192,54 @@ or_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, X, Y, Z).
 
 %% x = NOT (y OR z)
+-spec nor_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 nor_gate(Vp, Y, Z) -> nor_gate(Vp, var(Vp), Y, Z).
 
+-spec nor_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 nor_gate(Vp, undefined, Y, Z) -> nor_gate(Vp, Y, Z);
 nor_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, inv(X), Y, Z),
     X.
 
 %% x = y -> z (NOT y OR z)
-
+-spec imp_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 imp_gate(_Vp,?T,Z) -> Z;
 imp_gate(_Vp,Y,?F) -> inv(Y);
 imp_gate(_Vp,_Y,?T) -> ?T;
 imp_gate(_Vp,?F,_Z) -> ?T;
 imp_gate(Vp, Y, Z) -> imp_gate(Vp, var(Vp), Y, Z).
 
+-spec imp_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 imp_gate(Vp, undefined, Y, Z) -> imp_gate(Vp, Y, Z);
 imp_gate(Vp, X, Y, Z) ->
     or_clauses(Vp, X, inv(Y), Z).
 
 %% = y -/> z ( NOT (y -> z) ) = NOT (NOT y OR Z) =  (y AND NOT z)
+-spec nimp_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 nimp_gate(Vp, Y, Z) -> nimp_gate(Vp, var(Vp), Y, Z).
 
+-spec nimp_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 nimp_gate(Vp, undefined, Y, Z) -> nimp_gate(Vp, Y, Z);
 nimp_gate(Vp, X, Y, Z) ->
     and_clauses(Vp, X, Y, inv(Z)).
 
 %% x = y AND z
+-spec and_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 and_gate(_Vp,?F,_Z) -> ?F;
 and_gate(_Vp,_Y, ?F) -> ?F;
 and_gate(_Vp,?T, Z) -> Z;
 and_gate(_Vp,Y, ?T) -> Y;
 and_gate(Vp, Y, Z) -> and_gate(Vp, var(Vp), Y, Z).
 
+-spec and_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 and_gate(Vp, undefined, Y, Z) -> and_gate(Vp, Y, Z);
 and_gate(Vp,X, ?F,_Z) -> set(Vp,X,?F);
 and_gate(Vp,X, _Y, ?F) -> set(Vp,X,?F);
@@ -207,49 +248,70 @@ and_gate(Vp,X, Y, ?T) -> set(Vp,X,Y);
 and_gate(Vp, X, Y, Z) -> and_clauses(Vp, X, Y, Z).
 
 %% x = NOT (y AND z)
+-spec nand_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 nand_gate(Vp, Y, Z) -> nand_gate(Vp, var(Vp), Y, Z).
 
+-spec nand_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 nand_gate(Vp, undefined, Y, Z) -> nand_gate(Vp, Y, Z);
 nand_gate(Vp, X, Y, Z) -> and_clauses(Vp, inv(X), Y, Z), X.
 			   
 
 %% x = y XOR z
+-spec xor_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 xor_gate(_Vp, ?F, Z) -> Z;
 xor_gate(_Vp, ?T, Z) -> inv(Z);
 xor_gate(_Vp, Y, ?F) -> Y;
 xor_gate(_Vp, Y, ?T) -> inv(Y);
 xor_gate(Vp, Y, Z) -> xor_gate(Vp, var(Vp), Y, Z).
 
+-spec xor_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 xor_gate(Vp, undefined, Y, Z) -> xor_gate(Vp, Y, Z);
 xor_gate(Vp, X, Y, Z) -> xor_clauses(Vp, X, Y, Z).
 
 %% x = NOT (y XOR z)
+-spec xnor_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 xnor_gate(Vp, Y, Z) -> xnor_gate(Vp, var(Vp), Y, Z).
 
+-spec xnor_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 xnor_gate(Vp, undefined, Y, Z) -> xnor_gate(Vp, Y, Z);
 xnor_gate(Vp, X, Y, Z) -> xor_clauses(Vp, inv(X), Y, Z), X.
 			  
 
 %% x = (y == z)
+-spec equ_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 equ_gate(_Vp, ?F, Z) -> inv(Z);
 equ_gate(_Vp, ?T, Z) -> Z;
 equ_gate(_Vp, Y, ?F) -> inv(Y);
 equ_gate(_Vp, Y, ?T) -> Y;
 equ_gate(Vp, Y, Z) -> equ_gate(Vp, var(Vp), Y, Z).
 
+-spec equ_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 equ_gate(Vp, undefined, Y, Z) -> equ_gate(Vp, Y, Z);
 equ_gate(Vp, X, Y, Z) -> xor_clauses(Vp, X, inv(Y), Z).
 
 %% x = (y != z)
+-spec neq_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 neq_gate(_Vp, ?F, Z) -> Z;
 neq_gate(_Vp, ?T, Z) -> inv(Z);
 neq_gate(_Vp, Y, ?F) -> Y;
 neq_gate(_Vp, Y, ?T) -> inv(Y);
 neq_gate(Vp, Y, Z) -> neq_gate(Vp, var(Vp), Y, Z).
 
+-spec neq_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 neq_gate(Vp, undefined, Y, Z) -> neq_gate(Vp, Y, Z);
 neq_gate(Vp, X, Y, Z) -> xor_clauses(Vp, X, Y, Z).
 
+-spec gate(Vp::varp(), Op::atom(), Y::literal()|Ys::[literal()]) -> literal().
 gate(_Vp,'not',Y) -> inv(Y);
 gate(Vp,'all',Ys) -> all(Vp, Ys);
 gate(Vp,'any',Ys) -> any(Vp, Ys);
@@ -259,6 +321,8 @@ gate(Vp,'odd',Ys) -> odd(Vp, Ys);
 gate(Vp,'even',Ys) -> even(Vp, Ys);
 gate(Vp,'parity',Ys) -> parity(Vp, Ys).
 
+-spec gate(Vp::varp(), Op::atom(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 gate(Vp,'and',X,Y,Z)  -> and_gate(Vp,X,Y,Z);		     
 gate(Vp,'or',X,Y,Z)   -> or_gate(Vp,X,Y,Z);
 gate(Vp,'imp',X,Y,Z)  -> imp_gate(Vp,X,Y,Z);
@@ -317,36 +381,62 @@ gate(Vp,'GT',K,Ys) -> gtk(Vp,K,Ys);
 gate(Vp,'GTE',K,Ys) -> gtek(Vp,K,Ys).
 
 %% x = MIN(y,z) = (y AND z)
+-spec min_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 min_gate(Vp, Y, Z) -> min_gate(Vp, var(Vp), Y, Z).
 
+-spec min_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 min_gate(Vp, undefined, Y, Z) -> min_gate(Vp, Y, Z);
 min_gate(Vp, X, Y, Z) -> and_gate(Vp, X, Y, Z).
 
 %% x = MAX(y,z) = (y OR z)
+-spec max_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 max_gate(Vp, Y, Z) -> max_gate(Vp, var(Vp), Y, Z).
 
+-spec max_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 max_gate(Vp, undefined, Y, Z) -> max_gate(Vp, Y, Z);
 max_gate(Vp, X, Y, Z) -> or_gate(Vp, X, Y, Z).
 
 %% x = LT(y,z) = !y AND z
+-spec lt_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 lt_gate(Vp, Y, Z) -> and_gate(Vp, inv(Y), Z).
 
+-spec lt_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 lt_gate(Vp, undefined, Y, Z) -> lt_gate(Vp, Y, Z);
 lt_gate(Vp, X, Y, Z) -> and_gate(Vp, X, inv(Y), Z).
 
 %% x = LTE(y,z) = !GT(y,z)
+-spec lte_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 lte_gate(Vp, Y, Z) -> lte_gate(Vp, var(Vp), Y, Z).
 
+-spec lte_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 lte_gate(Vp, undefined, Y, Z) -> lte_gate(Vp, Y, Z);
 lte_gate(Vp, X, Y, Z) -> gt_gate(Vp, inv(X), Y, Z), X.
 
 %% x = GT(y,z) = LT(z,y)
+-spec gt_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 gt_gate(Vp, Y, Z) -> lt_gate(Vp, Z, Y).
+
+-spec gt_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 gt_gate(Vp, undefined, Y, Z) -> gt_gate(Vp, Y, Z);
 gt_gate(Vp, X, Y, Z) -> lt_gate(Vp, X, Z, Y).
 
 %% x = GTE(y,z) = !LT(y,z)
+-spec gte_gate(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  literal().
 gte_gate(Vp, Y, Z) -> gte_gate(Vp, var(Vp), Y, Z).
+
+-spec gte_gate(Vp::varp(), X::literal(), Y::literal(), Z::literal()) -> 
+	  literal().
 gte_gate(Vp, undefined, Y, Z) -> gte_gate(Vp, Y, Z);
 gte_gate(Vp, X, Y, Z) -> lt_gate(Vp, inv(X), Y, Z), X.
 
@@ -354,6 +444,8 @@ gte_gate(Vp, X, Y, Z) -> lt_gate(Vp, inv(X), Y, Z), X.
 %% if-then-else circuit
 %%  (I & T) | (~I & E)
 %%
+-spec ite(Vp::varp(), I::literal(), T::literal(), E::literal()) -> 
+	  literal().
 ite(_Vp,?T,T,_E) -> T;
 ite(_Vp,?F,_T,E) -> E;
 ite(_Vp,_I,X,X) -> X;
@@ -366,6 +458,8 @@ ite(Vp,I,T,E) ->
     A2 = and_gate(Vp,inv(I),E),
     or_gate(Vp,A1,A2).
 
+-spec ite(Vp::varp(), X::literal(), I::literal(), T::literal(), E::literal()) -> 
+	  literal().
 ite(Vp,undefined,I,T,E) -> ite(Vp,I,T,E);
 ite(Vp,X,?T,T,_E) -> set(Vp, X, T);
 ite(Vp,X,?F,_T,E) -> set(Vp, X, E);
@@ -380,9 +474,14 @@ ite(Vp,X,I,T,E) ->
     or_gate(Vp,X,A1,A2).
 
 %% (min,max) = SORT(y, z)
+-spec comparator(Vp::varp(), Y::literal(), Z::literal()) -> 
+	  {literal(),literal()}.
 comparator(Vp, Y, Z) ->
     comparator(Vp, Y, Z, var(Vp), var(Vp)).
 
+-spec comparator(Vp::varp(),
+		 Y::literal(), Z::literal(), X0::literal(), X1::literal()) ->
+	  {literal(),literal()}.
 comparator(Vp, Y, Z, X0, X1) ->
     {min_gate(Vp, X0, Y, Z), max_gate(Vp, X1, Y, Z)}.
 
@@ -407,6 +506,8 @@ minmax(Vp,[X1,X2|Xs],Ys) ->
     {Min,Max} = comparator(Vp,X1,X2),
     minmax(Vp,[Max|Xs],[Min|Ys]).
 
+-spec any(Vp::varp(), Ys::[literal()]) ->
+	  literal().
 any(Vp,Ys) -> any_(Vp,Ys,[]).
 any_(_Vp,[true|_], _Acc) -> true;
 any_(Vp,[false|Ys], Acc) -> any_(Vp,Ys,Acc);
@@ -418,6 +519,8 @@ any_(Vp,[],Acc) ->
 	Ys1 -> none_assoc(Vp,'or',Ys1)
     end.
 
+-spec any(Vp::varp(), X::literal(), Ys::[literal()]) ->
+	  literal().
 any(Vp,undefined,Ys) -> any(Vp,Ys);
 any(Vp,X,Ys) -> any_(Vp,X,Ys,[]).
 any_(Vp,X,[true|_], _Acc) -> clause(Vp,[X]), X;
@@ -429,6 +532,8 @@ any_(Vp,X,[],Acc) ->
 	Ys1 -> none_assoc(Vp,'or',X,Ys1)
     end.
 
+-spec all(Vp::varp(), Ys::[literal()]) ->
+	  literal().
 all(Vp,Ys) -> all_(Vp,Ys,[]).
 all_(_Vp,[false|_], _Acc) -> false;
 all_(Vp,[true|Ys], Acc) -> all_(Vp,Ys,Acc);
@@ -440,6 +545,8 @@ all_(Vp,[],Acc) ->
 	Ys1 -> none_assoc(Vp,'and',Ys1)
     end.
 
+-spec all(Vp::varp(), X::literal(), Ys::[literal()]) ->
+	  literal().
 all(Vp,undefined,Ys) -> all(Vp,Ys);
 all(Vp,X,Ys) -> all_(Vp,X,Ys,[]).
 all_(Vp,X,[false|_], _Acc) -> clause(Vp,[inv(X)]),X;
@@ -451,8 +558,12 @@ all_(Vp,X,[],Acc) ->
 	Ys1 -> none_assoc(Vp,'and',X,Ys1)
     end.
 
+-spec none(Vp::varp(), Ys::[literal()]) ->
+	  literal().
 none(Vp,Ys) -> none(Vp,var(Vp),Ys).
 
+-spec none(Vp::varp(), X::literal(), Ys::[literal()]) ->
+	  literal().
 none(Vp,undefined,Ys) -> none(Vp,var(Vp),Ys);
 none(Vp,X,Ys) -> all(Vp,X,[inv(Y) || Y <- Ys]).
 
@@ -1261,27 +1372,20 @@ bind_bits(_Vp, [], _) ->
 symbol(_Vp,true) -> "t";
 symbol(_Vp,false) -> "f";
 symbol(Vp, X) when is_integer(X) ->
-    case varp_nif:variable_info(Vp, X, 'symbol') of
+    V = abs(X),
+    case varp_nif:variable_info(Vp, V, 'symbol') of
 	[] ->
-	    "X("++integer_to_list(X)++")";
-	[{Name,0}|_] when is_binary(Name) ->
-	    case varp_nif:find_symbol(Vp,Name) of
-		false -> "X("++integer_to_list(X)++")";
-		Y when is_integer(Y), abs(Y) =:= X -> binary_to_list(Name);
-		Ys when is_list(Ys) -> binary_to_list(Name)++"[0]"
-	    end;
-	[{Term,0}|_] when is_tuple(Term) ->
-	    case varp_nif:find_symbol(Vp,Term) of
-		false -> "X("++integer_to_list(X)++")";
-		Y when is_integer(Y), abs(Y) =:= X -> var_to_list(Term);
-		Ys when is_list(Ys) -> var_to_list(Term)++"[0]"
-	    end;
-	[{Name,I}|_] when is_binary(Name) ->
-	    binary_to_list(Name)++"["++integer_to_list(I)++"]";
-	[{Term,I}|_] when is_tuple(Term) ->
-	    var_to_list(Term)++"["++integer_to_list(I)++"]"
+	    "X("++integer_to_list(V)++")";
+	[{Sym,bool,1,0}|_] ->
+	    sym_to_list(Sym);
+	[{Sym,_Type,_Len,Pos}|_] ->
+	    sym_to_list(Sym)++"["++integer_to_list(Pos)++"]"
     end.
 
+sym_to_list(Name) when is_binary(Name) -> binary_to_list(Name);
+sym_to_list({Name,Args}) when is_binary(Name) ->
+    sym_to_list({binary_to_list(Name),Args});
+sym_to_list(Term) when is_tuple(Term) -> var_to_list(Term).
 
 literal(_Vp,true) -> "t";
 literal(_Vp,false) -> "f";

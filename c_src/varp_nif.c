@@ -66,6 +66,7 @@
 // DEBUG_BCP          print clauses during bcp
 // DEBUG_NBCP         print level information during nbcp
 // DEBUG_ORDER        print order handling info
+// DUMP_ORDER         print order handling info
 // VALIDATE_TWL       check TWL data structures after clause changes
 // LIT_SIZE           literals are represented as integers, size=8,16,32,64
 //
@@ -77,6 +78,7 @@
 // #define DEBUG_BCP
 // #define DEBUG_NBCP
 // #define DEBUG_ORDER
+// #define DUMP_ORDER
 
 // #define ASSERTIONS
 //#define VALIDATE_TWL
@@ -625,6 +627,7 @@ typedef struct _varp_config_t
     ignore_t overflow;   // borrow must be true/false/ignore
     ignore_t divz;       // division by zero must be true/false/ignore
     bool_t   icase;
+    bool_t   bcp2;       // run nbcp over 2 variables
 } varp_config_t;
 
 typedef struct _varp_new_opt_t {
@@ -887,6 +890,7 @@ DECL_ATOM(borrow);
 DECL_ATOM(overflow);
 DECL_ATOM(divz);
 DECL_ATOM(icase);
+DECL_ATOM(bcp2);
 // sort
 DECL_ATOM(identity);
 DECL_ATOM(p_identity);
@@ -933,6 +937,7 @@ enum {
     OPT_OVERFLOW,
     OPT_DIVZ,
     OPT_ICASE,
+    OPT_BCP2,
     OPT_LAST
 };
 
@@ -953,6 +958,7 @@ helem_t opt_elems[] =
     HELEM(ATOM(overflow), OPT_OVERFLOW),
     HELEM(ATOM(divz), OPT_DIVZ),
     HELEM(ATOM(icase), OPT_ICASE),
+    HELEM(ATOM(bcp2), OPT_BCP2),
     { .next = NULL, .atm_ptr = NULL, .enm = 0, .hval = 0}    
 };
 
@@ -2478,7 +2484,7 @@ static int setup_top(varp_t* vp)
     return 0;
 }
 
-// get next unbound literal from top
+// get next unbound variable from top, return variable index
 static uint32_t next_unbound(varp_t* vp)
 {
     variable_t* var;
@@ -2493,6 +2499,7 @@ static uint32_t next_unbound(varp_t* vp)
     return 0;
 }
 
+// get unbound variable after var, return variable index
 static uint32_t next_unbound_after(varp_t* vp, variable_t* var)
 {
     if (cdlist_is_last(&vp->order_list, var))
@@ -3359,6 +3366,7 @@ static void default_config(varp_config_t* conf)
     conf->overflow = ign;
     conf->divz = ign;
     conf->icase = false;
+    conf->bcp2 = false;
 }
 
 static int vif_bool_config(ErlNifEnv* env,const ERL_NIF_TERM value,bool_t* var)
@@ -3455,7 +3463,9 @@ static int vif_setopt(ErlNifEnv* env,
     case OPT_DIVZ:
 	return vif_ignore_config(env, value, &opt->divz);
     case OPT_ICASE:
-	return vif_bool_config(env, value, &opt->icase);	
+	return vif_bool_config(env, value, &opt->icase);
+    case OPT_BCP2:
+	return vif_bool_config(env, value, &opt->bcp2);
     case OPT_SEED: {
 	uint64_t seed;
 	if (!enif_get_uint64(env, value, &seed))
@@ -3962,7 +3972,7 @@ static ERL_NIF_TERM varp_add_variable(ErlNifEnv* env, int argc,
     varp_t* vp;
     int i;
     int is_atom = 0;
-    int is_used = 0;
+    int is_used = 1;
     markbits_t mark = 0;
     
     if (!enif_get_resource(env, argv[0], varp_res, (void**)&vp))
@@ -3998,7 +4008,7 @@ static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
     int i;
     unsigned n;
     int is_atom = 0;
-    int is_used = 0;
+    int is_used = 1;
     int j;
     markbits_t mark = 0;    
 
@@ -4013,7 +4023,7 @@ static ERL_NIF_TERM varp_add_variables(ErlNifEnv* env, int argc,
     if (argc >= 4) {
 	if (!enif_get_boolean(env, argv[3], &is_used))
 	    return enif_make_badarg(env);
-    }    
+    }
     if (dynvar_size(vp->var_map)+(n-1) >= VLIMIT)
 	return enif_raise_exception(env, ATOM(system_limit));
 
@@ -6724,7 +6734,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int x;
+    int x1, x2;
     int32_t level;
     lit_t xp;
 
@@ -6742,12 +6752,16 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     switch(vp->bnd[level].t) {
     case uUNDEF:
 	vp->bnd[level].decision = LIT_FALSE;
-	if ((x = next_unbound(vp)) == 0) {
-	    // dump_order("next_unbound=0", vp);
+	if ((x1 = next_unbound(vp)) == 0) {
 	    vp->caller_env = NULL;
 	    return enif_make_boolean(env, true);  // model
 	}
-	DBG_ORDER("%sNbcp: t=uUNDEF x=%d\r\n", indent(level), x);
+	DBG_ORDER("%sNbcp: t=uUNDEF x1=%d\r\n", indent(level), x1);
+	x2 = 0;
+	if (vp->opt.bcp2) {
+	    x2 = next_unbound_after(vp, vp->var_map[x1]);
+	    DBG_ORDER("%sNbcp: t=uUNDEF x2=%d\r\n", indent(level), x2);
+	}
 	break;
     case uSET:
 	DBG_ORDER("%sNbcp: t=uSET\r\n", indent(level));
@@ -6760,7 +6774,6 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	DBG_ORDER("%sNbcp: t=uTOGGLE decision=%s\r\n",
 		  indent(level), format_lit(vp, xp));
 	goto bcp;
-
     case uDONE:
 	DBG("try to bcp t=uDONE state\r\n");
 	vp->caller_env = NULL;
@@ -6773,22 +6786,38 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     if (level == 0)
 	goto bcp;
 next:
-    xp = vindex_l(vp, x);
+    xp = vindex_l(vp, x1);
     vp->bnd[level].decision = xp;
     vp->bnd[level].t = uSET;
     vp->bnd[level].value = decide_phase(vp, xp);    
     put_l(vp, xp, vp->bnd[level].value, CLAUSE_NONE, level);
-    DBG_ORDER("%sNbcp: next decision=%s\r\n",
-	      indent(level), format_lit(vp, xp));
+    DBG_ORDER("%sNbcp: next decision=%d\r\n",
+	      indent(level), x1);
+    if (x2 != 0) {
+	push_level(vp);
+	level++;
+	xp = vindex_l(vp, x2);
+	vp->bnd[level].decision = xp;
+	vp->bnd[level].t = uSET;
+	vp->bnd[level].value = decide_phase(vp, xp);    
+	put_l(vp, xp, vp->bnd[level].value, CLAUSE_NONE, level);
+	DBG_ORDER("%sNbcp: next decision2=%d\r\n",
+		  indent(level), x2);
+    }
 bcp:
     bcp(vp);
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
     if (vp->num_conflicting == 0) {
-	x = next_unbound(vp);
-	DBG_ORDER("%sNbcp: step x=%d\r\n", indent(level), x);
-	if (x == 0) {
+	x1 = next_unbound(vp);
+	DBG_ORDER("%sNbcp: step x1=%d\r\n", indent(level), x1);
+	if (x1 == 0) {
 	    vp->caller_env = NULL;
 	    return enif_make_boolean(env, true);  // model
+	}
+	x2 = 0;
+	if (vp->opt.bcp2) {
+	    x2 = next_unbound_after(vp, vp->var_map[x1]);
+	    DBG_ORDER("%sNbcp: step x2=%d\r\n", indent(level), x2);
 	}
 	push_level(vp);
 	level++;
@@ -7169,7 +7198,9 @@ static ERL_NIF_TERM varp_getopt(ErlNifEnv* env, int argc,
     case OPT_DIVZ:
 	return make_ignore(env, vp->opt.divz);
     case OPT_ICASE:
-	return enif_make_boolean(env, vp->opt.icase);	
+	return enif_make_boolean(env, vp->opt.icase);
+    case OPT_BCP2:
+	return enif_make_boolean(env, vp->opt.bcp2);	
     default:
 	return enif_raise_exception(env, ATOM(arg1));
     }
@@ -7359,6 +7390,11 @@ static ERL_NIF_TERM varp_setopt(ErlNifEnv* env, int argc,
 	    goto bad_value;
 	return enif_make_ok(env);
     }
+    case OPT_BCP2: {
+	if (!vif_bool_config(env, value, &vp->opt.bcp2))
+	    goto bad_value;
+	return enif_make_ok(env);
+    }	
     default:
 	return enif_raise_exception(env, ATOM(arg1));
     }
@@ -7762,7 +7798,7 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 	}
     }
 
-#if defined(DEBUG_ORDER)
+#if defined(DUMP_ORDER)
     enif_fprintf(stdout, "bump variable %s@%d\r\n",
 		 format_variable(var), vp->level);
     dump_order("bump-before", vp);
@@ -7778,7 +7814,7 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 
 	// FIXME accelerate this
 	while (bump-- && !cdlist_is_first(&vp->order_list, anchor)) {
-#if defined(DEBUG_ORDER)
+#if defined(DUMP_ORDER)
 	    enif_fprintf(stdout, "bump: swap %s\r\n", format_variable(anchor));
 #endif
 	    anchor = cdlist_prev(anchor);
@@ -7786,7 +7822,7 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 
 	if (var != anchor) {
 	    order_remove(vp, var);
-#if defined(DEBUG_ORDER)
+#if defined(DUMP_ORDER)
 	    enif_fprintf(stdout, "bump: insert %s before %s%s\r\n",
 			 format_variable(var),
 			 (cdlist_is_first(&vp->order_list, anchor) ?
@@ -7796,7 +7832,7 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
 	    order_insert_before(vp, anchor, var);
 	}
     }
-#if defined(DEBUG_ORDER)
+#if defined(DUMP_ORDER)
     dump_order("bump-after", vp);
 #endif
     ASSERT(valid_order(vp));
@@ -7836,14 +7872,14 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     }
     else if (vif_get_cix(env, vp, argv[2], &cix)) {
 	if ((cp = get_clause(vp, cix)) == NULL) {
-	    DBG0("get_clause: cix=%d\r\n", cix);
+	    // DBG1("get_clause: cix=%d\r\n", cix);
 	    return enif_raise_exception(env, ATOM(arg2));
 	}
 	lit = cp->lit;
 	len = cp->size;
     }
     else {
-	DBG0("get_clause: argv[2]\\n");
+	// DBG1("get_clause: argv[2]\\n");
 	return enif_raise_exception(env, ATOM(arg2));
     }
     if (argc > 3) {
@@ -7856,10 +7892,10 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     level = vp->level;
 	
     if ((pos = vp->bnd[level].size) == 0) {
-	DBG0("0:pos=%d\r\n", pos);
+	// DBG1("0:pos=%d\r\n", pos);
 	return enif_make_undefined(env);  // No trail
     }
-    DBG0("0:pos=%d\r\n", pos);    
+    // DBG1("0:pos=%d\r\n", pos);    
     pos--;
     trail_vec = bindings(vp, &vp->bnd[level]);
 
@@ -7874,7 +7910,7 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 	    if ((q = lit[i]) != u) { // skip unit literal!
 		lit_t qv = L_VAR(q);
 		int qlevel = vp->var_lev[INDEX(q)].level;
-		DBG0("q = %d, qlevel=%d\r\n", export_l(q), qlevel);
+		// DBG1("q = %d, qlevel=%d\r\n", export_l(q), qlevel);
 		if (!is_marked(vp, qv, VAR_MARK0) && (qlevel > 0)) {
 		    variable_bump(vp, var_l(vp, qv), bump);
 		    add_mark(vp, qv, VAR_MARK0);
@@ -7886,13 +7922,13 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
 		}
 	    }
 	}
-	DBG0("1:pos=%d\r\n", pos);
+	// DBG1("1:pos=%d\r\n", pos);
 	while((pos >= 0) && !is_marked(vp, L_VAR(trail_vec[pos]), VAR_MARK0))
 	    pos--;
-	DBG0("2:pos'=%d\r\n", pos);
+	// DBG1("2:pos'=%d\r\n", pos);
 	if (pos < 0) {
 	    unmark_all(vp);
-	    DBG0("trail=NULL\r\n");
+	    // DBG1("trail=NULL\r\n");
 	    return enif_raise_exception(env, ATOM(internal1));
 	}
 	ul = L_VAR(trail_vec[pos]);
@@ -9438,6 +9474,7 @@ static int load_atoms(ErlNifEnv* env)
     LOAD_ATOM(overflow);
     LOAD_ATOM(divz);
     LOAD_ATOM(icase);
+    LOAD_ATOM(bcp2);
     LOAD_ATOM_STRING(exclamation_mark, "!");
     LOAD_ATOM(identity);
     LOAD_ATOM_STRING(p_identity, "+identity");

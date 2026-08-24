@@ -101,6 +101,9 @@ circuit_def -> 'declare' pdecls ';' : {declare,'$2'}.
 circuit_def -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
 		   varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
 circuit_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
+%% a bare formula in a body is a constraint, it lets a body use
+%% quantifiers to build a structure of any width
+circuit_def -> lexpr ';' : {constraint,'$1'}.
     
 primary_expr -> 'min': <<"min">>.
 primary_expr -> 'max': <<"max">>.
@@ -391,14 +394,16 @@ arg_list -> arg_list ',' arg : '$1'++['$3'].
 arg -> lexpr : '$1'.
 arg -> sym '=' lexpr : {'=','$1','$3'}.
 
-sym -> 'A'        : <<"A">>.
-sym -> 'E'        : <<"E">>.
+sym -> 'A'        : note_symbol(<<"A">>, line('$1')).
+sym -> 'E'        : note_symbol(<<"E">>, line('$1')).
 sym -> symbol     : str('$1').
 
 Erlang code.
 
 -include("varp.hrl").
 -import(lists, [map/2, member/2]).
+
+-export([symbol_table/0]).
 
 bin({binnum,_Line,"0b"++Val}) -> {const,list_to_integer(Val,2)}.
 oct({octnum,_Line,Val}) -> {const,list_to_integer(Val,8)}.
@@ -408,8 +413,36 @@ dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
 chr({chrnum,_Line,Val}) ->  {const,Val}.
 flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
 
-str({symbol,_Ln,Name}) -> Name;
-str({cname,_Ln,Name}) -> Name.
+str({symbol,Ln,Name}) -> note_symbol(Name,Ln), Name;
+str({cname,Ln,Name}) -> note_symbol(Name,Ln), Name.
+
+%% Record where and how often every symbol occurs in the source.
+%% varp:parse/3 picks the table up afterwards and it ends up in the
+%% 'syms' section, where it is used to point at the line of a
+%% diagnostic and to tell a typo (used once) from a real variable.
+note_symbol(Name, Ln) ->
+    case get(?SYMBOL_TABLE) of
+	undefined ->
+	    ok;
+	T ->
+	    case maps:find(Name, T) of
+		{ok,{N,L0}} ->
+		    put(?SYMBOL_TABLE, T#{ Name => {N+1,L0} });
+		error ->
+		    put(?SYMBOL_TABLE, T#{ Name => {1,Ln} })
+	    end
+    end,
+    Name.
+
+line({_Tag,Ln}) -> Ln;
+line({_Tag,Ln,_Val}) -> Ln.
+
+%% the symbol table collected by the most recent parse
+symbol_table() ->
+    case get(?SYMBOL_TABLE) of
+	undefined -> #{};
+	T -> T
+    end.
 
 op({Op,_Ln})     -> Op.
 
@@ -445,7 +478,7 @@ machine_sizeof(double)  ->
 %% machine_endian() ->
 %%    application:get_enc(varp, endian, little).
 init() ->
-    %% io:format("INIT\n"),
     varp_formula:init_circuit_def(),
+    put(?SYMBOL_TABLE, #{}),
     ok.
 

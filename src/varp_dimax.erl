@@ -62,7 +62,7 @@ load_stream_header(Vp, Line, LineFun) ->
 		[NVars,NClauses] ->
 		    io:format("loading: ~w variables, ~w clauses\n",
 			      [NVars, NClauses]),
-		    {1,NVars} = varp_nif:add_variables(Vp, NVars),
+		    {1,NVars} = varp_nif:add_variables(Vp, NVars, _IsAtom=true),
 		    io:format("loading clauses\n"),
 		    load_stream_clauses(Vp, Line+1, NClauses, LineFun);
 		_ ->

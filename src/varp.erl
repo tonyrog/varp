@@ -95,12 +95,43 @@
 -export([make_friend_map/1]).
 -export([order_all/1, phase_all/1]).
 -export([find_decl/2, find_decl/3]).
+-export([add_decls/3]).
 
 -define(BINDING_AS_TUPLE, true).
 
 -include_lib("stdlib/include/zip.hrl").
 
 -include("varp.hrl").
+
+-type variable() :: varp_nif:variable().
+-type literal() :: varp_nif:literal().
+-type symbol() :: varp_nif:symbol().
+-type varp() :: varp_nif:varp().
+
+-type uvec() :: {'uint',Size::psize(),[literal()]}.
+-type ivec() :: {'int',Size::psize(),[literal()]}.
+-type bvec() :: {'bit',Size::psize(),[literal()]}.
+-type pbits() :: uvec()|ivec()|bvec()|{bool,literal()}.
+
+-type pred()  :: {p,Name::atom(),[index()]}.
+-type index() :: integer() | atom() | [integer()|atom()] | func().
+-type func()  :: {f,Name::atom(),[index()]}.
+
+-type var() :: pred() |
+	       {uint,Size::psize(),pred()} |
+	       {int,pred(),Size::psize(),Pos::integer()} |
+	       {bit,pred(),Size::psize(),Pos::integer()}.
+
+-type plit() ::
+	#{ {atom(),ptype(),psize()} => literal()|[literal()] }.
+
+-export_type([varp/0]).
+-export_type([variable/0, literal/0, symbol/0]).
+-export_type([uvec/0, ivec/0, bvec/0, pbits/0]).
+-export_type([pred/0, index/0, func/0]).
+-export_type([var/0]).
+-export_type([plit/0]).	   
+
 
 -record(stat,
 	{
@@ -123,6 +154,22 @@ global_options() ->
 	 default => false,
 	 short => "i",
 	 description => "Case insensitive keywords and variables."
+       },
+     #{ long => "undeclared",
+	key => undeclared,
+	spec => {enum,[{"none",none},{"typo",typo},
+		       {"once",once},{"all",all}]},
+	default => typo,
+	description => "Warn about variables used without a declaration:"
+	    " never, when one occurs once and looks like a misspelling of"
+	    " another (typo), whenever one occurs once, or always."
+      },
+     # { long => "bcp2",
+	 key => bcp2,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 short => "b",
+	 description => "Bcp over 2 variables."
        },
      #{ long => "phase",
 	key => phase,
@@ -385,7 +432,11 @@ internal_options() -> %% needed?
      #{ key => syms,
 	spec => map,
 	default => #{},  %% map
-	description => "Internal map of symbols" }
+	description => "Internal map of symbols" },
+     #{ key => file,
+	spec => string,
+	default => "*internal*",
+	description => "Internal name of the file being built" }
     ].
 
 xref() ->
@@ -425,9 +476,17 @@ main(Args) ->
     GlobalOptionSpec = global_option_spec(),
     GOpts0 = default_options(),
     GOpts1 = load_options(GlobalOptionSpec, GOpts0),
+    %% io:format("GlobalOptionSpec = ~p\n", [GlobalOptionSpec]),
+    %% io:format("GOpts1 = ~p\n", [GOpts1]),
     Do0 = load_do(Plugins),
     {Do1,Files,GOpts2,Bound0} =
 	process_args(Args, Plugins, [], [], GlobalOptionSpec, GOpts1, []),
+
+    %%io:format("Do0 = ~p\n", [Do0]),
+    %%io:format("Bounds0 = ~p\n", [Bound0]),
+    %%io:format("GOpts2 = ~p\n", [GOpts2]),
+    %%io:format("Files = ~p\n", [Files]),
+
     case maps:get(gui,GOpts2,false) of
 	true ->
 	    varp_wx:start(Bound0),
@@ -666,7 +725,9 @@ varp_run(Do, Assignments, Formula, GOpts) ->
     catch
 	?EXCEPTION(error,Error,Trace) ->
 	    io:format("~s\n", [format_error(Error)]),
-	    io:format("~p\n", [?GET_STACK(Trace)]),
+	    %% the erlang stack trace is only useful when debugging varp
+	    %% itself, show it with --log=debug
+	    ?debug(GOpts, "~p\n", [?GET_STACK(Trace)]),
 	    put(exit_code, 1),
 	    ok
     after
@@ -773,8 +834,13 @@ do_run_(Do, Assignments, Formula, GOpts) ->
     Bs0 = varp_formula:new(GOpts),
     S0 = stat(Bs0),
     ?info(Bs0#bs.option, "pass ~p\n", [build]),
-    Bs0_0 = varp_formula:build_assignment_defs(Assignments, Bs0),
-    {Main,Bs} = case varp_formula:build(Formula,Bs0_0) of
+
+    %% an assignment that cannot hold makes the whole formula false,
+    %% the same way varp_formula:bld1/2 treats one inside the formula
+    {Main,Bs} =
+	try varp_formula:build_assignment_defs(Assignments, Bs0) of
+	    Bs0_0 ->
+		case varp_formula:build(Formula,Bs0_0) of
 		    {{bool,Var0},Bs0_1} -> 
 			{Var0,Bs0_1};
 		    {{uint,1,[Var0]},Bs0_1} ->
@@ -785,7 +851,11 @@ do_run_(Do, Assignments, Formula, GOpts) ->
 			VsB = [{bool,Vi} || Vi <- Vs],
 			{{bool,M0},Bs0_2} = varp_formula:any(VsB,Bs0_1),
 			{M0,Bs0_2}
-		end,
+		end
+	catch
+	    throw:contradiction ->
+		{?F, Bs0}
+	end,
     S1 = stat(Bs),
     T1 = erlang:monotonic_time(),
     Time = erlang:convert_time_unit(T1-T0,native,microsecond),
@@ -1268,17 +1338,18 @@ empty_sections() ->
        decls=>#{}, 
        circuits => [],
        literals=> #{},
-       syms => #{},        
+       syms => #{},        %% Name => {Occurrences, FirstLine}
+       file => "*internal*",
        order=>[],  
        assert=>[], 
        input=>[], 
        output=>[] }.
 
-append_sections(#{ decls:=D0,order:=O0,circuits:=C0,
-		   literals:=Ls0,defs:=Ds0,
-		   assert:=A0,input:=I0, output:=T0,syms:=S0 },
-		#{ decls:=D1,circuits:=C1,order:=O1,literals:=Ls1,defs:=Ds1,
-		   assert:=A1,input:=I1, output:=T1,syms:=S1 }) ->
+append_sections(M0=#{ decls:=D0,order:=O0,circuits:=C0,
+		      literals:=Ls0,defs:=Ds0,
+		      assert:=A0,input:=I0, output:=T0,syms:=S0 },
+		M1=#{ decls:=D1,circuits:=C1,order:=O1,literals:=Ls1,defs:=Ds1,
+		      assert:=A1,input:=I1, output:=T1,syms:=S1 }) ->
     #{ decls =>maps:merge(D0,D1),  %% must be fixed!
        circuits => C0++C1,
        order => O0++O1, 
@@ -1287,18 +1358,29 @@ append_sections(#{ decls:=D0,order:=O0,circuits:=C0,
        assert => A0++A1,
        input => I0++I1,
        output => T0++T1,
-       syms => maps:merge(S0,S1)  %% fix?
+       file => maps:get(file, M1, maps:get(file, M0, "*internal*")),
+       syms => merge_syms(S0,S1)
      }.
 
-section_opts(#{ decls := Decls,
-		order := Order,
-		circuits := Circuits,
-		literals := Literals,
-		defs := Defs,
-		assert := Assert,
-		input := Input,
-		output := Output,
-		syms := Syms },
+%% sum the occurrence counts and keep the earliest line
+merge_syms(S0, S1) ->
+    maps:fold(
+      fun(Name,{N1,L1},Acc) ->
+	      case maps:find(Name, Acc) of
+		  {ok,{N0,L0}} -> Acc#{ Name => {N0+N1, min(L0,L1)} };
+		  error -> Acc#{ Name => {N1,L1} }
+	      end
+      end, S0, S1).
+
+section_opts(Sections=#{ decls := Decls,
+			 order := Order,
+			 circuits := Circuits,
+			 literals := Literals,
+			 defs := Defs,
+			 assert := Assert,
+			 input := Input,
+			 output := Output,
+			 syms := Syms },
 	     GOpts) ->
     GOpts#{
 	   order => order_decl(Order),
@@ -1309,7 +1391,8 @@ section_opts(#{ decls := Decls,
 	   assert => Assert,
 	   input => Input,
 	   output => Output,
-	   syms => Syms
+	   syms => Syms,
+	   file => maps:get(file, Sections, "*internal*")
 	  }.
 
 merge_defs(Ds0, Ds1) ->
@@ -1319,18 +1402,28 @@ merge_defs(Ds0, Ds1) ->
 	      maps:put(Key,DefList0++DefList1,Ds00)
       end, Ds0, Ds1).
     
+%% conjoin two formulas, from several files or several -f options
 join_f(_JoinOp,undefined,B) -> B;
 join_f(_JoinOp,A,undefined) -> A;
-join_f(JoinOp,A,B) -> {JoinOp,A,B}.
+join_f(JoinOp,A,B) -> {lop,JoinOp,A,B}.
 
 process_args(As=[[$-|_]|_], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
     {As1,GOpts1,Bound1} = 
 	varp_option:process_args(As, GOptSpec, GOpts, Bound),
-    process_args(As1,Plugins,Do,Files,GOptSpec,GOpts1,Bound1);    
+    process_args(As1,Plugins,Do,Files,GOptSpec,GOpts1,Bound1);
 process_args([Arg|As], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
     case maps:get(Arg, Plugins, undefined) of
 	undefined ->
-	    process_args(As,Plugins,Do,[Arg|Files],GOptSpec,GOpts,Bound);
+	    case string:split(Arg, "=") of
+		[Var,Value] ->
+		    process_args(As, Plugins, Do, Files,
+				 GOptSpec, GOpts, [{list_to_binary(Var),
+						    list_to_integer(Value)}|
+						   Bound]);
+		_ ->
+		    process_args(As,Plugins,Do,[Arg|Files],
+				 GOptSpec,GOpts,Bound)
+	    end;
 	Mod ->
 	    OptionInfoList = Mod:options(),
 	    OptionSpec = varp_option:options_spec(OptionInfoList),
@@ -1466,18 +1559,12 @@ parse(Filename, String, GOpts) ->
 	   end,
     Scan:init(remove_comments(String)),
     case varp_parse:parse_and_scan({Scan, one_token, []}) of
-	{ok,{Sections,[],Formula}} ->
-	    case split_sections(Sections,GOpts) of
-		{ok, SectionMap} ->
-		    {ok,{SectionMap,[],Formula}};
-		Error ->
-		    io:format("~s: Error: ~p\n", [Filename,Error]),
-		    Error
-	    end;
 	{ok,{Sections,Assignments,Formula}} ->
+	    Syms = varp_parse:symbol_table(),
 	    case split_sections(Sections,GOpts) of
 		{ok, SectionMap} ->
-		    {ok,{SectionMap,Assignments,Formula}};
+		    {ok,{SectionMap#{ syms => Syms, file => Filename },
+			 Assignments,Formula}};
 		Error ->
 		    io:format("~s: Error: ~p\n", [Filename,Error]),
 		    Error
@@ -1531,15 +1618,22 @@ split_sections([], Map, _GOpts) ->
 
 add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
     Size = varp_formula:eval_meta(SExpr, Bs),
-    case maps:find(Sym, Decls) of
-	error ->
-	    Decls1 = maps:put(Sym, {PType,length(Args),Size}, Decls),
-	    add_decls(Ds, Decls1, Bs);
-	{ok,_} ->
-	    {error, {symbol, Sym, already_declared}}
-    end;
+    add_decls_(Sym, {PType,length(Args),Size}, Ds, Decls, Bs);
+%% untyped declaration: "declare X;" is a boolean (1 bit) symbol
+add_decls([{p,Sym,Args}|Ds], Decls, Bs) ->
+    add_decls_(Sym, {bool,length(Args),1}, Ds, Decls, Bs);
 add_decls([], Decls, _Bs) ->
     {ok,Decls}.
+
+add_decls_(Sym, Decl, Ds, Decls, Bs) ->
+    case maps:find(Sym, Decls) of
+	error ->
+	    add_decls(Ds, maps:put(Sym, Decl, Decls), Bs);
+	{ok,Decl} ->  %% identical redeclaration is harmless
+	    add_decls(Ds, Decls, Bs);
+	{ok,_} ->
+	    {error, {symbol, Sym, already_declared}}
+    end.
 
 find_decl(Sym, Decls) ->
     find_decl(Sym, Decls, false).
@@ -1839,7 +1933,9 @@ option_keys() ->
      borrow,
      overflow,
      divz,
-     icase
+     icase,
+     bcp2,
+     undeclared
     ].
 
 memory() ->

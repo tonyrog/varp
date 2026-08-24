@@ -111,7 +111,7 @@
 -type varp() :: reference().
 -type variable() :: pos_integer().
 -type unsigned() :: non_neg_integer().
--type literal() :: integer().
+-type literal() :: integer() | boolean().
 -type symbol() :: {Name::iolist(),[Index::term()]}.
 -type symbol_type() :: bool | int | uint | bit.
 -type sort_key() :: atom() | string().

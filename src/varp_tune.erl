@@ -334,7 +334,9 @@ run1(Sections, Form, Meta, [{global,Global},{backjump,BjParams}]) ->
 
 
 parse(String, Meta) ->
-    ICase = false,  %% Fixme: icase option
+    parse(String, Meta, false).
+
+parse(String, Meta, ICase) ->
     Scan = if ICase -> varp_scani;
 	      true -> varp_scan
 	   end,

@@ -12,7 +12,7 @@
 -export([format_clause/2, format_clause/3]).
 -export([format_literals/2, format_literals/3]).
 -export([format_lit/2, format_lit/3]).
--export([format_var/2]).
+-export([format_var/2, format_var/3]).
 -export([format_binding/1]).
 -export([format_symbol/1]).
 -export([format_meta/1]).
@@ -51,30 +51,23 @@ format_var(Bs,X) ->
 format_var(_Bs,?T,_Bound) -> "1";
 format_var(_Bs,?F,_Bound) -> "0";
 format_var(Bs,X,Bound) ->
-    case varp_formula:find_var(X,Bs) of
-	error ->
-	    format_bnd(Bs, X, X, Bound);
-	{ok,[Var]} ->
-	    format_bnd(Bs, X, Var, Bound)
-    end.
+    varp_circuit:symbol(Bs#bs.vp, X) ++ format_value(Bs, X, Bound).
 
-format_bnd(_Bs, _X, Var, false) ->
-    format_symbol(Var);
-format_bnd(Bs, X, Var, true) ->
-    Value = case varp_nif:value(Bs#bs.vp, X) of
-		true -> "/1";
-		false -> "/0";
-		_ -> ""
-	    end,
-    format_symbol(Var) ++ Value;
-format_bnd(Bs, X, Var, level) ->
-    L = varp_nif:implication_level(Bs#bs.vp, X), 
-    Value = case varp_nif:value(Bs#bs.vp, X) of
-		true -> "=1@"++integer_to_list(L);
-		false -> "=0@"++integer_to_list(L);
-		_ -> ""
-	    end,
-    format_symbol(Var) ++ Value.
+format_value(_Bs, _X, false) ->
+    "";
+format_value(Bs, X, true) ->
+    case varp_nif:value(Bs#bs.vp, X) of
+	true  -> "=1";
+	false -> "=0";
+	_     -> ""
+    end;
+format_value(Bs, X, level) ->
+    L = varp_nif:implication_level(Bs#bs.vp, X),
+    case varp_nif:value(Bs#bs.vp, X) of
+	true  -> "=1@"++integer_to_list(L);
+	false -> "=0@"++integer_to_list(L);
+	_     -> ""
+    end.
 
 format_symbol(?T) -> "t";
 format_symbol(?F) -> "f";

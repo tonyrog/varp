@@ -83,7 +83,7 @@ options_spec_list(Spec) ->
 process_args(["--"++OptName|As],Spec,Map,Bound) ->
     case get_long_opt(OptName,Spec) of
 	false -> usage(OptName, Spec);
-	{#{ key:=help }, Val} -> usage(help, Val, none);
+	{#{ key:=help }, Val} -> usage(help, Val, Spec);
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=Type },Val} ->
 	    case match_value(Type,Val,As) of
@@ -98,7 +98,7 @@ process_args(["-"++OptName|As],Spec,Map,Bound) ->
 	false ->
 	    case get_short_opt(OptName,Spec) of
 		false -> usage(OptName, Spec);
-		{#{ key:= help }, Val} -> usage(help, Val, none);
+		{#{ key:= help }, Val} -> usage(help, Val, Spec);
 		{#{ key:= version },_Val} -> version();
 		{#{ key:=Key,spec:=Type},Val} ->
 		    MVal = match_value(Type,Val,As),
@@ -402,7 +402,7 @@ usage(Key,Spec) when is_atom(Key) ->
 	false -> 
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
-	#{long:=Long, spec:=TypeSpec} ->
+	{Key,#{long:=Long, spec:=TypeSpec}} ->
 	    io:format("varp: bad argument to option '~s', allowed values are ~s\n", 
 		      [Long,format_spec(TypeSpec)]),
 	    halt(1)
@@ -413,19 +413,31 @@ usage(Key,Value,Spec) when is_atom(Key) ->
 	false ->
 	    io:format("varp: unknown option '~s'\n", [Key]),
 	    halt(1);
-	#{key := help } -> 
-	    if Value =:= none ->
-		    io:format("varp: help\n"),
+	{Key,#{key := help }} -> 
+	    case help_topic(Value) of
+		none ->
 		    usage(Spec);
-	       true ->
-		    io:format("varp: help for ~s\n", [Value]),
-		    plugin_help(Value)
+		Topic ->
+		    io:format("varp: help for ~s\n", [Topic]),
+		    plugin_help(Topic),
+		    halt(0)
 	    end;
-	#{long:=Long,spec:=TypeSpec} ->
+	{Key,#{long:=Long,spec:=TypeSpec}} ->
 	    io:format("varp: bad argument ~s to option '~s', allowed values are ~s\n", 
 		      [Value,Long,format_spec(TypeSpec)]),
 	    halt(1)
     end.
+
+%% extract an optional help topic from the trailing characters of
+%% --help / -h  ("" | "=sat" | " sat")
+help_topic(none) -> none;
+help_topic([$=|Cs]) -> help_topic(Cs);
+help_topic(Cs) when is_list(Cs) ->
+    case string:trim(Cs) of
+	"" -> none;
+	Topic -> Topic
+    end;
+help_topic(_) -> none.
 
 format_spec({multiple,T}) -> "{"++format_spec(T)++"}*";
 format_spec({list,T}) -> "["++format_spec(T)++"]";

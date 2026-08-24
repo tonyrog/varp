@@ -49,13 +49,8 @@
 -export([set/3]).
 
 -export([test/0]).
--compile(export_all).
 
 -include("varp.hrl").
-
-%% -type varp_lit() :: integer() | false | true.
-%% -type varp_vec_type() :: int | uint | bit.
-%% -type varp_vec() :: {varp_vec_type(), Size::integer(),[varp_lit()]}.
 
 neg(true) -> false;
 neg(false) -> true;
@@ -487,11 +482,7 @@ ror(Vp,X,A,B) ->
 set(Vp, {bool,X}, {bool,Y}) -> 
     varp_circuit:set(Vp, X, Y);
 set(Vp, X, Y) ->
-    {_Xt,Xn,Xx} = varg(X),
-    {Yt,Yn,Yx} = varg(Y),
-    Yx1 = vextend(Yt,Yx,Yn,Xn),
-    bitwise1(Vp,'=',Xx,Yx1),
-    X.
+    bitwise1(Vp,'=',X,Y).
 
 bitwise_not(Vp, Y) -> bitwise1(Vp,'not',Y).
 bitwise_not(Vp, X, Y) -> bitwise1(Vp,'not',X,Y).
@@ -1033,7 +1024,7 @@ vlteq(Vp,[Y1|Ys],[Z1|Zs]) ->
 
 %% do type check and return the common type
 -spec mix_type(A::ptype(),B::ptype()) -> ptype();
-	      (A::pbits(),B::pbits()) -> ptype().
+	      (A::varp:pbits(),B::varp:pbits()) -> ptype().
 mix_type({At,_,_},{Bt,_,_}) -> mix_type(At,Bt);
 mix_type({At,_,_},{Bt,_}) -> mix_type(At,Bt);
 mix_type({At,_},{Bt,_,_}) -> mix_type(At,Bt);
@@ -1062,21 +1053,22 @@ varg(V={bit,_,_}) -> V;
 varg({bool,X}) -> {uint,1,[X]}.
 
 %% convert arg to int vector
--spec iarg(A::pbits()) -> ivec().
+-spec iarg(A::varp:pbits()) -> varp:ivec().
 iarg(A={int,_An,_Ax}) -> A;
 iarg({uint,An,Ax})    -> {int,An+1,Ax++[false]};
-iarg({bit,An,Ax})     -> {int,An,Ax};
+%% a bit vector is unsigned (see vextend/4), so it needs a zero sign bit
+iarg({bit,An,Ax})     -> {int,An+1,Ax++[false]};
 iarg({bool,X})        -> {int,2,[X,false]}.
 
 %% convert arg to uint vector
--spec uarg(A::pbits()) -> uvec().
+-spec uarg(A::varp:pbits()) -> varp:uvec().
 uarg(A={uint,_An,_Ax}) -> A;
 uarg({int,An,Ax}) -> {uint,An,Ax};  %% cast!!
 uarg({bit,An,Ax}) -> {uint,An,Ax};
 uarg({bool,X})    -> {uint,1,[X]}.
 
 %% convert A into destination type
--spec xarg(Type::ptype(), Src::pbits()) -> Dst::pbits().
+-spec xarg(Type::ptype(), Src::varp:pbits()) -> Dst::varp:pbits().
 xarg(int, A) -> iarg(A);
 xarg(uint,A) -> uarg(A);
  %% mix_type should only return bool when boolxbool

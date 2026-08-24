@@ -1,21 +1,20 @@
 #!/usr/bin/env escript
 %%% -*- erlang -*-
 %%%
-%%% Command line entry point.  Works from anywhere, also through a
+%%% Start varp in GUI mode.  Works from anywhere, also through a
 %%% symlink on PATH, by locating ebin relative to this script.
 %%% Note that $VAR is NOT expanded in an escript %%! line, which is why
 %%% the code path is set here instead.
 
 main(Args) ->
     ok = add_ebin(),
-    varp:main(Args).
+    varp:main(["--gui=true"|Args]).
 
 add_ebin() ->
     Ebin = filename:join(filename:dirname(script_dir()), "ebin"),
     case code:add_patha(Ebin) of
 	true -> ok;
 	{error,bad_directory} ->
-	    %% already reachable through ERL_LIBS or an installed release
 	    case code:which(varp) of
 		non_existing ->
 		    io:format(standard_error,

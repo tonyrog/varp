@@ -236,7 +236,7 @@ main(Bs,Param,MaxLearned,MR) ->
 		    %% a working jump level (maybe just one up?)
 		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 		    %% FIXME: DELTA is maybe not the correct place!?
-		    varp_circuit:clause(Bs, Block, ?DELTA),
+		    varp_circuit:clause(Bs#bs.vp, Block, ?DELTA),
 		    %% we start with simple restart
 		    case MR#m.method of
 			collect ->

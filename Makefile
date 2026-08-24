@@ -6,13 +6,24 @@ APPL = Varp
 VSN = $(shell git describe --abbrev=0)
 MACHINE = $(shell uname -m)
 
+.PHONY: all test test-gui clean
+
 all:
 	(cd src && $(MAKE) all)
 	(cd c_src && $(MAKE) all)
 
+# build and run the eunit test suites
+test: all
+	(cd test && $(MAKE) test)
+
+# the same, including the gui window (needs xvfb-run)
+test-gui: all
+	(cd test && $(MAKE) test-gui)
+
 clean:
 	(cd src && $(MAKE) clean)
 	(cd c_src && $(MAKE) clean)
+	(cd test && $(MAKE) clean)
 
 appimage:
 	erl -wx -noshell -s varp_wx -s servator make_appimage $(APP) -s erlang halt

@@ -1179,7 +1179,9 @@ parse_bindings_([], Acc) ->
     {ok,lists:reverse(Acc)}.
 
 parse(String, Meta) ->
-    ICase = false,  %% Fixme: icase option
+    parse(String, Meta, false).
+
+parse(String, Meta, ICase) ->
     Scan = if ICase -> varp_scani;
 	      true -> varp_scan
 	   end,
@@ -1384,9 +1386,10 @@ format_time(Ms) ->
 	    M0 = S0 div 60,
 	    M = M0 rem 60,
 	    if M0 >= 60 ->
-		    H = M0 div 60,
-		    if H >= 24 ->
-			    D = H div 24,
+		    H0 = M0 div 60,
+		    H = H0 rem 24,
+		    if H0 >= 24 ->
+			    D = H0 div 24,
 			    [integer_to_list(D),"d ",
 			     f2i(H),$:,f2i(M),$:,f2i(S),$.,f3i(F)];
 		       true ->

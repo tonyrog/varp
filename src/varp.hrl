@@ -13,6 +13,9 @@
 
 -define(TOP_LEVEL, 0).
 
+%% process dictionary key for the parser symbol table
+-define(SYMBOL_TABLE, varp_symbol_table).
+
 -define(DELTA, 0).
 -define(GAMMA, 1).
 -define(BETA,  2).
@@ -80,44 +83,23 @@
 -define(warn(F,A), io:format((F),(A))).
 
 
--type variable() :: varp_nif:variable().
--type literal() :: varp_nif:literal().
--type symbol() :: varp_nif:symbol().
--type varp() :: varp_nif:varp().
--type sort_key() :: varp_nif:sort_key().
-
+-type cpdecl() :: term().  %% fixme
+-type psize() :: pos_integer().
 -type vtype() :: 'int' | 'uint' | 'bit'.
 -type ptype() :: vtype() | 'bool'.
--type psize() :: pos_integer().
--type uvec() :: {'uint',Size::psize(),[literal()]}.
--type ivec() :: {'int',Size::psize(),[literal()]}.
--type bvec() :: {'bit',Size::psize(),[literal()]}.
--type pbits() :: uvec()|ivec()|bvec()|{bool,literal()}.
-
--type pred()  :: {p,Name::atom(),[index()]}.
--type index() :: integer() | atom() | [integer()|atom()] | func().
--type func()  :: {f,Name::atom(),[index()]}.
-
--type var() :: pred() |
-	       {uint,Size::psize(),pred()} |
-	       {int,pred(),Size::psize(),Pos::integer()} |
-	       {bit,pred(),Size::psize(),Pos::integer()}.
 
 -type pdecl() ::
 	#{ {atom(),arity()} => {ptype(),arity(),psize()}, %% PSYM_ARITY
 	   atom()           => {ptype(),arity(),psize()} %% !PSYM_ARITY
 	 }.
-	   
--type plit() ::
-	#{ {atom(),ptype(),psize()} => literal()|[literal()] }.
 
--type cpdecl() :: term().  %% fixme
 -record(circuit,
 	{
 	 name :: binary(),  %% circuit name
 	 params = [] :: [{in,[cpdecl()]}|{out,[cpdecl()]}|{return,cpdecl()}],
 	 defs = []
 	}).
+
 
 -record(bs,
 	{
@@ -133,9 +115,10 @@
 	 main,                 %% main formula variable
 	 meta=#{} :: #{ string() => integer() },
 	 %% Def = {[v1,..vn],F(v1...vn)}
-	 defs=#{} :: #{ pred() => {[atom()],term()}},
+	 defs=#{} :: #{ {p,Name::atom(),[term()]} => {[atom()],term()}},
 	 decls=#{} :: pdecl(),
 	 circuits=#{} :: #{ binary() => #circuit{} },
+	 cseq=0 :: integer(),  %% circuit instance counter (unique local prefix)
 	 subst=[],             %% var/function substitution(s)
 	 literals=#{} :: #{ atom() => true },
 	 assert=[],            %% list of assertions [A1,...An]

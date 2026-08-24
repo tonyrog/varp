@@ -12,7 +12,7 @@
 -export([build/1, build/2]).
 -export([build_assignment_defs/2]).
 -export([new/0, new/1]).
--export([add_variable/1, add_variable/2]).
+-export([add_variable/1, add_atom/1]).
 -export([variable/2]).
 %% -export([alias/3]).
 %% -export([set_var/3, add_var/4]).
@@ -58,6 +58,16 @@
 -include("varp.hrl").
 
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
+%% operators that take booleans and give a boolean, everything else
+%% applied to booleans is arithmetic and widens them to 1 bit vectors
+-define(is_bool_op(Op),
+	((Op) =:= 'and' orelse (Op) =:= 'or' orelse (Op) =:= 'xor' orelse
+	 (Op) =:= 'imp' orelse (Op) =:= 'equ' orelse
+	 (Op) =:= 'nimp' orelse (Op) =:= 'nand' orelse (Op) =:= 'nor' orelse
+	 (Op) =:= 'band' orelse (Op) =:= 'bor' orelse (Op) =:= 'bxor' orelse
+	 (Op) =:= 'lt' orelse (Op) =:= 'gt' orelse
+	 (Op) =:= 'lte' orelse (Op) =:= 'gte' orelse
+	 (Op) =:= 'eq' orelse (Op) =:= 'neq')).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
 
 
@@ -73,7 +83,8 @@ new(OptMap) when is_map(OptMap) ->
 		 init_phase => maps:get(phase,OptMap),
 		 use_phase  => maps:get(use_phase,OptMap),
 		 seed       => maps:get(seed,OptMap),
-		 icase      => maps:get(icase,OptMap)
+		 icase      => maps:get(icase,OptMap),
+		 bcp2       => maps:get(bcp2,OptMap)
 	       },
     Vp  = varp_nif:new(NewOpts),
     %% transfer some options to vp:setopt(Vp, ...)
@@ -206,40 +217,34 @@ clean_clauses_(Bs, I) ->
 		 L::integer(), Type::atom()) ->
 	  ok.
 add_symbol(Bs, Sym, L, Type) ->
-    %% io:format("add_symbol: ~p ~p ~p\n", [Sym, L, Type]),
     varp_nif:add_symbol(Bs#bs.vp, Sym, L, Type).
 
 add_variable(Bs) ->
-    varp_nif:add_variable(Bs#bs.vp, false, true).
+    varp_nif:add_variable(Bs#bs.vp).
 
-%% Create a variable and mark all atoms as used
-add_variable(Bs, IsAtom) ->
-    varp_nif:add_variable(Bs#bs.vp, IsAtom, true).
+add_atom(Bs) ->
+    varp_nif:add_variable(Bs#bs.vp, _IsAtom=true).
 
 find_var({p,Name,Args}, Bs) ->
     Sym = {Name,Args},
     case varp_nif:find_symbol(Bs#bs.vp, Sym) of
 	false ->
-	    io:format("find_var ~p = error\n", [Sym]),
 	    error;
 	Val -> 
-	    io:format("find_var ~p = ~p\n", [Sym,Val]),
 	    {ok,Val}
     end;
 find_var({Type,Name,Args}, Bs) ->
     Sym = {Name,Args},
     case varp_nif:find_symbol(Bs#bs.vp, Sym) of
 	false ->
-	    io:format("find_var ~p = error\n", [Sym]),
 	    error;
 	Val -> 
-	    io:format("find_var ~p = ~p\n", [Sym,Val]),
 	    {ok,{Type,length(Val),Val}}
     end.
     
 
 make_variable({p,Name,Args}, Bs) ->
-    L = add_variable(Bs, true),
+    L = add_atom(Bs),
     Var = {Name,Args},
     add_symbol(Bs, Var, L, bool),
     {{bool,L}, Bs}.
@@ -413,8 +418,9 @@ expand_meta(ID,_Bs) when is_binary(ID) ->
 expand_meta(V,_Bs) ->
     V.
 
+%% definitions are keyed by {Name,Arity}, see varp:split_sections/3
 match_def(P, As, Defs) ->
-    List = maps:get(P, Defs, []),
+    List = maps:get({P,length(As)}, Defs, []),
     match_def_list(List,As).
 
 match_def_list([{Fs,Def}|Ds],As) ->
@@ -481,20 +487,18 @@ init_circuit_def() ->
     put(circuit_defs, #{}).
 
 add_circuit_def(C={circuit,Name,_Params,_Defs}) ->
-    io:format("add circuit ~s\n", [Name]),
     CDef = get(circuit_defs),
     put(circuit_defs, CDef#{ Name => true }),
     C.
 
-%% installed in dictionary, called from scanner!
-find_circuit_def(Name, Defs, _ICase=false) ->
-    case lists:keyfind(Name, 2, Defs) of
-	{_,C} -> {ok, C};
-	false -> error
-    end;
-find_circuit_def(Name, Defs, _ICase=true) ->
+%% lookup a circuit definition in the #bs.circuits map
+find_circuit_def(Name, Defs, _ICase=false) when is_map(Defs) ->
+    maps:find(Name, Defs);
+find_circuit_def(Name, Defs, _ICase=true) when is_map(Defs) ->
     UName = string:uppercase(Name),
-    find_circuit_def_(UName, Defs).
+    find_circuit_def_(UName, maps:values(Defs));
+find_circuit_def(Name, Defs, ICase) when is_list(Defs) ->
+    find_circuit_def(Name, make_circuit_map(Defs), ICase).
 
 find_circuit_def_(UName, [C={circuit,Name,_Params,_Defs}|Defs]) ->
     case string:uppercase(Name) of
@@ -532,6 +536,124 @@ is_circuit_def_(UName, I) ->
 set(undefined, Y, Bs) -> {Y, Bs};
 set(X, Y, Bs) -> operation1('=',X,Y,Bs).
 
+%% is Name defined by a 'define', for any arity
+is_definition(Name, Bs) ->
+    lists:any(fun({N,_A}) -> N =:= Name;
+		 (_) -> false
+	      end, maps:keys(Bs#bs.defs)).
+
+%% A symbol used as a propositional variable without a declaration.
+%% That is normal in varp, P(1,2) is meant to spring into existence, so
+%% plain "undeclared" is a weak signal.  The modes are
+%%
+%%   none  off
+%%   typo  a symbol that occurs once in the source AND looks like a
+%%         misspelling of another symbol.  a1/a2/a3 style families are
+%%         not reported, they differ only in their digits
+%%   once  every symbol that occurs once
+%%   all   every undeclared symbol
+%%
+%% Note that an occurrence count is lexical: A(i) under a quantifier
+%% occurs once but makes many variables, which is why 'once' is not the
+%% default.
+warn_undeclared(P, Arity, Bs) ->
+    case maps:get(undeclared, Bs#bs.option, none) of
+	none ->
+	    ok;
+	Mode ->
+	    %% a name with a definition or a declared literal is not a
+	    %% variable, and a name that is not in the source at all was
+	    %% generated by varp itself (circuit locals, dimacs x(N))
+	    case maps:is_key({P,Arity}, Bs#bs.defs) orelse
+		maps:is_key(P, Bs#bs.literals) of
+		true -> ok;
+		false -> warn_undeclared_(P, Arity, Mode, Bs)
+	    end
+    end.
+
+warn_undeclared_(P, Arity, Mode, Bs) ->
+    Syms = maps:get(syms, Bs#bs.option, #{}),
+    case maps:find(P, Syms) of
+	error ->
+	    ok;   %% generated by varp itself, not from the source
+	{ok,{N,Line}} ->
+	    case report_undeclared(Mode, P, N, Syms) of
+		false -> ok;
+		Why -> undeclared_warning(P, Arity, Line, Why, Bs)
+	    end
+    end.
+
+report_undeclared(all, _P, _N, _Syms) -> not_declared;
+report_undeclared(once, _P, 1, _Syms) -> occurs_once;
+report_undeclared(typo, P, 1, Syms) ->
+    case near_miss(P, Syms) of
+	false -> false;
+	Q -> {looks_like, Q}
+    end;
+report_undeclared(_Mode, _P, _N, _Syms) -> false.
+
+undeclared_warning(P, Arity, Line, Why, Bs) ->
+    Where = maps:get(file, Bs#bs.option, "*internal*"),
+    Name = if Arity =:= 0 -> [P];
+	      true -> [P,"/",integer_to_list(Arity)]
+	   end,
+    case Why of
+	{looks_like,Q} ->
+	    ?warn("~s:~w: warning: '~s' occurs once, did you mean '~s'?\n",
+		  [Where, Line, Name, Q]);
+	occurs_once ->
+	    ?warn("~s:~w: warning: '~s' occurs once and is not declared\n",
+		  [Where, Line, Name]);
+	not_declared ->
+	    ?warn("~s:~w: warning: '~s' is not declared\n",
+		  [Where, Line, Name])
+    end.
+
+%% Another symbol one edit away that is the established spelling, ie
+%% one that occurs more than once.  Two guards keep the families apart
+%% from the typos:
+%%   - a1 and a2 differ only in their digits, that is a family
+%%   - single letters are all one edit from each other, so require a
+%%     name of at least ?TYPO_MIN_LEN characters
+-define(TYPO_MIN_LEN, 3).
+
+near_miss(P, _Syms) when byte_size(P) < ?TYPO_MIN_LEN ->
+    false;
+near_miss(P, Syms) ->
+    near_miss_(P, undigit(P), maps:next(maps:iterator(Syms))).
+
+near_miss_(_P, _Bare, none) -> false;
+near_miss_(P, Bare, {P,_,I}) -> near_miss_(P, Bare, maps:next(I));
+near_miss_(P, Bare, {Q,{N,_},I}) ->
+    case (N > 1) andalso (byte_size(Q) >= ?TYPO_MIN_LEN) andalso
+	(undigit(Q) =/= Bare) andalso edit_distance_1(P, Q) of
+	true -> Q;
+	false -> near_miss_(P, Bare, maps:next(I))
+    end.
+
+undigit(Name) ->
+    << <<C>> || <<C>> <= Name, C < $0 orelse C > $9 >>.
+
+%% true when A can be turned into B with one insert, delete or
+%% substitution
+edit_distance_1(A, B) ->
+    Na = byte_size(A),
+    Nb = byte_size(B),
+    if Na =:= Nb -> subst_1(A, B);
+       Na+1 =:= Nb -> insert_1(A, B);
+       Nb+1 =:= Na -> insert_1(B, A);
+       true -> false
+    end.
+
+subst_1(<<C,A/binary>>, <<C,B/binary>>) -> subst_1(A, B);
+subst_1(<<_,A/binary>>, <<_,B/binary>>) -> A =:= B;
+subst_1(<<>>, <<>>) -> false.   %% identical, not an edit
+
+%% B is A with one extra character
+insert_1(<<C,A/binary>>, <<C,B/binary>>) -> insert_1(A, B);
+insert_1(A, <<_,B/binary>>) -> A =:= B;
+insert_1(<<>>, <<>>) -> false.
+
 icase(Bs) ->    
     maps:get(icase, Bs#bs.option, false).
     
@@ -550,12 +672,15 @@ build(F,Bs) when is_record(Bs, bs) ->
 
 bld1(F, Bs) ->
     try bld(F, Bs) of
-      	Value -> Value
+      	Value ->
+	    Value
     catch
       	throw:contradiction -> 
-     	    {{bool,?F},Bs};
-	?EXCEPTION(error,Error,Stack) ->
-	    io:format("error: ~w\n~p\n", [Error,?GET_STACK(Stack)])
+     	    {{bool,?F},Bs}
+	%% every other error is left for the caller, varp:varp_run/4
+	%% reports it through varp:format_error/1.  Catching it here
+	%% used to return the result of io:format/2, which then showed
+	%% up as a second, bogus, {case_clause,ok} crash.
     end.
 
 bld(Y, Bs) ->
@@ -565,7 +690,9 @@ bld(_X,undefined, Bs) -> {undefined, Bs};
 bld(X,true,Bs) ->  set(X,{bool,?T},Bs);
 bld(X,false,Bs) -> set(X,{bool,?F},Bs);
 bld(X,{literal,Y}, Bs) when is_integer(Y) -> set(X,{bool,Y},Bs); %% FIXME???
-bld(X,V,Bs) when is_binary(V) -> %% variable (and meta)
+%% The clauses below produce a value of their own and ignore the
+%% assignment target, build_assign/3 ties the two together.
+bld(_X,V,Bs) when is_binary(V) -> %% variable (and meta)
     Arity = 0,
     case varp:find_decl(V,Bs#bs.decls,icase(Bs)) of
 	error ->
@@ -584,7 +711,7 @@ bld(X,V,Bs) when is_binary(V) -> %% variable (and meta)
 	{ok,{PType,_Arity,Size}} ->
 	    var_vector(PType,V,Size,Bs)
     end;
-bld(X,W,Bs) when is_integer(W) ->
+bld(_X,W,Bs) when is_integer(W) ->
     if W < 0 ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs);
@@ -592,7 +719,7 @@ bld(X,W,Bs) when is_integer(W) ->
 	    N = varp_math:unsigned_size(W),
 	    const_vector(uint,W,N,Bs)
     end;
-bld(X,{const,W}, Bs) when is_integer(W) ->
+bld(_X,{const,W}, Bs) when is_integer(W) ->
     if W < 0 ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs);
@@ -612,12 +739,21 @@ bld(X,{p,<<"max">>,[A,B]}, Bs) ->
     {A1,Bs1} = bld(A, Bs),
     {B1,Bs2} = bld(B, Bs1),
     operation2('max',X,A1,B1,Bs2);
-bld(X, V={p,P,Args}, Bs) ->
+bld(_X, V={p,P,Args}, Bs) ->
     Arity = length(Args),
     case varp:find_decl(P,Bs#bs.decls,icase(Bs)) of
 	error ->
-	    Decls1 = maps:put(P,{bool,Arity,1},Bs#bs.decls),
-	    variable(V, Bs#bs { decls = Decls1 });
+	    %% a name with a definition is a macro, not a variable.
+	    %% declaring it as a boolean here would fix its arity and
+	    %% stop the same name being defined for several arities.
+	    case is_definition(P, Bs) of
+		true ->
+		    variable(V, Bs);
+		false ->
+		    warn_undeclared(P, Arity, Bs),
+		    Decls1 = maps:put(P,{bool,Arity,1},Bs#bs.decls),
+		    variable(V, Bs#bs { decls = Decls1 })
+	    end;
 	{ok,{bool,Arity1,1}} when Arity =/= Arity1 ->
 	    error({arity_mismatch,P});
 	{ok,{bool,Arity,1}} ->
@@ -625,13 +761,12 @@ bld(X, V={p,P,Args}, Bs) ->
 	{ok,{PType,_Arity,Size}} ->
 	    var_vector(PType,V,Size,Bs)
     end;
-bld(X,{PType,SExpr,PExpr},Bs) when
+bld(_X,{PType,SExpr,PExpr},Bs) when
       PType =:= uint; PType =:= int; PType =:= bit ->
     if is_atom(PExpr) ->
 	    Vn = atom_to_list(PExpr),
 	    case maps:find(Vn,Bs#bs.meta) of
 		error ->
-		    io:format("variable '~s' is not bound\n", [Vn]),
 		    error({unbound, Vn});
 		{ok,W} ->
 		    const_vector(PType,W,SExpr,Bs)
@@ -647,7 +782,10 @@ bld(X,{PType,SExpr,PExpr},Bs) when
 		    Error
 	    end
     end;
-bld(X,{expr,Expr}, Bs) ->
+%% an already built value, injected when a circuit body is instantiated
+bld(X,{value,V}, Bs) ->
+    set(X, V, Bs);
+bld(_X,{expr,Expr}, Bs) ->
     W = eval_meta(Expr,Bs),
     if W >=0 ->
 	    N = varp_math:unsigned_size(W),
@@ -656,17 +794,16 @@ bld(X,{expr,Expr}, Bs) ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs)
     end;
-bld(X,{vec,Fs}, Bs) ->
+bld(_X,{vec,Fs}, Bs) ->
     {Ys,Bs1} = bld_list(Fs, Bs),
     Ys1 = join_vector(Ys),
-    %% io:format("vec=~p, join=~p\n", [Ys, Ys1]),
     {{bit,length(Ys1),[bit(Y)||Y <- Ys1]},Bs1};
 
-bld(X,{bitindex,A,I},Bs) ->
+bld(_X,{bitindex,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
     case A of
-	{p,P,Ps} ->  %% check if declared
-	    case varp:find_decls(P, Bs#bs.decls, icase(Bs)) of
+	{p,P,_Ps} ->  %% check if declared
+	    case varp:find_decl(P, Bs#bs.decls, icase(Bs)) of
 		error ->
 		    variable({index,A,I1}, Bs);
 		{ok,{PType,_,PSize}} ->
@@ -687,7 +824,7 @@ bld(X,{bitindex,A,I},Bs) ->
 	    end
     end;
 
-bld(X,{bitrange,A,I,J,S},Bs) ->
+bld(_X,{bitrange,A,I,J,S},Bs) ->
     I1 = eval_meta(I,Bs),
     J1 = eval_meta(J,Bs),
     S1 = eval_meta(S,Bs),
@@ -716,11 +853,11 @@ bld(X,{'ror',A,K},Bs) ->
     {Z,Bs2} = bld(K,Bs1),
     operation2('ror',X,Y,Z,Bs2);
 
-bld(X,{cnf,{[],[],_Sections}},Bs) ->
+bld(_X,{cnf,{[],[],_Sections}},Bs) ->
     bld(false, Bs);
-bld(X,{cnf,{Vars,_Clauses,_Sections,Cs}},Bs) 
+bld(_X,{cnf,{Vars,_Clauses,_Sections,Cs}},Bs) 
   when is_list(Cs) ->
-    Bs1 = build_cnf(Vars,Cs,Bs),
+    Bs1 = build_cnf(Cs,Vars,Bs),
     {{bool,?T}, Bs1};
 
 bld(_X,{snf,{[],[],_Sections}},Bs) ->
@@ -821,27 +958,35 @@ bld(X,{{'GT',[X1|Qs]},F}, Bs) ->
 bld(X,{{'GTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    if K =:= 0 ->
-	    any(X,Ys,Bs1);
-       is_integer(K),K >= 0 ->
+    if K =< 0 ->            %% at least none is always true
+	    set(X,{bool,?T},Bs1);
+       is_integer(K) ->
 	    gtk(K-1,X,Ys,Bs1)
     end;
 bld(X,{{'LT',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    if K =:= 1 ->
+    N = length(Ys),
+    if K =< 0 ->            %% less than none is never true
+	    set(X,{bool,?F},Bs1);
+       K =:= 1 ->
 	    none(X,Ys,Bs1);
-       is_integer(K),K > 1 ->
-	    N = length(Ys),
+       K > N ->             %% less than more than all is always true
+	    set(X,{bool,?T},Bs1);
+       is_integer(K) ->
 	    gtk(N-K,X,lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
 bld(X,{{'LTE',[X1|Qs]},F}, Bs) ->
     K = eval_meta(X1,Bs),
     {Ys,Bs1} = build_quant(F,Qs,Bs),
-    if K =:= 0 ->
+    N = length(Ys),
+    if K < 0 ->
+	    set(X,{bool,?F},Bs1);
+       K =:= 0 ->
 	    none(X,Ys,Bs1);
-       is_integer(K),K > 0 ->
-	    N = length(Ys),
+       K >= N ->            %% at most all is always true
+	    set(X,{bool,?T},Bs1);
+       is_integer(K) ->
 	    gtk(N-K-1,X,lists:map(fun(Y) -> negate(Y) end, Ys), Bs1)
     end;
 bld(X,{{'SUM',Qs}, F}, Bs) ->
@@ -865,9 +1010,9 @@ bld(X,{{'EVEN',Qs}, F}, Bs) ->
 bld(X,{cop, Name, Args}, Bs) ->
     case find_circuit_def(Name, Bs#bs.circuits, icase(Bs)) of
 	{ok, Circuit} ->
-	    build_circuit(Circuit, Args, Bs);
+	    {Value,Bs1} = build_circuit(Circuit, Args, Bs),
+	    set(X, Value, Bs1);
 	error ->
-	    io:format("circuit ~p not defined\n", [Name]),
 	    error({circuit_undefined, Name})
     end.
 
@@ -892,39 +1037,238 @@ bld_list_([],Acc,Bs) ->
 
 
 %%
-%% Build circuit
-%% create a symbol prefix for each nesting level
-%% C = C1....Ci
-%%   input variables are bound to parameter variables (p1=x && y, p2=z)
-%%   int a, b, c = false
-%%       C.a = p1 (add_symbol)
-%%       C.b = p2 (add_symbol)
-%%       C.c = false
-%%   out o;
-%%   return r;
-%%       C.f = C.a xor C.b xor C.c;
-%%       C.o = C.f
-%%       C.r = C.f and C.b
+%% Build (instantiate) a circuit
 %%
-%%  Return variable C.d
-%%  Return true if there is no return parameter
-%%   
-build_circuit(Circuit, Args, Bs) ->
-    io:format("build circuit = ~p ~p\n", [Circuit, Args]),
-    {{bool,?T}, Bs}.
+%%   circuit Name(in y,z; in ci; return x; out co) { ... }
+%%
+%% A circuit is a closed module.  Every name that occurs in the body is
+%% local to the instance and is given the unique symbol prefix
+%% "<Name>#<Seq>." so that locals show up in models as e.g. adder#3.s1
+%% The only names that are NOT localised are
+%%
+%%   - the formal parameters,  they are replaced by the value of the
+%%     corresponding argument at the call site
+%%   - names that match a 'define' macro
+%%   - (nested) circuit names
+%%
+%% Arguments bind to the 'in' and 'out' parameters, in declaration order.
+%% Positional arguments fill the parameters from the left, named arguments
+%% (name = expr) bind by parameter name, and a parameter with a default
+%% (in a3 = false) may be left out.  Since an argument is built once and
+%% then substituted as a value, assigning to an 'out' parameter inside the
+%% body constrains the caller's variable, which is the point of 'out'.
+%%
+%% The value of the call is the value of the 'return' parameter, or
+%% true when the circuit has no return parameter.
+%%
+build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
+    {Ins,Outs,Return} = circuit_params(Name, Params),
+    {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0),
+    {Prefix,Bs2} = circuit_prefix(Name, Bs1),
+    {RetName,Bs3} = circuit_return(Return, Prefix, Bs2),
+    Body = circuit_rename(Defs, maps:from_list(Bnd), Prefix, Bs3#bs.defs),
+    Bs4 = build_circuit_body(Body, Bs3),
+    {Value,Bs5} = circuit_value(RetName, Bs4),
+    %% locals and nested circuit definitions do not leak into the caller,
+    %% but declarations made for the arguments (in Bs1) do.
+    {Value, Bs5#bs { decls = Bs1#bs.decls, circuits = Bs1#bs.circuits }}.
+
+%% split the parameter list into {In, Out, Return}
+circuit_params(Name, Params) ->
+    circuit_params(Name, Params, [], [], undefined).
+
+circuit_params(Name, [{in,Ds}|Ps], In, Out, Ret) ->
+    circuit_params(Name, Ps, In++[circuit_formal(Name,D) || D <- Ds], Out, Ret);
+circuit_params(Name, [{out,Ds}|Ps], In, Out, Ret) ->
+    circuit_params(Name, Ps, In, Out++[circuit_formal(Name,D) || D <- Ds], Ret);
+circuit_params(Name, [{return,D}|Ps], In, Out, undefined) ->
+    circuit_params(Name, Ps, In, Out, circuit_formal(Name,D));
+circuit_params(Name, [{return,_}|_], _In, _Out, _Ret) ->
+    error({circuit_multiple_return, Name});
+circuit_params(_Name, [], In, Out, Ret) ->
+    {In, Out, Ret}.
+
+%% #{ name, type, size, default }
+circuit_formal(Name, {'=',D,Default}) ->
+    F = circuit_formal(Name, D),
+    F#{ default => Default };
+circuit_formal(_Name, {{p,P,[]},Type,Size}) ->
+    #{ name => P, type => Type, size => Size, default => undefined };
+circuit_formal(_Name, {p,P,[]}) ->
+    #{ name => P, type => bool, size => 1, default => undefined };
+circuit_formal(Name, D) ->
+    error({circuit_parameter, Name, D}).
+
+%% bind the call arguments to the formal parameters
+circuit_bind(Name, Formals, Args, Bs) ->
+    {Named,Pos} =
+	lists:partition(fun({'=',N,_}) -> is_binary(N);
+			   (_) -> false
+			end, Args),
+    NamedMap = maps:from_list([{N,E} || {'=',N,E} <- Named]),
+    if length(Pos) > length(Formals) ->
+	    error({circuit_arity, Name, length(Args), length(Formals)});
+       true ->
+	    ok
+    end,
+    case maps:keys(NamedMap) -- [N || #{name := N} <- Formals] of
+	[] -> ok;
+	Unknown -> error({circuit_unknown_argument, Name, Unknown})
+    end,
+    circuit_bind_(Name, Formals, 1, length(Pos), Pos, NamedMap, [], Bs).
+
+circuit_bind_(Name, [F=#{name := N}|Fs], I, NPos, Pos, Named, Acc, Bs) ->
+    Expr =
+	if I =< NPos ->
+		case maps:is_key(N, Named) of
+		    true -> error({circuit_duplicate_argument, Name, N});
+		    false -> lists:nth(I, Pos)
+		end;
+	   true ->
+		case maps:find(N, Named) of
+		    {ok,E} -> E;
+		    error ->
+			case maps:get(default, F) of
+			    undefined ->
+				error({circuit_missing_argument, Name, N});
+			    D -> D
+			end
+		end
+	end,
+    {V,Bs1} = circuit_arg(F, Expr, Bs),
+    circuit_bind_(Name, Fs, I+1, NPos, Pos, Named, [{N,V}|Acc], Bs1);
+circuit_bind_(_Name, [], _I, _NPos, _Pos, _Named, Acc, Bs) ->
+    {lists:reverse(Acc), Bs}.
+
+%% build one argument.  When the parameter is typed and the argument is a
+%% plain, not yet declared, symbol then the parameter type/size is used to
+%% declare it in the caller scope.
+circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
+  when Type =/= bool ->
+    Bs1 = case varp:find_decl(P, Bs#bs.decls, icase(Bs)) of
+	      error ->
+		  N = eval_meta(Size, Bs),
+		  Decls = maps:put(P, {Type,length(As),N}, Bs#bs.decls),
+		  Bs#bs { decls = Decls };
+	      _ ->
+		  Bs
+	  end,
+    bld(Expr, Bs1);
+circuit_arg(_F, Expr, Bs) ->
+    bld(Expr, Bs).
+
+%% unique symbol prefix for the locals of this instance
+circuit_prefix(Name, Bs) ->
+    Seq = Bs#bs.cseq + 1,
+    Prefix = iolist_to_binary([Name,"#",integer_to_list(Seq),"."]),
+    {Prefix, Bs#bs { cseq = Seq }}.
+
+%% the return parameter is a fresh local
+circuit_return(undefined, _Prefix, Bs) ->
+    {undefined, Bs};
+circuit_return(#{name := N, type := bool}, Prefix, Bs) ->
+    {<<Prefix/binary,N/binary>>, Bs};
+circuit_return(#{name := N, type := Type, size := Size}, Prefix, Bs) ->
+    RName = <<Prefix/binary,N/binary>>,
+    Sz = eval_meta(Size, Bs),
+    {RName, Bs#bs { decls = maps:put(RName,{Type,0,Sz},Bs#bs.decls) }}.
+
+circuit_value(undefined, Bs) ->
+    {{bool,?T}, Bs};
+circuit_value(RName, Bs) ->
+    bld({p,RName,[]}, Bs).
+
+%% Rewrite the body: formal parameters become values, every other
+%% predicate/variable name is prefixed, macros and circuit names are kept.
+circuit_rename({p,P,As}, Env, Prefix, Defs) ->
+    As1 = circuit_rename(As, Env, Prefix, Defs),
+    case maps:find(P, Env) of
+	{ok,V} when As1 =:= [] ->
+	    {value,V};
+	{ok,_} ->
+	    error({circuit_parameter_arity, P});
+	error ->
+	    case maps:is_key({P,length(As1)}, Defs) of
+		true  -> {p,P,As1};
+		false -> {p,<<Prefix/binary,P/binary>>,As1}
+	    end
+    end;
+%% a nested circuit definition keeps its own scope, it is renamed when
+%% it is instantiated
+circuit_rename(C={circuit,_Name,_Params,_Body}, _Env, _Prefix, _Defs) ->
+    C;
+circuit_rename({cop,Name,As}, Env, Prefix, Defs) ->
+    {cop,Name,circuit_rename(As, Env, Prefix, Defs)};
+circuit_rename(T, Env, Prefix, Defs) when is_tuple(T) ->
+    list_to_tuple(circuit_rename(tuple_to_list(T), Env, Prefix, Defs));
+circuit_rename([H|T], Env, Prefix, Defs) ->
+    [circuit_rename(H, Env, Prefix, Defs) |
+     circuit_rename(T, Env, Prefix, Defs)];
+circuit_rename(X, _Env, _Prefix, _Defs) ->
+    X.
+
+build_circuit_body([{declare,Ds}|Body], Bs) ->
+    case varp:add_decls(Ds, Bs#bs.decls, Bs) of
+	{ok,Decls} -> build_circuit_body(Body, Bs#bs { decls = Decls });
+	{error,Reason} -> error(Reason)
+    end;
+build_circuit_body([C={circuit,Name,_Params,_Defs}|Body], Bs) ->
+    Circuits = maps:put(Name, C, Bs#bs.circuits),
+    build_circuit_body(Body, Bs#bs { circuits = Circuits });
+build_circuit_body([{lop,'=',OExpr,LExpr}|Body], Bs0) ->
+    {_X,Bs1} = build_assign(OExpr, LExpr, Bs0),
+    build_circuit_body(Body, Bs1);
+build_circuit_body([{constraint,F}|Body], Bs0) ->
+    build_circuit_body(Body, assert_formula(F, Bs0));
+build_circuit_body([F|Body], Bs0) ->
+    build_circuit_body(Body, assert_formula(F, Bs0));
+build_circuit_body([], Bs) ->
+    Bs.
+
+%% a bare formula in a circuit body must hold
+assert_formula(F, Bs0) ->
+    case bld(F, Bs0) of
+	{{bool,?T},Bs1} -> Bs1;
+	{{bool,?F},_Bs1} -> throw(contradiction);
+	{{bool,L},Bs1} ->
+	    varp_circuit:clause(Bs1#bs.vp, [L]),
+	    Bs1;
+	{{_Type,_N,Ls},Bs1} ->
+	    %% a vector is true when it is non zero
+	    varp_circuit:clause(Bs1#bs.vp, Ls),
+	    Bs1;
+	{_,Bs1} ->
+	    Bs1
+    end.
 
 
 %% build  [ oexpr = lexpr ';' ]
 %% here we could/should generate Oexpr then pass the 
 %% output to the left expression to be used as gate/circuit output?
+build_assignment_defs([F={cop,_Name,_Args}|Assignments], Bs0) ->
+    {_,Bs1} = bld(F, Bs0),
+    build_assignment_defs(Assignments, Bs1);
 build_assignment_defs([{lop,'=',OExpr,LExpr}|Assignments], Bs0) ->
-    {X,Bs1} = bld(OExpr,Bs0),    %% or bld1?
-    {_Y,Bs2} = bld(X,LExpr,Bs1),  %% or bld1?
-    %% {{bool,Z},Bs3} = operation2('eq',X,Y,Bs2),
-    %% varp_circuit:xor_gate(Bs3#bs.vp, ?F, Z, ?T),
-    build_assignment_defs(Assignments, Bs2);
+    {_X,Bs1} = build_assign(OExpr, LExpr, Bs0),
+    build_assignment_defs(Assignments, Bs1);
 build_assignment_defs([], Bs) ->
     Bs.
+
+%% OExpr = LExpr
+%%
+%% The left hand side is built first and then handed to bld/3 as the
+%% target, so that a gate can be generated directly into it.  Not every
+%% expression can do that (a plain variable reference, a constant, a bit
+%% selection, ...) - those return a value of their own and are tied to
+%% the target here instead.
+build_assign(OExpr, LExpr, Bs0) ->
+    {X,Bs1} = bld(OExpr, Bs0),
+    case bld(X, LExpr, Bs1) of
+	{X, Bs2} ->             %% built into the target
+	    {X, Bs2};
+	{Y, Bs2} ->             %% target was ignored, constrain it now
+	    set(X, Y, Bs2)
+    end.
 
 %%
 %% Special build of cnf/snf
@@ -935,7 +1279,7 @@ build_assignment_defs([], Bs) ->
 build_cnf(Cs,Vars,Bs) ->
     %% CNF only works as first formula! variables
     %% must be numerated 1..Vars
-    {1,Vars} = varp_nif:add_variables(Bs#bs.vp, Vars), %% yes, so match!
+    {1,Vars} = varp_nif:add_variables(Bs#bs.vp, Vars, true), %% yes, so match!
     build_cnf_(Cs, Vars, Bs).
 
 build_cnf_([CL|CLs], Vars, Bs) ->
@@ -964,7 +1308,7 @@ build_cnf_([],_Vars,Bs) ->
 build_snf([CL|CLs], Bs) ->
     {Xs,Bs1} = bld_args(CL,Bs),
     Ls = [L || {bool,L} <- Xs],
-    varp_circuit:clause(Bs1,Ls),
+    varp_circuit:clause(Bs1#bs.vp,Ls),
     build_snf(CLs, Bs1);
 build_snf([], Bs) ->
     Bs.
@@ -1044,7 +1388,7 @@ build_iquant(Fs, Qs, Bs) when is_list(Fs), is_list(Qs) ->
 build_iquant(F, Qs, Bs) when is_list(Qs) ->
     build_iquant_(F, Qs, Bs).
 
-build_iquant_(F,[{'=',V,D}|Qs], Bs) ->
+build_iquant_(F,[{op,'=',V,D}|Qs], Bs) ->
     Ds = eval_domain(D, Bs),
     build_iquant_domain(F, V, Ds, Qs, Bs);
 build_iquant_(F, [Expr|Qs], Bs) ->
@@ -1215,7 +1559,6 @@ eval_id(Vn, Bs) when is_binary(Vn) ->
 		error ->
 		    case find_prop_def(Vn, Bs#bs.defs) of
 			false ->
-			    io:format("'~s' is not bound\n", [Vn]),
 			    error({unbound, Vn});
 			Def ->
 			    eval_meta(Def, Bs)
@@ -1361,7 +1704,7 @@ var_vector(Type,V,N,Bs) ->
 	    %% io:format("var_vector (~w) ~p = ~p\n", [N1,Sym,{Type,Ls}]),
 	    {{Type,length(Ls),Ls},Bs};
 	false ->
-	    {V1,Vn} = varp_nif:add_variables(Bs#bs.vp, N1, true, true),
+	    {V1,Vn} = varp_nif:add_variables(Bs#bs.vp, N1, true),
 	    Ls = lists:seq(V1,Vn),
 	    Var = {Name,Args},
 	    add_symbol(Bs, Var, Ls, Type),
@@ -1521,11 +1864,8 @@ join_vector([]) ->
 %%
 %% Unary operator
 %%
-operation1(Op, {bool,A}, Bs) ->
-    B = case Op of
-	'not' ->
-		varp_circuit:gate(Bs#bs.vp,'not',A)
-	end,
+operation1(Op, {bool,A}, Bs) when Op =:= 'not'; Op =:= 'bnot' ->
+    B = varp_circuit:gate(Bs#bs.vp,'not',A),
     {{bool,B}, Bs};
 operation1(Op, A, Bs) ->
     X = case Op of
@@ -1549,16 +1889,23 @@ operation1(Op, A, Bs) ->
     {X, Bs}.
 
 %% Operation with assignment to X
-operation1(Op, {bool,X}, {bool,A}, Bs) ->
+operation1(Op, {bool,X}, {bool,A}, Bs) when
+      Op =:= 'not'; Op =:= 'bnot'; Op =:= '=' ->
     X1 = case Op of
-	     'not' -> varp_circuit:gate(Bs#bs.vp,'not',X,A);
-	     '=' -> varp_circuit:set(Bs#bs.vp, X, A)
+	     '=' ->
+		 varp_circuit:set(Bs#bs.vp, X, A);
+	     _ ->
+		 varp_circuit:gate(Bs#bs.vp,'not',X,A)
 	 end,
     {{bool,X1}, Bs};
 %% operation1(':=',X,Y={T,Size,Ys},Bs) when ?is_vec_type(T) ->
 %%     {Y, alias_vector(Bs,T,X,Size,Ys)};
+operation1(Op, undefined, A, Bs) ->
+    operation1(Op, A, Bs);
 operation1(Op, X, A, Bs) ->
     X1 = case Op of
+	    '=' ->
+		varp_arith:set(Bs#bs.vp,X,A);
 	    'bnot' ->
 		varp_arith:bitwise_not(Bs#bs.vp,X,A);
 	    'not' ->
@@ -1582,9 +1929,12 @@ operation1(Op, X, A, Bs) ->
 %%
 %% Binary operator
 %%
-operation2(Op,{bool,Y},{bool,Z}, Bs) ->
+operation2(Op,{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
     X = case Op of
 	    'and' -> varp_circuit:and_gate(Bs#bs.vp, Y, Z);
+	    'band' -> varp_circuit:and_gate(Bs#bs.vp, Y, Z);
+	    'bor' -> varp_circuit:or_gate(Bs#bs.vp, Y, Z);
+	    'bxor' -> varp_circuit:xor_gate(Bs#bs.vp, Y, Z);
 	    'or' ->  varp_circuit:or_gate(Bs#bs.vp, Y, Z);
 	    'imp' -> varp_circuit:imp_gate(Bs#bs.vp, Y, Z);
 	    'equ' -> varp_circuit:equ_gate(Bs#bs.vp, Y, Z);
@@ -1639,10 +1989,13 @@ operation2(Op,A,B,Bs) ->
 %% like operation2 but result is predetermined in X
 operation2(Op,undefined,Y,Z,Bs) ->
     operation2(Op,Y,Z,Bs);
-operation2(Op,{bool,X},{bool,Y},{bool,Z}, Bs) ->
+operation2(Op,{bool,X},{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
     %% X1 is "normally" equal to X
     X1 = case Op of
 	    'and' -> varp_circuit:and_gate(Bs#bs.vp, X, Y, Z);
+	    'band' -> varp_circuit:and_gate(Bs#bs.vp, X, Y, Z);
+	    'bor' -> varp_circuit:or_gate(Bs#bs.vp, X, Y, Z);
+	    'bxor' -> varp_circuit:xor_gate(Bs#bs.vp, X, Y, Z);
 	    'or' ->  varp_circuit:or_gate(Bs#bs.vp, X, Y, Z);
 	    'imp' -> varp_circuit:imp_gate(Bs#bs.vp, X, Y, Z);
 	    'equ' -> varp_circuit:equ_gate(Bs#bs.vp, X, Y, Z);
@@ -1768,17 +2121,16 @@ collect_model(Vp) ->
 	      fun(I,Acc) ->
 		      case varp_nif:get_symbol(Vp,I) of
 			  [] -> Acc;
-			  [{Sym={Name,Args},bool,1,0}] ->
+			  [{{Name,Args},bool,1,0}] ->
 			      Value = varp_nif:value(Vp,I),
 			      [{{p,Name,Args},Value}|Acc];
-			  [{Sym={Name,Args},Type,Len,Pos}] ->
+			  [{{Name,Args},Type,Len,Pos}] ->
 			      Value = varp_nif:value(Vp,I),
 			      V = case Value of
 				      ?T -> $1;
 				      ?F -> $0;
 				      _  -> $*
 				  end,
-			      %% io:format("I = ~w, value = ~p\n",[I,Value]),
 			      model_setvec(Type,{p,Name,Args},Len,Pos,V,Acc)
 		      end
 	      end, [], lists:seq(1, N))
@@ -1807,7 +2159,6 @@ model_vars(_Vp,[],_Y,Ms) ->
 %% int/uint/bit is represented as ascii vector {Type,{$0|$1|$*,...}}
 %% where the bit tuple is MSB (high to low) 
 model_setvec(Type,X,N,I,V,Ms) ->
-    %% io:format("setvec ~p ~p ~p ~p ~p\n", [Type,X,N,I,V]),
     case lists:keytake(X, 1, Ms) of
 	{value,{X,{Type,Bits}},Ms1} ->
 	    Bits1 = setelement(N-I,Bits,V),
@@ -1937,10 +2288,12 @@ proof_output_text(Fd, Bs, Prefix, Clause) ->
     end.
 
 proof_literal(Bs,Li) ->
-    case varp_nif:get_literal(Bs#bs.vp,Li) of
-	[] -> integer_to_list(Li);
-	[{{<<"x">>,[I]},bool,1,0}] when Li < 0  -> integer_to_list(-I);
-	[{P,bool,1,0}] when Li < 0  -> [$!|varp_format:format_symbol(P)];
-	[{{<<"x">>,[I]},bool,1,0}] when Li > 0  -> integer_to_list(I);
-	[{P,bool,1,0}] when Li > 0  -> [$!|varp_format:format_symbol(P)]
+    case varp_nif:get_symbol(Bs#bs.vp,abs(Li)) of
+	%% x(I) is a dimacs numbered variable, print it as a number
+	[{{<<"x">>,[I]},bool,1,0}] when Li < 0 -> integer_to_list(-I);
+	[{{<<"x">>,[I]},bool,1,0}] -> integer_to_list(I);
+	[{P,bool,1,0}] when Li < 0 -> [$!|varp_format:format_internal_symbol(P)];
+	[{P,bool,1,0}] -> varp_format:format_internal_symbol(P);
+	%% internal or vector variable, no boolean symbol of its own
+	_ -> integer_to_list(Li)
     end.
