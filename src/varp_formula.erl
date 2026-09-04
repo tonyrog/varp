@@ -749,6 +749,12 @@ bld(_X, V={p,P,Args}, Bs) ->
 	    case is_definition(P, Bs) of
 		true ->
 		    variable(V, Bs);
+		false when Arity =:= 0, is_map_key(P, Bs#bs.meta) ->
+		    %% a bound meta variable used as a value, "A*B == n":
+		    %% the scanner makes no difference between P and n,
+		    %% so this is where a small letter name becomes its
+		    %% number (a declared symbol of the same name wins)
+		    bld(maps:get(P, Bs#bs.meta), Bs);
 		false ->
 		    warn_undeclared(P, Arity, Bs),
 		    Decls1 = maps:put(P,{bool,Arity,1},Bs#bs.decls),

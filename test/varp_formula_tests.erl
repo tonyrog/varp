@@ -425,3 +425,22 @@ die_hard_test_() ->
 	       Opts = #{meta => #{<<"n">> => N}, undeclared => none},
 	       ?assertEqual(N >= 6, varp_tc:is_sat(Text, Opts))
        end}} || N <- [1,2,3,4,5,6]].
+
+%%%-------------------------------------------------------------------
+%%% Meta variables used as values
+%%%-------------------------------------------------------------------
+
+%% a small letter name bound on the command line (or by a quantifier)
+%% is a number when it appears in a logic expression
+meta_as_value_test() ->
+    Ms = varp_tc:models("declare A:4, B:3; (A*B == n)",
+			#{meta => #{<<"n">> => 15}}),
+    ?assertEqual([[{"A",3},{"B",5}],[{"A",5},{"B",3}],[{"A",15},{"B",1}]], Ms),
+    %% quantifier variables too
+    ?assertEqual(1, count("declare X(i):3; [A i=1..3] (X(i) == i)")),
+    %% and inside a define
+    ?assertEqual(1, count("declare X:3; define F(i) (X == i); F(5)")),
+    %% the is_prime formula: 100 = 25*4 = 20*5 = 50*2
+    F = "declare A:(isize(n)-1); declare B:((isize(n)+1)/2);"
+	"((A * B) == n) && (A > B) && (B > 1)",
+    ?assertEqual(3, varp_tc:count(F, #{meta => #{<<"n">> => 100}})).
