@@ -346,8 +346,9 @@ global_options() ->
       #{ long => "qtype",
 	 key => qtype,
 	 spec => {enum,[{"fifo",fifo},{"lifo",lifo},{"recursive",recursive}]},
-	 default => recursive,
-	 description => "lifo, fifo or depth first queue type."
+	 default => lifo,
+	 description => "Propagation order: lifo (newest implied literal first),"
+	     " fifo (oldest first), or recursive (depth first)."
        },
       #{ long => "hash",
 	 key => hash,

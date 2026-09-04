@@ -6,7 +6,7 @@ APPL = Varp
 VSN = $(shell git describe --abbrev=0)
 MACHINE = $(shell uname -m)
 
-.PHONY: all test test-gui clean
+.PHONY: all test test-gui bench clean
 
 all:
 	(cd src && $(MAKE) all)
@@ -15,6 +15,10 @@ all:
 # build and run the eunit test suites
 test: all
 	(cd test && $(MAKE) test)
+
+# raw solver performance on a fixed instance set (see test/bench.sh)
+bench: all
+	test/bench.sh
 
 # the same, including the gui window (needs xvfb-run)
 test-gui: all

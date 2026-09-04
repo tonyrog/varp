@@ -67,4 +67,4 @@ default_option_test() ->
 	      ?assertEqual({Key,Expected}, {Key,varp_nif:getopt(Vp,Key)})
       end,
       [{xref,false},{hash,false},{icase,false},{bcp2,false},
-       {use_phase,false},{seed,0},{qtype,recursive}]).
+       {use_phase,false},{seed,0},{qtype,lifo}]).

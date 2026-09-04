@@ -223,3 +223,28 @@ plugins_loadable_test() ->
 	      ?assert(erlang:function_exported(Mod, options, 0)),
 	      ?assert(erlang:function_exported(Mod, run, 2))
       end, Ps).
+
+%%%-------------------------------------------------------------------
+%%% Propagation order
+%%%-------------------------------------------------------------------
+
+%% --qtype selects the order in which implied literals are propagated.
+%% It changes which conflict is met first, never the answer.
+propagation_order_test_() ->
+    Pigeon = "( ([A p=1..n] [E h=1..(n-1)] P(p,h)) and"
+	"  ([A h=1..(n-1)] [A p=1..n] [A q=1..n,p<q]"
+	"      not (P(p,h) and P(q,h))) )",
+    [{atom_to_list(Q),
+      {timeout, 120,
+       fun() ->
+	       O = #{qtype => Q},
+	       ?assert(varp_tc:is_unsat(Pigeon, O#{meta => #{<<"n">> => 5}})),
+	       ?assertEqual(6, varp_tc:count("[EQ 2,i=1..4] P(i)", O)),
+	       ?assertEqual(1, varp_tc:count(
+				 "declare X:4,Y:4; (X*Y == 15) && (X>1) && (Y>1) && (X<=Y)", O)),
+	       ?assert(varp_tc:is_tautology("(A -> B) and (B -> C) -> (A -> C)", O)),
+	       {R,Ms,_} = run(Pigeon, [{satisfy,[]},{backjump,[{max,1}]}],
+			      O#{meta => #{<<"n">> => 4}}),
+	       ?assertEqual(?INCONSISTENT, R),
+	       ?assertEqual([], Ms)
+       end}} || Q <- [recursive, lifo, fifo]].

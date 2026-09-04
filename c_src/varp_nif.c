@@ -49,7 +49,6 @@
 #define DYN_UNDO_INIT    7
 #define DYN_MARK_INIT    8
 
-#define MAX_BCP_DEPTH  1000
 
 // Erlang is 1 based Python is 0 based
 #ifdef PYNIF
@@ -430,15 +429,27 @@ typedef uint16_t markbits_t;
 #define LIT_MARK0   0x0010
 #define LIT_MARK1   0x0020
 #define LIT_MARK2   0x0040
-#define LIT_MARKQ   0x0080  // literal is inq
+#define MAX_BCP_DEPTH 1000   // recursive propagation, then fall back to the stack
 #define VAR_ATOM    0x0100
 #define VAR_USED    0x0200
 #define LIT_MARKU   0x0400  // all marked
 
 
+// A watch: clause cp watches the literal whose vector this entry sits
+// in; blocker is the OTHER watched literal of cp (may be stale after
+// that watch moved, a stale blocker is only ever false, never wrong).
+// When the blocker is true the clause is satisfied and is not loaded.
+typedef struct _watch_t
+{
+    struct _clause_t* cp;
+    lit_t blocker;
+} watch_t;
+
 typedef struct _literal_t
 {
-    struct _wlink_t* wlist;    // list of watch positions
+    watch_t* ws;               // clauses watching this literal
+    uint32_t nws;              // number of entries in ws
+    uint32_t cws;              // capacity of ws
     dynarray_t* xref;          // (cix_t) cross references when enabled
     dynarray_t* sref;          // (sref_t) list of symbol/pos references
 } literal_t;
@@ -492,10 +503,6 @@ typedef struct _symbol_t // :dlink - dlist
     dynvar(lit_t*, lit);      // array of literals
 } symbol_t;
 
-typedef struct _wlink_t
-{
-    struct _wlink_t* next;
-} wlink_t;
 
 // #define USE_CLAUSE_SEGMENTS
 #define CLAUSE_BITS    24
@@ -503,14 +510,11 @@ typedef struct _wlink_t
 #define MAX_CLAUSE_OFFSET MAX_CLAUSE_SEGMENT_SIZE
 #define DEF_SEGMENT_SIZE (1 << 20)
 
-// sizeof wlink should be 4 on 32 bit machine or 8 on 64 bit machine
-// 32 bit machine alignement should be 2*4 = 8 bytes
-// 64 bit machine alignement should be 2*8 = 16 bytes
-#define CLAUSE_ALIGNMENT (2*sizeof(wlink_t))
+// clauses are malloc aligned, nothing depends on it any more
+#define CLAUSE_ALIGNMENT 16
 
 typedef struct _clause_t
 {
-    wlink_t    wl[2];        // ALIGNED watch point 1&2+links (DO NOT MOVE!)
     cix_t      cix;          // clause id (index) 0..n-1  (<< 1)
     uint32_t   size;         // number of literals (used) in lit
     uint32_t   lsize;        // number of literals (allocated) in lit
@@ -706,7 +710,9 @@ typedef struct _varp_t {
     int32_t      max_level;     // statistics max level since last check
     int32_t      min_level;     // statistics min level since last check
 
-    dynvar(lit_t*, q);          // queue/stack of literals
+    int qhead;                  // fifo: trail index of next literal to propagate
+    dynvar(lit_t*, qs);         // lifo/recursive: stack of literals to propagate
+    int qn;                     // number of literals on qs
 
     variable_t constant;
 
@@ -1557,18 +1563,7 @@ static int decompress_int(uint8_t* ptr)
 }
 #endif
 
-// Clause pointer from wlink_t pointer
-static inline clause_t* clause_pointer(wlink_t* wl)
-{
-    intptr_t w = (intptr_t) wl;
-    return (clause_t*) (w & ~(CLAUSE_ALIGNMENT-1));
-}
 
-static inline int wlink_index(wlink_t* wl)
-{
-    intptr_t w = (intptr_t) wl;
-    return (w & (CLAUSE_ALIGNMENT-1)) / sizeof(wlink_t);
-}
 
 static inline clause_t* get_clause(varp_t* vp, cix_t index)
 {
@@ -2132,31 +2127,37 @@ void print_sym_clause(varp_t* vp, char* label, clause_t* cp)
 }
 
 
-static inline void wlink_clear(wlink_t* wlp)
-{
-    wlp->next = NULL;
-}
 
-static inline void wlink_link(varp_t* vp, wlink_t* wlp, lit_t xl)
+// add clause cp to the watch vector of literal xl
+static int watch_push(varp_t* vp, lit_t xl, clause_t* cp, lit_t blocker)
 {
     literal_t* lp = l2ll(vp, xl);
-    wlp->next = lp->wlist;  // link literal
-    lp->wlist = wlp;
+    if (lp->nws == lp->cws) {
+	uint32_t cap = lp->cws ? 2*lp->cws : 4;
+	watch_t* ws = VARP_REALLOC(lp->ws, cap*sizeof(watch_t));
+	if (ws == NULL) return -1;
+	lp->ws = ws;
+	lp->cws = cap;
+    }
+    lp->ws[lp->nws].cp = cp;
+    lp->ws[lp->nws].blocker = blocker;
+    lp->nws++;
+    return 0;
 }
 
 // FIXME: make constant
-static void wlink_unlink(varp_t* vp, clause_t* cp, lit_t xl)
+// remove clause cp from the watch vector of literal xl (rare: level 0
+// retirement and substitution), order is not significant
+static void watch_remove(varp_t* vp, clause_t* cp, lit_t xl)
 {
-    UNUSED(vp);
     literal_t* lp = l2ll(vp, xl);
-    wlink_t** wlp = &lp->wlist;
-    wlink_t* wl;
-
-    while((wl = *wlp) && (clause_pointer(wl) != cp))
-	wlp = &(wl->next);
-    if (wl != NULL) {
-	*wlp = wl->next;  // unlink
-	wl->next = NULL;  // do we need to clear this?
+    uint32_t i;
+    for (i = 0; i < lp->nws; i++) {
+	if (lp->ws[i].cp == cp) {
+	    lp->ws[i] = lp->ws[lp->nws-1];
+	    lp->nws--;
+	    return;
+	}
     }
 }
 
@@ -2164,8 +2165,9 @@ static void wlink_unlink(varp_t* vp, clause_t* cp, lit_t xl)
 static void clause_unwatch(varp_t* vp, clause_t* cp)
 {
     if (cp->watched) {
-	wlink_unlink(vp, cp, cp->lit[0]);
-	wlink_unlink(vp, cp, cp->lit[1]);
+	watch_remove(vp, cp, cp->lit[0]);
+	if (cp->size != 0)   // a monitor clause has one watch only
+	    watch_remove(vp, cp, cp->lit[1]);
 	cp->watched = 0;
     }
 }
@@ -2178,35 +2180,44 @@ static void schedule_unwatch_clause(varp_t* vp, clause_t* cp)
     }
 }
 
-static inline void lqueue_insert(varp_t* vp, lit_t xl)
+// Three propagation orders, --qtype:
+//   fifo       the queue is the tail of the trail: bnd_map[qhead..top) is
+//              assigned but not yet propagated, nothing is copied
+//   lifo       a stack qs of literals made false, newest first
+//   recursive  an implied literal is propagated at once, inside the walk
+//              that found it (depth first), the stack takes over past
+//              MAX_BCP_DEPTH
+// The order is a search heuristic: it decides which conflict is found
+// first and so what is learnt.  The structure below is the same for all.
+static inline int trail_top(varp_t* vp)
 {
-    if (lit_mark_if_unmarked(vp, xl, LIT_MARKQ)) {
-	int i = dynvar_size(vp->q);
-	dynvar_resize(vp->q, i+1);
-	vp->q[i] = xl;
-    }
+    bindings_t* bp = &vp->bnd[vp->level];
+    return bp->offs + bp->size;
 }
-
-// always get from head of list(queue)
-static inline lit_t lqueue_deq(varp_t* vp)
+static inline void qs_push(varp_t* vp, lit_t xl)
+{
+    vp->qs[vp->qn++] = xl;   // sized with the trail, a literal is pending at most once
+}
+// drop whatever is left to propagate (after a conflict)
+static inline void lqueue_clear(varp_t* vp)
+{
+    vp->qhead = trail_top(vp);
+    vp->qn = 0;
+}
+// is xl (a false literal) still waiting to be propagated?  debug only
+static int lqueue_member(varp_t* vp, lit_t xl)
 {
     int i;
-    if ((i = dynvar_size(vp->q)) > 0) {
-	lit_t xl = vp->q[i-1];
-	dynvar_resize(vp->q, i-1);
-	clr_marks(vp, xl, LIT_MARKQ);
-	return xl;
+    if (vp->opt.qtype == q_fifo) {
+	int top = trail_top(vp);
+	for (i = vp->qhead; i < top; i++)
+	    if (neg_l(vp->bnd_map[i]) == xl) return i;
     }
-    return LIT_FALSE;
-}
-
-static void lqueue_clear(varp_t* vp)
-{
-    int i;
-    int n = dynvar_size(vp->q);
-    for (i = 0; i < n; i++)
-	clr_marks(vp, vp->q[i], LIT_MARKQ);
-    dynvar_resize(vp->q, 0);
+    else {
+	for (i = 0; i < vp->qn; i++)
+	    if (vp->qs[i] == xl) return i;
+    }
+    return -1;
 }
 
 // since level size is not included in num_bound we
@@ -2513,11 +2524,6 @@ static uint32_t next_unbound_after(varp_t* vp, variable_t* var)
     return 0;
 }
 
-static wlink_t** watch_list(varp_t* vp, lit_t xl)
-{
-    literal_t* xp = l2ll(vp, xl);
-    return &xp->wlist;
-}
 
 // level=0 work
 // after evaluation of a literal in the L literal queue
@@ -2566,14 +2572,14 @@ static inline void put_nq_l(varp_t* vp, lit_t xp, ival_t ivalue,
     set_lev_phase(vp, xp, level, cix, ivalue);
 }
 
+// assign and, unless the trail itself is the queue, remember to
+// propagate the literal made false
 static inline void put_l(varp_t* vp, lit_t xl, ival_t ivalue,
 			 cix_t cix, int level)
 {
     put_nq_l(vp, xl, ivalue, cix, level);
-    if (ivalue == I_TRUE)
-	lqueue_insert(vp, neg_l(xl));
-    else if (ivalue == I_FALSE)
-	lqueue_insert(vp, xl);
+    if (vp->opt.qtype != q_fifo)
+	qs_push(vp, (ivalue == I_TRUE) ? neg_l(xl) : xl);
 }
 
 static void init_level(varp_t* vp, int level)
@@ -2608,6 +2614,8 @@ static int pop_level(varp_t* vp)
     if (level >= 0) {
 	vp->num_bound -= vp->bnd[level].size;
 	vp->level = level;
+	if (vp->qhead > trail_top(vp))
+	    vp->qhead = trail_top(vp);
 	set_min_level(vp);
 	DBG("%sPop_level: @%d, t=%s, decision=%s\r\n",
 	    indent(level), level, bnd_state_name[vp->bnd[level].t],
@@ -2656,11 +2664,16 @@ static void unbind_level(varp_t* vp, int level)
 	set_lev(vp, xl, -1, CLAUSE_NONE);
     }
     vp->bnd[level].size = 0;
+    if (vp->qhead > bp->offs)   // nothing above this level is pending now
+	vp->qhead = bp->offs;
+    vp->qn = 0;
 }
 
 static void ll_init(literal_t* lp, variable_t* var, bool_t neg)
 {
-    lp->wlist    = NULL;
+    lp->ws       = NULL;
+    lp->nws      = 0;
+    lp->cws      = 0;
     lp->xref     = NULL;
     lp->sref     = NULL;
 }
@@ -2883,8 +2896,6 @@ static clause_t* clause_alloc(varp_t* vp, int si, size_t size)
     }
 
     if (cp != NULL) {
-	wlink_clear(&cp->wl[0]);
-	wlink_clear(&cp->wl[1]);
 	cp->size = size;  // used
 	cp->lsize = size; // allocated
 	cp->mon = 0;
@@ -3293,12 +3304,15 @@ static void cleanup(varp_t* vp)
     for (i = 1; i < (int)dynvar_size(vp->var_map); i++) {
 	dynarray_destroy(vp, vp->var_map[i]->lit[0].xref);
 	dynarray_destroy(vp, vp->var_map[i]->lit[1].xref);
+	if (vp->var_map[i]->lit[0].ws) VARP_FREE(vp->var_map[i]->lit[0].ws);
+	if (vp->var_map[i]->lit[1].ws) VARP_FREE(vp->var_map[i]->lit[1].ws);
 	dynarray_destroy(vp, vp->var_map[i]->lit[0].sref);
 	dynarray_destroy(vp, vp->var_map[i]->lit[1].sref);	
     }
 
     dynvar_clear(vp->var_map);
     dynvar_clear(vp->bnd_map);
+    dynvar_clear(vp->qs);
 
     dynvar_clear(vp->lit_mark);
     dynvar_clear(vp->lit_value);
@@ -3350,7 +3364,7 @@ static void cleanup(varp_t* vp)
 
 static void default_config(varp_config_t* conf)
 {
-    conf->qtype = q_recursive;
+    conf->qtype = q_lifo;
     conf->xref  = false;
     conf->hash  = false;
     conf->vsids = true;
@@ -3756,6 +3770,9 @@ static int setup(varp_t* vp, varp_config_t* config)
 
     if (dynvar_init(vp->bnd_map, vsize) < 0)
 	goto error;
+    if (dynvar_init(vp->qs, vsize) < 0)
+	goto error;
+    vp->qn = 0;
 
     cdlist_init(&vp->order_list);
     vp->top = NULL;
@@ -3832,7 +3849,7 @@ static int setup(varp_t* vp, varp_config_t* config)
     if (allocator_init(&vp->hlink_allocator, sizeof(hlink_t)) < 0)
 	goto error;
 
-    dynvar_init(vp->q, 0);
+    vp->qhead = 0;
 
     dynvar_init(vp->bnd, 0);
     resize_levels(vp, DYN_UNDO_INIT);
@@ -3929,6 +3946,8 @@ static int add_variables(varp_t* vp, size_t n)
 	// printf("var capacity = %ld\n", dynvar_capacity(vp->var_map));
 	cap = dynvar_capacity(vp->var_map);
 	if (dynvar_set_capacity(vp->bnd_map, cap) < 0)
+	    return -1;
+	if (dynvar_set_capacity(vp->qs, cap) < 0)
 	    return -1;
 	if (dynvar_set_capacity(vp->lit_mark, 2*cap) < 0)
 	    return -1;
@@ -4477,10 +4496,8 @@ static ERL_NIF_TERM varp_literal_info(ErlNifEnv* env, int argc,
     switch(linfo) {
     case LITINFO_MARK:
 	return enif_make_int(env, lit_markb(vp, xl));
-    case LITINFO_INQUEUE: {
-	int val = is_marked(vp, xl, LIT_MARKQ);
-	return enif_make_boolean(env, val);
-    }
+    case LITINFO_INQUEUE:
+	return enif_make_boolean(env, lqueue_member(vp, xl) >= 0);
     case LITINFO_DEGREE: {
 	if (vp->opt.xref) {
 	    literal_t* lp = l2ll(vp, xl);    
@@ -5745,8 +5762,12 @@ static int is_unit_clause(varp_t* vp, clause_t* cp)
 
 static inline void clause_watch_insert(varp_t* vp, clause_t* cp)
 {
-    wlink_link(vp, &cp->wl[0], cp->lit[0]);
-    wlink_link(vp, &cp->wl[1], cp->lit[1]);
+    if (cp->size == 0) {  // monitor: one watch, on an unassigned literal
+	watch_push(vp, cp->lit[0], cp, LIT_FALSE);
+	return;
+    }
+    watch_push(vp, cp->lit[0], cp, cp->lit[1]);
+    watch_push(vp, cp->lit[1], cp, cp->lit[0]);
 }
 
 // insert sort literal level 'l' into la
@@ -6065,16 +6086,17 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	}
     }
 
-    if (opt.queue) {  // clone queue
-	size_t size = dynvar_size(vp0->q);
+    // pending propagations: clone them, or start with nothing pending
+    if (opt.queue) {
 	int i;
-
-	dynvar_resize(vp->q, size);
-	for (i = 0; i < (int)size; i++) {
-	    lit_t xl = vp0->q[i];
-	    vp->q[i] = xl;
-	    set_marks(vp, xl, LIT_MARKQ);
-	}
+	vp->qhead = vp0->qhead;
+	dynvar_resize(vp->qs, dynvar_size(vp0->qs));
+	for (i = 0; i < vp0->qn; i++) vp->qs[i] = vp0->qs[i];
+	vp->qn = vp0->qn;
+    }
+    else {
+	vp->qhead = vp0->bnd[vp0->level].offs + vp0->bnd[vp0->level].size;
+	vp->qn = 0;
     }
 
     for (si = 0; si < NUM_CSET; si++) {
@@ -6405,165 +6427,161 @@ static int bcp_turbo(varp_t* vp, lit_t xp)
 #define NEXT do { wlp = &wl->next; goto next; } while(0)
 // #define NEXT goto next1
 
+// Propagate the falsity of xl: walk the clauses watching xl.
+// The vector is compacted in place while walking: entries that stay are
+// copied down to j, entries whose watch moves are dropped.
 static int bcp_clauses(varp_t* vp, lit_t xl, int level, int depth)
 {
-    wlink_t** wlp;
-    wlink_t*  wl;
-    clause_t* cp;
-    int i;
-    lit_t* lit;
-    uint32_t p;
-    ival_t lw;
+    literal_t* lp = l2ll(vp, xl);
+    watch_t* ws = lp->ws;
+    uint32_t n = lp->nws;
+    uint32_t i = 0, j = 0;
+    int r = 0;
 
-restart:
-    wlp = watch_list(vp, xl);
     DBG_BCP("%sBcp_clauses: %s\r\n", indent(level),format_lit(vp, neg_l(xl)));
-//    goto next;
-//next1:
-//    wlp = &wl->next;
-next:
-    if ((wl = *wlp) == NULL) goto done;
-    cp = clause_pointer(wl);
-    if (cp->dead || cp->conflict) NEXT;
-    i = wlink_index(wl);
+
+    while (i < n) {
+	watch_t w = ws[i++];
+	clause_t* cp;
+	lit_t* lit;
+	int k;
+	ival_t lw;
+	uint32_t p;
+
+	// satisfied by the blocker: the clause is not even loaded.  at
+	// level 0 it is loaded so that it can be retired for good.
+	if (level && (get_value(vp, w.blocker) == I_TRUE)) {
+	    COUNT(vp, CLAUSE_DEAD_COUNTER);
+	    ws[j++] = w;
+	    continue;
+	}
+	cp = w.cp;
+	if (cp->dead || cp->conflict) { ws[j++] = w; continue; }
 #if defined(DEBUG_BCP)
-    print_sym_clause(vp, "  bcp: ", cp);
+	print_sym_clause(vp, "  bcp: ", cp);
 #endif
-    lit = cp->lit;
-    if ((lw = get_value(vp, lit[1-i])) == I_TRUE)
-	goto ev_dead;
-    switch(cp->size) {
-    case 0: // monitor lsize gives the actual size
-	COUNT(vp, CLAUSE_MON_COUNTER);
-	for (p = 2; p < cp->lsize; p++) {
-	    switch(get_value(vp, lit[p])) {
-	    case I_FALSE: break;
-	    case I_TRUE:  break;
-	    default:
-		swap_lit(lit, i, p);
-		lit[1-i] = neg_l(lit[i]);
-		goto ev_watch2;
+	lit = cp->lit;
+	if (cp->size == 0) { // monitor: lsize gives the actual size
+	    COUNT(vp, CLAUSE_MON_COUNTER);
+	    for (p = 1; p < cp->lsize; p++) {
+		if (get_value(vp, lit[p]) == I_UNDEF) {
+		    swap_lit(lit, 0, p);
+		    watch_push(vp, lit[0], cp, LIT_FALSE);  // moved, drop here
+		    goto next;
+		}
 	    }
+	    DBG1("monitor clause %d trigger\r\n", cp->cix);
+	    ws[j++] = w;   // all literals have values: trigger (todo)
+	    continue;
 	}
-	goto ev_trigger; // all literals got values - trigger
-    case 1: ASSERT(0);
-    case 2:
-	COUNT(vp, CLAUSE_2_COUNTER);
-	break;
-    case 3:
-	COUNT(vp, CLAUSE_3_COUNTER);
-	switch(get_value(vp, lit[2])) {
-	case I_TRUE:
-	    goto ev_dead;
-	case I_FALSE:
+	k = (lit[0] == xl) ? 0 : 1;  // which of the two watches is ours
+	if ((lw = get_value(vp, lit[1-k])) == I_TRUE) {
+	    w.blocker = lit[1-k];
+	    goto dead;
+	}
+	switch(cp->size) {
+	case 2:
+	    COUNT(vp, CLAUSE_2_COUNTER);
 	    break;
-	default:
-	    swap_lit(lit, i, 2);
-	    goto ev_watch;	    
-	}
-	break;
-    default:
-	COUNT(vp, CLAUSE_N_COUNTER);
-	for (p = 2; p < cp->size; p++) {
-	    // for (p = n-1; p >= 2; p--) {
-	    switch(get_value(vp, lit[p])) {
+	case 3:
+	    COUNT(vp, CLAUSE_3_COUNTER);
+	    switch(get_value(vp, lit[2])) {
+	    case I_TRUE:
+		w.blocker = lit[2];
+		goto dead;
 	    case I_FALSE:
 		break;
-	    case I_TRUE:
-		goto ev_dead;
 	    default:
-		swap_lit(lit, i, p);
-		goto ev_watch;
+		swap_lit(lit, k, 2);
+		goto moved;
+	    }
+	    break;
+	default:
+	    COUNT(vp, CLAUSE_N_COUNTER);
+	    for (p = 2; p < cp->size; p++) {
+		switch(get_value(vp, lit[p])) {
+		case I_FALSE:
+		    break;
+		case I_TRUE:
+		    w.blocker = lit[p];
+		    goto dead;
+		default:
+		    swap_lit(lit, k, p);
+		    goto moved;
+		}
+	    }
+	    break;
+	}
+	if (lw == I_FALSE) { // conflict
+	    ws[j++] = w;
+	    if (vp->max_conflicting == 1) {
+		vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
+		r = -1;
+		break;
+	    }
+	    else if (vp->num_conflicting < vp->max_conflicting) {
+		vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
+		cp->conflict = 1;
+		continue;
+	    }
+	    else {
+		r = -1;
+		break;
 	    }
 	}
-	break;
-    }
-    if (lw == I_FALSE)
-	goto ev_conflict;
-
-// ev_unit:
-    put_nq_l(vp, lit[1-i], I_TRUE, cp->cix, level);
-    if (level == 0) {
-	cp->dead = 1;
-	vp->cdead[GET_SI(cp->cix)]++;
-	schedule_unwatch_clause(vp, cp);
-    }
-    if (wl->next == NULL) { // last in watch list! do tail call
-	if ((level == 0) && vp->opt.xref)
-	    kill_clauses(vp, neg_l(xl));
-	xl = neg_l(lit[1-i]);
-	goto restart;
-    }
-    if (vp->opt.qtype == q_recursive) {
-	if (depth) {
-	    if (bcp_clauses(vp, neg_l(lit[1-i]), level, depth-1) < 0)
-		goto conflict;
+	// unit: lit[1-k] is implied
+	put_nq_l(vp, lit[1-k], I_TRUE, cp->cix, level);
+	if (level == 0) {
+	    cp->dead = 1;
+	    vp->cdead[GET_SI(cp->cix)]++;
+	    schedule_unwatch_clause(vp, cp);
 	}
-	else {
-	    // DBG1("bcp max depth %d reached enqueue\r\n", MAX_BCP_DEPTH);
-	    lqueue_insert(vp, neg_l(lit[1-i]));
+	w.blocker = lit[1-k];
+	ws[j++] = w;
+	switch (vp->opt.qtype) {
+	case q_fifo:      // bcp() reaches it on the trail
+	    break;
+	case q_lifo:
+	    qs_push(vp, neg_l(lit[1-k]));
+	    break;
+	case q_recursive:
+	    if (depth == 0) {
+		qs_push(vp, neg_l(lit[1-k]));
+	    }
+	    else if (bcp_clauses(vp, neg_l(lit[1-k]), level, depth-1) < 0) {
+		r = -1;   // recorded down there; keep the rest of this vector
+		goto out;
+	    }
+	    break;
 	}
-    }
-    else {
-	lqueue_insert(vp, neg_l(lit[1-i]));
-    }
-    NEXT;
+	continue;
 
-ev_watch: {
-	wlink_t* wl0 = &cp->wl[i];
-	*wlp = wl0->next;
-	wlink_link(vp, wl0, lit[i]);
-    }
-    goto next; // wlp does not need update
+    moved:
+	// the watch on xl moves to lit[k]: append there, drop here
+	watch_push(vp, lit[k], cp, lit[1-k]);
+	continue;
 
-ev_conflict:
-    if (vp->max_conflicting == 1) {
-	vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
-	goto conflict;
-    }
-    else if (vp->num_conflicting < vp->max_conflicting) {
-	vp->conflicting_clauses[vp->num_conflicting++] = cp->cix;
-	cp->conflict = 1;
-    }
-    else
-	goto conflict;
-    NEXT;    
+    dead:
+	COUNT(vp, CLAUSE_DEAD_COUNTER);
+	if (level == 0) {
+	    cp->dead = 1;
+	    vp->cdead[GET_SI(cp->cix)]++;
+	    schedule_unwatch_clause(vp, cp);
+	}
+	ws[j++] = w;
+	continue;
 
-ev_dead:
-    COUNT(vp, CLAUSE_DEAD_COUNTER);
-    if (level == 0) {
-	cp->dead = 1;
-	vp->cdead[GET_SI(cp->cix)]++;
-	schedule_unwatch_clause(vp, cp);
+    next:
+	continue;
     }
-    NEXT;
-		
-ev_watch2: {
-	// NOT TESTED
-	wlink_t* wl0 = &cp->wl[i];
-	wlink_t* wl1 = &cp->wl[1-i];
-	*wlp = wl0->next;
-	wlink_link(vp, wl0, lit[i]);
-	// FIXME!!! make better
-	wlink_unlink(vp, cp, neg_l(xl));
-	wlink_link(vp, wl1, lit[1-i]);
-    }
-    goto next; // wlp does not need update
+out:
+    // keep whatever was not examined (after a conflict)
+    while (i < n) ws[j++] = ws[i++];
+    lp->nws = j;
 
-ev_trigger:
-    DBG1("monitor clause %d trigger\r\n", cp->cix);
-    // collect clause
-    NEXT;    
-
-done:    
     if ((level == 0) && vp->opt.xref)
 	kill_clauses(vp, neg_l(xl));
-    return 0;
-    
-conflict:
-    if ((level == 0) && vp->opt.xref)
-	kill_clauses(vp, neg_l(xl)); 
-    return -1;
+    return r;
 }
 
 static int bcp(varp_t* vp)
@@ -6575,12 +6593,26 @@ static int bcp(varp_t* vp)
     int level_size;
     
     COUNT(vp, BCP_COUNTER);
-    while((xl = lqueue_deq(vp)) != LIT_FALSE) {
-	DBG_BCP("%sBcp: %s\r\n", indent(level), format_lit(vp, xl));
-	if ((r = bcp_clauses(vp, xl, level, MAX_BCP_DEPTH)) < 0) {
-	    COUNT(vp, CONFLICT_COUNTER);
-	    break;
+    if (vp->opt.qtype == q_fifo) {
+	while (vp->qhead < trail_top(vp)) {
+	    xl = neg_l(vp->bnd_map[vp->qhead++]);  // the literal made false
+	    DBG_BCP("%sBcp: %s\r\n", indent(level), format_lit(vp, xl));
+	    if ((r = bcp_clauses(vp, xl, level, MAX_BCP_DEPTH)) < 0) {
+		COUNT(vp, CONFLICT_COUNTER);
+		break;
+	    }
 	}
+    }
+    else {
+	while (vp->qn > 0) {
+	    xl = vp->qs[--vp->qn];
+	    DBG_BCP("%sBcp: %s\r\n", indent(level), format_lit(vp, xl));
+	    if ((r = bcp_clauses(vp, xl, level, MAX_BCP_DEPTH)) < 0) {
+		COUNT(vp, CONFLICT_COUNTER);
+		break;
+	    }
+	}
+	vp->qhead = trail_top(vp);
     }
     level_size = vp->bnd[0].size; // size after bcp    
     set_max_bound(vp);
@@ -8753,12 +8785,10 @@ static ERL_NIF_TERM varp_get_clauses(ErlNifEnv* env, int argc,
 	how = argv[2];
     
     if (how == ATOM(watch)) {
-	wlink_t* wl = lp->wlist;
-	while(wl != NULL) {
-	    clause_t* cp = clause_pointer(wl);
-	    ERL_NIF_TERM elem = make_cix(env, cp->cix);
+	uint32_t i;
+	for (i = 0; i < lp->nws; i++) {
+	    ERL_NIF_TERM elem = make_cix(env, lp->ws[i].cp->cix);
 	    list = enif_make_list_cell(env, elem, list);
-	    wl = wl->next;
 	}
     }
     else if (how == ATOM(literal)) {
@@ -8802,10 +8832,13 @@ static ERL_NIF_TERM varp_queue_first(ErlNifEnv* env, int argc,
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
-    if (dynvar_size(vp->q) > 0)
-	return make_lit(env, vp->q[0]);
-    else
-	return enif_make_boolean(env, false);
+    if (vp->opt.qtype == q_fifo) {
+	if (vp->qhead < trail_top(vp))
+	    return make_lit(env, neg_l(vp->bnd_map[vp->qhead]));
+    }
+    else if (vp->qn > 0)
+	return make_lit(env, vp->qs[vp->qn-1]);
+    return enif_make_boolean(env, false);
 }
 
 // Get next literal in queue (debug)
@@ -8822,12 +8855,13 @@ static ERL_NIF_TERM varp_queue_next(ErlNifEnv* env, int argc,
 	return enif_make_badarg(env);
     if (!vif_get_lit(env, vp, argv[1], &xl))
 	return enif_make_badarg(env);
-    if ((size = dynvar_size(vp->q)) > 1) {
-	size--;
-	for (i = 0; i < (int)size; i++) {
-	    if (vp->q[i] == xl)
-		return make_lit(env, vp->q[i+1]);
+    if ((i = lqueue_member(vp, xl)) >= 0) {
+	if (vp->opt.qtype == q_fifo) {
+	    size = trail_top(vp);
+	    if (i+1 < (int)size) return make_lit(env, neg_l(vp->bnd_map[i+1]));
 	}
+	else if (i-1 >= 0)   // the stack pops from the top
+	    return make_lit(env, vp->qs[i-1]);
     }
     return enif_make_boolean(env, false);
 }
