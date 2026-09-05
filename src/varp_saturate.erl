@@ -89,7 +89,7 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Timeout = maps:get(timeout, Param, infinity),
     Threshold = maps:get(threshold, Param, 0),
     Laps = maps:get(laps, Param, infinity),
-    Subst = maps:get(laps, Param, infinity),
+    Subst = maps:get(subst, Param, true),
     ?dbg0("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
     saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold,Subst).
 

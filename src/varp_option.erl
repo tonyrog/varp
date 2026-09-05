@@ -70,7 +70,9 @@ rewrite(Fun,Value) -> Fun(Value).
 key_options(Spec) ->
     L = maps:fold(
 	  fun(_K,V=#{key:=Key},Acc) ->
-		  [{Key,V}|Acc]
+		  [{Key,V}|Acc];
+	     (_K,_V,Acc) ->  %% '$plugin' marker etc
+		  Acc
 	  end, [], Spec),
     lists:ukeysort(1, L).
 
@@ -368,7 +370,8 @@ plugin_help(Name) ->
 	{ok,Ps} ->
 	    lists:foreach(
 	      fun({_,PluginName,Plugin}) ->
-		      if (Name =:= all) orelse (Name =:= PluginName) ->
+		      if (Name =:= all) orelse (Name =:= PluginName) orelse
+			 (Name =:= Plugin) ->
 			      io:format("PLUGIN ~s OPTIONS\n", [PluginName]),
 			      OptionList = Plugin:options(),
 			      Spec1 = varp_option:options_spec(OptionList),
@@ -394,6 +397,15 @@ usage(Spec) ->
     plugin_help(none),
     halt(1).
 
+usage(Opt,Spec) when Opt =:= "h"; Opt =:= "help" ->
+    %% -h|--help after a plugin name: print that plugin's options
+    case maps:find('$plugin', Spec) of
+	{ok,Mod} ->
+	    plugin_help(Mod),
+	    halt(0);
+	error ->
+	    usage(Spec)
+    end;
 usage(Opt,_Spec) when is_list(Opt) ->
     io:format("varp: unknown option ~s\n", [Opt]),
     halt(1);

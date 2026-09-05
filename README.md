@@ -168,7 +168,7 @@ plugin reads back:
 
 ### Plugin options
 
-`varp --help=<plugin>` prints them. The two search plugins:
+`varp --help=<plugin>` prints them, and so does `-h` or `--help` right after the plugin name (`varp bj -h`). The two search plugins:
 
     backtrack   --max, -n <N>        models to find, 0 = all       (1)
                 --timeout, -t <s>                          (infinity)

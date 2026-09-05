@@ -1427,7 +1427,9 @@ process_args([Arg|As], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
 	    end;
 	Mod ->
 	    OptionInfoList = Mod:options(),
-	    OptionSpec = varp_option:options_spec(OptionInfoList),
+	    %% '$plugin' lets varp_option print this plugin's help on -h|--help
+	    OptionSpec = maps:put('$plugin', Mod,
+				  varp_option:options_spec(OptionInfoList)),
 	    OptMap = varp_option:default_opts(OptionInfoList),
 	    {As1,OptMap1,Bound1} = 
 		varp_option:process_args(As, OptionSpec, OptMap, Bound),

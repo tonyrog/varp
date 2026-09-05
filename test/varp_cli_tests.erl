@@ -51,6 +51,19 @@ plugin_help_test_() ->
 	     ?assert(contains(Out, "--max"))
      end}.
 
+plugin_h_flag_test_() ->
+    %% -h|--help right after a plugin name prints that plugin's options
+    {timeout, 60,
+     fun() ->
+	     {Code1,Out1} = cli(["sat","bj","-h"]),
+	     ?assertEqual(0, Code1),
+	     ?assert(contains(Out1, "PLUGIN backjump OPTIONS")),
+	     ?assert(contains(Out1, "--max-learned")),
+	     {Code2,Out2} = cli(["bt","--max","3","--help"]),
+	     ?assertEqual(0, Code2),
+	     ?assert(contains(Out2, "PLUGIN backtrack OPTIONS"))
+     end}.
+
 unknown_option_test_() ->
     {timeout, 60,
      fun() ->
