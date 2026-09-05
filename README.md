@@ -150,6 +150,9 @@ Encoding and search behaviour:
     --carry, --borrow, --overflow       true|false|ignore         (ignore)
     --divz true|false|ignore            divide by zero            (false)
     --phase true|false|undefined        initial phase             (true)
+    --bump-decay <f>           VSIDS activity decay per conflict; 0 keeps
+                               the order-list bump, 0.9-0.95 is a large
+                               win on most instances               (0)
     --use-phase <bool>                  phase saving              (false)
     --qtype fifo|lifo|recursive         queue type            (recursive)
     --seed <integer>                    random seed                   (0)
@@ -199,6 +202,22 @@ to the next level. The learned clause limit is
 
 and the number kept on a reduction is `max(K, P*MaxLearned)`.
 
+`bmc` is a driver for bounded model checking (see
+[`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md)): it rebuilds the
+formula for every bound, runs the search plugin that follows it, and
+prints a counterexample as a trace, one row per step:
+
+    bmc         --k-min <N>, --k-max <N>, --step <N>     bounds  (0, 20, 1)
+                --bound <name>             the bound's meta variable  (k)
+                --trace <bool>             print the trace           (true)
+                --incremental <bool>       one clause database for all bounds (true)
+                --keep-learned auto|<bool> keep learned clauses between bounds
+                --reset-order auto|<bool>  restore the variable order per bound
+                                           (auto: keep and no reset with --bump-decay)
+
+    varp bmc formulas/varp/die_hard_system.varp
+    varp bmc --bound n bj --minimize recursive formulas/varp/die_hard.varp
+
     order       --sort <order>[,<order>]  identity|random|degree|rank|user,
                                           each with an optional +, - or =
                 --first, -f "v1,..,vn"    literals sorted first
@@ -232,8 +251,9 @@ The language
 ------------
 
 [`SYNTAX.md`](SYNTAX.md) is the reference; [`doc/CIRCUIT.md`](doc/CIRCUIT.md)
-covers circuits, and [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md) is a
-design note on bounded model checking. A taste:
+covers circuits, and [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md)
+transition systems (`system { state ... next ... reach ... }`) for
+bounded model checking. A taste:
 
     // n pigeons do not fit in n-1 holes
     ([A p=1..n] [E h=1..(n-1)] P(p,h)) and

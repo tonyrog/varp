@@ -9,6 +9,7 @@
 		    {"sat",   "satisfy",     varp_satisfy},
 		    {"unsat", "falsify",     varp_falsify},
 		    {"p",     "prove",       varp_prove},
+		    {"bmc",   "bmc",         varp_bmc},
 		    {"ord",   "order",       varp_order},
 		    {"bt",    "backtrack",   varp_backtrack},
 		    {"bj",    "backjump",    varp_backjump},

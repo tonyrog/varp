@@ -83,6 +83,7 @@ new(OptMap) when is_map(OptMap) ->
 		 init_phase => maps:get(phase,OptMap),
 		 use_phase  => maps:get(use_phase,OptMap),
 		 seed       => maps:get(seed,OptMap),
+		 decay      => float(maps:get(bump_decay,OptMap,0)),
 		 icase      => maps:get(icase,OptMap)
 	       },
     Vp  = varp_nif:new(NewOpts),

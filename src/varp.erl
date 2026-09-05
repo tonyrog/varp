@@ -256,6 +256,12 @@ global_options() ->
 	 default => 0,
 	 description => "Random seed."
        },
+      #{ long => "bump-decay",
+	 key => bump_decay,
+	 spec => float,
+	 default => 0.0,
+	 description => "VSIDS activity decay per conflict (0.9-0.99), 0 uses the order list."
+       },
       #{ long => "assoc",
 	 key => assoc,
 	 spec => {enum,
@@ -823,6 +829,11 @@ do_run(Do, Assignments, Formula, GOpts) ->
     garbage_collect(self(),[{type,major}]),
     R.
 
+%% a driver plugin (bmc) rebuilds the formula itself, so it gets the
+%% source and the rest of the chain instead of a clause database
+do_run_([{Plugin,Param}|Do], Assignments, Formula, GOpts) when
+      Plugin =:= varp_bmc ->
+    Plugin:drive(Do, Assignments, Formula, GOpts, Param);
 do_run_(Do, Assignments, Formula, GOpts) ->
     T0 = erlang:monotonic_time(),
     Bs0 = varp_formula:new(GOpts),
@@ -1337,7 +1348,8 @@ empty_sections() ->
        order=>[],  
        assert=>[], 
        input=>[], 
-       output=>[] }.
+       output=>[],
+       systems=>[] }.     %% system_info from varp_system
 
 append_sections(M0=#{ decls:=D0,order:=O0,circuits:=C0,
 		      literals:=Ls0,defs:=Ds0,
@@ -1353,7 +1365,8 @@ append_sections(M0=#{ decls:=D0,order:=O0,circuits:=C0,
        input => I0++I1,
        output => T0++T1,
        file => maps:get(file, M1, maps:get(file, M0, "*internal*")),
-       syms => merge_syms(S0,S1)
+       syms => merge_syms(S0,S1),
+       systems => maps:get(systems, M0, []) ++ maps:get(systems, M1, [])
      }.
 
 %% sum the occurrence counts and keep the earliest line
@@ -1386,6 +1399,7 @@ section_opts(Sections=#{ decls := Decls,
 	   input => Input,
 	   output => Output,
 	   syms => Syms,
+	   systems => maps:get(systems, Sections, []),
 	   file => maps:get(file, Sections, "*internal*")
 	  }.
 
@@ -1592,6 +1606,9 @@ split_sections([{declare,DeclList}|Sections], Map=#{ decls:=Decl0 },GOpts) ->
 split_sections([C={circuit,_Name,_Params,_Defs}|Sections], 
 	       Map=#{ circuits:=Circuits0 },GOpts) ->
     split_sections(Sections, Map#{ circuits => [C|Circuits0] },GOpts);
+split_sections([{system_info,_Name,Info}|Sections], Map, GOpts) ->
+    Systems = maps:get(systems, Map, []),
+    split_sections(Sections, Map#{ systems => Systems ++ [Info] },GOpts);
 split_sections([{order,Order}|Sections],Map=#{ order:=Order0 },GOpts) ->
     split_sections(Sections, Map#{ order => Order0++Order },GOpts);
 split_sections([{literals,Ls}|Sections],Map=#{ literals:=Ls0 },GOpts) ->
@@ -1918,6 +1935,7 @@ option_keys() ->
      qtype,
      xref,             %% xref is used (need for saturate with substitution)
      vsids,
+     decay,            %% VSIDS activity decay, 0 = order list
      hash,             %% hash is used
      init_phase,       %% initial phase value
      use_phase,        %% used saved phase value

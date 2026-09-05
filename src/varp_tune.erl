@@ -65,6 +65,7 @@
 
 default_spec() ->
     [{global, [{qtype,     [lifo,fifo]},
+	       {bump_decay, [0.0,0.9,0.95]},
 	       {phase,     [true,false,undefined]},
 	       {use_phase, [true,false]}]},
      {backjump, [{minimize,           [none,local,recursive]},
@@ -114,6 +115,7 @@ e4_center() ->
 
 e4_spec() ->
     [{global,   [{qtype,     [fifo,lifo]},
+		 {bump_decay, [0.0,0.9,0.95]},
 		 {phase,     [undefined,true,false]},
 		 {use_phase, [true,false]}]},
      {order,    [{sort, [{value,[identity]},{value,[random]},{value,[degree]},

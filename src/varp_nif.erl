@@ -35,6 +35,7 @@
 -export([bound/2]).
 -export([bind/2]).
 -export([decide/2]).
+-export([assume/2]).
 -export([subst/3]).
 -export([implication_clause/2]).
 -export([implication_level/2]).
@@ -358,6 +359,10 @@ bound(_Vp, Lit) when is_integer(Lit) ->
 bind(_Vp, X) when is_integer(X) ->
     ?nif_stub().
 
+%% assume literal: push a level with the literal as its decision
+-spec assume(Vp::varp(), X::literal()) -> boolean().
+assume(_Vp, X) when is_integer(X) ->
+    ?nif_stub().
 %% decide literal, affected by phase!
 -spec decide(Vp::varp(), X::literal()) -> boolean().
 

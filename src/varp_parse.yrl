@@ -16,11 +16,12 @@ Terminals
 	'bool' 'char' 'short' 'int' 'long' 'signed' 'unsigned' 
         'float' 'double'
         'circuit' 'in' 'out' 'return'
+        'system' 'state' 'init' 'next' 'invariant' 'reach' 'eventually'
         'min' 'max' 'abs'
 	.
 
 Nonterminals
-        init file 
+        prologue file system_items system_item
 	primary_expr postfix_expr argument_expr_list
 	unary_expr unary_operator
 	multiplicative_expr additive_expr shift_expr
@@ -43,15 +44,15 @@ Nonterminals
 
 Rootsymbol file.
 
-file  -> init definition_list assignment_defs lexpr  : {'$2','$3','$4'}.
-file  -> init definition_list assignment_defs : {'$2','$3',true}.
-file  -> init definition_list lexpr  : {'$2',[],'$3'}.
-file  -> init definition_list : {'$2',[],undefined}.
-file  -> init assignment_defs lexpr  : {[],'$2','$3'}.
-file  -> init assignment_defs : {[],'$2',true}.
-file  -> init lexpr : {[],[],'$2'}.
+file  -> prologue definition_list assignment_defs lexpr  : file('$2','$3','$4').
+file  -> prologue definition_list assignment_defs : file('$2','$3',true).
+file  -> prologue definition_list lexpr  : file('$2',[],'$3').
+file  -> prologue definition_list : file('$2',[],undefined).
+file  -> prologue assignment_defs lexpr  : file([],'$2','$3').
+file  -> prologue assignment_defs : file([],'$2',true).
+file  -> prologue lexpr : file([],[],'$2').
 
-init -> '$empty' : init().
+prologue -> '$empty' : init().
 
 assignment_defs -> assignment_def : ['$1'].
 assignment_defs -> assignment_defs assignment_def : '$1'++['$2'].
@@ -71,6 +72,22 @@ definition -> 'input' sym ';'  : {input,'$2'}.
 definition -> 'output' sym ';' : {output,'$2'}.
 definition -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
 		  varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
+definition -> 'system' sym '{' system_items '}' :
+		  {system,'$2',[],'$4',line('$1')}.
+definition -> 'system' sym circuit_params '{' system_items '}' :
+		  {system,'$2','$3','$5',line('$1')}.
+
+%% transition system, see doc/MODEL_CHECKING.md
+system_items -> system_item : ['$1'].
+system_items -> system_items system_item : '$1' ++ ['$2'].
+
+system_item -> 'state' pdecls ';'      : {state,'$2'}.
+system_item -> 'input' pdecls ';'      : {input,'$2'}.
+system_item -> 'init' lexpr ';'        : {init,'$2'}.
+system_item -> 'next' lexpr ';'        : {next,'$2'}.
+system_item -> 'invariant' lexpr ';'   : {invariant,'$2'}.
+system_item -> 'reach' lexpr ';'       : {reach,'$2'}.
+system_item -> 'eventually' lexpr ';'  : {eventually,'$2'}.
 
 circuit_params -> '(' ')' : [].
 circuit_params -> '(' circuit_param_decls ')' : '$2'.
@@ -397,6 +414,7 @@ arg -> sym '=' lexpr : {'=','$1','$3'}.
 sym -> 'A'        : note_symbol(<<"A">>, line('$1')).
 sym -> 'E'        : note_symbol(<<"E">>, line('$1')).
 sym -> symbol     : str('$1').
+sym -> 'next'     : <<"next">>.
 
 Erlang code.
 
@@ -433,6 +451,14 @@ note_symbol(Name, Ln) ->
 	    end
     end,
     Name.
+
+%% expand system definitions and pick the default formula
+file(Defs, Assigns, Formula) ->
+    try varp_system:expand_file({Defs, Assigns, Formula})
+    catch
+	error:{system,Line,Reason} ->
+	    return_error(Line, varp_system:format_error(Reason))
+    end.
 
 line({_Tag,Ln}) -> Ln;
 line({_Tag,Ln,_Val}) -> Ln.

@@ -66,5 +66,5 @@ default_option_test() ->
       fun({Key,Expected}) ->
 	      ?assertEqual({Key,Expected}, {Key,varp_nif:getopt(Vp,Key)})
       end,
-      [{xref,false},{hash,false},{icase,false},
+      [{xref,false},{hash,false},{icase,false},{decay,0.0},
        {use_phase,false},{seed,0},{qtype,lifo}]).

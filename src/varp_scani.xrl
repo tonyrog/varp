@@ -38,6 +38,13 @@ out                 : {token,{'out',TokenLine}}.
 declare             : {token,{'declare',TokenLine}}.
 literals            : {token,{'literals',TokenLine}}.
 define              : {token,{'define',TokenLine}}.
+system              : {token,{'system',TokenLine}}.
+state               : {token,{'state',TokenLine}}.
+init                : {token,{'init',TokenLine}}.
+next                : {token,{'next',TokenLine}}.
+invariant           : {token,{'invariant',TokenLine}}.
+reach               : {token,{'reach',TokenLine}}.
+eventually          : {token,{'eventually',TokenLine}}.
 order               : {token,{'order',TokenLine}}.
 rank                : {token,{'rank',TokenLine}}.
 degree              : {token,{'degree',TokenLine}}.

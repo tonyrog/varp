@@ -241,6 +241,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "bound",               2,  varp_bound )	\
     NIF( "bind",                2,  varp_bind )		\
     NIF( "decide",              2,  varp_decide )	\
+    NIF( "assume",              2,  varp_assume )	\
     NIF( "subst",               3,  varp_subst )	      \
     NIF( "implication_clause",  2,  varp_implication_clause ) \
     NIF( "implication_level",   2,  varp_implication_level )  \
@@ -484,6 +485,9 @@ typedef struct _variable_t     // :cdlink_t in cdlist_t
     cdlink_t link;
     uint32_t ix;                 // variable index
     lit_t    bl;                 // bound literal | LIT_NONE
+    double   act;                // VSIDS activity (decay mode)
+    uint32_t rank;               // position in order list, tie break
+    int32_t  hpos;               // index in activity heap or -1
     literal_t lit[2];            // literal containers LIT_POS=0 LIT_NEG=1
 } variable_t;
 
@@ -619,6 +623,7 @@ typedef struct _varp_config_t
     bool_t   xref;       // xref used or not
     bool_t   hash;       // clause has or not
     bool_t   vsids;      // variable state independent decaying sum
+    double   decay;      // activity decay per conflict, 0 = order list mode
     bool_t   use_phase;  // use saved phase
     bool_t   all_used;   // all variables are used
     ival_t   init_phase; // initial phase selection (TRUE|FALSE|UNDEF)
@@ -699,6 +704,9 @@ typedef struct _varp_t {
     clause_segment_t* clauseseg[NUM_CSET];  // allocation sets
     cdlist_t     order_list;    // doubly linked order list
     variable_t*  top;           // first unbound variable
+    dynvar(uint32_t*, heap);    // activity heap of variable indices (decay mode)
+    double       var_inc;       // current activity increment
+    int          heap_dirty;    // rebuild heap from the order list before use
 
     dynvar(clause_t**, unwatch); // clauses to unwatch (check after bcp) 
     dynvar(bindings_t*,bnd);     // stack of bindings, one for each level
@@ -883,6 +891,7 @@ DECL_ATOM(varp);
 DECL_ATOM(watch);
 DECL_ATOM(xref);
 DECL_ATOM(vsids);
+DECL_ATOM(decay);
 DECL_ATOM(none);
 DECL_ATOM(log2);
 DECL_ATOM(log10);
@@ -930,6 +939,7 @@ enum {
     OPT_MAX_CONFLICTING,
     OPT_XREF,
     OPT_VSIDS,
+    OPT_DECAY,
     OPT_HASH,
     OPT_QTYPE,
     OPT_USE_PHASE,
@@ -950,6 +960,7 @@ helem_t opt_elems[] =
     HELEM(ATOM(max_conflicting), OPT_MAX_CONFLICTING),
     HELEM(ATOM(xref), OPT_XREF),
     HELEM(ATOM(vsids), OPT_VSIDS),
+    HELEM(ATOM(decay), OPT_DECAY),
     HELEM(ATOM(hash), OPT_HASH),    
     HELEM(ATOM(qtype), OPT_QTYPE),
     HELEM(ATOM(use_phase), OPT_USE_PHASE),
@@ -1845,6 +1856,135 @@ static inline int variable_is_unused(varp_t* vp, variable_t* var)
     return !variable_is_used(vp, var);
 }
 
+// ---------------------------------------------------------------------
+// Activity heap (opt.decay > 0): VSIDS with decay, MiniSat style.
+// The order list is kept as the initial order and tie break (rank).
+// ---------------------------------------------------------------------
+
+static inline int heap_before(varp_t* vp, uint32_t a, uint32_t b)
+{
+    variable_t* va = vp->var_map[a];
+    variable_t* vb = vp->var_map[b];
+    if (va->act != vb->act) return va->act > vb->act;
+    return va->rank < vb->rank;
+}
+
+static void heap_up(varp_t* vp, int i)
+{
+    uint32_t x = vp->heap[i];
+    while (i > 0) {
+	int p = (i-1)/2;
+	if (!heap_before(vp, x, vp->heap[p])) break;
+	vp->heap[i] = vp->heap[p];
+	vp->var_map[vp->heap[i]]->hpos = i;
+	i = p;
+    }
+    vp->heap[i] = x;
+    vp->var_map[x]->hpos = i;
+}
+
+static void heap_down(varp_t* vp, int i)
+{
+    int n = (int) dynvar_size(vp->heap);
+    uint32_t x = vp->heap[i];
+    while (1) {
+	int l = 2*i+1, r = l+1, c;
+	if (l >= n) break;
+	c = (r < n && heap_before(vp, vp->heap[r], vp->heap[l])) ? r : l;
+	if (!heap_before(vp, vp->heap[c], x)) break;
+	vp->heap[i] = vp->heap[c];
+	vp->var_map[vp->heap[i]]->hpos = i;
+	i = c;
+    }
+    vp->heap[i] = x;
+    vp->var_map[x]->hpos = i;
+}
+
+static void heap_insert(varp_t* vp, variable_t* var)
+{
+    uint32_t ix = var->ix;
+    if (var->hpos >= 0) return;
+    if (dynvar_append(vp->heap, &ix) < 0) return;
+    heap_up(vp, (int) dynvar_size(vp->heap) - 1);
+}
+
+// remove the top, return its variable index (0 when empty)
+static uint32_t heap_remove_top(varp_t* vp)
+{
+    int n = (int) dynvar_size(vp->heap);
+    uint32_t x;
+    if (n == 0) return 0;
+    x = vp->heap[0];
+    vp->var_map[x]->hpos = -1;
+    n--;
+    if (n > 0) {
+	vp->heap[0] = vp->heap[n];
+	dynvar_resize(vp->heap, n);
+	heap_down(vp, 0);
+    }
+    else
+	dynvar_resize(vp->heap, 0);
+    return x;
+}
+
+// rebuild from the order list: ranks follow the list, every unbound
+// used variable goes into the heap
+static void order_heap_rebuild(varp_t* vp)
+{
+    variable_t* var;
+    uint32_t rank = 0;
+    int n = (int) dynvar_size(vp->var_map);
+    int i;
+    for (i = 0; i < n; i++)
+	if (vp->var_map[i]) vp->var_map[i]->hpos = -1;
+    dynvar_resize(vp->heap, 0);
+    for (var = cdlist_first(&vp->order_list); var != NULL;
+	 var = cdlist_next(var)) {
+	var->rank = rank++;
+	if (!variable_is_bound(vp, var) && variable_is_used(vp, var))
+	    heap_insert(vp, var);
+    }
+    vp->heap_dirty = 0;
+}
+
+static void heap_reset_activity(varp_t* vp)
+{
+    int n = (int) dynvar_size(vp->var_map);
+    int i;
+    for (i = 0; i < n; i++)
+	if (vp->var_map[i]) vp->var_map[i]->act = 0.0;
+    vp->var_inc = 1.0;
+}
+
+static void heap_bump(varp_t* vp, variable_t* var)
+{
+    var->act += vp->var_inc;
+    if (var->act > 1e100) {
+	int n = (int) dynvar_size(vp->var_map);
+	int i;
+	for (i = 0; i < n; i++)
+	    if (vp->var_map[i]) vp->var_map[i]->act *= 1e-100;
+	vp->var_inc *= 1e-100;
+    }
+    if (var->hpos >= 0)
+	heap_up(vp, var->hpos);
+}
+
+// next decision variable in decay mode: the most active unbound one
+static uint32_t heap_decide_var(varp_t* vp)
+{
+    if (vp->heap_dirty)
+	order_heap_rebuild(vp);
+    while (dynvar_size(vp->heap) > 0) {
+	uint32_t x = vp->heap[0];
+	variable_t* var = vp->var_map[x];
+	if (!variable_is_bound(vp, var) && variable_is_used(vp, var))
+	    return x;
+	heap_remove_top(vp);
+    }
+    return 0;
+}
+
 static inline int lit_is_atom(varp_t* vp, lit_t xl)
 {
     return is_marked(vp, L_VAR(xl), VAR_ATOM);
@@ -2410,6 +2550,8 @@ static inline void print_top(varp_t* vp, char* where)
 static inline void order_unbind(varp_t* vp, lit_t xl)
 {
     clr_value(vp, xl);
+    if (vp->opt.decay > 0.0 && !vp->heap_dirty)
+	heap_insert(vp, var_l(vp, xl));
 
     if (vp->top == NULL)
 	vp->top = var_l(vp, xl);
@@ -2504,6 +2646,15 @@ static uint32_t next_unbound(varp_t* vp)
 	    return var->ix;
     }
     return 0;
+}
+
+// the next decision variable: activity heap in decay mode, else the
+// first unbound variable of the order list
+static uint32_t decide_var(varp_t* vp)
+{
+    if (vp->opt.decay > 0.0)
+	return heap_decide_var(vp);
+    return next_unbound(vp);
 }
 
 // get unbound variable after var, return variable index
@@ -2678,6 +2829,9 @@ static void var_init(varp_t* vp, variable_t* var, int ix)
 {
     var->ix         = ix;
     var->bl         = LIT_NONE;
+    var->act        = 0.0;
+    var->rank       = ix;
+    var->hpos       = -1;
     clr_vv(vp, var);
     ll_init(&var->lit[LIT_POS], var, false);
     ll_init(&var->lit[LIT_NEG], var, true);
@@ -3309,6 +3463,7 @@ static void cleanup(varp_t* vp)
     dynvar_clear(vp->var_map);
     dynvar_clear(vp->bnd_map);
     dynvar_clear(vp->qs);
+    dynvar_clear(vp->heap);
 
     dynvar_clear(vp->lit_mark);
     dynvar_clear(vp->lit_value);
@@ -3364,6 +3519,7 @@ static void default_config(varp_config_t* conf)
     conf->xref  = false;
     conf->hash  = false;
     conf->vsids = true;
+    conf->decay = 0.0;
     conf->init_phase = I_TRUE;
     conf->use_phase = false;
     conf->all_used  = false;
@@ -3478,6 +3634,13 @@ static int vif_setopt(ErlNifEnv* env,
 	if (!enif_get_uint64(env, value, &seed))
 	    return 0;
 	opt->seed = seed;
+	return 1;
+    }
+    case OPT_DECAY: {
+	double d;
+	if (!enif_get_double(env, value, &d))
+	    return 0;
+	opt->decay = d;
 	return 1;
     }
     default:
@@ -3766,6 +3929,10 @@ static int setup(varp_t* vp, varp_config_t* config)
     if (dynvar_init(vp->qs, vsize) < 0)
 	goto error;
     vp->qn = 0;
+    if (dynvar_init(vp->heap, vsize) < 0)
+	goto error;
+    vp->var_inc = 1.0;
+    vp->heap_dirty = 1;
 
     cdlist_init(&vp->order_list);
     vp->top = NULL;
@@ -3971,6 +4138,8 @@ static int add_variables(varp_t* vp, size_t n)
 	vp->var_map[j] = var;
 	if (vp->top == NULL)
 	    vp->top = var;
+	if (vp->opt.decay > 0.0 && !vp->heap_dirty)
+	    heap_insert(vp, var);
     }
     // cdlist_renumber(&vp->order_list);
     return (int)k;
@@ -5070,6 +5239,8 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
     if (r < 0)
 	return enif_make_badarg(env);
     cdlist_renumber(&vp->order_list);
+    vp->heap_dirty = 1;
+    heap_reset_activity(vp);
     setup_top(vp);
     ASSERT(valid_order(vp));
     return enif_make_ok(env);
@@ -5114,6 +5285,7 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 	    }
 	} STK_END(lit);
 	cdlist_renumber(&vp->order_list);
+	vp->heap_dirty = 1;
 	setup_top(vp);
 	ASSERT(valid_order(vp));
 	return r;
@@ -5158,6 +5330,7 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 	    }
 	} STK_END(lit);
 	cdlist_renumber(&vp->order_list);
+	vp->heap_dirty = 1;
 	setup_top(vp);
 	ASSERT(valid_order(vp));
 	return r;
@@ -5463,6 +5636,25 @@ static ERL_NIF_TERM varp_decide(ErlNifEnv* env, int argc,
     if (!vif_get_lit(env, vp, argv[1], &xl))
 	return enif_raise_exception(env, ATOM(literal));
     if (!decide_lit(vp, xl, decide_phase(vp, xl)))
+	return enif_make_boolean(env, false);
+    return enif_make_boolean(env, true);
+}
+
+// assume literal: push a level and make the literal its decision,
+// so that the search (nbcp) continues below it instead of deciding
+// a second variable on the same level.  Used for assumptions.
+static ERL_NIF_TERM varp_assume(ErlNifEnv* env, int argc,
+				const ERL_NIF_TERM argv[])
+{
+    UNUSED(argc);
+    lit_t xl;
+    varp_t* vp;
+    if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
+	return enif_make_badarg(env);
+    if (!vif_get_lit(env, vp, argv[1], &xl))
+	return enif_raise_exception(env, ATOM(literal));
+    push_level(vp);
+    if (!decide_lit(vp, xl, I_TRUE))
 	return enif_make_boolean(env, false);
     return enif_make_boolean(env, true);
 }
@@ -6021,6 +6213,8 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 
 	mark0 = vp0->lit_mark[MAKE_LIT(i,0)];
 	vp->lit_mark[MAKE_LIT(i,0)] = mark0 & (VAR_ATOM|VAR_USED);
+	var->act = var0->act;
+	var->rank = var0->rank;
 
 	switch(v) {
 	case I_FALSE:
@@ -6777,7 +6971,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
     switch(vp->bnd[level].t) {
     case uUNDEF:
 	vp->bnd[level].decision = LIT_FALSE;
-	if ((x1 = next_unbound(vp)) == 0) {
+	if ((x1 = decide_var(vp)) == 0) {
 	    vp->caller_env = NULL;
 	    return enif_make_boolean(env, true);  // model
 	}
@@ -6817,7 +7011,7 @@ bcp:
     bcp(vp);
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
     if (vp->num_conflicting == 0) {
-	x1 = next_unbound(vp);
+	x1 = decide_var(vp);
 	DBG_ORDER("%sNbcp: step x1=%d\r\n", indent(level), x1);
 	if (x1 == 0) {
 	    vp->caller_env = NULL;
@@ -7193,6 +7387,8 @@ static ERL_NIF_TERM varp_getopt(ErlNifEnv* env, int argc,
 	return enif_make_int(env, vp->max_conflicting);
     case OPT_SEED:
 	return enif_make_uint64(env, vp->opt.seed);
+    case OPT_DECAY:
+	return enif_make_double(env, vp->opt.decay);
     case OPT_CARRY:
 	return make_ignore(env, vp->opt.carry);
     case OPT_BORROW:
@@ -7302,6 +7498,7 @@ static ERL_NIF_TERM varp_setopt(ErlNifEnv* env, int argc,
 	    goto bad_value;
 	if (enable && !vp->opt.vsids) {
 	    cdlist_renumber(&vp->order_list);
+	    vp->heap_dirty = 1;
 	    vp->opt.vsids = true;
 	}
 	else if (!enable && vp->opt.vsids) {
@@ -7364,6 +7561,14 @@ static ERL_NIF_TERM varp_setopt(ErlNifEnv* env, int argc,
 	if (!enif_get_uint64(env, value, &seed))
 	    goto bad_value;
 	varp_set_seed(vp, seed);
+	return enif_make_ok(env);
+    }
+    case OPT_DECAY: {
+	double d;
+	if (!enif_get_double(env, value, &d))
+	    goto bad_value;
+	vp->opt.decay = d;
+	vp->heap_dirty = 1;
 	return enif_make_ok(env);
     }
     // defined user options
@@ -7766,7 +7971,10 @@ static void variable_bump(varp_t* vp, variable_t* var, int bump)
     case I_BOUND:
     default: return;
     }
-    
+    if (vp->opt.decay > 0.0) {
+	heap_bump(vp, var);
+	return;
+    }
     nvars = dynvar_size(vp->var_map)-1;
 
     if (bump < 0) {
@@ -7887,6 +8095,8 @@ static ERL_NIF_TERM varp_conflict(ErlNifEnv* env, int argc,
     }
 
     level = vp->level;
+    if (vp->opt.decay > 0.0)
+	vp->var_inc /= vp->opt.decay;
 	
     if ((pos = vp->bnd[level].size) == 0) {
 	// DBG1("0:pos=%d\r\n", pos);
@@ -9461,6 +9671,7 @@ static int load_atoms(ErlNifEnv* env)
     LOAD_ATOM(watch);
     LOAD_ATOM(xref);
     LOAD_ATOM(vsids);
+    LOAD_ATOM(decay);
     LOAD_ATOM(none);
     LOAD_ATOM(log2);
     LOAD_ATOM(log10);

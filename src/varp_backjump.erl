@@ -191,7 +191,41 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 
 init(Bs, Param, MaxLearned, MR) ->
     0 = varp_nif:level(Bs#bs.vp),
-    timeout_or_cancel(Bs, Param, MaxLearned, MR).
+    case assume(Bs, Param) of
+	true -> timeout_or_cancel(Bs, Param, MaxLearned, MR);
+	false -> assumptions_failed(Bs, Param, MR)
+    end.
+
+%% Assumptions (used by bmc): literals decided on levels of their own
+%% before the search proper, and again after every jump below them.
+%% A learned clause never depends on them, so the clause database can
+%% be reused with other assumptions afterwards.
+assume(Bs, Param) ->
+    assume_(Bs#bs.vp, maps:get(assume, Param, [])).
+
+assume_(_Vp, []) ->
+    true;
+assume_(Vp, [L|Ls]) ->
+    case varp_nif:value(Vp, L) of
+	true -> assume_(Vp, Ls);
+	false -> false;
+	undefined ->
+	    case varp_nif:assume(Vp, L) andalso varp_nif:bcp(Vp) of
+		true -> assume_(Vp, Ls);
+		false -> false
+	    end
+    end.
+
+%% no (more) models under the assumptions; the formula itself may
+%% have some, so this is DONE rather than INCONSISTENT when models
+%% were collected before
+assumptions_failed(Bs, Param, MR) ->
+    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
+    display_stat(Bs, Param),
+    case MR#m.n of
+	0 -> return(?INCONSISTENT, MR, Bs);
+	_ -> return(?DONE, MR, Bs)
+    end.
 
 timeout_or_cancel(Bs, Param, MaxLearned, MR) ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_BJT_BCP_COUNTER,
@@ -358,7 +392,10 @@ main_bcp(Bs,Param,Level,MaxLearned,MR) ->
 		    conflict(Bs,Param,MaxLearned,MR)
 	    end;
 	true ->
-	    restart(Bs,Param,MaxLearned,MR)
+	    case assume(Bs, Param) of
+		true -> restart(Bs,Param,MaxLearned,MR);
+		false -> assumptions_failed(Bs, Param, MR)
+	    end
     end.
 
 restart(Bs,Param,MaxLearned,MR) ->
