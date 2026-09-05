@@ -232,7 +232,8 @@ The language
 ------------
 
 [`SYNTAX.md`](SYNTAX.md) is the reference; [`doc/CIRCUIT.md`](doc/CIRCUIT.md)
-covers circuits. A taste:
+covers circuits, and [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md) is a
+design note on bounded model checking. A taste:
 
     // n pigeons do not fit in n-1 holes
     ([A p=1..n] [E h=1..(n-1)] P(p,h)) and

@@ -223,6 +223,9 @@ get_option_name([$_|Cs],_InName,Alt,Acc) ->
 get_option_name([C|Cs],_InName,Alt,Acc) when
       C >= $a, C =< $z; C >= $A, C =< $Z ->
     get_option_name(Cs,true,[C|Alt],[C|Acc]);
+get_option_name([C|Cs],true,Alt,Acc) when C >= $0, C =< $9 ->
+    %% digits are allowed after a letter: bcp2, log2
+    get_option_name(Cs,true,[C|Alt],[C|Acc]);
 get_option_name(Cs,_InName,Alt,Acc) ->
     {lists:reverse(Acc), lists:reverse(Alt), Cs}.
 

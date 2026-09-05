@@ -631,7 +631,6 @@ typedef struct _varp_config_t
     ignore_t overflow;   // borrow must be true/false/ignore
     ignore_t divz;       // division by zero must be true/false/ignore
     bool_t   icase;
-    bool_t   bcp2;       // run nbcp over 2 variables
 } varp_config_t;
 
 typedef struct _varp_new_opt_t {
@@ -896,7 +895,6 @@ DECL_ATOM(borrow);
 DECL_ATOM(overflow);
 DECL_ATOM(divz);
 DECL_ATOM(icase);
-DECL_ATOM(bcp2);
 // sort
 DECL_ATOM(identity);
 DECL_ATOM(p_identity);
@@ -943,7 +941,6 @@ enum {
     OPT_OVERFLOW,
     OPT_DIVZ,
     OPT_ICASE,
-    OPT_BCP2,
     OPT_LAST
 };
 
@@ -964,7 +961,6 @@ helem_t opt_elems[] =
     HELEM(ATOM(overflow), OPT_OVERFLOW),
     HELEM(ATOM(divz), OPT_DIVZ),
     HELEM(ATOM(icase), OPT_ICASE),
-    HELEM(ATOM(bcp2), OPT_BCP2),
     { .next = NULL, .atm_ptr = NULL, .enm = 0, .hval = 0}    
 };
 
@@ -3380,7 +3376,6 @@ static void default_config(varp_config_t* conf)
     conf->overflow = ign;
     conf->divz = ign;
     conf->icase = false;
-    conf->bcp2 = false;
 }
 
 static int vif_bool_config(ErlNifEnv* env,const ERL_NIF_TERM value,bool_t* var)
@@ -3478,8 +3473,6 @@ static int vif_setopt(ErlNifEnv* env,
 	return vif_ignore_config(env, value, &opt->divz);
     case OPT_ICASE:
 	return vif_bool_config(env, value, &opt->icase);
-    case OPT_BCP2:
-	return vif_bool_config(env, value, &opt->bcp2);
     case OPT_SEED: {
 	uint64_t seed;
 	if (!enif_get_uint64(env, value, &seed))
@@ -6766,7 +6759,7 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 {
     UNUSED(argc);
     varp_t* vp;
-    int x1, x2;
+    int x1;
     int32_t level;
     lit_t xp;
 
@@ -6789,11 +6782,6 @@ static ERL_NIF_TERM varp_nbcp(ErlNifEnv* env, int argc,
 	    return enif_make_boolean(env, true);  // model
 	}
 	DBG_ORDER("%sNbcp: t=uUNDEF x1=%d\r\n", indent(level), x1);
-	x2 = 0;
-	if (vp->opt.bcp2) {
-	    x2 = next_unbound_after(vp, vp->var_map[x1]);
-	    DBG_ORDER("%sNbcp: t=uUNDEF x2=%d\r\n", indent(level), x2);
-	}
 	break;
     case uSET:
 	DBG_ORDER("%sNbcp: t=uSET\r\n", indent(level));
@@ -6825,17 +6813,6 @@ next:
     put_l(vp, xp, vp->bnd[level].value, CLAUSE_NONE, level);
     DBG_ORDER("%sNbcp: next decision=%d\r\n",
 	      indent(level), x1);
-    if (x2 != 0) {
-	push_level(vp);
-	level++;
-	xp = vindex_l(vp, x2);
-	vp->bnd[level].decision = xp;
-	vp->bnd[level].t = uSET;
-	vp->bnd[level].value = decide_phase(vp, xp);    
-	put_l(vp, xp, vp->bnd[level].value, CLAUSE_NONE, level);
-	DBG_ORDER("%sNbcp: next decision2=%d\r\n",
-		  indent(level), x2);
-    }
 bcp:
     bcp(vp);
     if (dynvar_size(vp->unwatch)) bcp_unwatch(vp);
@@ -6845,11 +6822,6 @@ bcp:
 	if (x1 == 0) {
 	    vp->caller_env = NULL;
 	    return enif_make_boolean(env, true);  // model
-	}
-	x2 = 0;
-	if (vp->opt.bcp2) {
-	    x2 = next_unbound_after(vp, vp->var_map[x1]);
-	    DBG_ORDER("%sNbcp: step x2=%d\r\n", indent(level), x2);
 	}
 	push_level(vp);
 	level++;
@@ -7231,8 +7203,6 @@ static ERL_NIF_TERM varp_getopt(ErlNifEnv* env, int argc,
 	return make_ignore(env, vp->opt.divz);
     case OPT_ICASE:
 	return enif_make_boolean(env, vp->opt.icase);
-    case OPT_BCP2:
-	return enif_make_boolean(env, vp->opt.bcp2);	
     default:
 	return enif_raise_exception(env, ATOM(arg1));
     }
@@ -7422,11 +7392,6 @@ static ERL_NIF_TERM varp_setopt(ErlNifEnv* env, int argc,
 	    goto bad_value;
 	return enif_make_ok(env);
     }
-    case OPT_BCP2: {
-	if (!vif_bool_config(env, value, &vp->opt.bcp2))
-	    goto bad_value;
-	return enif_make_ok(env);
-    }	
     default:
 	return enif_raise_exception(env, ATOM(arg1));
     }
@@ -9508,7 +9473,6 @@ static int load_atoms(ErlNifEnv* env)
     LOAD_ATOM(overflow);
     LOAD_ATOM(divz);
     LOAD_ATOM(icase);
-    LOAD_ATOM(bcp2);
     LOAD_ATOM_STRING(exclamation_mark, "!");
     LOAD_ATOM(identity);
     LOAD_ATOM_STRING(p_identity, "+identity");

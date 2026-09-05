@@ -83,8 +83,7 @@ new(OptMap) when is_map(OptMap) ->
 		 init_phase => maps:get(phase,OptMap),
 		 use_phase  => maps:get(use_phase,OptMap),
 		 seed       => maps:get(seed,OptMap),
-		 icase      => maps:get(icase,OptMap),
-		 bcp2       => maps:get(bcp2,OptMap)
+		 icase      => maps:get(icase,OptMap)
 	       },
     Vp  = varp_nif:new(NewOpts),
     %% transfer some options to vp:setopt(Vp, ...)

@@ -164,13 +164,6 @@ global_options() ->
 	    " never, when one occurs once and looks like a misspelling of"
 	    " another (typo), whenever one occurs once, or always."
       },
-     # { long => "bcp2",
-	 key => bcp2,
-	 spec => {enum,[?BOOL]},
-	 default => false,
-	 short => "b",
-	 description => "Bcp over 2 variables."
-       },
      #{ long => "phase",
 	key => phase,
 	spec => {enum,[?BOOL,{"undefined",undefined},{"u",undefined}]},
@@ -1937,7 +1930,6 @@ option_keys() ->
      overflow,
      divz,
      icase,
-     bcp2,
      undeclared
     ].
 
