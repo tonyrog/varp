@@ -341,3 +341,62 @@ signed_shift_test() ->
     ?assertEqual(-16, Get("declare a:8/signed, b:8/signed; b = (a >> -1); a == -8", "b")),
     ?assertEqual(-2, Get("circuit f(in x:8/signed; return y:8/signed) { y = (x >> 2); }\n"
 			 "declare a:8/signed, b:8/signed; b == f(a) and a == -8", "b")).
+
+%%%-------------------------------------------------------------------
+%%% Lookup tables: synthesis of a configuration by quantifying over
+%%% the rows of the truth table (fpga.varp, fpga_adder.varp)
+%%%-------------------------------------------------------------------
+
+lut_synthesis_test_() ->
+    [{"!x && y && z is cfg 64, and only that", {timeout, 120,
+      fun() ->
+	      Ms = models(read_formula("fpga.varp")),
+	      ?assertEqual([64], [proplists:get_value("cfg", M) || M <- Ms])
+      end}},
+     {"full adder: sum 0x96, carry 0xe8", {timeout, 300,
+      fun() ->
+	      [M] = models(read_formula("fpga_adder.varp")),
+	      ?assertEqual(16#96, proplists:get_value("cs", M)),
+	      ?assertEqual(16#e8, proplists:get_value("cc", M))
+      end}},
+     {"a define called with a variable is an error", {timeout, 60,
+      fun() ->
+	      %% a bare name is taken for a meta variable first
+	      ?assertError({unbound, _},
+			   models("define T(x) (x); declare a; T(a)")),
+	      ?assertError({define_argument, _},
+			   models("define T(x) (x); declare a(i); T(a(1))"))
+      end}}].
+
+%% the fabric: four LUT3 cells with routing, programmed by the solver
+%% to add two 2 bit numbers; the program is checked by simulating it
+%% here on all 32 inputs
+fabric_test_() ->
+    {timeout, 300,
+     fun() ->
+	     %% one model: there are far too many symmetric programs to
+	     %% enumerate them all
+	     {_R, [M|_], _} = varp_tc:run(read_formula("fpga_fabric.varp"),
+					 [{satisfy,[]},{backjump,[{max,1}]}]),
+	     Val = fun(Name, Args) ->
+			   {_, {uint,Bits}} = lists:keyfind({p,Name,Args}, 1, M),
+			   list_to_integer(tuple_to_list(Bits), 2)
+		   end,
+	     Cfg = fun(C) -> Val(<<"CFG">>, [C]) end,
+	     Sel = fun(C,K) -> Val(<<"SEL">>, [C,K]) end,
+	     Lut = fun(Cfg0,X,Y,Z) -> (Cfg0 bsr (X + 2*Y + 4*Z)) band 1 end,
+	     %% feed forward routing
+	     lists:foreach(fun({C,K}) -> ?assert(Sel(C,K) < 5 + C) end,
+			   [{C,K} || C <- lists:seq(0,3), K <- lists:seq(0,2)]),
+	     lists:foreach(
+	       fun(I) ->
+		       In = [(I bsr K) band 1 || K <- lists:seq(0,4)],
+		       Sig = lists:foldl(
+			       fun(C, S) ->
+				       [X,Y,Z] = [lists:nth(Sel(C,K)+1, S) || K <- lists:seq(0,2)],
+				       S ++ [Lut(Cfg(C),X,Y,Z)]
+			       end, In, lists:seq(0,3)),
+		       [A0,A1,B0,B1,CI,_O0,O1,O2,O3] = Sig,
+		       ?assertEqual(A0 + 2*A1 + B0 + 2*B1 + CI, O1 + 2*O3 + 4*O2)
+	       end, lists:seq(0,31))
+     end}.

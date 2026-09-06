@@ -1,23 +1,47 @@
+// A 3 input lookup table, the cell of an FPGA, and its configuration
+// computed from a formula.
+//
+// The configuration cfg is the truth table of the cell: bit m of cfg
+// is the output for the input combination m = x + 2y + 4z, and the
+// cell computes "some minterm whose cfg bit is set holds".  Any
+// function of three inputs is one configuration, most of them with
+// several bits set (xor has four).
+//
+// So the configuration of a target function is the target evaluated
+// on every row: bit m of cfg is target(bits of m).  The target is a
+// circuit (a define only takes integer arguments), the row bits are
+// constants, and the whole right hand side folds at build time:
+//
+//     varp sat bj formulas/varp/fpga.varp        cfg=64 (bit 6: x=0,y=1,z=1)
+//
+// With cfg known the same lut3 just evaluates the function; with the
+// target unknown but constrained, the solver finds the cfg that fits,
+// which is what fpga_fabric.varp does for a whole net.
 
-// 3 bit fpga
-define F0_3(i) (~X3(i) and ~X2(i) and ~X1(i)) ;
-define F1_3(i) (~X3(i) and ~X2(i) and  X1(i)) ;
-define F2_3(i) (~X3(i) and  X2(i) and ~X1(i)) ;
-define F3_3(i) (~X3(i) and  X2(i) and  X1(i)) ;
-define F4_3(i) ( X3(i) and ~X2(i) and ~X1(i)) ;
-define F5_3(i) ( X3(i) and ~X2(i) and  X1(i)) ;
-define F6_3(i) ( X3(i) and  X2(i) and ~X1(i)) ;
-define F7_3(i) ( X3(i) and  X2(i) and  X1(i)) ;
+circuit lut3(in cfg:8; in x, y, z; return q)
+{
+    q = (cfg[0] && !x && !y && !z) ||
+        (cfg[1] &&  x && !y && !z) ||
+        (cfg[2] && !x &&  y && !z) ||
+        (cfg[3] &&  x &&  y && !z) ||
+        (cfg[4] && !x && !y &&  z) ||
+        (cfg[5] &&  x && !y &&  z) ||
+        (cfg[6] && !x &&  y &&  z) ||
+        (cfg[7] &&  x &&  y &&  z);
+}
 
-define FPGA(i)
-	   ((F(i):3 == 0) && F0_3(i))  ||
-	   ((F(i):3 == 1) && F1_3(i))  ||
-	   ((F(i):3 == 2) && F2_3(i))  ||
-	   ((F(i):3 == 3) && F3_3(i))  ||
-	   ((F(i):3 == 4) && F4_3(i))  ||
-	   ((F(i):3 == 5) && F5_3(i))  ||
-	   ((F(i):3 == 6) && F6_3(i))  ||
-	   ((F(i):3 == 7) && F7_3(i)) ;
+// the function to build
+circuit target(in x, y, z; return q)
+{
+    q = !x && y && z;
+}
 
-FPGA(1) && [EQ 1]{X1(1),X2(1),X3(1)}
+// row m of the truth table: the target on the bits of m
+define TT(m) target((m & 1) == 1, (m & 2) == 2, (m & 4) == 4);
 
+declare cfg:8;
+
+[A m=0..7] (cfg[m] equ TT(m))
+
+// The same as a vector literal, elements from bit 0 upwards:
+//     cfg == {TT(0), TT(1), TT(2), TT(3), TT(4), TT(5), TT(6), TT(7)}

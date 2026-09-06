@@ -439,6 +439,13 @@ match_def_args([F|Fs], [A|As], Acc) ->
 	    match_def_args(Fs,As,[{Fi,Ai}|Acc]);
 	{Fi,Fi} when is_integer(Fi) ->
 	    match_def_args(Fs,As,Acc);
+	{_,{term,T}} ->
+	    %% "define F(x) ..." called as F(X(i)): a define takes
+	    %% integers, a formula argument needs a circuit
+	    error({define_argument, T});
+	{_,Ai} when is_binary(Ai) ->
+	    %% an unbound name, F(a) with a a variable
+	    error({define_argument, {p,Ai,[]}});
 	_ ->
 	    false
     end;
@@ -450,6 +457,8 @@ match_def_args(_, _, _Acc) ->
 %% sub eval for match
 match_eval({const,V}) -> V;
 match_eval(Name) when is_binary(Name) -> Name;
+match_eval(T) when is_tuple(T), element(1,T) =:= f;
+		   is_tuple(T), element(1,T) =:= p -> {term, T};
 match_eval(X) when is_integer(X) -> X;
 match_eval(X) when is_atom(X) -> X.
 

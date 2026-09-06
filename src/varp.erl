@@ -809,6 +809,9 @@ format_error(Err) ->
 	    ["Variable ",VarName," is out of range\n"];
 	{empty_clause, _Where} ->
 	    ["Empty clause not allowed\n"];
+	{define_argument,T} ->
+	    io_lib:format("a define takes integer arguments, ~s is a formula:"
+			  " use a circuit\n", [varp_format:format_symbol(T)]);
 	{width_mismatch,{bool,1},{Type,N}} ->
 	    io_lib:format("a ~w bit ~w value can not be assigned to a "
 			  "boolean variable, declare it with a width\n",

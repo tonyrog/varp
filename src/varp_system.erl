@@ -179,16 +179,22 @@ rename(L, Map) when is_list(L) ->
 rename(X, _Map) ->
     X.
 
-%% "src_n", "src_q0" with src a parameter bound to a channel
+%% "src_n", "req_a_q0" with src, req_a a parameter bound to a channel:
+%% the longest parameter that is a prefix followed by "_" wins
 rename_field(Name, Map) ->
-    case binary:split(Name, <<"_">>) of
-	[Prefix, Field] ->
-	    case maps:find(Prefix, Map) of
-		{ok,New} -> <<New/binary,"_",Field/binary>>;
-		error -> Name
-	    end;
-	_ -> Name
+    Hits = [{byte_size(P), P, New} || {P, New} <- maps:to_list(Map),
+				      is_field_of(P, Name)],
+    case lists:reverse(lists:sort(Hits)) of
+	[{Len, _P, New}|_] ->
+	    <<_:Len/binary, Rest/binary>> = Name,
+	    <<New/binary, Rest/binary>>;
+	[] -> Name
     end.
+
+is_field_of(P, Name) ->
+    Len = byte_size(P),
+    byte_size(Name) > Len + 1 andalso
+	binary:part(Name, 0, Len + 1) =:= <<P/binary, "_">>.
 
 %% ------------------------------------------------------------------
 %% Channels: "channel ch:8[2];" is a queue of two 8 bit values, a
@@ -540,6 +546,9 @@ rw_bind(B, Ctx) -> rw(B, Ctx).
 
 next_arg(Name, _Ctx) when is_binary(Name) -> {Name, []};
 next_arg({p, Name, Params}, _Ctx) -> {Name, Params};
+%% next(v(p)): the argument of a call is an expression, where v(p) is
+%% a call node
+next_arg({call, Name, Params}, _Ctx) when is_binary(Name) -> {Name, Params};
 next_arg(_, _) -> false.
 
 var_kind(Name, #{ vars := #{ states := States, inputs := Inputs },

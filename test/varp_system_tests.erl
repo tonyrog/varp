@@ -222,3 +222,30 @@ channel_and_instance_test_() ->
 	      ?assertMatch({error,{2,varp_parse,_}},
 			   parse("system s(a) { state x; init x; }\ninstance t = s(y, z);\n"))
       end}}].
+
+%% dining philosophers: the TLA+ translations (n philosophers, indexed
+%% state and quantifiers) and the message passing versions (three
+%% philosophers and three forks as processes over channels)
+dining_test_() ->
+    Bmc = fun(File, KMax, Meta) ->
+		  varp_tc:run(read(File), [{bmc,[{k_max,KMax}]}], #{meta => Meta})
+	  end,
+    Steps = fun({_R,[M|_],_}) -> {_, Rows} = varp_bmc:trace(M), length(Rows) - 1 end,
+    [{"dining_dead n=3 deadlocks at k=3", {timeout, 300,
+      fun() -> ?assertEqual(3, Steps(Bmc("dining_dead.varp", 6, #{<<"n">> => 3}))) end}},
+     {"dining_dead n=4 deadlocks at k=4", {timeout, 300,
+      fun() -> ?assertEqual(4, Steps(Bmc("dining_dead.varp", 6, #{<<"n">> => 4}))) end}},
+     {"dining_correct n=3 has no deadlock up to k=8", {timeout, 300,
+      fun() -> ?assertMatch({?INCONSISTENT,[],_}, Bmc("dining_correct.varp", 8, #{<<"n">> => 3})) end}},
+     {"dining_msg_dead deadlocks at k=4", {timeout, 300,
+      fun() -> ?assertEqual(4, Steps(Bmc("dining_msg_dead.varp", 8, #{}))) end}},
+     {"dining_msg_correct has no deadlock up to k=10", {timeout, 300,
+      fun() -> ?assertMatch({?INCONSISTENT,[],_}, Bmc("dining_msg_correct.varp", 10, #{})) end}},
+     {"dining_msg_correct: a philosopher eats", {timeout, 300,
+      fun() ->
+	      T = lists:flatten(string:replace(read("dining_msg_correct.varp"),
+					       "reach p0_st == 3 and p1_st == 3 and p2_st == 3;",
+					       "reach p2_st == 4;", all)),
+	      {R,[_|_],_} = varp_tc:run(T, [{bmc,[{k_max,10}]}]),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE)
+      end}}].

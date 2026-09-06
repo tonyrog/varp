@@ -70,6 +70,13 @@ options() ->
 	description => "Incremental: restore the variable order between bounds "
 	    "(auto: only without --bump-decay)."
       },
+     #{ long => "property",
+	key => property,
+	spec => string,
+	default => "",
+	description => "Check this property macro (e.g. dining_invariant) "
+	    "instead of the first property of the system."
+      },
      #{ long => "induction",
 	key => induction,
 	spec => {enum,[?BOOL]},
@@ -91,9 +98,13 @@ run(Bs, _Param) when is_record(Bs,bs) ->
     {?ERROR, "bmc must be the first plugin", Bs}.
 
 %% Do is the rest of the plugin chain
-drive(Do, Assignments, Formula, GOpts, Param) ->
+drive(Do, Assignments, Formula0, GOpts, Param) ->
     Do1 = with_search(with_mode(Do)),
     Bound = list_to_binary(maps:get(bound, Param)),
+    Formula = case maps:get(property, Param) of
+		  "" -> Formula0;
+		  Prop -> {p, list_to_binary(Prop), [Bound]}
+	      end,
     KMin = maps:get(k_min, Param),
     KMax = maps:get(k_max, Param),
     Step = max(1, maps:get(step, Param)),

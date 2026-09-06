@@ -211,6 +211,7 @@ prints a counterexample as a trace, one row per step:
                 --bound <name>             the bound's meta variable  (k)
                 --trace <bool>             print the trace           (true)
                 --induction <bool>         prove an invariant by k-induction (false)
+                --property <macro>         which property, e.g. dining_invariant
                 --incremental <bool>       one clause database for all bounds (true)
                 --keep-learned auto|<bool> keep learned clauses between bounds
                 --reset-order auto|<bool>  restore the variable order per bound
@@ -254,7 +255,11 @@ The language
 [`SYNTAX.md`](SYNTAX.md) is the reference; [`doc/CIRCUIT.md`](doc/CIRCUIT.md)
 covers circuits, and [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md)
 transition systems (`system { state ... next ... reach ... }`, channels
-and instances) for bounded model checking. A taste:
+and instances) for bounded model checking; `formulas/varp/fpga.varp` and
+`fpga_adder.varp` compute lookup table configurations from a target
+circuit (bit m of the table is the target on the bits of m), and
+`fpga_fabric.varp` programs a net of four cells with routing bits into a
+2 bit adder. A taste:
 
     // n pigeons do not fit in n-1 holes
     ([A p=1..n] [E h=1..(n-1)] P(p,h)) and

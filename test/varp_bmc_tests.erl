@@ -209,3 +209,27 @@ induction_test_() ->
 	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
 	      ?assertEqual(4, value(M, <<"B">>, 6))
       end}}].
+
+%% deadlock freedom of the ordered dining philosophers, proved with a
+%% strengthening invariant selected by --property; the same lemma on
+%% the deadlocking version is refuted at k=n
+strengthening_invariant_test_() ->
+    Read = fun(Name) ->
+		   File = filename:join(varp_tc:formula_dir("varp"), Name),
+		   {ok,Bin} = file:read_file(File), binary_to_list(Bin)
+	   end,
+    Run = fun(Text, N, KMax) ->
+		  varp_tc:run(Text, [{bmc,[{induction,true},{property,"dining_invariant"},
+					   {k_max,KMax}]}], #{meta => #{<<"n">> => N}})
+	  end,
+    Correct = Read("dining_correct.varp"),
+    [{"proved for n="++integer_to_list(N), {timeout, 300,
+      fun() -> ?assertMatch({?INCONSISTENT,[],_}, Run(Correct, N, 2)) end}}
+     || N <- [3,4,5]] ++
+    [{"a weaker lemma is not inductive", {timeout, 300,
+      fun() ->
+	      Weak = lists:flatten(string:replace(Correct,
+			"                     and ((st(p) == 1) implies ((forks(a) == p) and (forks(b) != p)))\n",
+			"", all)),
+	      ?assertMatch({?CONTINUE,[],_}, Run(Weak, 3, 2))
+      end}}].

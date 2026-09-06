@@ -349,7 +349,6 @@ syntax_error_test() ->
 	 {"and_bug.varp",   "leading && "},
 	 {"arith.varp",     "sized variable X:3 inside a logic expression"},
 	 {"fib.varp",       "sized variable inside a logic expression"},
-	 {"fpga.varp",      "sized variable F(i):3 inside a logic expression"},
 	 {"is_square.varp", "sized variable inside a logic expression"},
 	 {"plustimes2.varp","sized variable on the left of an assignment"},
 	 {"prog1.varp",     "code {} block is not in the grammar"},
