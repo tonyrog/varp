@@ -70,6 +70,13 @@ options() ->
 	description => "Incremental: restore the variable order between bounds "
 	    "(auto: only without --bump-decay)."
       },
+     #{ long => "induction",
+	key => induction,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Prove an invariant by k-induction: TRUE, FALSE with a "
+	    "trace, or UNKNOWN past k-max."
+      },
      #{ long => "incremental",
 	key => incremental,
 	spec => {enum,[?BOOL]},
@@ -96,6 +103,17 @@ drive(Do, Assignments, Formula, GOpts, Param) ->
 		 true -> incremental_target(Formula, Bound, GOpts, Do1);
 		 false -> false
 	     end,
+    case maps:get(induction, Param) of
+	true ->
+	    induction(KMin, KMax, Step, Trace, Print, Formula, Bound,
+		      Do1, Assignments, GOpts#{ print => false });
+	false ->
+	    drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
+			 Do1, Assignments, Formula, GOpts, Param)
+    end.
+
+drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
+	     Do1, Assignments, Formula, GOpts, Param) ->
     case Target of
 	{Info, Kind, BjParam} ->
 	    ?info(GOpts, "bmc: incremental, ~s ~s\n",
@@ -108,6 +126,75 @@ drive(Do, Assignments, Formula, GOpts, Param) ->
 	false ->
 	    loop(KMin, KMax, Step, Bound, Trace, Print,
 		 Do1, Assignments, Formula, GOpts#{ print => false })
+    end.
+
+%% ------------------------------------------------------------------
+%% k-induction (--induction): for k = k-min.. the base case is the
+%% search for a violation within k steps, the step case asks for k+1
+%% transitions, distinct states, the property holding in 0..k and
+%% failing in k+1.  A base model is a counterexample (% FALSE), an
+%% unsatisfiable step case is a proof (% TRUE), k-max gives % UNKNOWN.
+%% ------------------------------------------------------------------
+
+induction(KMin, KMax, Step, Trace, Print, Formula, Bound, Do, As, GOpts) ->
+    case induction_target(Formula, Bound, GOpts) of
+	false ->
+	    result(Print, "bmc: --induction needs a system with an invariant "
+		   "or reach property as the formula\n", []),
+	    result(Print, "% ERROR\n", []),
+	    {?ERROR, "no invariant to prove", undefined};
+	{Info, Kind} ->
+	    ?info(GOpts, "bmc: k-induction, ~s ~s\n", [maps:get(name, Info), Kind]),
+	    istep_ind(KMin, KMax, Step, Trace, Print, Info, Kind, Do, As, GOpts)
+    end.
+
+induction_target({p,Name,[Bound]}, Bound, GOpts) ->
+    Systems = maps:get(systems, GOpts, []),
+    case [{Info, Kind} || Info <- Systems,
+			  Kind <- [varp_system:property_kind(Info, Name)],
+			  Kind =:= invariant orelse Kind =:= reach] of
+	[T|_] -> T;
+	[] -> false
+    end;
+induction_target(_Formula, _Bound, _GOpts) ->
+    false.
+
+istep_ind(K, KMax, _Step, _Trace, Print, _Info, _Kind, _Do, _As, _GOpts)
+  when K > KMax ->
+    result(Print, "% UNKNOWN\n", []),
+    {?CONTINUE, [], undefined};
+istep_ind(K, KMax, Step, Trace, Print, Info, Kind, Do, As, GOpts) ->
+    {Base, StepF} = varp_system:induction_formulas(Info, Kind, K),
+    {RB, AccB, BsB} = varp:do_run(Do, As, Base, GOpts),
+    case models(AccB) of
+	[Model|_] when RB =/= ?TIMEOUT ->
+	    ?info(GOpts, "bmc: k=~w base case SAT, counterexample\n", [K]),
+	    result(Print, "bmc: counterexample at k=~w\n", [K]),
+	    if Trace, Print -> io:put_chars(format_trace(Model));
+	       true -> ok
+	    end,
+	    result(Print, "% FALSE\n", []),
+	    {RB, AccB, BsB};
+	_ when RB =:= ?TIMEOUT; RB =:= ?CANCEL; RB =:= ?ERROR ->
+	    result(Print, "% ~s\n", [verdict(RB, AccB)]),
+	    {RB, AccB, BsB};
+	_ ->
+	    {RS, AccS, BsS} = varp:do_run(Do, As, StepF, GOpts),
+	    case models(AccS) of
+		[] when RS =:= ?INCONSISTENT; RS =:= ?DONE ->
+		    ?info(GOpts, "bmc: k=~w base UNSAT, step UNSAT: proved\n", [K]),
+		    result(Print, "bmc: proved by ~w-induction\n", [K]),
+		    result(Print, "% TRUE\n", []),
+		    {?INCONSISTENT, [], BsS};
+		[_|_] ->
+		    ?info(GOpts, "bmc: k=~w base UNSAT, step SAT: not ~w-inductive\n",
+			  [K, K]),
+		    istep_ind(K+Step, KMax, Step, Trace, Print, Info, Kind,
+			      Do, As, GOpts);
+		_ ->
+		    result(Print, "% ~s\n", [verdict(RS, AccS)]),
+		    {RS, AccS, BsS}
+	    end
     end.
 
 %% With activity decay (a VSIDS heap) old learned clauses and activity

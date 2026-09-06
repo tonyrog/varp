@@ -89,7 +89,15 @@ process_args(["--"++OptName|As],Spec,Map,Bound) ->
 	{#{ key:=version },_Val} -> version();
 	{#{ key:=Key,spec:=Type },Val} ->
 	    case match_value(Type,Val,As) of
-		false -> usage(Spec);
+		false ->
+		    %% a boolean flag without a value: --induction
+		    case Val =:= [] andalso spec_has_true_value(Type) of
+			true ->
+			    process_args(As,Spec,
+					 insert_value(Key,true,Type,Map),Bound);
+			false ->
+			    usage(Spec)
+		    end;
 		{ok,Value,As1} ->
 		    process_args(As1,Spec,
 				 insert_value(Key,Value,Type,Map),Bound)

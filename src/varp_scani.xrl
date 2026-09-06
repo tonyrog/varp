@@ -46,6 +46,11 @@ invariant           : {token,{'invariant',TokenLine}}.
 reach               : {token,{'reach',TokenLine}}.
 eventually          : {token,{'eventually',TokenLine}}.
 assume              : {token,{'assume',TokenLine}}.
+channel             : {token,{'channel',TokenLine}}.
+send                : {token,{'send',TokenLine}}.
+recv                : {token,{'recv',TokenLine}}.
+when                : {token,{'when',TokenLine}}.
+instance            : {token,{'instance',TokenLine}}.
 order               : {token,{'order',TokenLine}}.
 rank                : {token,{'rank',TokenLine}}.
 degree              : {token,{'degree',TokenLine}}.

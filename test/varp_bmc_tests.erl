@@ -171,3 +171,41 @@ jugs_test_() ->
 	     ?assertEqual(10, K),
 	     ?assertEqual("1", hd(Vals))
      end}.
+
+%% k-induction: TRUE when the step case is unsatisfiable, FALSE with a
+%% trace when the base case has a model, UNKNOWN past k-max
+induction_test_() ->
+    Sys = fun(Prop) ->
+		  lists:flatten(string:replace(read("die_hard_system.varp"),
+					       "reach B == 4;", Prop, all))
+	  end,
+    Run = fun(Prop, KMax) ->
+		  varp_tc:run(Sys(Prop), [{bmc,[{induction,true},{k_max,KMax}]}])
+	  end,
+    [{"0-inductive", {timeout, 120,
+      fun() ->
+	      ?assertMatch({?INCONSISTENT, [], _}, Run("invariant B <= 5 and L <= 3;", 4))
+      end}},
+     {"2-inductive", {timeout, 120,
+      fun() ->
+	      ?assertMatch({?INCONSISTENT, [], _}, Run("invariant B + L <= 8;", 4))
+      end}},
+     {"false, counterexample at k=6", {timeout, 120,
+      fun() ->
+	      {R, [M|_], _} = Run("invariant B != 4;", 8),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	      ?assertEqual(4, value(M, <<"B">>, 6)),
+	      ?assertEqual(undefined, value(M, <<"B">>, 7))
+      end}},
+     {"unknown within k-max", {timeout, 120,
+      fun() ->
+	      %% B == 6 is unreachable but the step case wanders through
+	      %% unreachable states, so 3-induction cannot prove it
+	      ?assertMatch({?CONTINUE, [], _}, Run("reach B == 6;", 3))
+      end}},
+     {"reach is the invariant not P", {timeout, 120,
+      fun() ->
+	      {R, [M|_], _} = Run("reach B == 4;", 8),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	      ?assertEqual(4, value(M, <<"B">>, 6))
+      end}}].

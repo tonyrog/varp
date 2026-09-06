@@ -179,3 +179,46 @@ composition_test_() ->
 	      ?assertEqual("3", Count),
 	      ?assert(K >= 6 andalso K =< 12)
       end}}].
+
+%% channels are queues between systems, instances copy a template
+channel_and_instance_test_() ->
+    Q = read("queue.varp"),
+    Prod = "channel ch:4[DEPTH];\n"
+	"system producer(dst) { state v:4; init v == 1;\n"
+	"  send dst v when v <= 3;\n"
+	"  next (v <= 3) implies next(v) == v + 1;\n"
+	"  next (v > 3) implies next(v) == v;\n"
+	"  reach v == 4; }\n"
+	"instance p = producer(ch);\n",
+    Depth = fun(D) -> lists:flatten(string:replace(Prod, "DEPTH", integer_to_list(D))) end,
+    [{"producer, queue, consumer: 1+2+3 in four steps", {timeout, 120,
+      fun() ->
+	      {R, [M|_], _} = varp_tc:run(Q, [{bmc,[{k_max,8}]}]),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	      {Vectors, Rows} = varp_bmc:trace(M),
+	      ?assertEqual(5, length(Rows)),
+	      %% instance locals are prefixed, the channel keeps its name
+	      Names = [binary_to_list(N) || {p,N,[]} <- Vectors],
+	      ?assertEqual(["c_got","c_sum","ch_data","ch_n","ch_q0","ch_q1","p_v"], Names),
+	      {4, Vals, _} = lists:last(Rows),
+	      ?assertEqual("6", lists:nth(2, Vals)),      %% c_sum
+	      ?assertEqual("0", lists:nth(4, Vals))       %% ch_n, drained
+      end}},
+     {"a full queue blocks the sender", {timeout, 120,
+      fun() ->
+	      %% three values through a queue of two with nobody reading
+	      ?assertMatch({?INCONSISTENT, [], _},
+			   varp_tc:run(Depth(2), [{bmc,[{k_max,8}]}])),
+	      {R, [M|_], _} = varp_tc:run(Depth(3), [{bmc,[{k_max,8}]}]),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	      {_, Rows} = varp_bmc:trace(M),
+	      ?assertEqual(4, length(Rows))               %% k=3
+      end}},
+     {"errors", {timeout, 60,
+      fun() ->
+	      ?assertMatch({error,{1,varp_parse,_}}, parse("instance p = nothing;\n")),
+	      ?assertMatch({error,{2,varp_parse,_}},
+			   parse("system s(a) { state x; init x; }\ninstance t = s(b=y);\n")),
+	      ?assertMatch({error,{2,varp_parse,_}},
+			   parse("system s(a) { state x; init x; }\ninstance t = s(y, z);\n"))
+      end}}].

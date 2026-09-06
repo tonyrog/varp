@@ -17,7 +17,7 @@ Terminals
         'float' 'double'
         'circuit' 'in' 'out' 'return'
         'system' 'state' 'init' 'next' 'invariant' 'reach' 'eventually'
-        'assume'
+        'assume' 'channel' 'send' 'recv' 'when' 'instance'
         'min' 'max' 'abs'
 	.
 
@@ -78,6 +78,17 @@ definition -> 'system' sym '{' system_items '}' :
 definition -> 'system' sym circuit_params '{' system_items '}' :
 		  {system,'$2','$3','$5',line('$1')}.
 
+%% a queue between systems, and an instance of a system template,
+%% see doc/MODEL_CHECKING.md
+definition -> 'channel' sym ':' sexpr ';' :
+		  {channel,'$2','$4',1,line('$1')}.
+definition -> 'channel' sym ':' sexpr '[' integer ']' ';' :
+		  {channel,'$2','$4',value('$6'),line('$1')}.
+definition -> 'instance' sym '=' sym ';' :
+		  {instance,'$2','$4',[],line('$1')}.
+definition -> 'instance' sym '=' sym '(' arg_list ')' ';' :
+		  {instance,'$2','$4','$6',line('$1')}.
+
 %% transition system, see doc/MODEL_CHECKING.md
 system_items -> system_item : ['$1'].
 system_items -> system_items system_item : '$1' ++ ['$2'].
@@ -90,6 +101,10 @@ system_item -> 'invariant' lexpr ';'   : {invariant,'$2'}.
 system_item -> 'reach' lexpr ';'       : {reach,'$2'}.
 system_item -> 'eventually' lexpr ';'  : {eventually,'$2'}.
 system_item -> 'assume' lexpr ';'      : {assume,'$2'}.
+system_item -> 'send' sym lexpr ';'    : {send,'$2','$3',true}.
+system_item -> 'send' sym lexpr 'when' lexpr ';' : {send,'$2','$3','$5'}.
+system_item -> 'recv' sym sym ';'      : {recv,'$2','$3',true}.
+system_item -> 'recv' sym sym 'when' lexpr ';' : {recv,'$2','$3','$5'}.
 
 circuit_params -> '(' ')' : [].
 circuit_params -> '(' circuit_param_decls ')' : '$2'.

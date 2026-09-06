@@ -210,6 +210,7 @@ prints a counterexample as a trace, one row per step:
     bmc         --k-min <N>, --k-max <N>, --step <N>     bounds  (0, 20, 1)
                 --bound <name>             the bound's meta variable  (k)
                 --trace <bool>             print the trace           (true)
+                --induction <bool>         prove an invariant by k-induction (false)
                 --incremental <bool>       one clause database for all bounds (true)
                 --keep-learned auto|<bool> keep learned clauses between bounds
                 --reset-order auto|<bool>  restore the variable order per bound
@@ -252,8 +253,8 @@ The language
 
 [`SYNTAX.md`](SYNTAX.md) is the reference; [`doc/CIRCUIT.md`](doc/CIRCUIT.md)
 covers circuits, and [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md)
-transition systems (`system { state ... next ... reach ... }`) for
-bounded model checking. A taste:
+transition systems (`system { state ... next ... reach ... }`, channels
+and instances) for bounded model checking. A taste:
 
     // n pigeons do not fit in n-1 holes
     ([A p=1..n] [E h=1..(n-1)] P(p,h)) and
