@@ -259,7 +259,7 @@ global_options() ->
       #{ long => "bump-decay",
 	 key => bump_decay,
 	 spec => float,
-	 default => 0.0,
+	 default => 0.95,
 	 description => "VSIDS activity decay per conflict (0.9-0.99), 0 uses the order list."
        },
       #{ long => "assoc",

@@ -151,8 +151,7 @@ Encoding and search behaviour:
     --divz true|false|ignore            divide by zero            (false)
     --phase true|false|undefined        initial phase             (true)
     --bump-decay <f>           VSIDS activity decay per conflict; 0 keeps
-                               the order-list bump, 0.9-0.95 is a large
-                               win on most instances               (0)
+                               the old order-list bump             (0.95)
     --use-phase <bool>                  phase saving              (false)
     --qtype fifo|lifo|recursive         queue type            (recursive)
     --seed <integer>                    random seed                   (0)
@@ -185,6 +184,7 @@ plugin reads back:
                 --max-conflicts <N>        conflicts to analyse    (1)
                 --minimize none|local|global|recursive          (none)
                 --bump <N>|none|next|log2|log10|rank    VSIDS bump (1)
+                                           (with --bump-decay only none matters)
                 --restart-counter <N>                              (0)
                 --restart-interval <s>                     (infinity)
                 --stumble <L>              extra jump if D1 >= L   (0)
