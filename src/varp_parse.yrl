@@ -17,6 +17,7 @@ Terminals
         'float' 'double'
         'circuit' 'in' 'out' 'return'
         'system' 'state' 'init' 'next' 'invariant' 'reach' 'eventually'
+        'assume'
         'min' 'max' 'abs'
 	.
 
@@ -88,6 +89,7 @@ system_item -> 'next' lexpr ';'        : {next,'$2'}.
 system_item -> 'invariant' lexpr ';'   : {invariant,'$2'}.
 system_item -> 'reach' lexpr ';'       : {reach,'$2'}.
 system_item -> 'eventually' lexpr ';'  : {eventually,'$2'}.
+system_item -> 'assume' lexpr ';'      : {assume,'$2'}.
 
 circuit_params -> '(' ')' : [].
 circuit_params -> '(' circuit_param_decls ')' : '$2'.

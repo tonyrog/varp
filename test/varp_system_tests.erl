@@ -5,6 +5,7 @@
 
 -module(varp_system_tests).
 -include_lib("eunit/include/eunit.hrl").
+-include("../src/varp.hrl").
 
 read(Name) ->
     File = filename:join(varp_tc:formula_dir("varp"), Name),
@@ -92,3 +93,89 @@ macros_test() ->
     ?assertEqual(16, varp_tc:count(Mixed, opts(<<"k">>, 7))),
     Direct = New ++ "\njugs_init(0) and [A s=1..k] jugs_next(s) and B(k) == 4 and L(k) == 3\n",
     ?assertEqual(17, varp_tc:count(Direct, opts(<<"k">>, 7))).
+
+%% assume: a constraint in every step, here on the input.  The shortest
+%% string of capital letters with the CRC-16/CCITT-FALSE of "HELLO" has
+%% four letters, and the trace is a valid one (checked in Erlang)
+crc16_system_test_() ->
+    {timeout, 300,
+     fun() ->
+	     Text = read("crc16_system.varp"),
+	     {R, [Model|_], _} = varp_tc:run(Text, [{bmc,[{k_max,6}]}]),
+	     ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	     {_, Rows} = varp_bmc:trace(Model),
+	     ?assertEqual(5, length(Rows)),          %% steps 0..4
+	     %% column order: CHAR, CRC (alphabetical)
+	     Chars = [list_to_integer(C) || {S,[C,_],_} <- Rows, S > 0],
+	     ?assert(lists:all(fun(C) -> C >= 65 andalso C =< 90 end, Chars)),
+	     ?assertEqual(18902, crc16(Chars, 16#ffff)),
+	     {4, [_, "18902"], _} = lists:last(Rows)
+     end}.
+
+crc16([], C) -> C;
+crc16([B|Bs], C0) ->
+    C1 = lists:foldl(fun(_, C) ->
+			     case C band 16#8000 of
+				 0 -> (C bsl 1) band 16#ffff;
+				 _ -> ((C bsl 1) bxor 16#1021) band 16#ffff
+			     end
+		     end, C0 bxor (B bsl 8), lists:seq(1,8)),
+    crc16(Bs, C1).
+
+assume_test() ->
+    %% without the assumption a two step path reaches 3, with it never
+    Sys = fun(A) -> "system c { state x:4; input d:4; init x == 0;\n"
+			"  next next(x) == x + d;\n" ++ A ++
+			"  reach x == 3; }\n" end,
+    ?assert(varp_tc:is_sat(Sys(""), opts(<<"k">>, 1))),
+    ?assertNot(varp_tc:is_sat(Sys("  assume d == 1;\n"), opts(<<"k">>, 2))),
+    ?assert(varp_tc:is_sat(Sys("  assume d == 1;\n"), opts(<<"k">>, 3))),
+    ?assertNot(varp_tc:is_sat(Sys("  assume x < 3;\n"), opts(<<"k">>, 6))).
+
+%% several systems compose synchronously and share variables by name
+composition_test_() ->
+    Two = "system sender {\n"
+	"  state msg:4, turn;\n"
+	"  init  msg == 0 and turn;\n"
+	"  next  turn implies (next(msg) == msg + 1 and not next(turn));\n"
+	"  next  (not turn) implies (next(msg) == msg and next(turn));\n"
+	"}\n"
+	"system receiver {\n"
+	"  state msg:4, seen:4;\n"
+	"  init  seen == 0;\n"
+	"  next  next(seen) == seen + msg;\n"
+	"  reach seen == 6;\n"
+	"}\n",
+    [{"sender constrains the receiver's msg", {timeout, 120,
+      fun() ->
+	      %% alone the receiver would see any msg at k=1; composed,
+	      %% msg counts 0,1,1,2,2,3 and the sum reaches 6 at k=5
+	      ?assertNot(varp_tc:is_sat(Two, opts(<<"k">>, 1))),
+	      ?assertNot(varp_tc:is_sat(Two, opts(<<"k">>, 4))),
+	      ?assert(varp_tc:is_sat(Two, opts(<<"k">>, 5))),
+	      {R, [M|_], _} = varp_tc:run(Two, [{bmc,[{k_max,8}]}]),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	      {_, Rows} = varp_bmc:trace(M),
+	      ?assertEqual(6, length(Rows)),
+	      ?assertEqual({5,["3","6"],[]}, lists:last(Rows))
+      end}},
+     {"per system macros stay pure", {timeout, 120,
+      fun() ->
+	      %% receiver_init/next alone: msg is free again
+	      Own = Two ++ "receiver_init(0) and receiver_next(1) and seen(1) == 6\n",
+	      ?assert(varp_tc:is_sat(Own, opts(<<"k">>, 1)))
+      end}},
+     {"handshake: ABC over valid/ready", {timeout, 300,
+      fun() ->
+	      Text = read("handshake.varp"),
+	      {R, [M|_], _} = varp_tc:run(Text, [{bmc,[{k_max,12}]}]),
+	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	      {Vectors, Rows} = varp_bmc:trace(M),
+	      %% columns: count, data, sum (alphabetical vectors)
+	      ?assertEqual([{p,<<"count">>,[]},{p,<<"data">>,[]},{p,<<"sum">>,[]}],
+			   Vectors),
+	      {K, [Count,_Data,Sum], _} = lists:last(Rows),
+	      ?assertEqual("198", Sum),
+	      ?assertEqual("3", Count),
+	      ?assert(K >= 6 andalso K =< 12)
+      end}}].

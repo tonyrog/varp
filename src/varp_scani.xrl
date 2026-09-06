@@ -45,6 +45,7 @@ next                : {token,{'next',TokenLine}}.
 invariant           : {token,{'invariant',TokenLine}}.
 reach               : {token,{'reach',TokenLine}}.
 eventually          : {token,{'eventually',TokenLine}}.
+assume              : {token,{'assume',TokenLine}}.
 order               : {token,{'order',TokenLine}}.
 rank                : {token,{'rank',TokenLine}}.
 degree              : {token,{'degree',TokenLine}}.

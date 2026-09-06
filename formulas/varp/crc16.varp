@@ -1,0 +1,35 @@
+//
+// CRC circuit
+//
+
+// one crc step 16 bit poly
+circuit crc_bit_16(in crc:16, poly:16; return result:16)
+{
+	declare crc1:16;  // "declare crc1;" is an error: a 17 bit value
+	                  // does not fit a boolean (width_mismatch)
+	crc1 = (crc << 1);
+	result = crc[15] ? crc1 ^ poly : crc1;
+}
+
+// 8 steps - 16 bit poly
+circuit crc_byte_16(in byte:8, crc:16, poly:16; return result:16)
+{
+	declare c0:16, c1:16, c2:16, c3:16, c4:16, c5:16, c6:16, c7:16;
+	
+	c0 = crc ^ (byte << 8);
+	c1 = crc_bit_16(c0, poly);
+	c2 = crc_bit_16(c1, poly);
+	c3 = crc_bit_16(c2, poly);
+	c4 = crc_bit_16(c3, poly);
+	c5 = crc_bit_16(c4, poly);
+	c6 = crc_bit_16(c5, poly);
+	c7 = crc_bit_16(c6, poly);
+	result = crc_bit_16(c7, poly);
+}
+
+declare CRC:16;
+
+// CRC-16/CCITT-FALSE of "H" (72): seed 0xffff, poly 0x1021 => 0x283c = 10300
+(CRC == crc_byte_16(72, 65535, 4129))
+
+// see crc16_hello.varp for a whole string

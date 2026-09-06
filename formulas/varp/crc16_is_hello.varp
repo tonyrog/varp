@@ -1,0 +1,49 @@
+//
+// CRC-16/CCITT-FALSE of "HELLO": seed 0xffff, poly 0x1021 => 0x49d6 = 18902
+//
+//     varp sat bj formulas/varp/crc16_hello.varp
+//
+// The circuits are the ones of crc16.varp.
+
+circuit crc_bit_16(in crc:16, poly:16; return result:16)
+{
+	declare crc1:16;
+	crc1 = (crc << 1);
+	result = crc[15] ? crc1 ^ poly : crc1;
+}
+
+circuit crc_byte_16(in byte:8, crc:16, poly:16; return result:16)
+{
+	declare c0:16, c1:16, c2:16, c3:16, c4:16, c5:16, c6:16, c7:16;
+	c0 = crc ^ (byte << 8);
+	c1 = crc_bit_16(c0, poly);
+	c2 = crc_bit_16(c1, poly);
+	c3 = crc_bit_16(c2, poly);
+	c4 = crc_bit_16(c3, poly);
+	c5 = crc_bit_16(c4, poly);
+	c6 = crc_bit_16(c5, poly);
+	c7 = crc_bit_16(c6, poly);
+	result = crc_bit_16(c7, poly);
+}
+
+// find b1..b5 such that crc = 18902 (HELLO?)
+declare b1:8, b2:8, b3:8, b4:8, b5:8;
+declare c1:16, c2:16, c3:16, c4:16, CRC:16;
+
+define seed 0xffff;
+define poly 0x1021;
+
+// b1...b5 must be uppercase letter
+((b1 >= 65) && (b1 <= 90)) &&
+((b2 >= 65) && (b2 <= 90)) &&
+((b3 >= 65) && (b3 <= 90)) &&
+((b4 >= 65) && (b4 <= 90)) &&
+((b5 >= 65) && (b5 <= 90)) &&
+
+
+(c1 == crc_byte_16(b1, seed, poly)) &&
+(c2 == crc_byte_16(b2, c1, poly)) &&
+(c3 == crc_byte_16(b3, c2, poly)) &&
+(c4 == crc_byte_16(b4, c3, poly)) &&
+(18902 == crc_byte_16(b5, c4, poly))
+

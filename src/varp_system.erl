@@ -12,6 +12,7 @@
 %%%          input fill_big, ...;
 %%%          init  B == 0 and L == 0;
 %%%          next  fill_big implies next(B) == 5 and next(L) == L ...;
+%%%          assume not (fill_big and fill_small);  // holds in every step
 %%%          reach B == 4;
 %%%      }
 %%%
@@ -39,33 +40,65 @@
 -define(S, <<"$s">>).   %% step variable of the unrolling quantifiers
 -define(L, <<"$l">>).   %% loop step of a lasso
 -define(BOUND, <<"k">>). %% the binding the default formula uses
+-define(ALL, <<"$all">>).            %% the composition of all systems
+-define(ALL_INIT, <<"$all_init">>).
+-define(ALL_NEXT, <<"$all_next">>).
 
 %% called from the grammar on every parsed file
+%%
+%% Several systems in one file compose synchronously: every step all of
+%% them take a transition, a name declared in more than one system is
+%% one shared variable, and every property is checked in that composed
+%% world.  Each system keeps its own <name>_init/<name>_next macros; the
+%% composed path is $all_init/$all_next, and the property macros use it.
 expand_file({Defs, Assigns, Formula}) ->
-    {Defs1, Systems} = expand_defs(Defs, [], []),
+    Names = [N || {system,N,_,_,_} <- Defs],
+    Path = case Names of
+	       [_,_|_] -> {?ALL_INIT, ?ALL_NEXT};
+	       _ -> undefined
+	   end,
+    {Defs1, Systems} = expand_defs(Defs, Path, [], []),
+    Defs2 = case Path of
+		undefined -> Defs1;
+		_ -> Defs1 ++ composite(Names, Systems)
+	    end,
     Formula1 =
 	case Formula of
 	    undefined ->
-		case [N || {N,true} <- Systems] of
+		case [N || {N,true,_} <- Systems] of
 		    [Name|_] -> {p, Name, [?BOUND]};
 		    [] -> Formula
 		end;
 	    _ -> Formula
 	end,
-    {Defs1, Assigns, Formula1}.
+    {Defs2, Assigns, Formula1}.
 
-expand_defs([S={system,Name,_Params,Items,Line}|Defs], Acc, Systems) ->
+expand_defs([S={system,Name,_Params,Items,Line}|Defs], Path, Acc, Systems) ->
     HasProperty = lists:any(fun({K,_}) -> is_property(K) end, Items),
-    Expanded = try expand(S)
+    Expanded = try expand(S, Path)
 	       catch error:{system,Reason} ->
 		       erlang:error({system,Line,Reason})
 	       end,
-    expand_defs(Defs, lists:reverse(Expanded) ++ Acc,
-		[{Name,HasProperty}|Systems]);
-expand_defs([D|Defs], Acc, Systems) ->
-    expand_defs(Defs, [D|Acc], Systems);
-expand_defs([], Acc, Systems) ->
+    [Info] = [I || {system_info,_,I} <- Expanded],
+    expand_defs(Defs, Path, lists:reverse(Expanded) ++ Acc,
+		[{Name,HasProperty,Info}|Systems]);
+expand_defs([D|Defs], Path, Acc, Systems) ->
+    expand_defs(Defs, Path, [D|Acc], Systems);
+expand_defs([], _Path, Acc, Systems) ->
     {lists:reverse(Acc), lists:reverse(Systems)}.
+
+%% $all_init($t) and $all_next($t): the conjunction over the systems
+composite(Names, Systems) ->
+    [{define, {p,?ALL_INIT,[?T]},
+      conj([{p,macro(N,"init"),[?T]} || N <- Names])},
+     {define, {p,?ALL_NEXT,[?T]},
+      conj([{p,macro(N,"next"),[?T]} || N <- Names])},
+     %% the union of the states, for the lasso of "eventually"
+     {system_info, ?ALL,
+      #{ name => ?ALL, init => ?ALL_INIT, next => ?ALL_NEXT,
+	 states => lists:usort(lists:append([maps:get(states,I) || {_,_,I} <- Systems])),
+	 inputs => lists:usort(lists:append([maps:get(inputs,I) || {_,_,I} <- Systems])),
+	 props => lists:append([maps:get(props,I) || {_,_,I} <- Systems]) }}].
 
 format_error(next_outside_next) ->
     "next(...) is only allowed in the next item of a system";
@@ -80,9 +113,13 @@ is_property(eventually) -> true;
 is_property(_) -> false.
 
 %% {system,Name,Params,Items,Line} -> [definition()]
-expand({system, Name, Params, Items, _Line}) ->
-    expand({system, Name, Params, Items});
-expand({system, Name, _Params, Items}) ->
+expand(S) -> expand(S, undefined).
+
+%% Path: {InitMacro,NextMacro} of the composed path when the file has
+%% several systems, undefined when the system is on its own
+expand({system, Name, Params, Items, _Line}, Path) ->
+    expand({system, Name, Params, Items}, Path);
+expand({system, Name, _Params, Items}, Path) ->
     States = [decl_name(D) || {state,Ds} <- Items, D <- Ds],
     Inputs = [decl_name(D) || {input,Ds} <- Items, D <- Ds],
     Vars = #{ states => States, inputs => Inputs },
@@ -90,22 +127,31 @@ expand({system, Name, _Params, Items}) ->
 	     || {Tag,Ds} <- Items, Tag =:= state orelse Tag =:= input],
     Init = conj([E || {init,E} <- Items]),
     Next = conj([E || {next,E} <- Items]),
+    %% assumptions hold in every step: on the state and input of the
+    %% step, so they go with init (step 0) and after every transition
+    Assume = conj([E || {assume,E} <- Items]),
     InitName = macro(Name, "init"),
     NextName = macro(Name, "next"),
     Macros =
-	[{define, {p,InitName,[?T]}, rewrite(Init, init, ?T, Vars)},
-	 {define, {p,NextName,[?T]}, rewrite(Next, next, ?T, Vars)}],
+	[{define, {p,InitName,[?T]},
+	  conj2(rewrite(Init, init, ?T, Vars), rewrite(Assume, prop, ?T, Vars))},
+	 {define, {p,NextName,[?T]},
+	  conj2(rewrite(Next, next, ?T, Vars), rewrite(Assume, prop, ?T, Vars))}],
     Props = [{K, E} || {K,E} <- Items, is_property(K)],
+    {PathInit, PathNext} = case Path of
+			       undefined -> {InitName, NextName};
+			       _ -> Path
+			   end,
     PropDefs =
 	[{define, {p,macro(Name,K),[?K]},
-	  property(K, E, InitName, NextName, Vars)} || {K,E} <- Props],
+	  property(K, E, PathInit, PathNext, Vars)} || {K,E} <- Props],
     Default =
 	case Props of
 	    [{K0,_}|_] ->
 		[{define, {p,Name,[?K]}, {p,macro(Name,K0),[?K]}}];
 	    [] -> []
 	end,
-    Info = #{ name => Name, init => InitName, next => NextName,
+    Info = #{ name => Name, init => PathInit, next => PathNext,
 	      states => States, inputs => Inputs,
 	      props => [{K, rewrite(E, prop, ?T, Vars)} || {K,E} <- Props] },
     Decls ++ Macros ++ PropDefs ++ Default ++ [{system_info, Name, Info}].
@@ -176,6 +222,10 @@ macro(Name, Suffix) ->
 conj([]) -> true;
 conj([E]) -> E;
 conj([E|Es]) -> {lop,'and',E,conj(Es)}.
+
+conj2(E, true) -> E;
+conj2(true, E) -> E;
+conj2(A, B) -> {lop,'and',A,B}.
 
 %% declarations: {p,Name,Params} | {{p,Name,Params},Type,Width}
 decl_name({{p,Name,_},_Type,_Width}) -> Name;
