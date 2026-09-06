@@ -253,3 +253,91 @@ generic_adder_is_correct_test_() ->
        fun() ->
 	       ?assert(varp_tc:is_tautology(T, #{meta => #{<<"n">> => N}}))
        end}} || N <- [2,3,4,6]].
+
+%%%-------------------------------------------------------------------
+%%% Shifts assigned inside a circuit, macros as arguments, vector
+%%% conditionals: the CRC-16 example (crc16.varp, crc16_hello.varp)
+%%%-------------------------------------------------------------------
+
+read_formula(Name) ->
+    File = filename:join(varp_tc:formula_dir("varp"), Name),
+    {ok,Bin} = file:read_file(File),
+    binary_to_list(Bin).
+
+%% "b = a << 1" used to build the result as {Type,Bits,N}
+shift_assign_test() ->
+    [M] = models("declare a:16, b:16; b = (a << 1); a == 3"),
+    ?assertEqual(6, proplists:get_value("b", M)),
+    [M2] = models("circuit f(in x:16; return y:16) { y = (x >> 1); }\n"
+		  "declare a:16, b:16; b == f(a) and a == 6"),
+    ?assertEqual(3, proplists:get_value("b", M2)).
+
+%% a 17 bit value into an undeclared (boolean) local is an error,
+%% not a silent truncation
+width_mismatch_test() ->
+    ?assertError({width_mismatch,{bool,1},{uint,17}},
+		 models("circuit f(in x:16; return y:16) { declare t; t = (x << 1); y = t; }\n"
+			"declare a:16, b:16; b == f(a) and a == 3")).
+
+%% c ? a : b with vector branches is a bitwise mux
+vector_ite_test() ->
+    Ms = models("declare a:8, b:8, c; b = c ? a : (a ^ 255); a == 5"),
+    ?assertEqual([{false,250},{true,5}],
+		 lists:sort([{proplists:get_value("c",M), proplists:get_value("b",M)}
+			     || M <- Ms])).
+
+%% a zero-arity define used as a circuit argument is expanded, it used
+%% to become a free vector variable of the parameter's width
+define_as_argument_test() ->
+    Ms = models("circuit f(in x:16; return y:16) { y = x; }\n"
+		"define seed 0xffff;\n"
+		"declare a:16; a == f(seed)"),
+    ?assertEqual([65535], [proplists:get_value("a",M) || M <- Ms]),
+    ?assertEqual(1, length(Ms)).
+
+crc16_test_() ->
+    [{"CRC-16/CCITT-FALSE of H", {timeout, 120,
+      fun() ->
+	      [M] = models(read_formula("crc16.varp")),
+	      ?assertEqual(16#283c, proplists:get_value("CRC", M))
+      end}},
+     {"CRC-16/CCITT-FALSE of HELLO", {timeout, 300,
+      fun() ->
+	      [M] = models(read_formula("crc16_hello.varp")),
+	      ?assertEqual(16#49d6, proplists:get_value("CRC", M)),
+	      ?assertEqual(16#283c, proplists:get_value("c1", M))
+      end}}].
+
+%% rotations were mirrored: <<< rotated right and >>> rotated left,
+%% both as a value and as an assignment target
+rotate_test() ->
+    [M] = models("declare a:8, b:8, c:8; b = (a <<< 1); c = (a >>> 3); a == 129"),
+    ?assertEqual(3, proplists:get_value("b", M)),
+    ?assertEqual(48, proplists:get_value("c", M)),
+    [M2] = models("declare a:8, b:8, c:8; b == (a <<< 1) and c == (a >>> 3) and a == 129"),
+    ?assertEqual(3, proplists:get_value("b", M2)),
+    ?assertEqual(48, proplists:get_value("c", M2)),
+    %% into a wider target the rotation is that of the source width
+    [M3] = models("declare a:8, b:16; b = (a <<< 1); a == 129"),
+    ?assertEqual(3, proplists:get_value("b", M3)),
+    [M4] = models("circuit f(in x:8; return y:8) { y = (x >>> 1); }\n"
+		  "declare a:8, b:8; b == f(a) and a == 3"),
+    ?assertEqual(129, proplists:get_value("b", M4)),
+    ?assertError({width_mismatch,{bool,1},{uint,8}},
+		 models("declare a:8, b; b = (a <<< 1); a == 129")).
+
+%% arithmetic shift right sign-extends a signed int, also into a wider
+%% target; a negative shift count shifts the other way
+signed_shift_test() ->
+    Get = fun(Text, Name) ->
+		  [M] = models(Text), proplists:get_value(Name, M)
+	  end,
+    ?assertEqual(-2, Get("declare a:8/signed, b:8/signed; b = (a >> 2); a == -8", "b")),
+    ?assertEqual(-1, Get("declare a:8/signed, b:8/signed; b = (a >> 7); a == -1", "b")),
+    ?assertEqual(16, Get("declare a:8/signed, b:8/signed; b = (a >> 2); a == 64", "b")),
+    ?assertEqual(62, Get("declare a:8, b:8; b = (a >> 2); a == 248", "b")),
+    ?assertEqual(-4, Get("declare a:8/signed, b:16/signed; b = (a >> 1); a == -8", "b")),
+    ?assertEqual(-2, Get("declare a:8/signed, b:8/signed; b = (a << -2); a == -8", "b")),
+    ?assertEqual(-16, Get("declare a:8/signed, b:8/signed; b = (a >> -1); a == -8", "b")),
+    ?assertEqual(-2, Get("circuit f(in x:8/signed; return y:8/signed) { y = (x >> 2); }\n"
+			 "declare a:8/signed, b:8/signed; b == f(a) and a == -8", "b")).

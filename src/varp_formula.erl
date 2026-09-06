@@ -1153,9 +1153,17 @@ circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
   when Type =/= bool ->
     Bs1 = case varp:find_decl(P, Bs#bs.decls, icase(Bs)) of
 	      error ->
-		  N = eval_meta(Size, Bs),
-		  Decls = maps:put(P, {Type,length(As),N}, Bs#bs.decls),
-		  Bs#bs { decls = Decls };
+		  %% a macro ("define seed 0xffff;") is expanded by
+		  %% variable/2, anything else is an undeclared vector
+		  %% of the parameter's width
+		  case match_def(P, As, Bs#bs.defs) of
+		      false ->
+			  N = eval_meta(Size, Bs),
+			  Decls = maps:put(P, {Type,length(As),N}, Bs#bs.decls),
+			  Bs#bs { decls = Decls };
+		      _ ->
+			  Bs
+		  end;
 	      _ ->
 		  Bs
 	  end,
@@ -2058,6 +2066,17 @@ operation2(Op,X,Y,Z,Bs) ->
 ite(X,{bool,?T},T,_E, Bs) -> set(X,T,Bs);
 ite(X,{bool,?F},_T,E, Bs) -> set(X,E,Bs);
 ite(X,_Cond,Y,Y, Bs) -> set(X,Y,Bs);
+%% a vector branch: a bitwise mux with the condition spread over the
+%% width, X = (C & T) | (~C & E) bit by bit
+ite(X,Cond,T,E, Bs) when ?is_vec_type(element(1,T));
+			 ?is_vec_type(element(1,E)) ->
+    C = cond_lit(Cond),
+    N = max(vec_width(T), vec_width(E)),
+    Cv = {uint,N,lists:duplicate(N,C)},
+    Cnv = {uint,N,lists:duplicate(N,neg_lit(C))},
+    {A1,Bs1} = operation2('band',Cv,T,Bs),
+    {A2,Bs2} = operation2('band',Cnv,E,Bs1),
+    operation2('bor',X,A1,A2,Bs2);
 %% (Cond & false) | (~Cond & E) == ~Cond & E
 ite(X,Cond,{bool,?F},E, Bs) -> operation2('and',X,negate(Cond),E,Bs);
 %% (Cond & T) | (~Cond & false) == Cond & T
@@ -2066,6 +2085,17 @@ ite(X,Cond,T,E, Bs) ->
     {A1,Bs1} = operation2('and',Cond,T,Bs),
     {A2,Bs2} = operation2('and',negate(Cond),E,Bs1),
     operation2('or',X,A1,A2,Bs2).
+
+cond_lit({bool,C}) -> C;
+cond_lit({_T,1,[C]}) -> C;
+cond_lit(V) -> error({condition_not_boolean, V}).
+
+neg_lit(?T) -> ?F;
+neg_lit(?F) -> ?T;
+neg_lit(C) when is_integer(C) -> -C.
+
+vec_width({bool,_}) -> 1;
+vec_width({_T,N,_}) -> N.
 
 each_unbound(Bs, Fun) ->
     each_unbound_(Bs, Fun, varp_nif:next_unbound(Bs#bs.vp)).

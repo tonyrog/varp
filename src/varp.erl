@@ -809,6 +809,10 @@ format_error(Err) ->
 	    ["Variable ",VarName," is out of range\n"];
 	{empty_clause, _Where} ->
 	    ["Empty clause not allowed\n"];
+	{width_mismatch,{bool,1},{Type,N}} ->
+	    io_lib:format("a ~w bit ~w value can not be assigned to a "
+			  "boolean variable, declare it with a width\n",
+			  [N, Type]);
 	{arity_mismatch,Var} ->
 	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ",VarName, " can only have ", "one arity"];

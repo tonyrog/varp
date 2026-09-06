@@ -385,8 +385,9 @@ shl(Vp,X,A,B) ->
 	     true ->
 		  vushift_right(-K,An,Ax)
 	  end,
+    bool_target(X, At, length(Ax1)),
     Ax2 = vextend(Xt,Ax1,length(Ax1),Xn),
-    set(Vp,X,{At,Ax2,Xn}).
+    set(Vp,X,{At,Xn,Ax2}).
 
 
 %% shift right
@@ -418,8 +419,9 @@ shr(Vp,X,A,B) ->
 	     K < 0 ->
 		  vshift_left(-K,Ax)
 	  end,
+    bool_target(X, At, length(Ax1)),
     Ax2 = vextend(Xt,Ax1,length(Ax1),Xn),
-    set(Vp,X,{At,Ax2,Xn}).
+    set(Vp,X,{At,Xn,Ax2}).
 
 	    
 %% rotate
@@ -430,7 +432,8 @@ rol(_Vp,A,B) ->
        K >= 0 ->
 	    {At,An,Ax} = varg(A),
 	    K1 = K rem An,
-	    {Ax1,Ax2} = lists:split(K1, Ax),
+	    %% bits are LSB first: rotate left moves the top K bits down
+	    {Ax1,Ax2} = lists:split(An-K1, Ax),
 	    Ax3 = Ax2++Ax1,
 	    {At,An,Ax3}
     end.
@@ -444,10 +447,11 @@ rol(Vp,X,A,B) ->
 	    {Xt,Xn,_Xx} = varg(X),
 	    {At,An,Ax} = varg(A),
 	    K1 = K rem An,
-	    {Ax1,Ax2} = lists:split(K1, Ax),
+	    {Ax1,Ax2} = lists:split(An-K1, Ax),
 	    Ax3 = Ax2++Ax1,
+	    bool_target(X, At, An),
 	    Ax4 = vextend(Xt,Ax3,An,Xn),
-	    set(Vp, X,{At,An,Ax4})
+	    set(Vp, X,{At,Xn,Ax4})
     end.
 
 %% rotate right
@@ -458,7 +462,8 @@ ror(_Vp,A,B) ->
 	    error({shift_not_constant, B});
        K >= 0 ->
 	    K1 = K rem An,
-	    {Ax1,Ax2} = lists:split(An-K1, Ax),
+	    %% bits are LSB first: rotate right moves the low K bits up
+	    {Ax1,Ax2} = lists:split(K1, Ax),
 	    Ax3 = Ax2++Ax1,
 	    {At,An,Ax3}
     end.
@@ -472,10 +477,11 @@ ror(Vp,X,A,B) ->
 	    {Xt,Xn,_Xx} = varg(X),
 	    {At,An,Ax} = varg(A),
 	    K1 = K rem An,
-	    {Ax1,Ax2} = lists:split(An-K1, Ax),
+	    {Ax1,Ax2} = lists:split(K1, Ax),
 	    Ax3 = Ax2++Ax1,
+	    bool_target(X, At, An),
 	    Ax4 = vextend(Xt,Ax3,An,Xn),
-	    set(Vp, X,{At,An,Ax4})
+	    set(Vp, X,{At,Xn,Ax4})
     end.
 
 %% X := Y
@@ -483,6 +489,14 @@ set(Vp, {bool,X}, {bool,Y}) ->
     varp_circuit:set(Vp, X, Y);
 set(Vp, X, Y) ->
     bitwise1(Vp,'=',X,Y).
+
+%% A vector assigned to a boolean target: "declare t; t = x << 1;"
+%% would silently keep one bit, so it is an error instead.  Vector to
+%% vector keeps the width of the target (extend or cut at the top).
+bool_target({bool,_}, Yt, Yn) when Yn > 1 ->
+    error({width_mismatch, {bool,1}, {Yt,Yn}});
+bool_target(_X, _Yt, _Yn) ->
+    ok.
 
 bitwise_not(Vp, Y) -> bitwise1(Vp,'not',Y).
 bitwise_not(Vp, X, Y) -> bitwise1(Vp,'not',X,Y).
@@ -508,6 +522,7 @@ bitwise1(Vp, Op, Y) ->
 
 bitwise1(Vp,Op,X,Y) ->
     {Yt,Yn,Yx} = varg(Y),
+    bool_target(X, Yt, Yn),
     {Xt,Xn,Xx1} = varg(X),
     Yx1 = vextend(Yt,Yx,Yn,Xn),
     Xx2 = varp_bitvec:bitwise1(Vp,Op,Xx1,Yx1),
