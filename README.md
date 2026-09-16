@@ -306,6 +306,11 @@ GUI and packaging
 
     varp --gui=true                # or priv/varp_gui.sh
 
+The GUI runs the formula with Satisfy, Falsify or BMC; BMC takes the
+bound from "k max", proves by k-induction when "Induction" is ticked,
+and prints the verdict and the counterexample as a step table in the
+model window (see doc/MODEL_CHECKING.md).
+
     make appimage                  # Linux AppImage (wx)
     make osxapp                    # macOS .app + .dmg
     make win32app                  # Windows

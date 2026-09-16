@@ -22,7 +22,7 @@ Terminals
 	.
 
 Nonterminals
-        prologue file system_items system_item
+        prologue file system_items system_item qassign
 	primary_expr postfix_expr argument_expr_list
 	unary_expr unary_operator
 	multiplicative_expr additive_expr shift_expr
@@ -60,6 +60,12 @@ assignment_defs -> assignment_defs assignment_def : '$1'++['$2'].
 
 assignment_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
 assignment_def -> cname '(' arg_list ')' ';'  : { cop, str('$1'), '$3'}.
+assignment_def -> qassign : '$1'.
+
+%% a quantified assignment, "[A i=0..n-1] s[i] = fa(a[i], b[i], c[i], c[i+1]);"
+%% is a constraint that holds for every index (see doc/CIRCUIT.md)
+qassign -> quantifier qassign : qassign('$1', '$2').
+qassign -> quantifier oexpr '=' lexpr ';' : qassign('$1', {lop,'=','$2','$4'}).
 
 definition_list -> definition : ['$1'].
 definition_list -> definition_list definition : '$1'++['$2'].
@@ -135,6 +141,7 @@ circuit_def -> 'declare' pdecls ';' : {declare,'$2'}.
 circuit_def -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
 		   varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
 circuit_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
+circuit_def -> qassign : '$1'.
 %% a bare formula in a body is a constraint, it lets a body use
 %% quantifiers to build a structure of any width
 circuit_def -> lexpr ';' : {constraint,'$1'}.
@@ -468,6 +475,17 @@ note_symbol(Name, Ln) ->
 	    end
     end,
     Name.
+
+%% A quantified assignment is the constraint "target equals value" for
+%% every index.  The target is written like an assignment target
+%% (oexpr) and becomes the value form of the same thing.
+qassign(Q, {constraint, Body}) ->
+    {constraint, {Q, Body}};
+qassign(Q, {lop,'=',OExpr,LExpr}) ->
+    {constraint, {Q, {lop,eq,oexpr_value(OExpr),LExpr}}}.
+
+oexpr_value({'!',P}) -> {lop,'not',P};
+oexpr_value(P) -> P.   %% pexpr, bitindex and bitrange are values too
 
 %% expand system definitions and pick the default formula
 file(Defs, Assigns, Formula) ->

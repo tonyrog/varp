@@ -233,3 +233,26 @@ strengthening_invariant_test_() ->
 			"", all)),
 	      ?assertMatch({?CONTINUE,[],_}, Run(Weak, 3, 2))
       end}}].
+
+%% the GUI hands bmc a fun to write to (bmc_output): verdict, trace
+%% and progress lines go there instead of the terminal
+output_fun_test() ->
+    Text = read("die_hard_system.varp"),
+    {Sections, Assignments, Formula} = varp_tc:parse(Text, #{}),
+    GOpts0 = varp:section_opts(Sections, varp:load_option_list([{print,true}])),
+    Self = self(),
+    GOpts = GOpts0#{ bmc_output => fun(Line) -> Self ! {bmc, Line} end },
+    Do = varp:parse_do([{bmc,[{k_max,8}]}]),
+    {R, [_|_], _} = varp:do_run(Do, Assignments, Formula, GOpts),
+    ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+    Lines = collect([]),
+    Out = lists:flatten(Lines),
+    ?assert(string:find(Out, "bmc: counterexample at k=6") =/= nomatch),
+    ?assert(string:find(Out, "step  B  L  input") =/= nomatch),
+    ?assert(string:find(Out, "big_to_small") =/= nomatch),
+    ?assert(string:find(Out, "% 1") =/= nomatch),
+    %% progress lines come too, one per bound
+    ?assert(length([L || L <- Lines, string:prefix(L, "bmc: k=") =/= nomatch]) >= 6).
+
+collect(Acc) ->
+    receive {bmc, L} -> collect([L|Acc]) after 0 -> lists:reverse(Acc) end.

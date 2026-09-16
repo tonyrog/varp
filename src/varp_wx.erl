@@ -48,6 +48,7 @@
 	 model,
 	 satisfy,
 	 falsify,
+	 bmc,              %% wxButton, bounded model checking
 	 cancel,
 	 settings,
 	 dir = "",
@@ -67,6 +68,8 @@
 	 config_max_models, %% wxSpinCtrl
 	 config_timeout,    %% wxSpinCtrl
 	 config_saturate,   %% wxSpinCtrl (saturate=1 or none=0)
+	 config_kmax,       %% wxSpinCtrl, bmc bound
+	 config_induction,  %% wxCheckBox, bmc by k-induction
 	 config_profile,    %% wxChoice 0..9
  	 config_nbound,     %% wxGauge
 	 config_notebook
@@ -252,6 +255,9 @@ create_window(Wx, Bound) ->
     Falsify = wxButton:new(Win2, ?wxID_ANY, [{label,"Falsify"}]),
     wxButton:connect(Falsify, command_button_clicked),
     wxButton:enable(Falsify),
+    Bmc = wxButton:new(Win2, ?wxID_ANY, [{label,"BMC"}]),
+    wxButton:connect(Bmc, command_button_clicked),
+    wxButton:enable(Bmc),
 
     Cancel = wxButton:new(Win2, ?wxID_ANY, [{label,"Cancel"}]),
     SELF = self(),
@@ -264,6 +270,7 @@ create_window(Wx, Bound) ->
 
     wxSizer:add(Run, Satisfy, []),
     wxSizer:add(Run, Falsify, []),
+    wxSizer:add(Run, Bmc, []),
     wxSizer:add(Run, Cancel, []),
 
     %% CONFIG max models
@@ -277,6 +284,13 @@ create_window(Wx, Bound) ->
     wxSpinCtrl:setRange(Timeout, 0, 100000),
     wxSizer:add(TimeBox, Timeout, [{flag, ?wxEXPAND}]),
 
+    BmcBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"BMC k max"}]),
+    KMax = wxSpinCtrl:new(Win2, []),
+    wxSpinCtrl:setRange(KMax, 0, 10000),
+    wxSpinCtrl:setValue(KMax, 20),
+    wxSizer:add(BmcBox, KMax, [{flag, ?wxEXPAND}]),
+    Induction = wxCheckBox:new(Win2, ?wxID_ANY, "Induction"),
+    wxSizer:add(BmcBox, Induction, [{flag, ?wxEXPAND}]),
     SaturateBox = wxStaticBoxSizer:new(?wxVERTICAL,Win2,[{label,"Saturate"}]),
     Saturate = wxSpinCtrl:new(Win2, []),
     wxSpinCtrl:setRange(Saturate, 0, 3),
@@ -311,6 +325,7 @@ create_window(Wx, Bound) ->
     wxSizer:add(Config1, MaxBox, [{proportion,1}]),
     wxSizer:add(Config1, TimeBox, [{proportion,1}]),
     wxSizer:add(Config1, SaturateBox, [{proportion,1}]),
+    wxSizer:add(Config1, BmcBox, [{proportion,1}]),
     wxSizer:add(Config1, ProfileBox, [{proportion,1}]),
     wxSizer:add(Config1, SettingsBox, [{proportion,1}]),
 
@@ -361,6 +376,7 @@ create_window(Wx, Bound) ->
 	 model = Model,
 	 falsify = Falsify,
 	 satisfy = Satisfy,
+	 bmc     = Bmc,
 	 cancel  = Cancel,
 	 settings = Settings,
 	 filename = undefined,
@@ -371,6 +387,8 @@ create_window(Wx, Bound) ->
 	 config_max_models = MaxModels,
 	 config_timeout    = Timeout,
 	 config_saturate   = Saturate,
+	 config_kmax       = KMax,
+	 config_induction  = Induction,
 	 config_profile    = Profile,	 
 	 config_nbound     = NBound,
 	 wx_env            = wx:get_env(),
@@ -618,6 +636,9 @@ handle_event(Event, S) ->
 	       S#s.falsify =:= Obj ->
 		    S1 = solve(falsify, S),
 		    {noreply, S1};
+	       S#s.bmc =:= Obj ->
+		    S1 = solve(bmc, S),
+		    {noreply, S1};
 	       S#s.settings =:= Obj ->
 		    P = wxChoice:getSelection(S#s.config_profile),
 		    wxNotebook:setSelection(S#s.config_notebook, P),
@@ -844,11 +865,21 @@ solve(Mode, S, Bound) ->
 		   true -> [{order,[{sort,[order(Ascend_1,Order_1),
 					   order(Ascend_2,Order_2)]}]}]
 		end,
-	    Do =
-		[{wx,[{nbound,S#s.config_nbound},
-		      {window,S#s.window},
-		      {env, S#s.wx_env}]},
-		 {Mode,[]}] ++
+	    %% bmc drives the chain itself, bound by bound, and reports
+	    %% through bmc_output; the wx monitor stays out of that chain
+	    Head =
+		case Mode of
+		    bmc ->
+			[{bmc,[{k_max, wxSpinCtrl:getValue(S#s.config_kmax)},
+			       {induction, wxCheckBox:getValue(S#s.config_induction)}]},
+			 {satisfy,[]}];
+		    _ ->
+			[{wx,[{nbound,S#s.config_nbound},
+			      {window,S#s.window},
+			      {env, S#s.wx_env}]},
+			 {Mode,[]}]
+		end,
+	    Do = Head ++
 		Order ++
 		case lists:keyfind(level,1,Saturate) of
 		    {level,0} -> [];
@@ -868,17 +899,21 @@ solve(Mode, S, Bound) ->
 	    GDo = varp:parse_do(Do),
 
 	    GOpts2 = GOpts1#{ meta => Meta,
-			      output => [{?MODULE,output_model,[S]}] },
+			      output => [{?MODULE,output_model,[S]}],
+			      bmc_output => fun(Text) -> output_text(S, Text) end },
 	    output_clear(S),
 
 	    ok = wxFrame:setStatusText(S#s.window, "ok",[]),
 
 	    wxButton:disable(S#s.satisfy),
 	    wxButton:disable(S#s.falsify),
+	    wxButton:disable(S#s.bmc),
 	    wxButton:enable(S#s.cancel),
 	    wxButton:disable(S#s.settings),
 
 	    try varp:do_run(GDo,Form,GOpts2) of
+		_ when Mode =:= bmc ->
+		    S;   %% bmc has written the verdict and the trace
 		{?INCONSISTENT,_,_Bs} ->
 		    if Mode =:= falsify ->
 			    output_text(S, "VALID\n");
@@ -911,11 +946,16 @@ solve(Mode, S, Bound) ->
 	    after
 		wxButton:enable(S#s.satisfy),
 		wxButton:enable(S#s.falsify),
+		wxButton:enable(S#s.bmc),
 		wxButton:disable(S#s.cancel),
 		wxButton:enable(S#s.settings),
-
-		call(get(mon_proc), flush),
-		call(get(mon_proc), stop)
+		case get(mon_proc) of
+		    undefined -> ok;
+		    _ ->
+			call(get(mon_proc), flush),
+			call(get(mon_proc), stop),
+			erase(mon_proc)
+		end
 	    end;
 
 	{error, {Ln,Mod,Message}} when is_integer(Ln), is_atom(Mod) ->

@@ -109,7 +109,11 @@ drive(Do, Assignments, Formula0, GOpts, Param) ->
     KMax = maps:get(k_max, Param),
     Step = max(1, maps:get(step, Param)),
     Trace = maps:get(trace, Param),
-    Print = maps:get(print, GOpts, true) =/= false,
+    %% where the answer goes: the terminal, or a fun (the GUI)
+    Print = case maps:get(bmc_output, GOpts, undefined) of
+		F when is_function(F, 1) -> F;
+		_ -> maps:get(print, GOpts, true) =/= false
+	    end,
     Target = case maps:get(incremental, Param) of
 		 true -> incremental_target(Formula, Bound, GOpts, Do1);
 		 false -> false
@@ -117,7 +121,7 @@ drive(Do, Assignments, Formula0, GOpts, Param) ->
     case maps:get(induction, Param) of
 	true ->
 	    induction(KMin, KMax, Step, Trace, Print, Formula, Bound,
-		      Do1, Assignments, GOpts#{ print => false });
+		      Do1, Assignments, GOpts#{ print => false, method => collect });
 	false ->
 	    drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
 			 Do1, Assignments, Formula, GOpts, Param)
@@ -127,16 +131,16 @@ drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
 	     Do1, Assignments, Formula, GOpts, Param) ->
     case Target of
 	{Info, Kind, BjParam} ->
-	    ?info(GOpts, "bmc: incremental, ~s ~s\n",
+	    info(GOpts, Print, "bmc: incremental, ~s ~s\n",
 		  [maps:get(name, Info), Kind]),
 	    incremental(KMin, KMax, Step, Trace, Print, Info, Kind, BjParam,
 			Assignments,
-			GOpts#{ print => false,
+			GOpts#{ print => false, method => collect,
 				keep_learned => auto(keep_learned, Param, GOpts),
 				reset_order => auto(reset_order, Param, GOpts) });
 	false ->
 	    loop(KMin, KMax, Step, Bound, Trace, Print,
-		 Do1, Assignments, Formula, GOpts#{ print => false })
+		 Do1, Assignments, Formula, GOpts#{ print => false, method => collect })
     end.
 
 %% ------------------------------------------------------------------
@@ -155,7 +159,7 @@ induction(KMin, KMax, Step, Trace, Print, Formula, Bound, Do, As, GOpts) ->
 	    result(Print, "% ERROR\n", []),
 	    {?ERROR, "no invariant to prove", undefined};
 	{Info, Kind} ->
-	    ?info(GOpts, "bmc: k-induction, ~s ~s\n", [maps:get(name, Info), Kind]),
+	    info(GOpts, Print, "bmc: k-induction, ~s ~s\n", [maps:get(name, Info), Kind]),
 	    istep_ind(KMin, KMax, Step, Trace, Print, Info, Kind, Do, As, GOpts)
     end.
 
@@ -179,11 +183,9 @@ istep_ind(K, KMax, Step, Trace, Print, Info, Kind, Do, As, GOpts) ->
     {RB, AccB, BsB} = varp:do_run(Do, As, Base, GOpts),
     case models(AccB) of
 	[Model|_] when RB =/= ?TIMEOUT ->
-	    ?info(GOpts, "bmc: k=~w base case SAT, counterexample\n", [K]),
+	    info(GOpts, Print, "bmc: k=~w base case SAT, counterexample\n", [K]),
 	    result(Print, "bmc: counterexample at k=~w\n", [K]),
-	    if Trace, Print -> io:put_chars(format_trace(Model));
-	       true -> ok
-	    end,
+	    trace_out(Trace, Print, Model),
 	    result(Print, "% FALSE\n", []),
 	    {RB, AccB, BsB};
 	_ when RB =:= ?TIMEOUT; RB =:= ?CANCEL; RB =:= ?ERROR ->
@@ -193,12 +195,12 @@ istep_ind(K, KMax, Step, Trace, Print, Info, Kind, Do, As, GOpts) ->
 	    {RS, AccS, BsS} = varp:do_run(Do, As, StepF, GOpts),
 	    case models(AccS) of
 		[] when RS =:= ?INCONSISTENT; RS =:= ?DONE ->
-		    ?info(GOpts, "bmc: k=~w base UNSAT, step UNSAT: proved\n", [K]),
+		    info(GOpts, Print, "bmc: k=~w base UNSAT, step UNSAT: proved\n", [K]),
 		    result(Print, "bmc: proved by ~w-induction\n", [K]),
 		    result(Print, "% TRUE\n", []),
 		    {?INCONSISTENT, [], BsS};
 		[_|_] ->
-		    ?info(GOpts, "bmc: k=~w base UNSAT, step SAT: not ~w-inductive\n",
+		    info(GOpts, Print, "bmc: k=~w base UNSAT, step SAT: not ~w-inductive\n",
 			  [K, K]),
 		    istep_ind(K+Step, KMax, Step, Trace, Print, Info, Kind,
 			      Do, As, GOpts);
@@ -258,7 +260,7 @@ incremental(KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, As, GOpts) ->
 		istep(0, KMin, KMax, Step, Trace, Print, Info, Kind,
 		      BjParam, GOpts, Bs3);
 	    {false, Bs3} ->
-		?info(GOpts, "bmc: no initial state\n", []),
+		info(GOpts, Print, "bmc: no initial state\n", []),
 		result(Print, "% 0\n", []),
 		{?INCONSISTENT, [], Bs3}
 	end
@@ -281,7 +283,7 @@ istep(K, KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, GOpts, Bs) ->
 	     end,
     case StepOk of
 	{false, Bs1} ->
-	    ?info(GOpts, "bmc: k=~w no path of that length\n", [K]),
+	    info(GOpts, Print, "bmc: k=~w no path of that length\n", [K]),
 	    result(Print, "% 0\n", []),
 	    {?INCONSISTENT, [], Bs1};
 	{true, Bs1} when K < KMin; (K - KMin) rem Step =/= 0 ->
@@ -307,7 +309,7 @@ istep(K, KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, GOpts, Bs) ->
 	    Ts = erlang:convert_time_unit(erlang:monotonic_time()-T0,
 					  native, microsecond) / 1000000,
 	    C1 = varp_nif:getstat(Vp, conflict_counter),
-	    ?info(GOpts, "bmc: k=~w ~s ~.2fs conflicts=~w learned=~w models=~w\n",
+	    info(GOpts, Print, "bmc: k=~w ~s ~.2fs conflicts=~w learned=~w models=~w\n",
 		  [K, verdict(R, Acc), Ts, C1 - C0,
 		   varp_nif:clauseset_size(Vp, ?GAMMA), nmodels(Acc)]),
 	    case R of
@@ -319,9 +321,7 @@ istep(K, KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, GOpts, Bs) ->
 				  Kind, BjParam, GOpts, Bs4);
 			[Model|_] ->
 			    result(Print, "bmc: counterexample at k=~w\n", [K]),
-			    if Trace, Print -> io:put_chars(format_trace(Model));
-			       true -> ok
-			    end,
+			    trace_out(Trace, Print, Model),
 			    result(Print, "% 1\n", []),
 			    {R, Acc, Bs4}
 		    end;
@@ -413,7 +413,7 @@ loop(K, KMax, Step, Bound, Trace, Print, Do, As, Formula, GOpts) ->
 		    #bs{} -> varp_nif:getstat(Bs#bs.vp, conflict_counter);
 		    _ -> 0
 		end,
-    ?info(GOpts, "bmc: k=~w ~s ~.2fs conflicts=~w\n",
+    info(GOpts, Print, "bmc: k=~w ~s ~.2fs conflicts=~w\n",
 	  [K, verdict(R, Acc), Ts, Conflicts]),
     case R of
 	?INCONSISTENT ->
@@ -425,9 +425,7 @@ loop(K, KMax, Step, Bound, Trace, Print, Do, As, Formula, GOpts) ->
 			 Do, As, Formula, GOpts);
 		[Model|_] ->
 		    result(Print, "bmc: counterexample at k=~w\n", [K]),
-		    if Trace, Print -> io:put_chars(format_trace(Model));
-		       true -> ok
-		    end,
+		    trace_out(Trace, Print, Model),
 		    result(Print, "% 1\n", []),
 		    {R, Acc, Bs}
 	    end;
@@ -443,7 +441,21 @@ loop(K, KMax, Step, Bound, Trace, Print, Do, As, Formula, GOpts) ->
     end.
 
 result(false, _Fmt, _Args) -> ok;
+result(Out, Fmt, Args) when is_function(Out, 1) ->
+    Out(lists:flatten(io_lib:format(Fmt, Args)));
 result(_, Fmt, Args) -> io:format(Fmt, Args).
+
+%% the trace table, when wanted
+trace_out(true, Print, Model) when Print =/= false ->
+    result(Print, "~s", [format_trace(Model)]);
+trace_out(_Trace, _Print, _Model) ->
+    ok.
+
+%% progress lines: the log at info level, or the GUI fun
+info(_GOpts, Out, Fmt, Args) when is_function(Out, 1) ->
+    Out(lists:flatten(io_lib:format(Fmt, Args)));
+info(GOpts, _Print, Fmt, Args) ->
+    ?info(GOpts, Fmt, Args).
 
 verdict(?INCONSISTENT, _) -> "UNSAT";
 verdict(R, Acc) when R =:= ?DONE; R =:= ?CONTINUE ->

@@ -809,6 +809,8 @@ format_error(Err) ->
 	    ["Variable ",VarName," is out of range\n"];
 	{empty_clause, _Where} ->
 	    ["Empty clause not allowed\n"];
+	{circuit_missing_argument,C,P} ->
+	    io_lib:format("circuit ~s called without its ~s argument\n", [C,P]);
 	{define_argument,T} ->
 	    io_lib:format("a define takes integer arguments, ~s is a formula:"
 			  " use a circuit\n", [varp_format:format_symbol(T)]);

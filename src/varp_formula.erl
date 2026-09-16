@@ -1271,6 +1271,9 @@ assert_formula(F, Bs0) ->
 build_assignment_defs([F={cop,_Name,_Args}|Assignments], Bs0) ->
     {_,Bs1} = bld(F, Bs0),
     build_assignment_defs(Assignments, Bs1);
+build_assignment_defs([{constraint,F}|Assignments], Bs0) ->
+    %% a quantified assignment at the file level
+    build_assignment_defs(Assignments, assert_formula(F, Bs0));
 build_assignment_defs([{lop,'=',OExpr,LExpr}|Assignments], Bs0) ->
     {_X,Bs1} = build_assign(OExpr, LExpr, Bs0),
     build_assignment_defs(Assignments, Bs1);

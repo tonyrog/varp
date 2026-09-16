@@ -400,3 +400,42 @@ fabric_test_() ->
 		       ?assertEqual(A0 + 2*A1 + B0 + 2*B1 + CI, O1 + 2*O3 + 4*O2)
 	       end, lists:seq(0,31))
      end}.
+
+%% generate: a quantified circuit call in a body, one instance per index
+generate_test_() ->
+    [{"rca n=4: 5+7", {timeout, 120,
+      fun() ->
+	      [M] = varp_tc:models(read_formula("rca_gen.varp"), #{meta => #{<<"n">> => 4}}),
+	      ?assertEqual(12, proplists:get_value("z", M))
+      end}},
+     {"rca equals + for n=6", {timeout, 300,
+      fun() ->
+	      ?assert(varp_tc:is_tautology(read_formula("rca_gen_proof.varp"),
+					   #{meta => #{<<"n">> => 6}}))
+      end}}].
+
+%% quantified assignments: in a body, nested, and at the file level
+quantified_assignment_test_() ->
+    [{"addn: A > B, A + B == 6 in three bits", {timeout, 120,
+      fun() ->
+	      Ms = varp_tc:models(read_formula("addn.varp"), #{meta => #{<<"n">> => 3}}),
+	      ?assertEqual([{4,2},{5,1},{6,0}],
+			   lists:sort([{proplists:get_value("A",M), proplists:get_value("B",M)}
+				       || M <- Ms]))
+      end}},
+     {"nested and file level", {timeout, 60,
+      fun() ->
+	      [M] = models("declare M(i,j):3, v:8;\n"
+			   "[A i=0..1] [A j=0..2] M(i,j) = i + 2*j;\n"
+			   "[A i=0..7] v[i] = (i % 2 == 0);\n"
+			   "true"),
+	      ?assertEqual(5, proplists:get_value("M(1,2)", M)),
+	      ?assertEqual(2, proplists:get_value("M(0,1)", M)),
+	      ?assertEqual(85, proplists:get_value("v", M))
+      end}},
+     {"a missing argument is reported", {timeout, 60,
+      fun() ->
+	      ?assertError({circuit_missing_argument,<<"fa">>,_},
+			   models("circuit fa(in a, b; out s, co) { s = a ^ b; co = a && b; }\n"
+				  "declare x, y, z; z = fa(x, y); true"))
+      end}}].
