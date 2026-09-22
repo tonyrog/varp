@@ -155,6 +155,13 @@ global_options() ->
 	 short => "i",
 	 description => "Case insensitive keywords and variables."
        },
+     #{ long => "lib",
+	key => lib,
+	spec => {multiple,string},
+	default => [],
+	description => "Circuit library directory, searched for <name>.varp "
+	    "when an unknown circuit is called (default lib/default)."
+       },
      #{ long => "undeclared",
 	key => undeclared,
 	spec => {enum,[{"none",none},{"typo",typo},
@@ -809,6 +816,9 @@ format_error(Err) ->
 	    ["Variable ",VarName," is out of range\n"];
 	{empty_clause, _Where} ->
 	    ["Empty clause not allowed\n"];
+	{unable_to_unify,Name,Was,Is} ->
+	    io_lib:format("size ~s is ~w from an earlier argument, "
+			  "this argument has ~w bits\n", [Name,Was,Is]);
 	{circuit_missing_argument,C,P} ->
 	    io_lib:format("circuit ~s called without its ~s argument\n", [C,P]);
 	{define_argument,T} ->
@@ -1576,6 +1586,10 @@ parse(Filename, String, GOpts) ->
 	       false -> varp_scan;
 	       true -> varp_scani
 	   end,
+    case maps:get(lib, GOpts, []) of
+	[] -> ok;
+	Dirs -> varp_lib:set_path(Dirs)
+    end,
     Scan:init(remove_comments(String)),
     case varp_parse:parse_and_scan({Scan, one_token, []}) of
 	{ok,{Sections,Assignments,Formula}} ->
@@ -1631,6 +1645,8 @@ split_sections([{define,{p,P,Ps},Expr}|Sections], Map=#{ defs:=Defs0 },GOpts) ->
     split_sections(Sections, Map#{ defs => Defs1 },GOpts);
 split_sections([{assert,Expr}|Sections], Map=#{ assert:=Assert0 },GOpts) ->
     split_sections(Sections, Map#{ assert => Assert0++[Expr] },GOpts);
+split_sections([{import,_Name}|Sections], Map, GOpts) ->
+    split_sections(Sections, Map, GOpts);   %% its circuits are in the list
 split_sections([{input,Name}|Sections], Map=#{ input:=Input0 },GOpts) ->
     split_sections(Sections, Map#{ input => Input0++[Name] },GOpts);
 split_sections([{output,Name}|Sections], Map=#{ output:=Output0 },GOpts) ->

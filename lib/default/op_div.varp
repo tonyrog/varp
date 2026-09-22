@@ -1,0 +1,13 @@
+// a / b and a % b, unsigned, restoring division bit by bit from the
+// top: T is the partial remainder shifted with the next bit of a,
+// the quotient bit says whether b fits, and the remainder follows.
+// b == 0 gives an all ones quotient.
+circuit op_div(in a:n, b:m; return q:n; out r:m)
+{
+    declare R(i):(max(n,m)+2), T(i):(max(n,m)+2);
+    R(n) = 0;
+    [A i=0..(n-1)] T(i) = (R(i+1) << 1) | a[i];
+    [A i=0..(n-1)] q[i] = op_gte(T(i), b);
+    [A i=0..(n-1)] R(i) = q[i] ? op_sub(T(i), b) : T(i);
+    r = R(0);
+}

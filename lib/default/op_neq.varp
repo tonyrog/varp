@@ -1,0 +1,4 @@
+circuit op_neq(in a:n, b:m; return q)
+{
+    q = !op_eq(a, b);
+}

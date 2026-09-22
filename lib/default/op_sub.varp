@@ -1,0 +1,8 @@
+// a - b modulo 2^max(n,m): a + ~b + 1
+circuit op_sub(in a:n, b:m; return d:(max(n,m)))
+{
+    declare C:(max(n,m)+1);
+    C[0] = true;
+    [A i=0..(max(n,m)-1)]
+        d[i] = op_full_adder(a[i], !b[i], C[i], C[i+1]);
+}

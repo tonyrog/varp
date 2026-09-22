@@ -1,0 +1,74 @@
+// A small FPGA fabric: four 3 input lookup tables (see fpga.varp) with
+// programmable routing.  Every input of cell c picks, with a 4 bit
+// selector, one of the signals
+//
+//     0 a0  1 a1  2 b0  3 b1  4 ci  5 out(0)  6 out(1)  7 out(2)  8 out(3)
+//
+// and may only use cells before itself, so the net is feed forward.
+// The synthesis question: configure the four cells and the routing so
+// that the net adds two 2 bit numbers and a carry in,
+//
+//     out(1) = s0, out(3) = s1, out(2) = carry,   s = a + b + ci
+//
+// for all 32 inputs.  Cell 0 is free, the solver has to discover that
+// it needs the carry out of the low bit there.  The configuration and
+// the routing are shared by all rows of the truth table; the row
+// inputs and the cell outputs are per row.
+//
+//     varp sat bj formulas/varp/fpga_fabric.varp
+
+circuit lut3(in cfg:8; in x, y, z; return q)
+{
+    q = (cfg[0] && !x && !y && !z) ||
+        (cfg[1] &&  x && !y && !z) ||
+        (cfg[2] && !x &&  y && !z) ||
+        (cfg[3] &&  x &&  y && !z) ||
+        (cfg[4] && !x && !y &&  z) ||
+        (cfg[5] &&  x && !y &&  z) ||
+        (cfg[6] && !x &&  y &&  z) ||
+        (cfg[7] &&  x &&  y &&  z);
+}
+
+// a routing multiplexer: signal number sel
+circuit mux9(in sel:4; in s0, s1, s2, s3, s4, s5, s6, s7, s8; return q)
+{
+    q = (sel == 0 && s0) || (sel == 1 && s1) || (sel == 2 && s2) ||
+        (sel == 3 && s3) || (sel == 4 && s4) || (sel == 5 && s5) ||
+        (sel == 6 && s6) || (sel == 7 && s7) || (sel == 8 && s8);
+}
+
+// a cell: three multiplexers in front of a lookup table
+circuit cell(in cfg:8; in sel0:4, sel1:4, sel2:4;
+             in s0, s1, s2, s3, s4, s5, s6, s7, s8; return q)
+{
+    declare x, y, z;
+    x = mux9(sel0, s0, s1, s2, s3, s4, s5, s6, s7, s8);
+    y = mux9(sel1, s0, s1, s2, s3, s4, s5, s6, s7, s8);
+    z = mux9(sel2, s0, s1, s2, s3, s4, s5, s6, s7, s8);
+    q = lut3(cfg, x, y, z);
+}
+
+// the specification, a + b + ci as a 3 bit number
+circuit spec(in a0, a1, b0, b1, ci; return s:3)
+{
+    s = a0 + b0 + ci + 2 * (a1 + b1);
+}
+
+// row i of the truth table
+define ROW(i) ((A0(i) equ ((i & 1) == 1)) && (A1(i) equ ((i & 2) == 2)) &&
+               (B0(i) equ ((i & 4) == 4)) && (B1(i) equ ((i & 8) == 8)) &&
+               (CI(i) equ ((i & 16) == 16)));
+
+declare CFG(c):8, SEL(c,k):4;              // the program of the fabric
+declare A0(i), A1(i), B0(i), B1(i), CI(i); // row inputs
+declare O(c,i);                            // cell outputs per row
+declare S(i):3;                            // what the row should give
+
+// feed forward: cell c sees the 5 inputs and cells 0..c-1
+[A c=0..3] [A k=0..2] (SEL(c,k) < 5 + c) &&
+[A i=0..31] (ROW(i) &&
+    [A c=0..3] (O(c,i) equ cell(CFG(c), SEL(c,0), SEL(c,1), SEL(c,2),
+                                A0(i), A1(i), B0(i), B1(i), CI(i),
+                                O(0,i), O(1,i), O(2,i), O(3,i))) &&
+    (S(i) == spec(A0(i), A1(i), B0(i), B1(i), CI(i))) &&
+    (O(1,i) equ S(i)[0]) && (O(3,i) equ S(i)[1]) && (O(2,i) equ S(i)[2]))

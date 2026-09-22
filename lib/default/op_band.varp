@@ -1,0 +1,4 @@
+circuit op_band(in a:n, b:m; return r:(max(n,m)))
+{
+    [A i=0..(max(n,m)-1)] r[i] = a[i] & b[i];
+}

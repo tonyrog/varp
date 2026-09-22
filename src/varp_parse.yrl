@@ -17,7 +17,7 @@ Terminals
         'float' 'double'
         'circuit' 'in' 'out' 'return'
         'system' 'state' 'init' 'next' 'invariant' 'reach' 'eventually'
-        'assume' 'channel' 'send' 'recv' 'when' 'instance'
+        'assume' 'channel' 'send' 'recv' 'when' 'instance' 'import' string
         'min' 'max' 'abs'
 	.
 
@@ -76,9 +76,16 @@ definition -> 'literals' ldecls ';'    : {literals,'$2'}.
 definition -> 'order' odecls ';'       : {order,'$2'}.
 definition -> 'assert' expr ';'        : {assert,'$2'}.
 definition -> 'input' sym ';'  : {input,'$2'}.
+%% a library file, once; its circuits join this file's definitions
+definition -> 'import' sym ';'    : import('$2', line('$1')).
+definition -> 'import' cname ';'  : import(str('$2'), line('$1')).
+definition -> 'import' string ';' : import(element(3,'$2'), line('$1')).
 definition -> 'output' sym ';' : {output,'$2'}.
 definition -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
 		  varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
+%% a definition of a name the library also has: the file's own wins
+definition -> 'circuit' cname circuit_params '{'  circuit_defs '}' :
+		  varp_formula:add_circuit_def({circuit, str('$2'), '$3', '$5'}).
 definition -> 'system' sym '{' system_items '}' :
 		  {system,'$2',[],'$4',line('$1')}.
 definition -> 'system' sym circuit_params '{' system_items '}' :
@@ -138,6 +145,8 @@ circuit_defs -> circuit_defs circuit_def : '$1' ++ ['$2'].
 
 %% oexpr must be output args, lexpr may contain both in and out id's
 circuit_def -> 'declare' pdecls ';' : {declare,'$2'}.
+circuit_def -> 'circuit' cname circuit_params '{'  circuit_defs '}' :
+		   varp_formula:add_circuit_def({circuit, str('$2'), '$3', '$5'}).
 circuit_def -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
 		   varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
 circuit_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
@@ -487,8 +496,23 @@ qassign(Q, {lop,'=',OExpr,LExpr}) ->
 oexpr_value({'!',P}) -> {lop,'not',P};
 oexpr_value(P) -> P.   %% pexpr, bitindex and bitrange are values too
 
+import(Name, Line) ->
+    case varp_lib:import(Name) of
+	ok -> {import, Name};
+	{error, {no_such_library_file, Base}} ->
+	    return_error(Line, io_lib:format("no library file ~s", [Base]));
+	{error, Reason} ->
+	    return_error(Line, io_lib:format("import ~s failed: ~p", [Name, Reason]))
+    end.
+
 %% expand system definitions and pick the default formula
-file(Defs, Assigns, Formula) ->
+file(Defs0, Assigns, Formula) ->
+    %% circuits loaded from the library while scanning come first; a
+    %% circuit the file defines itself shadows the library's
+    Own = [N || {circuit,N,_,_} <- Defs0],
+    Lib = [D || D = {circuit,N,_,_} <- varp_lib:definitions(),
+		not lists:member(N, Own)],
+    Defs = Lib ++ Defs0,
     try varp_system:expand_file({Defs, Assigns, Formula})
     catch
 	error:{system,Line,Reason} ->

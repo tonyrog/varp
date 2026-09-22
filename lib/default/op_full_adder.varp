@@ -1,0 +1,6 @@
+// full adder, the cell of the library's adders
+circuit op_full_adder(in a, b, ci; return s; out co)
+{
+    s  = a ^ b ^ ci;
+    co = (a & b) | (ci & (a ^ b));
+}

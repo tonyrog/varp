@@ -1,0 +1,5 @@
+// a == b, bits past the end of the narrower operand are zero
+circuit op_eq(in a:n, b:m; return q)
+{
+    q = [A i=0..(max(n,m)-1)] (a[i] equ b[i]);
+}

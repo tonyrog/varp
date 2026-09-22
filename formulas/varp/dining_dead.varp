@@ -1,0 +1,36 @@
+// Dining philosophers, a straight translation of tmp/dining_dead.tla.
+//
+//     varp bmc n=3 formulas/varp/dining_dead.varp     deadlock at k=3
+//     varp bmc n=5 formulas/varp/dining_dead.varp     deadlock at k=5
+//
+// forks(f) is the owner of fork f, or n when it is available (3 bits,
+// so n <= 7); st(p) is 0 thinking, 1 has_left, 2 eating.  TLA's
+// "\exists p : TakeLeft(p) \/ TakeRight(p) \/ PutDown(p)" becomes the
+// inputs who and act (0 take left, 1 take right, 2 put down), and the
+// EXCEPT frames become "every other fork and philosopher stays".
+// Quantifier bodies are parenthesised: [A f=..] binds tighter than ==.
+
+system dining {
+    state forks(f):3, st(p):2;
+    input who:3, act:2;
+
+    init  [A f=0..n-1] (forks(f) == n) and [A p=0..n-1] (st(p) == 0);
+    assume who < n and act < 3;
+
+    next  [E p=0..n-1] ((who == p) and
+            (   ((act == 0) and (st(p) == 0) and (forks(p) == n)
+                 and (next(forks(p)) == p) and (next(st(p)) == 1)
+                 and [A f=0..n-1] ((f != p) implies (next(forks(f)) == forks(f))))
+             or ((act == 1) and (st(p) == 1) and (forks((p+1) % n) == n)
+                 and (next(forks((p+1) % n)) == p) and (next(st(p)) == 2)
+                 and [A f=0..n-1] ((f != (p+1) % n) implies (next(forks(f)) == forks(f))))
+             or ((act == 2) and (st(p) == 2)
+                 and (next(forks(p)) == n) and (next(forks((p+1) % n)) == n)
+                 and (next(st(p)) == 0)
+                 and [A f=0..n-1] (((f != p) and (f != (p+1) % n))
+                                   implies (next(forks(f)) == forks(f)))))
+            and [A q=0..n-1] ((q != p) implies (next(st(q)) == st(q))));
+
+    // deadlock: everyone holds the left fork and waits for the right
+    reach [A p=0..n-1] (st(p) == 1);
+}

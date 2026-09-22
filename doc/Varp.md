@@ -175,8 +175,15 @@ Bits of vectors are read and assigned with `a[i]`, also as `out`
 arguments, quantifiers nest (`[A i=0..1] [A j=0..2] M(i,j) = ...;`)
 and the same statement works at the file level.
 
-`doc/CIRCUIT.md` has the details: scope, defaults, named arguments,
-nested circuits and the errors.
+A parameter size that is a meta variable, `a:n`, is unified with the
+width of the argument, so a circuit written once adds operands of any
+widths.  `lib/default/` is a library of the arithmetic and comparison
+operators written this way, `op_add`, `op_mul`, `op_lt` and so on,
+imported with `import op_add;` or on first use, and proved equal to
+the built in operators; another directory with the same names is another encoding,
+selected with `--lib`.  `doc/CIRCUIT.md` has the details: scope,
+defaults, named arguments, nested circuits, the library and the
+errors.
 
 ## Assignments and the top level formula
 

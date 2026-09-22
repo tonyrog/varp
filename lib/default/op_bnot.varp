@@ -1,0 +1,4 @@
+circuit op_bnot(in a:n; return r:n)
+{
+    [A i=0..(n-1)] r[i] = !a[i];
+}

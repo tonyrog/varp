@@ -1,0 +1,6 @@
+// a % b, unsigned, see op_div
+circuit op_rem(in a:n, b:m; return r:m)
+{
+    declare q:n;
+    q = op_div(a, b, r);
+}

@@ -1,0 +1,9 @@
+// a < b, unsigned: the borrow out of a - b
+circuit op_lt(in a:n, b:m; return q)
+{
+    declare BR:(max(n,m)+1);
+    BR[0] = false;
+    [A i=0..(max(n,m)-1)]
+        BR[i+1] = (!a[i] & b[i]) | (!(a[i] ^ b[i]) & BR[i]);
+    q = BR[max(n,m)];
+}

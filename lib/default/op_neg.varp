@@ -1,0 +1,8 @@
+// -a modulo 2^n: ~a + 1
+circuit op_neg(in a:n; return r:n)
+{
+    declare C:(n+1);
+    C[0] = true;
+    [A i=0..(n-1)]
+        r[i] = op_full_adder(false, !a[i], C[i], C[i+1]);
+}

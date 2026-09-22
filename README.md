@@ -142,6 +142,8 @@ search. Follow one with `bt` or `bj`:
     --statistics <bool>        show counters                       (false)
     --version, -V              print the version
     --help, -h[=<plugin>]      this, or a plugin's options
+    --lib <dir>                circuit library, <name>.varp loaded on use
+                               (lib/default: op_add, op_mul, op_lt, ...)
 
 Encoding and search behaviour:
 

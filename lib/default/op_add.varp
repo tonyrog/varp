@@ -1,0 +1,9 @@
+// a + b, unsigned, with the carry as the top bit: max(n,m)+1 bits
+circuit op_add(in a:n, b:m; return s:(max(n,m)+1))
+{
+    declare C:(max(n,m)+1);
+    C[0] = false;
+    [A i=0..(max(n,m)-1)]
+        s[i] = op_full_adder(a[i], b[i], C[i], C[i+1]);
+    s[max(n,m)] = C[max(n,m)];
+}

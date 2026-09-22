@@ -32,6 +32,7 @@ unsigned	: {token,{unsigned,TokenLine}}.
 assert              : {token,{'assert',TokenLine}}.
 circuit             : {token,{'circuit',TokenLine}}.
 input               : {token,{'input',TokenLine}}.
+import              : {token,{'import',TokenLine}}.
 in                  : {token,{'in',TokenLine}}.
 output              : {token,{'output',TokenLine}}.
 out                 : {token,{'out',TokenLine}}.
@@ -96,7 +97,7 @@ max                 : {token,{'max',TokenLine}}.
 
 {L}({L}|{D})*	    : 
   Name = list_to_binary(TokenChars),  %% utf8?
-  case varp_formula:is_circuit_def(Name, false) of
+  case varp_formula:is_circuit_def(Name, false) orelse varp_lib:autoload(Name) of
       false -> {token,{symbol,TokenLine,Name}};
       true -> {token,{cname,TokenLine,Name}}
   end.
@@ -164,6 +165,7 @@ Erlang code.
 -define(BUF, varp_scan_buf).
 
 init(Chars) ->
+    varp_lib:reset(),
     put(?CONT, []),
     put(?LOC,  1),
     put(?BUF, Chars++" ").

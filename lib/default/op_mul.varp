@@ -1,0 +1,11 @@
+// a * b, unsigned, n+m bits: the partial products added up in a row
+circuit op_mul(in a:n, b:m; return p:(n+m))
+{
+    declare P(j):(n+m), S(j):(n+m);
+    [A j=0..(m-1)] [A i=0..(n+m-1)]
+        P(j)[i] = b[j] & a[i-j];
+    S(0) = 0;
+    [A j=0..(m-1)]
+        S(j+1) = op_add(S(j), P(j));
+    p = S(m);
+}

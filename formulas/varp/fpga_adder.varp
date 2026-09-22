@@ -1,0 +1,28 @@
+// The configurations of a full adder on two 3 input lookup tables (see
+// fpga.varp): bit m of each table is the sum, or the carry, of the
+// input bits of m.  The answer is cs = 0x96 (xor of three) and
+// cc = 0xe8 (majority), each with four bits set, which is why a table
+// is a truth table and not a choice of one minterm.
+//
+//     varp sat bj formulas/varp/fpga_adder.varp
+
+circuit sum(in a, b, ci; return q)
+{
+    declare s:2;
+    s = a + b + ci;
+    q = s[0];
+}
+
+circuit carry(in a, b, ci; return q)
+{
+    declare s:2;
+    s = a + b + ci;
+    q = s[1];
+}
+
+define SBIT(m) sum((m & 1) == 1, (m & 2) == 2, (m & 4) == 4);
+define CBIT(m) carry((m & 1) == 1, (m & 2) == 2, (m & 4) == 4);
+
+declare cs:8, cc:8;
+
+[A m=0..7] ((cs[m] equ SBIT(m)) && (cc[m] equ CBIT(m)))

@@ -1,0 +1,5 @@
+// the larger of a and b, unsigned
+circuit op_max(in a:n, b:m; return r:(max(n,m)))
+{
+    r = op_lt(a, b) ? b : a;
+}

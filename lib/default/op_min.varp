@@ -1,0 +1,5 @@
+// the smaller of a and b, unsigned
+circuit op_min(in a:n, b:m; return r:(max(n,m)))
+{
+    r = op_lt(a, b) ? a : b;
+}

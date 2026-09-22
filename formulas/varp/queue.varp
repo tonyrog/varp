@@ -1,0 +1,37 @@
+// A producer and a consumer talking over a queue.
+//
+//     varp bmc formulas/varp/queue.varp
+//
+// "channel ch:4[2]" is a queue of two 4 bit values, a system of its
+// own.  The producer owns the sending end (send ... when ...), the
+// consumer the receiving end (recv ... when ...); a send into a full
+// queue or a recv from an empty one is not a possible step.  The
+// queue's head and count are readable as ch_q0 and ch_n.
+//
+// producer and consumer are templates with the channel as parameter;
+// the instances p and c bind it to ch and get their other names
+// prefixed (p_v, c_sum, ...).  The shortest run in which the consumer
+// has added up 1+2+3 is four steps.
+
+channel ch:4[2];
+
+system producer(dst) {
+    state v:4;
+    init  v == 1;
+    send  dst v when v <= 3;
+    next  (v <= 3) implies next(v) == v + 1;
+    next  (v > 3) implies next(v) == v;
+}
+
+system consumer(src) {
+    state got:4, sum:4;
+    input take;
+    init  sum == 0 and got == 0;
+    recv  src got when take and src_n > 0;
+    next  (take and src_n > 0) implies next(sum) == sum + src_q0;
+    next  (not (take and src_n > 0)) implies next(sum) == sum;
+    reach sum == 6;
+}
+
+instance p = producer(ch);
+instance c = consumer(ch);

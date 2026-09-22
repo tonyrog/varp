@@ -493,10 +493,16 @@ pop_meta(Bs, Meta) ->
 %% keep defined circuits to allow parser to know what
 %% symbols are predicates and what symbols are circuits
 init_circuit_def() ->
-    put(circuit_defs, #{}).
+    put(circuit_defs, varp_lib:pending_names()).
 
 add_circuit_def(C={circuit,Name,_Params,_Defs}) ->
-    CDef = get(circuit_defs),
+    %% undefined when a library circuit is the first token of a file:
+    %% the grammar has not initialised yet (it does so on the first
+    %% reduction, after that token), init_circuit_def/0 keeps the name
+    CDef = case get(circuit_defs) of
+	       undefined -> #{};
+	       M -> M
+	   end,
     put(circuit_defs, CDef#{ Name => true }),
     C.
 
@@ -1078,7 +1084,16 @@ bld_list_([],Acc,Bs) ->
 %%
 build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
     {Ins,Outs,Return} = circuit_params(Name, Params),
-    {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0),
+    %% the size variables of the parameters (a:n) are local to this
+    %% instance: unbound on entry, bound by the arguments, and the
+    %% caller's bindings come back afterwards, so that a circuit can
+    %% call another with sizes of its own (mul calling add)
+    Sizes = [Sz || #{ size := Sz } <- Ins ++ Outs ++ [R || R <- [Return],
+							   R =/= undefined],
+		   is_binary(Sz)],
+    Meta0 = Bs0#bs.meta,
+    Bs0_1 = Bs0#bs { meta = maps:without(Sizes, Meta0) },
+    {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0_1),
     {Prefix,Bs2} = circuit_prefix(Name, Bs1),
     {RetName,Bs3} = circuit_return(Return, Prefix, Bs2),
     Body = circuit_rename(Defs, maps:from_list(Bnd), Prefix, Bs3#bs.defs),
@@ -1086,7 +1101,8 @@ build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
     {Value,Bs5} = circuit_value(RetName, Bs4),
     %% locals and nested circuit definitions do not leak into the caller,
     %% but declarations made for the arguments (in Bs1) do.
-    {Value, Bs5#bs { decls = Bs1#bs.decls, circuits = Bs1#bs.circuits }}.
+    {Value, Bs5#bs { decls = Bs1#bs.decls, circuits = Bs1#bs.circuits,
+		     meta = Meta0 }}.
 
 %% split the parameter list into {In, Out, Return}
 circuit_params(Name, Params) ->
@@ -1155,9 +1171,12 @@ circuit_bind_(Name, [F=#{name := N}|Fs], I, NPos, Pos, Named, Acc, Bs) ->
 circuit_bind_(_Name, [], _I, _NPos, _Pos, _Named, Acc, Bs) ->
     {lists:reverse(Acc), Bs}.
 
-%% build one argument.  When the parameter is typed and the argument is a
+%% Build one argument.  When the parameter is typed and the argument is a
 %% plain, not yet declared, symbol then the parameter type/size is used to
-%% declare it in the caller scope.
+%% declare it in the caller scope.  A size that is a bare meta variable
+%% (a:n) is unified with the width of the argument, whatever the argument
+%% is: a declared vector, an expression or a constant.  The first use
+%% binds it, later uses must agree.
 circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
   when Type =/= bool ->
     Bs1 = case varp:find_decl(P, Bs#bs.decls, icase(Bs)) of
@@ -1173,12 +1192,32 @@ circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
 		      _ ->
 			  Bs
 		  end;
-	      _ ->
+	      {ok,_Decl} ->
 		  Bs
 	  end,
-    bld(Expr, Bs1);
+    {V, Bs2} = bld(Expr, Bs1),
+    {V, unify_size(Size, V, Bs2)};
+circuit_arg(#{type := Type, size := Size}, Expr, Bs) when Type =/= bool ->
+    {V, Bs1} = bld(Expr, Bs),
+    {V, unify_size(Size, V, Bs1)};
 circuit_arg(_F, Expr, Bs) ->
     bld(Expr, Bs).
+
+%% a:n against a value of width N
+unify_size(Name, {T,N,_}, Bs) when is_binary(Name),
+				 T =:= uint; T =:= int; T =:= bit ->
+    unify_meta(Name, N, Bs);
+unify_size(Name, {bool,_}, Bs) when is_binary(Name) ->
+    unify_meta(Name, 1, Bs);
+unify_size(_Size, _V, Bs) ->
+    Bs.
+
+unify_meta(Name, N, Bs) ->
+    case maps:find(Name, Bs#bs.meta) of
+	error -> Bs#bs { meta = maps:put(Name, N, Bs#bs.meta) };
+	{ok,N} -> Bs;
+	{ok,Other} -> error({unable_to_unify, Name, Other, N})
+    end.
 
 %% unique symbol prefix for the locals of this instance
 circuit_prefix(Name, Bs) ->
@@ -1746,18 +1785,23 @@ var_vector(Type,V,N,Bs) ->
 %%    var_vector_(I+1,Size,Type,[Xi|Xs],V,Bs1).
 
 all(A,Bs) -> all(undefined,A,Bs).
+%% the target of a gate: build_assign/3 hands over the built target,
+%% {bool,L}; the circuit functions take the literal or undefined
+qtarget({bool,L}) when is_integer(L) -> L;
+qtarget(_) -> undefined.
+
 all(X,As,Bs) ->
-    X1 = varp_circuit:all(Bs#bs.vp,X,circuit_args(As)),
+    X1 = varp_circuit:all(Bs#bs.vp,qtarget(X),circuit_args(As)),
     {{bool,X1},Bs}.
 
 any(A,Bs) -> any(undefined,A,Bs).
 any(X,As,Bs) ->
-    X1 = varp_circuit:any(Bs#bs.vp,X,circuit_args(As)),
+    X1 = varp_circuit:any(Bs#bs.vp,qtarget(X),circuit_args(As)),
     {{bool,X1},Bs}.    
 
 none(A,Bs) -> none(undefined,A,Bs).
 none(X,As,Bs) ->
-    X1 = varp_circuit:none(Bs#bs.vp,X,circuit_args(As)),
+    X1 = varp_circuit:none(Bs#bs.vp,qtarget(X),circuit_args(As)),
     {{bool,X1},Bs}.
 
 one(A,Bs) -> one(undefined,A,Bs).
@@ -1794,15 +1838,15 @@ prod_([Y|Ys], Bs) ->
 
 
 eqk(K,X,Ys,Bs) ->
-    X1 = varp_circuit:eqk(Bs#bs.vp,K,X,circuit_args(Ys)),
+    X1 = varp_circuit:eqk(Bs#bs.vp,K,qtarget(X),circuit_args(Ys)),
     {{bool,X1},Bs}.
 
 neqk(K,X,Ys,Bs) ->
-    X1 = varp_circuit:neqk(Bs#bs.vp,K,X,circuit_args(Ys)),
+    X1 = varp_circuit:neqk(Bs#bs.vp,K,qtarget(X),circuit_args(Ys)),
     {{bool,X1},Bs}.
 
 gtk(K,X,Ys,Bs) ->
-    X1 = varp_circuit:gtk(Bs#bs.vp,K,X,circuit_args(Ys)),
+    X1 = varp_circuit:gtk(Bs#bs.vp,K,qtarget(X),circuit_args(Ys)),
     {{bool,X1},Bs}.
 
 negate({bool,X}) -> {bool,lnot(X)}.

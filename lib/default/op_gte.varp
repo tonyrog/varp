@@ -1,0 +1,4 @@
+circuit op_gte(in a:n, b:m; return q)
+{
+    q = !op_lt(a, b);
+}

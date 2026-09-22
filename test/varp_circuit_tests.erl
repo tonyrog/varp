@@ -439,3 +439,40 @@ quantified_assignment_test_() ->
 			   models("circuit fa(in a, b; out s, co) { s = a ^ b; co = a && b; }\n"
 				  "declare x, y, z; z = fa(x, y); true"))
       end}}].
+
+%% a size that is a bare meta variable, a:n, is unified with the width
+%% of the argument: a declared vector, an expression or a constant
+size_unification_test_() ->
+    Lib = "circuit fa(in a, b, ci; return s; out co) {\n"
+	"  s = a ^ b ^ ci; co = (a & b) || (ci & (a ^ b)); }\n"
+	"circuit addn(in a:n, b:m, ci; return s:(max(n,m)); out co) {\n"
+	"  declare RC:(max(n,m)+1);\n"
+	"  RC[0] = ci;\n"
+	"  [A i=0..(max(n,m)-1)] s[i] = fa(a[i], b[i], RC[i], RC[i+1]);\n"
+	"  co = RC[max(n,m)]; }\n",
+    Get = fun(Text, Name) -> [M] = models(Text), proplists:get_value(Name, M) end,
+    [{"3 and 4 bit operands, 12 models", {timeout, 120,
+      fun() ->
+	      ?assertEqual(12, count(Lib ++ "declare A:3, B:4;\n"
+				     "(addn(A, B, 0, 0) > 7) && (A > B)"))
+      end}},
+     {"an expression argument", {timeout, 60,
+      fun() ->
+	      ?assertEqual(4, Get(Lib ++ "declare A:3, B:4;\n"
+				  "(addn(A + 1, B, 0, Co) == 8) && (A == 3)", "B"))
+      end}},
+     {"a constant argument", {timeout, 60,
+      fun() ->
+	      ?assertEqual(3, Get(Lib ++ "declare B:4;\n(addn(5, B, 0, Co) == 8)", "B"))
+      end}},
+     {"a:n, b:n with different widths is an error", {timeout, 60,
+      fun() ->
+	      ?assertError({unable_to_unify,<<"n">>,3,4},
+			   models("circuit add2(in a:n, b:n; return s:n) { s = a + b; }\n"
+				  "declare A:3, B:4;\nadd2(A, B) == 3"))
+      end}},
+     {"a:n, b:n with the same width", {timeout, 60,
+      fun() ->
+	      ?assertEqual(5, Get("circuit add2(in a:n, b:n; return s:n) { s = a + b; }\n"
+				  "declare A:3, B:3;\nadd2(A, B) == 7 && A == 2", "B"))
+      end}}].
