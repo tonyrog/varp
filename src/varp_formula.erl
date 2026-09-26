@@ -2326,6 +2326,8 @@ print_dimacs_rows_([], _I, _N, Acc) ->
     io:format("v~s 0\n", [Acc]).
 
 %% remove bindings on form _Var (hidden)
+filter_bindings([{{p,_V,_},undefined}|Bs]) ->
+    filter_bindings(Bs);
 filter_bindings([B={{p,V,_},_}|Bs]) when is_binary(V) ->
     case V of
 	<<$_,_/binary>> ->
