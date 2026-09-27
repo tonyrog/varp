@@ -118,9 +118,19 @@ run(Bs, _Param) when is_record(Bs,bs) ->
 drive(Do, Assignments, Formula0, GOpts, Param) ->
     Do1 = with_search(with_mode(Do)),
     Bound = list_to_binary(maps:get(bound, Param)),
-    NoProps = maps:get(no_properties, Param, false),
-    Formula = case {NoProps, maps:get(property, Param)} of
-		  {true, _} -> runs_formula(GOpts, Bound, Formula0);
+    %% Either placement works: `varp --no-properties bmc ...' (global, where it
+    %% also reaches satisfy and saturate) or `varp bmc --no-properties ...'. The
+    %% global one has already swapped the formula in varp_run/4, so all that is
+    %% left here is the wording and turning off what needs a property.
+    NoProps = maps:get(no_properties, Param, false) orelse
+	      maps:get(no_properties, GOpts, false),
+    %% SUBSTITUTE, do not replace: -f has already been conjoined into Formula0,
+    %% and replacing it threw that away -- `-f "BathLight(1)" bmc
+    %% --no-properties' silently ignored the -f and answered about the system
+    %% alone. varp_run/4 has done this already when the flag was global.
+    Formula = case {maps:get(no_properties, Param, false),
+		    maps:get(property, Param)} of
+		  {true, _} -> varp:strip_properties(Formula0, GOpts);
 		  {_, ""}   -> Formula0;
 		  {_, Prop} -> {p, list_to_binary(Prop), [Bound]}
 	      end,
@@ -252,19 +262,6 @@ auto(Key, Param, GOpts) ->
 
 %% incremental mode needs the formula to be a property of a system,
 %% {p,Name,[Bound]}, and a chain of just satisfy and backjump
-%% The composition of every system in the file, $all, is what a run means when
-%% no property picks one out. A file with no system at all keeps its own formula.
-runs_formula(GOpts, Bound, Fallback) ->
-    Systems = maps:get(systems, GOpts, []),
-    case [I || I = #{ name := <<"$all">> } <- Systems] of
-	[Info | _] -> varp_system:runs_formula(Info, Bound);
-	[] ->
-	    case Systems of
-		[Info | _] -> varp_system:runs_formula(Info, Bound);
-		[] -> Fallback
-	    end
-    end.
-
 incremental_target({p,Name,[Bound]}, Bound, GOpts, Do) ->
     Systems = maps:get(systems, GOpts, []),
     Found = [{Info, Kind} || Info <- Systems,

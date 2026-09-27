@@ -12,6 +12,7 @@
 -export([test/0]).
 -export([main/1]).
 -export([do_run/3, do_run/4]).
+-export([strip_properties/2]).   %% --no-properties, also used by bmc
 
 -export([tokens/1, tokens/2]).
 -export([parse/1, parse/2, parse/3]).
@@ -348,6 +349,25 @@ global_options() ->
 	 spec => {multiple,string},
 	 default => [],
 	 description => "Command line formula."
+       },
+      %% Global, not a bmc option: what it changes is what the FILE contributes,
+       %% so it has to hold for satisfy, saturate, bt and bj as well. Two
+       %% entries, one key -- the option machinery maps a name to a key.
+      #{ long => "no-properties",
+	 key => no_properties,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "Ignore invariant/reach/eventually and use the "
+			"transition relation alone, so models can be "
+			"generated without the property on top. Any -f is "
+			"still conjoined, so -f \"BathLight(1)\" asks for a "
+			"run in which that holds."
+       },
+      #{ long => "runs",
+	 key => no_properties,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "Alias for --no-properties."
        },
       #{ long => "qtype",
 	 key => qtype,
@@ -723,7 +743,11 @@ run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
       end, Fs).
 
 %% command line - display errors and exception as well as results
-varp_run(Do, Assignments, Formula, GOpts) ->
+varp_run(Do, Assignments, Formula0, GOpts) ->
+    Formula = case maps:get(no_properties, GOpts, false) of
+		  true  -> strip_properties(Formula0, GOpts);
+		  false -> Formula0
+	      end,
     put(exit_code, 0),
     start_cprof(GOpts),
     start_fprof(GOpts),
@@ -834,11 +858,65 @@ format_error(Err) ->
 	{bitsize_mismatch,Var} ->
 	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ",VarName, " can only have one size"];
+	{not_a_condition,Op,Left,Right} ->
+	    io_lib:format("`~s' needs boolean operands, but the left is ~s and "
+			  "the right is ~s.\n"
+			  "A vector is a value, not a condition: there is no "
+			  "implicit truthiness, so compare it.\n"
+			  "  -f \"B(3)\"       is a 4 bit value\n"
+			  "  -f \"B(3) == 4\"  is a condition\n",
+			  [Op, operand_kind_str(Left), operand_kind_str(Right)]);
 	{shift_not_constant,B} ->
 	    BStr = varp_format:format_symbol(B),
 	    ["Shift value ",BStr," must be constant "];
 	_ ->
 	    io_lib:format("~p\n", [Err])
+    end.
+
+operand_kind_str(boolean)         -> "boolean";
+operand_kind_str({Type,Bits})     -> io_lib:format("a ~w bit ~w value",
+						   [Bits, Type]);
+operand_kind_str(Other)           -> io_lib:format("~p", [Other]).
+
+%%% --no-properties: a file with a system and no formula of its own contributes
+%%% {p,<sys>,[k]} -- a reference to its first property. Swap THAT NODE for the
+%%% transition relation, wherever the -f conjunction has left it, so the two
+%%% compose: `-f "BathLight(1)" --no-properties' asks for a run of the system in
+%%% which BathLight holds at step 1.
+%%%
+%%% Done here rather than in expand_file/1 because the parser calls that and has
+%%% no options; done as a substitution rather than a replacement because -f has
+%%% already been conjoined by the time the file is read.
+strip_properties(Formula, GOpts) ->
+    Systems = maps:get(systems, GOpts, []),
+    case Systems of
+	[] -> Formula;                  % no system: nothing to strip
+	_  -> subst_prop(Formula, Systems, <<"k">>)
+    end.
+
+subst_prop({p, Name, [B]} = Node, Systems, B) ->
+    case prop_owner(Name, Systems) of
+	{ok, Info} -> varp_system:runs_formula(Info, B);
+	none       -> Node
+    end;
+subst_prop({lop, Op, L, R}, S, B) ->
+    {lop, Op, subst_prop(L, S, B), subst_prop(R, S, B)};
+subst_prop({lop, Op, M}, S, B) ->
+    {lop, Op, subst_prop(M, S, B)};
+subst_prop(Node, _S, _B) ->
+    Node.
+
+%% Which system a property macro belongs to. The RUN is over the whole
+%% composition, so $all wins when there is one -- otherwise a two-system file
+%% would be unrolled as if only one of them stepped.
+prop_owner(Name, Systems) ->
+    case [I || I <- Systems, varp_system:property_kind(I, Name) =/= false] of
+	[] -> none;
+	[Info | _] ->
+	    case [A || A = #{ name := <<"$all">> } <- Systems] of
+		[All | _] -> {ok, All};
+		[]        -> {ok, Info}
+	    end
     end.
 
 do_run(Do, Formula, GOpts) ->

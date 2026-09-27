@@ -323,3 +323,57 @@ no_properties_word_test() ->
     Out = lists:flatten(collect([])),
     ?assert(string:find(Out, "bmc: run at k=1") =/= nomatch),
     ?assertEqual(nomatch, string:find(Out, "counterexample")).
+
+%% --no-properties is GLOBAL as well, so it reaches satisfy/saturate/bt/bj and
+%% not only bmc -- and it SUBSTITUTES rather than replaces, so a -f survives.
+%% Replacing threw the -f away, which made `-f "X" --no-properties' quietly
+%% answer about the system alone.
+%%
+%% varp_tc:run/3 goes through varp:do_run/4, not varp_run/4, so the CLI's
+%% automatic substitution is applied here by hand -- which is also the unit
+%% under test.
+global_no_properties_test_() ->
+    Src =
+	"system t {\n"
+	"    state A:2;\n"
+	"    input C:1;\n"
+	"    init  A == 0;\n"
+	"    next  next(A) == A + C;\n"
+	"    invariant A != 3;\n"
+	"}\n",
+    Sat = fun({R, Models, _}) -> R =/= ?INCONSISTENT andalso Models =/= [] end,
+    Go = fun(Strip, Extra, K) ->
+		 Opts = #{ meta => #{<<"k">> => K} },
+		 {Sections, As, F0} = varp_tc:parse(Src, Opts),
+		 G0 = varp:load_option_list([{print,false},{undeclared,none}]),
+		 GOpts0 = varp:section_opts(Sections, G0#{ meta => #{<<"k">> => K} }),
+		 GOpts = case Strip of
+			     true  -> GOpts0#{ no_properties => true };
+			     false -> GOpts0
+			 end,
+		 F1 = case Extra of
+			  none -> F0;
+			  Text ->
+			      {_, _, E} = varp_tc:parse("declare z;\n" ++ Text
+							++ "\n", Opts),
+			      {lop,'and',F0,E}
+		      end,
+		 F = case Strip of
+			 true  -> varp:strip_properties(F1, GOpts);
+			 false -> F1
+		     end,
+		 %% satisfy alone does no SEARCH -- bmc adds backjump for you,
+		 %% and without it every case answers "no models" for the wrong
+		 %% reason.
+		 varp:do_run(varp:parse_do([{satisfy,[]},{backjump,[]}]),
+			     As, F, GOpts)
+	 end,
+    [{"satisfy sees the property by default",
+      ?_assertNot(Sat(Go(false, none, 1)))},
+     {"--no-properties reaches satisfy",
+      ?_assert(Sat(Go(true, none, 1)))},
+     %% A rises by at most 1 per step, so 3 is out of reach at k=2 and 2 is not
+     {"a -f survives: unreachable value stays unsatisfiable",
+      ?_assertNot(Sat(Go(true, "A(2) == 3", 2)))},
+     {"a -f survives: reachable value is satisfiable",
+      ?_assert(Sat(Go(true, "A(2) == 2", 2)))}].

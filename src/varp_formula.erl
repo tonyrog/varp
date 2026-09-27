@@ -2052,9 +2052,26 @@ operation2(Op,A,B,Bs) ->
 	    %% operator '=' is kind of assignment but really a 
 	    %% equality test and check of overflow bits
 	    %% FIXME: same as '==' but check overflow / truncate 
-	    '=' -> X = varp_arith:set(Bs#bs.vp,A,B),{bool,X}
+	    '=' -> X = varp_arith:set(Bs#bs.vp,A,B),{bool,X};
+	    %% `and', `or', `xor', `nand', `nor' and `nimp' are absent from this
+	    %% clause on purpose: they need BOOLEAN operands, and here at least
+	    %% one side is a vector. A vector is a value, not a condition --
+	    %% there is no implicit truthiness -- so the formula has to compare
+	    %% it. Until this clause existed the miss fell out of the case as
+	    %% {case_clause,'and'}, which told the user nothing at all.
+	    _ ->
+		erlang:error({not_a_condition, Op, operand_kind(A),
+			      operand_kind(B)})
 	end,
     {C, Bs}.
+
+%% Describe an operand for the error above. A width and a type is as much as is
+%% known here -- the name the user wrote is long gone by the time a value is
+%% built, so the message names the OPERATOR and leaves finding the side to them.
+operand_kind({bool,_})            -> boolean;
+operand_kind({T,N,_}) when is_integer(N) -> {T,N};
+operand_kind({T,N}) when is_integer(N)   -> {T,N};
+operand_kind(Other)               -> Other.
 
 %% like operation2 but result is predetermined in X
 operation2(Op,undefined,Y,Z,Bs) ->
