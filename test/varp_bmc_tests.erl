@@ -256,3 +256,70 @@ output_fun_test() ->
 
 collect(Acc) ->
     receive {bmc, L} -> collect([L|Acc]) after 0 -> lists:reverse(Acc) end.
+
+%% --no-properties (alias --runs): unroll the transition relation alone.
+%%
+%% Two things it is for. Inspecting models of a file that HAS a property --
+%% without it the property's formula is what gets solved, so a question about
+%% the system comes back answered about the property. And checking that `next'
+%% is consistent at all: an inconsistent one has no transitions, so every
+%% property holds and every proof is vacuous.
+no_properties_test_() ->
+    Src =
+	"system t {\n"
+	"    state A:2;\n"
+	"    input C:1;\n"
+	"    init  A == 0;\n"
+	"    next  (C == 1) implies (next(A) == A + 1);\n"
+	"    next  (C == 0) implies (next(A) == A);\n"
+	"    invariant A != 3;\n"
+	"}\n",
+    Run = fun(Opts, K) ->
+		  {Sections, As, Formula} = varp_tc:parse(Src, #{}),
+		  GOpts = varp:section_opts(
+			    Sections, varp:load_option_list([{print,false}])),
+		  Do = varp:parse_do([{bmc, [{k_min,K},{k_max,K},
+					     {trace,false} | Opts]}]),
+		  varp:do_run(Do, As, Formula, GOpts)
+	  end,
+    Sat = fun({R, Models, _}) -> R =/= ?INCONSISTENT andalso Models =/= [] end,
+    [{"the invariant is not violated at k=1", ?_assertNot(Sat(Run([], 1)))},
+     {"...but a run of length 1 exists",
+      ?_assert(Sat(Run([{no_properties,true}], 1)))},
+     {"the invariant IS violated at k=3", ?_assert(Sat(Run([], 3)))},
+     {"--runs is the same flag",
+      ?_assert(Sat(Run([{no_properties,true}], 2)))},
+     %% an inconsistent next has no transitions: this is the check that has to
+     %% pass before a proof means anything
+     {"an inconsistent next has no runs",
+      fun() ->
+	      Bad = lists:flatten(
+		      string:replace(Src,
+				     "    next  (C == 0) implies (next(A) == A);\n",
+				     "    next  (C == 0) implies (next(A) == A);\n"
+				     "    next  next(A) == A + 1;\n"
+				     "    next  next(A) == A + 2;\n", all)),
+	      {Sections, As, Formula} = varp_tc:parse(Bad, #{}),
+	      GOpts = varp:section_opts(
+			Sections, varp:load_option_list([{print,false}])),
+	      Do = varp:parse_do([{bmc, [{k_min,1},{k_max,1},{trace,false},
+					 {no_properties,true}]}]),
+	      ?assertNot(Sat(varp:do_run(Do, As, Formula, GOpts)))
+      end}].
+
+%% The word in the verdict line says which mode produced the model.
+no_properties_word_test() ->
+    Src = "system t {\n    state A:2;\n    input C:1;\n"
+	  "    init  A == 0;\n"
+	  "    next  next(A) == A + C;\n    invariant A != 3;\n}\n",
+    {Sections, As, Formula} = varp_tc:parse(Src, #{}),
+    Self = self(),
+    GOpts0 = varp:section_opts(Sections,
+			       varp:load_option_list([{print,true}])),
+    GOpts = GOpts0#{ bmc_output => fun(L) -> Self ! {bmc, L} end },
+    Do = varp:parse_do([{bmc, [{k_min,1},{k_max,1},{trace,false},
+			       {no_properties,true}]}]),
+    varp:do_run(Do, As, Formula, GOpts),
+    Out = lists:flatten(collect([])),
+    ?assert(string:find(Out, "bmc: run at k=1") =/= nomatch),
+    ?assertEqual(nomatch, string:find(Out, "counterexample")).

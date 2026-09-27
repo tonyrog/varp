@@ -35,6 +35,7 @@
 -export([expand_file/1, expand/1, format_error/1]).
 -export([init_formula/1, next_formula/2, step_property/4, property_kind/2]).
 -export([induction_formulas/3]).
+-export([runs_formula/2]).
 
 -define(T, <<"$t">>).   %% step parameter of init/next/property macros
 -define(K, <<"$k">>).   %% bound parameter of the unrolled properties
@@ -476,6 +477,17 @@ index_decl({p,Name,Params}) ->
 %% ------------------------------------------------------------------
 %% properties, unrolled to the bound $k
 %% ------------------------------------------------------------------
+
+%% The transition relation on its own, with the CALLER's bound variable rather
+%% than the $k of an unrolled property macro. This is what `bmc --no-properties'
+%% runs: every valid run of length Bound, no property asked. Two uses --
+%% inspecting models without editing the file, and the consistency check that
+%% must pass before any proof means anything (an inconsistent `next' has no
+%% transitions, so everything is unreachable and every property holds).
+runs_formula(#{ init := InitName, next := NextName }, Bound) ->
+    {lop,'and',
+     {p,InitName,[{const,0}]},
+     {{'ALL',[{op,'=',?S,{range,{const,1},Bound}}]}, {p,NextName,[?S]}}}.
 
 %% init(0) and [A $s=1..$k] next($s)
 path(InitName, NextName) ->

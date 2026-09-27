@@ -50,6 +50,23 @@ options() ->
 	default => "k",
 	description => "Name of the meta variable that carries the bound."
       },
+     %% Two entries, one key: the option machinery maps a name to a key, so an
+     %% alias is a second entry rather than a change to varp_option.
+     #{ long => "no-properties",
+	key => no_properties,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Ignore invariant/reach/eventually and unroll the "
+		       "transition relation alone: every valid run of length k. "
+		       "Lets models be inspected, and the consistency of `next' "
+		       "checked, without editing the file."
+      },
+     #{ long => "runs",
+	key => no_properties,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Alias for --no-properties."
+      },
      #{ long => "trace",
 	key => trace,
 	spec => {enum,[?BOOL]},
@@ -101,9 +118,11 @@ run(Bs, _Param) when is_record(Bs,bs) ->
 drive(Do, Assignments, Formula0, GOpts, Param) ->
     Do1 = with_search(with_mode(Do)),
     Bound = list_to_binary(maps:get(bound, Param)),
-    Formula = case maps:get(property, Param) of
-		  "" -> Formula0;
-		  Prop -> {p, list_to_binary(Prop), [Bound]}
+    NoProps = maps:get(no_properties, Param, false),
+    Formula = case {NoProps, maps:get(property, Param)} of
+		  {true, _} -> runs_formula(GOpts, Bound, Formula0);
+		  {_, ""}   -> Formula0;
+		  {_, Prop} -> {p, list_to_binary(Prop), [Bound]}
 	      end,
     KMin = maps:get(k_min, Param),
     KMax = maps:get(k_max, Param),
@@ -114,17 +133,26 @@ drive(Do, Assignments, Formula0, GOpts, Param) ->
 		F when is_function(F, 1) -> F;
 		_ -> maps:get(print, GOpts, true) =/= false
 	    end,
-    Target = case maps:get(incremental, Param) of
+    %% Both of these are about a property: incremental reuse keys off which one,
+    %% and induction proves one. With --no-properties there is none, so they are
+    %% off rather than wrong.
+    Target = case (not NoProps) andalso maps:get(incremental, Param) of
 		 true -> incremental_target(Formula, Bound, GOpts, Do1);
 		 false -> false
 	     end,
-    case maps:get(induction, Param) of
+    case (not NoProps) andalso maps:get(induction, Param) of
 	true ->
 	    induction(KMin, KMax, Step, Trace, Print, Formula, Bound,
 		      Do1, Assignments, GOpts#{ print => false, method => collect });
 	false ->
+	    %% A model means different things in the two modes: refuting a
+	    %% property, or simply a run of the system. Say which.
+	    GOpts1 = GOpts#{ bmc_word => case NoProps of
+					     true  -> "run";
+					     false -> "counterexample"
+					 end },
 	    drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
-			 Do1, Assignments, Formula, GOpts, Param)
+			 Do1, Assignments, Formula, GOpts1, Param)
     end.
 
 drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
@@ -173,6 +201,7 @@ induction_target({p,Name,[Bound]}, Bound, GOpts) ->
     end;
 induction_target(_Formula, _Bound, _GOpts) ->
     false.
+
 
 istep_ind(K, KMax, _Step, _Trace, Print, _Info, _Kind, _Do, _As, _GOpts)
   when K > KMax ->
@@ -223,6 +252,19 @@ auto(Key, Param, GOpts) ->
 
 %% incremental mode needs the formula to be a property of a system,
 %% {p,Name,[Bound]}, and a chain of just satisfy and backjump
+%% The composition of every system in the file, $all, is what a run means when
+%% no property picks one out. A file with no system at all keeps its own formula.
+runs_formula(GOpts, Bound, Fallback) ->
+    Systems = maps:get(systems, GOpts, []),
+    case [I || I = #{ name := <<"$all">> } <- Systems] of
+	[Info | _] -> varp_system:runs_formula(Info, Bound);
+	[] ->
+	    case Systems of
+		[Info | _] -> varp_system:runs_formula(Info, Bound);
+		[] -> Fallback
+	    end
+    end.
+
 incremental_target({p,Name,[Bound]}, Bound, GOpts, Do) ->
     Systems = maps:get(systems, GOpts, []),
     Found = [{Info, Kind} || Info <- Systems,
@@ -424,7 +466,8 @@ loop(K, KMax, Step, Bound, Trace, Print, Do, As, Formula, GOpts) ->
 		    loop(K+Step, KMax, Step, Bound, Trace, Print,
 			 Do, As, Formula, GOpts);
 		[Model|_] ->
-		    result(Print, "bmc: counterexample at k=~w\n", [K]),
+		    result(Print, "bmc: ~s at k=~w\n",
+			   [maps:get(bmc_word, GOpts, "counterexample"), K]),
 		    trace_out(Trace, Print, Model),
 		    result(Print, "% 1\n", []),
 		    {R, Acc, Bs}
