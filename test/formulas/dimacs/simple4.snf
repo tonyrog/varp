@@ -1,0 +1,6 @@
+c simple case 3
+p snf 3 4
+A B C .
+A B !C .
+A !B C .
+!A !B .

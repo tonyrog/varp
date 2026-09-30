@@ -1,0 +1,30 @@
+// DIE HARD as a transition system, see doc/MODEL_CHECKING.md
+//
+// The same puzzle as die_hard.varp: a 3 litre jug L and a 5 litre
+// jug B, measure exactly 4 litres.  Run with the bound k:
+//
+//     varp sat bj k=6 formulas/varp/die_hard_system.varp
+//
+// k=5 is UNSAT, k=6 gives the first solution, k=7 and k=8 give two
+// each, the same models as die_hard.varp gives for n=6,7,8.
+
+system jugs {
+    state B:4, L:4;
+    input fill_small, fill_big, empty_small, empty_big,
+          small_to_big, big_to_small;
+
+    init  B == 0 and L == 0;
+
+    next  [EQ 1](fill_small, fill_big, empty_small, empty_big,
+                 small_to_big, big_to_small) and
+          (fill_small   implies (next(L) == 3 and next(B) == B)) and
+          (fill_big     implies (next(B) == 5 and next(L) == L)) and
+          (empty_small  implies (next(L) == 0 and next(B) == B)) and
+          (empty_big    implies (next(B) == 0 and next(L) == L)) and
+          (small_to_big implies (next(B) == min(B + L, 5) and
+                                 next(L) == L - (next(B) - B))) and
+          (big_to_small implies (next(L) == min(B + L, 3) and
+                                 next(B) == B - (next(L) - L)));
+
+    reach B == 4;
+}

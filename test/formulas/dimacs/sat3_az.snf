@@ -1,0 +1,9 @@
+p snf 4 8
+ X  Y  Z !A 0
+ X  Y !Z  A 0
+ X !Y  Z !A 0
+ X !Y !Z  A 0
+!X  Y  Z !A 0
+!X  Y !Z  A 0
+!X !Y  Z !A 0
+!X !Y !Z  A 0

@@ -1,0 +1,514 @@
+c auto generated from <file>
+p snf 95 508
+c declare X:5/unsigned
+c declare Y:5/unsigned
+Y[1] Y[2] Y[3] Y[4] .
+X[1] X[2] X[3] X[4] .
+!T75 .
+!T86 .
+!T84 .
+!T82 .
+!T80 .
+T78 .
+T76 .
+T59 .
+T42 .
+T25 .
+!T8 .
+true !T58 !T85 T86 .
+true !T58 T75 .
+true !T85 T75 .
+true T75 T86 .
+false T58 T85 !T86 .
+false T58 !T75 .
+false T85 !T75 .
+false !T75 !T86 .
+!T58 !T85 T75 .
+!T58 T75 T86 .
+T58 T85 !T75 .
+T58 !T75 !T86 .
+!T85 T75 T86 .
+T85 !T75 !T86 .
+!T74 !T69 !T83 T84 .
+!T74 !T69 T85 .
+!T74 !T83 T85 .
+!T74 T85 T84 .
+T74 T69 T83 !T84 .
+T74 T69 !T85 .
+T74 T83 !T85 .
+T74 !T85 !T84 .
+!T69 !T83 T85 .
+!T69 T85 T84 .
+T69 T83 !T85 .
+T69 !T85 !T84 .
+!T83 T85 T84 .
+T83 !T85 !T84 .
+!T73 !T67 !T81 T82 .
+!T73 !T67 T83 .
+!T73 !T81 T83 .
+!T73 T83 T82 .
+T73 T67 T81 !T82 .
+T73 T67 !T83 .
+T73 T81 !T83 .
+T73 !T83 !T82 .
+!T67 !T81 T83 .
+!T67 T83 T82 .
+T67 T81 !T83 .
+T67 !T83 !T82 .
+!T81 T83 T82 .
+T81 !T83 !T82 .
+!T72 !T65 !T79 T80 .
+!T72 !T65 T81 .
+!T72 !T79 T81 .
+!T72 T81 T80 .
+T72 T65 T79 !T80 .
+T72 T65 !T81 .
+T72 T79 !T81 .
+T72 !T81 !T80 .
+!T65 !T79 T81 .
+!T65 T81 T80 .
+T65 T79 !T81 .
+T65 !T81 !T80 .
+!T79 T81 T80 .
+T79 !T81 !T80 .
+!T71 !T63 !T77 T78 .
+!T71 !T63 T79 .
+!T71 !T77 T79 .
+!T71 T79 T78 .
+T71 T63 T77 !T78 .
+T71 T63 !T79 .
+T71 T77 !T79 .
+T71 !T79 !T78 .
+!T63 !T77 T79 .
+!T63 T79 T78 .
+T63 T77 !T79 .
+T63 !T79 !T78 .
+!T77 T79 T78 .
+T77 !T79 !T78 .
+!T70 !T61 true T76 .
+!T70 !T61 T77 .
+!T70 true T77 .
+!T70 T77 T76 .
+T70 T61 false !T76 .
+T70 T61 !T77 .
+T70 false !T77 .
+T70 !T77 !T76 .
+!T61 true T77 .
+!T61 T77 T76 .
+T61 false !T77 .
+T61 !T77 !T76 .
+true T77 T76 .
+false !T77 !T76 .
+!X[4] !Y[4] T74 .
+X[4] !T74 .
+Y[4] !T74 .
+!X[3] !Y[4] T73 .
+X[3] !T73 .
+Y[4] !T73 .
+!X[2] !Y[4] T72 .
+X[2] !T72 .
+Y[4] !T72 .
+!X[1] !Y[4] T71 .
+X[1] !T71 .
+Y[4] !T71 .
+!X[0] !Y[4] T70 .
+X[0] !T70 .
+Y[4] !T70 .
+true !T41 !T68 T69 .
+true !T41 T58 .
+true !T68 T58 .
+true T58 T69 .
+false T41 T68 !T69 .
+false T41 !T58 .
+false T68 !T58 .
+false !T58 !T69 .
+!T41 !T68 T58 .
+!T41 T58 T69 .
+T41 T68 !T58 .
+T41 !T58 !T69 .
+!T68 T58 T69 .
+T68 !T58 !T69 .
+!T57 !T52 !T66 T67 .
+!T57 !T52 T68 .
+!T57 !T66 T68 .
+!T57 T68 T67 .
+T57 T52 T66 !T67 .
+T57 T52 !T68 .
+T57 T66 !T68 .
+T57 !T68 !T67 .
+!T52 !T66 T68 .
+!T52 T68 T67 .
+T52 T66 !T68 .
+T52 !T68 !T67 .
+!T66 T68 T67 .
+T66 !T68 !T67 .
+!T56 !T50 !T64 T65 .
+!T56 !T50 T66 .
+!T56 !T64 T66 .
+!T56 T66 T65 .
+T56 T50 T64 !T65 .
+T56 T50 !T66 .
+T56 T64 !T66 .
+T56 !T66 !T65 .
+!T50 !T64 T66 .
+!T50 T66 T65 .
+T50 T64 !T66 .
+T50 !T66 !T65 .
+!T64 T66 T65 .
+T64 !T66 !T65 .
+!T55 !T48 !T62 T63 .
+!T55 !T48 T64 .
+!T55 !T62 T64 .
+!T55 T64 T63 .
+T55 T48 T62 !T63 .
+T55 T48 !T64 .
+T55 T62 !T64 .
+T55 !T64 !T63 .
+!T48 !T62 T64 .
+!T48 T64 T63 .
+T48 T62 !T64 .
+T48 !T64 !T63 .
+!T62 T64 T63 .
+T62 !T64 !T63 .
+!T54 !T46 !T60 T61 .
+!T54 !T46 T62 .
+!T54 !T60 T62 .
+!T54 T62 T61 .
+T54 T46 T60 !T61 .
+T54 T46 !T62 .
+T54 T60 !T62 .
+T54 !T62 !T61 .
+!T46 !T60 T62 .
+!T46 T62 T61 .
+T46 T60 !T62 .
+T46 !T62 !T61 .
+!T60 T62 T61 .
+T60 !T62 !T61 .
+!T53 !T44 true T59 .
+!T53 !T44 T60 .
+!T53 true T60 .
+!T53 T60 T59 .
+T53 T44 false !T59 .
+T53 T44 !T60 .
+T53 false !T60 .
+T53 !T60 !T59 .
+!T44 true T60 .
+!T44 T60 T59 .
+T44 false !T60 .
+T44 !T60 !T59 .
+true T60 T59 .
+false !T60 !T59 .
+!X[4] !Y[3] T57 .
+X[4] !T57 .
+Y[3] !T57 .
+!X[3] !Y[3] T56 .
+X[3] !T56 .
+Y[3] !T56 .
+!X[2] !Y[3] T55 .
+X[2] !T55 .
+Y[3] !T55 .
+!X[1] !Y[3] T54 .
+X[1] !T54 .
+Y[3] !T54 .
+!X[0] !Y[3] T53 .
+X[0] !T53 .
+Y[3] !T53 .
+true !T24 !T51 T52 .
+true !T24 T41 .
+true !T51 T41 .
+true T41 T52 .
+false T24 T51 !T52 .
+false T24 !T41 .
+false T51 !T41 .
+false !T41 !T52 .
+!T24 !T51 T41 .
+!T24 T41 T52 .
+T24 T51 !T41 .
+T24 !T41 !T52 .
+!T51 T41 T52 .
+T51 !T41 !T52 .
+!T40 !T35 !T49 T50 .
+!T40 !T35 T51 .
+!T40 !T49 T51 .
+!T40 T51 T50 .
+T40 T35 T49 !T50 .
+T40 T35 !T51 .
+T40 T49 !T51 .
+T40 !T51 !T50 .
+!T35 !T49 T51 .
+!T35 T51 T50 .
+T35 T49 !T51 .
+T35 !T51 !T50 .
+!T49 T51 T50 .
+T49 !T51 !T50 .
+!T39 !T33 !T47 T48 .
+!T39 !T33 T49 .
+!T39 !T47 T49 .
+!T39 T49 T48 .
+T39 T33 T47 !T48 .
+T39 T33 !T49 .
+T39 T47 !T49 .
+T39 !T49 !T48 .
+!T33 !T47 T49 .
+!T33 T49 T48 .
+T33 T47 !T49 .
+T33 !T49 !T48 .
+!T47 T49 T48 .
+T47 !T49 !T48 .
+!T38 !T31 !T45 T46 .
+!T38 !T31 T47 .
+!T38 !T45 T47 .
+!T38 T47 T46 .
+T38 T31 T45 !T46 .
+T38 T31 !T47 .
+T38 T45 !T47 .
+T38 !T47 !T46 .
+!T31 !T45 T47 .
+!T31 T47 T46 .
+T31 T45 !T47 .
+T31 !T47 !T46 .
+!T45 T47 T46 .
+T45 !T47 !T46 .
+!T37 !T29 !T43 T44 .
+!T37 !T29 T45 .
+!T37 !T43 T45 .
+!T37 T45 T44 .
+T37 T29 T43 !T44 .
+T37 T29 !T45 .
+T37 T43 !T45 .
+T37 !T45 !T44 .
+!T29 !T43 T45 .
+!T29 T45 T44 .
+T29 T43 !T45 .
+T29 !T45 !T44 .
+!T43 T45 T44 .
+T43 !T45 !T44 .
+!T36 !T27 true T42 .
+!T36 !T27 T43 .
+!T36 true T43 .
+!T36 T43 T42 .
+T36 T27 false !T42 .
+T36 T27 !T43 .
+T36 false !T43 .
+T36 !T43 !T42 .
+!T27 true T43 .
+!T27 T43 T42 .
+T27 false !T43 .
+T27 !T43 !T42 .
+true T43 T42 .
+false !T43 !T42 .
+!X[4] !Y[2] T40 .
+X[4] !T40 .
+Y[2] !T40 .
+!X[3] !Y[2] T39 .
+X[3] !T39 .
+Y[2] !T39 .
+!X[2] !Y[2] T38 .
+X[2] !T38 .
+Y[2] !T38 .
+!X[1] !Y[2] T37 .
+X[1] !T37 .
+Y[2] !T37 .
+!X[0] !Y[2] T36 .
+X[0] !T36 .
+Y[2] !T36 .
+true !T7 !T34 T35 .
+true !T7 T24 .
+true !T34 T24 .
+true T24 T35 .
+false T7 T34 !T35 .
+false T7 !T24 .
+false T34 !T24 .
+false !T24 !T35 .
+!T7 !T34 T24 .
+!T7 T24 T35 .
+T7 T34 !T24 .
+T7 !T24 !T35 .
+!T34 T24 T35 .
+T34 !T24 !T35 .
+!T23 !T18 !T32 T33 .
+!T23 !T18 T34 .
+!T23 !T32 T34 .
+!T23 T34 T33 .
+T23 T18 T32 !T33 .
+T23 T18 !T34 .
+T23 T32 !T34 .
+T23 !T34 !T33 .
+!T18 !T32 T34 .
+!T18 T34 T33 .
+T18 T32 !T34 .
+T18 !T34 !T33 .
+!T32 T34 T33 .
+T32 !T34 !T33 .
+!T22 !T16 !T30 T31 .
+!T22 !T16 T32 .
+!T22 !T30 T32 .
+!T22 T32 T31 .
+T22 T16 T30 !T31 .
+T22 T16 !T32 .
+T22 T30 !T32 .
+T22 !T32 !T31 .
+!T16 !T30 T32 .
+!T16 T32 T31 .
+T16 T30 !T32 .
+T16 !T32 !T31 .
+!T30 T32 T31 .
+T30 !T32 !T31 .
+!T21 !T14 !T28 T29 .
+!T21 !T14 T30 .
+!T21 !T28 T30 .
+!T21 T30 T29 .
+T21 T14 T28 !T29 .
+T21 T14 !T30 .
+T21 T28 !T30 .
+T21 !T30 !T29 .
+!T14 !T28 T30 .
+!T14 T30 T29 .
+T14 T28 !T30 .
+T14 !T30 !T29 .
+!T28 T30 T29 .
+T28 !T30 !T29 .
+!T20 !T12 !T26 T27 .
+!T20 !T12 T28 .
+!T20 !T26 T28 .
+!T20 T28 T27 .
+T20 T12 T26 !T27 .
+T20 T12 !T28 .
+T20 T26 !T28 .
+T20 !T28 !T27 .
+!T12 !T26 T28 .
+!T12 T28 T27 .
+T12 T26 !T28 .
+T12 !T28 !T27 .
+!T26 T28 T27 .
+T26 !T28 !T27 .
+!T19 !T10 true T25 .
+!T19 !T10 T26 .
+!T19 true T26 .
+!T19 T26 T25 .
+T19 T10 false !T25 .
+T19 T10 !T26 .
+T19 false !T26 .
+T19 !T26 !T25 .
+!T10 true T26 .
+!T10 T26 T25 .
+T10 false !T26 .
+T10 !T26 !T25 .
+true T26 T25 .
+false !T26 !T25 .
+!X[4] !Y[1] T23 .
+X[4] !T23 .
+Y[1] !T23 .
+!X[3] !Y[1] T22 .
+X[3] !T22 .
+Y[1] !T22 .
+!X[2] !Y[1] T21 .
+X[2] !T21 .
+Y[1] !T21 .
+!X[1] !Y[1] T20 .
+X[1] !T20 .
+Y[1] !T20 .
+!X[0] !Y[1] T19 .
+X[0] !T19 .
+Y[1] !T19 .
+true true !T17 T18 .
+true true T7 .
+true !T17 T7 .
+true T7 T18 .
+false false T17 !T18 .
+false false !T7 .
+false T17 !T7 .
+false !T7 !T18 .
+true !T17 T7 .
+true T7 T18 .
+false T17 !T7 .
+false !T7 !T18 .
+!T17 T7 T18 .
+T17 !T7 !T18 .
+!T6 true !T15 T16 .
+!T6 true T17 .
+!T6 !T15 T17 .
+!T6 T17 T16 .
+T6 false T15 !T16 .
+T6 false !T17 .
+T6 T15 !T17 .
+T6 !T17 !T16 .
+true !T15 T17 .
+true T17 T16 .
+false T15 !T17 .
+false !T17 !T16 .
+!T15 T17 T16 .
+T15 !T17 !T16 .
+!T5 true !T13 T14 .
+!T5 true T15 .
+!T5 !T13 T15 .
+!T5 T15 T14 .
+T5 false T13 !T14 .
+T5 false !T15 .
+T5 T13 !T15 .
+T5 !T15 !T14 .
+true !T13 T15 .
+true T15 T14 .
+false T13 !T15 .
+false !T15 !T14 .
+!T13 T15 T14 .
+T13 !T15 !T14 .
+!T4 true !T11 T12 .
+!T4 true T13 .
+!T4 !T11 T13 .
+!T4 T13 T12 .
+T4 false T11 !T12 .
+T4 false !T13 .
+T4 T11 !T13 .
+T4 !T13 !T12 .
+true !T11 T13 .
+true T13 T12 .
+false T11 !T13 .
+false !T13 !T12 .
+!T11 T13 T12 .
+T11 !T13 !T12 .
+!T3 true !T9 T10 .
+!T3 true T11 .
+!T3 !T9 T11 .
+!T3 T11 T10 .
+T3 false T9 !T10 .
+T3 false !T11 .
+T3 T9 !T11 .
+T3 !T11 !T10 .
+true !T9 T11 .
+true T11 T10 .
+false T9 !T11 .
+false !T11 !T10 .
+!T9 T11 T10 .
+T9 !T11 !T10 .
+!T2 true true T8 .
+!T2 true T9 .
+!T2 true T9 .
+!T2 T9 T8 .
+T2 false false !T8 .
+T2 false !T9 .
+T2 false !T9 .
+T2 !T9 !T8 .
+true true T9 .
+true T9 T8 .
+false false !T9 .
+false !T9 !T8 .
+true T9 T8 .
+false !T9 !T8 .
+!X[4] !Y[0] T6 .
+X[4] !T6 .
+Y[0] !T6 .
+!X[3] !Y[0] T5 .
+X[3] !T5 .
+Y[0] !T5 .
+!X[2] !Y[0] T4 .
+X[2] !T4 .
+Y[0] !T4 .
+!X[1] !Y[0] T3 .
+X[1] !T3 .
+Y[0] !T3 .
+!X[0] !Y[0] T2 .
+X[0] !T2 .
+Y[0] !T2 .
+%
+.

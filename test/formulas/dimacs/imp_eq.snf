@@ -1,0 +1,5 @@
+c equivalence class handling
+c CNF for V -> (X = Z)
+p snf 3 2
+!V X !Z.
+!V !X Z.

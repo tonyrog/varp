@@ -1,0 +1,20 @@
+c test generation of triple X = -Y or Z as CNF
+c plus equivalence class handling
+c   Y=1  => X = Z   (V)
+c   Z=0  => X = -Y  (W)
+p snf 5 9
+c implication:  X = -Y or Z
+X   Y.
+X  !Y !Z.
+!X !Y  Z.
+c class bindings
+!Y V.
+Z  W.
+c CNF for V -> (X = Z)
+!V  X !Z.
+!V !X  Z.
+c CNF for W -> (X = -Y)
+!W  X  Y.
+!W !X !Y.
+%
+.

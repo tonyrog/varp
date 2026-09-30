@@ -1,0 +1,25 @@
+// The generated adder of rca_gen.varp agrees with the built in +:
+//
+//     varp p bj n=6 formulas/varp/rca_gen_proof.varp     % TRUE
+
+circuit fa(in a, b, ci; return s; out co)
+{
+    s  = a ^ b ^ ci;
+    co = (a && b) || (ci && (a ^ b));
+}
+
+circuit rca(in a:n, b:n, ci; return s:n; out co)
+{
+    declare RC:(n+1);
+    RC[0] = ci;
+    [A i=0..n-1]
+        s[i] = fa(a[i], b[i], RC[i], RC[i+1]);
+    co = RC[n];
+}
+
+declare x:n, y:n, z:n, w:(n+1), cout;
+
+z = rca(x, y, false, cout);
+w = x + y;
+
+(w == z + (cout ? (1 << n) : 0))

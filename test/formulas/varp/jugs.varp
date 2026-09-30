@@ -1,0 +1,27 @@
+// Two jugs of `big` and `small` litres, measure exactly `goal` litres.
+// die_hard_system.varp with the sizes as bindings, n is the bit width.
+//
+//     varp bmc n=4 big=5 small=3 goal=4 formulas/varp/jugs.varp    (k=6)
+//     varp bmc n=5 big=13 small=9 goal=1 formulas/varp/jugs.varp   (k=8)
+//     varp bmc --k-max 40 n=6 big=37 small=19 goal=1 formulas/varp/jugs.varp
+
+system jugs {
+    state B:n, L:n;
+    input fill_small, fill_big, empty_small, empty_big,
+          small_to_big, big_to_small;
+
+    init  B == 0 and L == 0;
+
+    next  [EQ 1](fill_small, fill_big, empty_small, empty_big,
+                 small_to_big, big_to_small) and
+          (fill_small   implies (next(L) == small and next(B) == B)) and
+          (fill_big     implies (next(B) == big and next(L) == L)) and
+          (empty_small  implies (next(L) == 0 and next(B) == B)) and
+          (empty_big    implies (next(B) == 0 and next(L) == L)) and
+          (small_to_big implies (next(B) == min(B + L, big) and
+                                 next(L) == L - (next(B) - B))) and
+          (big_to_small implies (next(L) == min(B + L, small) and
+                                 next(B) == B - (next(L) - L)));
+
+    reach B == goal;
+}

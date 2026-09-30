@@ -1,0 +1,44 @@
+
+circuit crc_bit_16(in crc:16, poly:16; return result:16)
+{
+	declare crc1:16;
+	crc1 = (crc << 1);
+	result = crc[15] ? crc1 ^ poly : crc1;
+}
+
+circuit crc_byte_16(in byte:8, crc:16, poly:16; return result:16)
+{
+	declare c0:16, c1:16, c2:16, c3:16, c4:16, c5:16, c6:16, c7:16;
+	c0 = crc ^ (byte << 8);
+	c1 = crc_bit_16(c0, poly);
+	c2 = crc_bit_16(c1, poly);
+	c3 = crc_bit_16(c2, poly);
+	c4 = crc_bit_16(c3, poly);
+	c5 = crc_bit_16(c4, poly);
+	c6 = crc_bit_16(c5, poly);
+	c7 = crc_bit_16(c6, poly);
+	result = crc_bit_16(c7, poly);
+}
+
+define SEED 0xffff;
+define POLY 0x1021;
+
+// The shortest string of capital letters with a given CRC-16/CCITT-FALSE:
+//
+//     varp bmc formulas/varp/crc16_system.varp
+//
+// Every step feeds one character (the input) into the running CRC (the
+// state).  "assume" restricts the input in every step; "reach" is the
+// goal and bmc raises the bound until a path reaches it.  18902 is the
+// CRC of "HELLO", but there are shorter strings with the same CRC.
+
+system crc_machine {
+    state CRC:16;
+    input CHAR:8;
+    init  CRC == SEED;
+    assume CHAR >= 65 && CHAR <= 90;
+
+    next next(CRC) == crc_byte_16(CHAR, CRC, POLY);
+
+    reach CRC == 18902;
+}

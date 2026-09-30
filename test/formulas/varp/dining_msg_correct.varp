@@ -1,0 +1,76 @@
+// Dining philosophers in message passing style, the ordered version:
+// philosopher 2 asks for its right fork (fork 0) first, the others
+// for their left, so the forks are always taken in number order.
+//
+//     varp bmc formulas/varp/dining_msg_correct.varp     % 0
+//
+// Every philosopher and every fork is a process, and they only talk
+// through channels: a philosopher asks a fork with a request message
+// (1), the fork answers with a grant, and the philosopher hands the
+// fork back with a release message (2) on the same channel.
+//
+// l<p>/gl<p> connect philosopher p with its left fork p, r<p>/gr<p>
+// with its right fork (p+1) mod 3.  Fork f serves side a (philosopher
+// f, its left) and side b (philosopher f-1, its right), and picks a
+// side with the input "pick" when both ask.
+
+channel l0:2; channel gl0:2; channel r0:2; channel gr0:2;
+channel l1:2; channel gl1:2; channel r1:2; channel gr1:2;
+channel l2:2; channel gl2:2; channel r2:2; channel gr2:2;
+
+system phil(lreq, lgrant, rreq, rgrant) {
+    state st:3, g:2;      // 0 thinking, 1 asked left, 2 has left, 3 asked right, 4 eating
+    input hungry;
+
+    init  st == 0 and g == 0;
+
+    send  lreq (st == 0 ? 1 : 2) when (st == 0 and hungry) or st == 4;
+    recv  lgrant g when st == 1 and lgrant_n > 0;
+    send  rreq (st == 2 ? 1 : 2) when st == 2 or st == 4;
+    recv  rgrant g when st == 3 and rgrant_n > 0;
+
+    next  (st == 0 and hungry) implies next(st) == 1;
+    next  (st == 0 and not hungry) implies next(st) == 0;
+    next  (st == 1 and lgrant_n > 0) implies next(st) == 2;
+    next  (st == 1 and lgrant_n == 0) implies next(st) == 1;
+    next  st == 2 implies next(st) == 3;
+    next  (st == 3 and rgrant_n > 0) implies next(st) == 4;
+    next  (st == 3 and rgrant_n == 0) implies next(st) == 3;
+    next  st == 4 implies next(st) == 0;          // eats, then releases both
+}
+
+system fork(req_a, grant_a, req_b, grant_b) {
+    state holder:2;       // 0 free, 1 side a, 2 side b
+    state ma:2, mb:2;     // the last message from each side
+    input pick;
+
+    init  holder == 0;
+
+    recv  req_a ma when (holder == 0 and req_a_n > 0 and (pick or req_b_n == 0))
+                     or (holder == 1 and req_a_n > 0);
+    recv  req_b mb when (holder == 0 and req_b_n > 0 and (not pick or req_a_n == 0))
+                     or (holder == 2 and req_b_n > 0);
+    send  grant_a 1 when holder == 0 and req_a_n > 0 and (pick or req_b_n == 0);
+    send  grant_b 1 when holder == 0 and req_b_n > 0 and (not pick or req_a_n == 0);
+
+    next  (holder == 0 and req_a_n > 0 and (pick or req_b_n == 0)) implies next(holder) == 1;
+    next  (holder == 0 and req_b_n > 0 and (not pick or req_a_n == 0)) implies next(holder) == 2;
+    next  (holder == 0 and req_a_n == 0 and req_b_n == 0) implies next(holder) == 0;
+    next  (holder == 1 and req_a_n > 0) implies next(holder) == 0;   // the release
+    next  (holder == 1 and req_a_n == 0) implies next(holder) == 1;
+    next  (holder == 2 and req_b_n > 0) implies next(holder) == 0;
+    next  (holder == 2 and req_b_n == 0) implies next(holder) == 2;
+}
+
+instance f0 = fork(l0, gl0, r2, gr2);
+instance f1 = fork(l1, gl1, r0, gr0);
+instance f2 = fork(l2, gl2, r1, gr1);
+
+instance p0 = phil(l0, gl0, r0, gr0);
+instance p1 = phil(l1, gl1, r1, gr1);
+instance p2 = phil(lreq = r2, lgrant = gr2, rreq = l2, rgrant = gl2);
+
+// the deadlock of dining_msg_dead.varp, unreachable here
+system watch {
+    reach p0_st == 3 and p1_st == 3 and p2_st == 3;
+}

@@ -1,0 +1,31 @@
+// An n bit ripple carry adder generated from full adders: a quantified
+// assignment in a circuit body is the statement for every index, the
+// "generate" of varp.
+//
+//     varp sat bj n=4 formulas/varp/rca_gen.varp          z=12
+//     varp p bj n=6 formulas/varp/rca_gen_proof.varp      equivalent to +
+//
+// The carry chain RC is a vector of n+1 bits, the bits of the vector
+// parameters are read with a[i], and the out argument RC[i+1] of one
+// full adder is the carry in of the next.  See also addn.varp.
+
+circuit fa(in a, b, ci; return s; out co)
+{
+    s  = a ^ b ^ ci;
+    co = (a && b) || (ci && (a ^ b));
+}
+
+circuit rca(in a:n, b:n, ci; return s:n; out co)
+{
+    declare RC:(n+1);
+    RC[0] = ci;
+    [A i=0..n-1]
+        s[i] = fa(a[i], b[i], RC[i], RC[i+1]);
+    co = RC[n];
+}
+
+declare x:n, y:n, z:n, cout;
+
+z = rca(x, y, false, cout);
+
+x == 5 && y == 7

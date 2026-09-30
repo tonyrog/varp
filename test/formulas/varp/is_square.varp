@@ -1,0 +1,13 @@
+//
+// Check if r is a square number
+// input n  number to factorize
+// input k  number of bits in Y
+// input i  step
+//
+declare B:k;
+
+[A a0=isqrt(n)+1, a=a0+i]
+( (B2:2*k == (a*a - n)) &&
+  (B*B == B2) &&
+  (P == (a+B)) &&
+  (Q == (a-B)) )

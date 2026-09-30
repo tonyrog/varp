@@ -1,0 +1,10 @@
+//
+//  input is r = numer of colors  k = length of sequnce n = number of
+//  formula is satisfiable iff n < W(r,k)
+//
+
+([A i=1..n][EQ 1, c=0..(r-1)] S(i,c)) &&
+
+[A c=0..(r-1)] [A d=0..n/(k-1), i=0..(n-(g*k+k-g))]
+   [A j=0..(k-1)] (!S(i+(g+1)*j+1,c) && 
+     

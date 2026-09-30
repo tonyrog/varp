@@ -1,0 +1,57 @@
+// Dining philosophers with ordered forks, a straight translation of
+// tmp/dining_correct.tla: a philosopher takes the lower numbered of
+// its two forks first, so the last one takes fork 0 before fork n-1.
+//
+//     varp bmc n=3 formulas/varp/dining_correct.varp           % 0, no deadlock up to k-max
+//     varp bmc --k-max 30 n=5 formulas/varp/dining_correct.varp
+//
+// Same encoding as dining_dead.varp.  FirstFork/SecondFork are the
+// quantified a and b, pinned down by a meta level condition on p.
+
+system dining {
+    state forks(f):3, st(p):2;
+    input who:3, act:2;
+
+    init  [A f=0..n-1] (forks(f) == n) and [A p=0..n-1] (st(p) == 0);
+    assume who < n and act < 3;
+
+    next  [E p=0..n-1] [E a=0..n-1] [E b=0..n-1] (
+            (((p < n-1) and (a == p) and (b == p+1)) or
+             ((p == n-1) and (a == 0) and (b == n-1)))
+            and (who == p) and
+            (   ((act == 0) and (st(p) == 0) and (forks(a) == n)
+                 and (next(forks(a)) == p) and (next(st(p)) == 1)
+                 and [A f=0..n-1] ((f != a) implies (next(forks(f)) == forks(f))))
+             or ((act == 1) and (st(p) == 1) and (forks(b) == n)
+                 and (next(forks(b)) == p) and (next(st(p)) == 2)
+                 and [A f=0..n-1] ((f != b) implies (next(forks(f)) == forks(f))))
+             or ((act == 2) and (st(p) == 2)
+                 and (next(forks(a)) == n) and (next(forks(b)) == n)
+                 and (next(st(p)) == 0)
+                 and [A f=0..n-1] (((f != a) and (f != b))
+                                   implies (next(forks(f)) == forks(f)))))
+            and [A q=0..n-1] ((q != p) implies (next(st(q)) == st(q))));
+
+    // the deadlock of dining_dead.varp: unreachable here
+    reach [A p=0..n-1] (st(p) == 1);
+
+    // Deadlock freedom proved by induction, with a strengthening
+    // invariant: the values are in range, a philosopher's state says
+    // exactly which of its two forks it holds, and a fork is held only
+    // by one of its two neighbours.  Together they make "everyone holds
+    // the first fork" impossible (fork 0 would have two owners), and
+    // every action preserves them, so the whole conjunction is
+    // inductive:
+    //
+    //     varp bmc --induction --property dining_invariant n=3 formulas/varp/dining_correct.varp
+    invariant
+        [A f=0..n-1] (forks(f) <= n) and [A p=0..n-1] (st(p) <= 2) and
+        [A p=0..n-1] [A a=0..n-1] [A b=0..n-1] (
+            (((p < n-1) and (a == p) and (b == p+1)) or
+             ((p == n-1) and (a == 0) and (b == n-1)))
+            implies (    ((st(p) == 0) implies ((forks(a) != p) and (forks(b) != p)))
+                     and ((st(p) == 1) implies ((forks(a) == p) and (forks(b) != p)))
+                     and ((st(p) == 2) implies ((forks(a) == p) and (forks(b) == p))))) and
+        [A f=0..n-1] [A p=0..n-1] ((forks(f) == p) implies ((f == p) or (f == (p+1) % n))) and
+        not [A p=0..n-1] (st(p) == 1);
+}

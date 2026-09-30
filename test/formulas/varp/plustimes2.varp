@@ -1,0 +1,51 @@
+
+declare A:8 ;
+declare B:8 ;
+declare C:8 ;
+declare D:8 ;
+declare P1:32, P2:32, P3:32, P4:32 ;
+declare S1:36, S2:36, S3:36, S4:36 ;
+
+declare S : 40 ;
+
+// set test fixed input
+(A == 2) && (B == 3) && (C == 5) && (D == 7) &&
+// limit & order
+(A > 0) && (A < 10) &&
+(B > 0) && (B < 10) &&
+(C > 0) && (C < 10) &&
+(D > 0) && (D < 10) &&
+(A < B) && (B < C) && (C < D) &&
+
+A*B + A*C + A*D  // A(B+C+D)  A(BC+D) AB+CD
+B*C + B*D        // B(C + D)  B(CD)
+C*D              // 
+
+P1 = (A * B)
+P2 = (A * C)
+P3 = (A * D)
+P4 = (B * C)
+P5 = (B * D)
+P6 = (C * D)
+
+
+
+// P1,P2,P3,P4 represent various products
+// Pi is 0 only if none of the variables are selected for row i
+(P1 == (Y11|Y12|Y13|Y14)*((Y11*A)|(!Y11))*((Y12*B)|(!Y12))*((Y13*C)|(!Y13))*((Y14*D)|(!Y14))) &&
+(P2 == (Y21|Y22|Y23|Y24)*((Y21*A)|(!Y21))*((Y22*B)|(!Y22))*((Y23*C)|(!Y23))*((Y24*D)|(!Y24))) &&
+(P3 == (Y31|Y32|Y33|Y34)*((Y31*A)|(!Y31))*((Y32*B)|(!Y32))*((Y33*C)|(!Y33))*((Y34*D)|(!Y34))) &&
+(P4 == (Y41|Y42|Y43|Y44)*((Y41*A)|(!Y41))*((Y42*B)|(!Y42))*((Y43*C)|(!Y43))*((Y44*D)|(!Y44))) &&
+
+// unique products
+// (P1 <= P2) && (P2 <= P3) && (P3 <= P4) &&
+
+// select products if product C1 contain for example A then product C2 can not 
+[LTE 1]{Y11,Y21,Y31,Y41} &&
+[LTE 1]{Y12,Y22,Y32,Y42} &&
+[LTE 1]{Y13,Y23,Y33,Y43} &&
+[LTE 1]{Y14,Y24,Y34,Y44} &&
+
+// compute sum of products
+(S == P1 + P2 + P3 + P4) &&
+(S == 73)
