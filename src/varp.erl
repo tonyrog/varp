@@ -87,7 +87,7 @@
 -export([vtl/3]).
 -export([intersect/1, intersect/2]).
 -export([install_bindings/2, install_bindings/3]).
--export([vec_sat/2, vec_sat/5, vec_sat/6, vec_sat/7]).
+-export([vec_sat/2, vec_sat/5, vec_sat/6, vec_sat/7, vec_sat/8]).
 -export([vec_sat_lap/5]).
 
 -export([get_marked/1]).
@@ -149,6 +149,12 @@
 
 global_options() ->
     [
+     # { long => "list-plugins",
+	 key => list_plugins,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "List avaiable plugins"
+       },
      # { long => "icase",
 	 key => icase,
 	 spec => {enum,[?BOOL]},
@@ -162,6 +168,19 @@ global_options() ->
 	default => [],
 	description => "Circuit library directory, searched for <name>.varp "
 	    "when an unknown circuit is called (default lib/default)."
+       },
+     #{ long => "hex",
+	key => hex,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Print unsigned vector values in hex."
+       },
+     #{ long => "check",
+	key => check,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Parse and build only, no search: every symbol used "
+	    "without a declaration is an error with its line."
        },
      #{ long => "undeclared",
 	key => undeclared,
@@ -497,109 +516,217 @@ start0() ->
     application:ensure_all_started(varp),
     ok.
 
+%% ------------------------------------------------------------------
+%% The command line
+%%
+%%   varp [global options] [plugin [options]]* [name=value]* [file]*
+%%
+%% The arguments give the plugin chain, the bindings and the sources.
+%% The sources are the -f formulas, then the files, in order; nothing
+%% at all means standard input, and a single archive means every
+%% formula in it, one run each.  Every source adds to one set of
+%% sections, one list of assignments and one formula, which the chain
+%% is run on.
+%% ------------------------------------------------------------------
 main(Args) ->
     application:ensure_all_started(varp),
     Plugins = load_plugins(),
-    GlobalOptionSpec = global_option_spec(),
-    GOpts0 = default_options(),
-    GOpts1 = load_options(GlobalOptionSpec, GOpts0),
-    %% io:format("GlobalOptionSpec = ~p\n", [GlobalOptionSpec]),
-    %% io:format("GOpts1 = ~p\n", [GOpts1]),
-    Do0 = load_do(Plugins),
-    {Do1,Files,GOpts2,Bound0} =
-	process_args(Args, Plugins, [], [], GlobalOptionSpec, GOpts1, []),
-
-    %%io:format("Do0 = ~p\n", [Do0]),
-    %%io:format("Bounds0 = ~p\n", [Bound0]),
-    %%io:format("GOpts2 = ~p\n", [GOpts2]),
-    %%io:format("Files = ~p\n", [Files]),
-
-    case maps:get(gui,GOpts2,false) of
+    GOptSpec = global_option_spec(),
+    GOpts0 = load_options(GOptSpec, default_options()),
+    {Do0,Files,GOpts1,Bound} =
+	process_args(Args, Plugins, [], [], GOptSpec, GOpts0, []),
+    case maps:get(list_plugins, GOpts1, false) of
+	false -> ok;
 	true ->
-	    varp_wx:start(Bound0),
-	    receive
-		quit -> ok
-	    end,
-	    halt(0);
-	false ->
-	    ok
+	    list_plugins(),
+	    halt(0)
     end,
-    Bound = maps:from_list(Bound0),
-    GOpts3 = GOpts2#{ meta => Bound },
-    Do = if Do1 =/= [] -> Do1;
-	    true -> Do0
+    maps:get(gui, GOpts1, false) andalso gui(Bound),
+    GOpts = GOpts1#{ meta => maps:from_list(Bound) },
+    Do = case Do0 of
+	     [] -> load_do(Plugins);
+	     _ -> Do0
 	 end,
-    {ReadIn,{Sections0,Assignments0,Formula0}} =
-	try load_formulas(maps:get(formula,GOpts3,[]), undefined, 'and',
-			  GOpts3) of
-	    {ok,{S0,A0,undefined}}-> {true,{S0,A0,undefined}};
-	    {ok,R0} -> {false,R0}
-	catch
-	    ?EXCEPTION(error,Error0,Trace0) ->
-		io:format("~s\n", [format_error(Error0)]),
-		io:format("~p\n", [?GET_STACK(Trace0)]),
-		halt(1)
-	end,
-    GOpts4 = section_opts(Sections0, GOpts3),
-
-    case Files of
-	[] when not ReadIn ->
-	    varp_run(Do, Assignments0, Formula0, GOpts4);
-	[] when ReadIn ->
-	    case read_in() of
-		{ok,<<>>} ->
-		    varp_run(Do, Assignments0, Formula0, GOpts4);
-		{ok,Data} ->
-		    try parse("*stdin*", Data, GOpts4) of
-			{ok,{Sections1,Assignments,Formula}} ->
-			    Assignments1 = Assignments0 ++ Assignments,
-			    Formula1 = join_f('and',Formula0,Formula),
-			    Sections = append_sections(Sections0,Sections1),
-			    GOpts5 = section_opts(Sections,GOpts4),
-			    varp_run(Do,Assignments1,Formula1,GOpts5)
-		    catch
-			?EXCEPTION(error,Error1,Trace1) ->
-			    io:format("~s\n", [format_error(Error1)]),
-			    io:format("~p\n", [?GET_STACK(Trace1)]),
-			    halt(1)
-		    end;
-		_Error ->
-		    halt(1)
-	    end;
-	[F] -> %% check if batch mode, run tar/zip over all formulas
-	    case archive_type(F) of
-		undefined ->
-		    try load_files([F],Assignments0,Formula0,Sections0,
-				   'and',GOpts4) of
-			{ok,{Sections1,Assignments,Formula,GOpts5}} ->
-			    GOpts6 = section_opts(Sections1, GOpts5),
-			    varp_run(Do,Assignments,Formula,GOpts6);
-			_Error ->
-			    halt(1)
-		    catch
-			?EXCEPTION(error,Error2,Trace2) ->
-			    io:format("~s\n", [format_error(Error2)]),
-			    io:format("~p\n", [?GET_STACK(Trace2)]),
-			    halt(1)
-		    end;
-		Type -> %% with formula?
-		    run_batch(Do,Type,F,GOpts4)
-	    end;
-	Fs ->
-	    try load_files(Fs,Assignments0,Formula0,Sections0,'and',GOpts4) of
-		{ok,{Sections1,Assignments,Formula,GOpts5}} ->
-		    GOpts6 = section_opts(Sections1, GOpts5),
-		    varp_run(Do,Assignments,Formula,GOpts6);
-		_Error ->
-		    halt(1)
-	    catch
-		?EXCEPTION(error,Error3,Trace3) ->
-		    io:format("~s\n", [format_error(Error3)]),
-		    io:format("~p\n", [?GET_STACK(Trace3)]),
-		    halt(1)
+    put(exit_code, 0),
+    case sources(maps:get(formula, GOpts, []), Files) of
+	{batch, Type, Archive} ->
+	    run_batch(Do, Type, Archive, GOpts);
+	Sources ->
+	    case load(Sources, GOpts) of
+		{ok, Assignments, Formula, GOpts2} ->
+		    varp_run(Do, Assignments, Formula, GOpts2);
+		{error, _} ->
+		    put(exit_code, 1)
 	    end
     end,
     halt(get(exit_code)).
+
+gui(Bound) ->
+    varp_wx:start(Bound),
+    receive quit -> ok end,
+    halt(0).
+
+%% [{text,Formula} | {file,File} | stdin] or {batch,Type,Archive}
+sources([], []) ->
+    [stdin];
+sources(Formulas, [File]) ->
+    case archive_type(File) of
+	undefined -> [{text,F} || F <- Formulas] ++ [{file,File}];
+	Type -> {batch, Type, File}
+    end;
+sources(Formulas, Files) ->
+    [{text,F} || F <- Formulas] ++ [{file,F} || F <- Files].
+
+%% ------------------------------------------------------------------
+%% Loading the sources
+%%
+%% A formula file (.varp, or anything not listed below) is parsed, a
+%% DIMACS file (.cnf .snf .dimacs) loads as clauses, and a data file
+%% (.txt .dat, or any other extension when the formula has declared
+%% input modules) goes to the input modules, see varp_input.  When no
+%% data file was given the input modules may take their data from the
+%% bindings instead.
+%% ------------------------------------------------------------------
+-record(loaded, { sections = empty_sections(),
+		  assignments = [],
+		  formula = undefined,
+		  meta = #{},
+		  data = false }).    %% a data file was loaded
+
+%% -> {ok, Assignments, Formula, GOpts} | {error, Reason}
+load(Sources, GOpts) ->
+    L0 = #loaded{ meta = maps:get(meta, GOpts, #{}) },
+    try load_sources(Sources, L0, GOpts) of
+	{ok, L1} ->
+	    case load_bindings(L1, GOpts) of
+		{ok, L} ->
+		    GOpts1 = section_opts(L#loaded.sections,
+					  GOpts#{ meta => L#loaded.meta }),
+		    {ok, L#loaded.assignments, L#loaded.formula, GOpts1};
+		Error ->
+		    load_error(Error, GOpts)
+	    end;
+	Error ->
+	    load_error(Error, GOpts)
+    catch
+	?EXCEPTION(error,Reason,Trace) ->
+	    io:format("~s\n", [format_error(Reason)]),
+	    ?debug(GOpts, "~p\n", [?GET_STACK(Trace)]),
+	    {error, Reason}
+    end.
+
+load_error({error, Reason}, _GOpts) ->
+    case Reason of
+	{no_input_module, File} ->
+	    io:format("~s: no input module takes this file, "
+		      "the formula has to declare one (input <module>;)\n", [File]);
+	{no_such_line, File, N} ->
+	    io:format("~s: no line ~w (recno)\n", [File, N]);
+	{input, Src} ->
+	    io:format("~p: the input module rejected the data\n", [Src]);
+	{message_too_long, N, Max} ->
+	    io:format("the message has ~w bytes, at most ~w fit\n", [N, Max]);
+	{digest_length, N, Want} ->
+	    io:format("the digest pattern has ~w nibbles, ~w wanted\n", [N, Want]);
+	{digest, {not_hex, C}} ->
+	    io:format("'~s' in the digest is not a hex digit or *\n", [C]);
+	Other when is_tuple(Other) ->
+	    io:format("input: ~p\n", [Other]);
+	_ ->
+	    ok   %% printed where it happened
+    end,
+    {error, Reason};
+load_error(Error, _GOpts) ->
+    {error, Error}.
+
+load_sources([S|Ss], L, GOpts) ->
+    case load_source(S, L, GOpts) of
+	{ok, L1} -> load_sources(Ss, L1, GOpts);
+	Error -> Error
+    end;
+load_sources([], L, _GOpts) ->
+    {ok, L}.
+
+load_source(stdin, L, GOpts) ->
+    case read_in() of
+	{ok, <<>>} -> {ok, L};
+	{ok, Data} -> load_formula("*stdin*", Data, L, GOpts);
+	Error -> Error
+    end;
+load_source({text, Text}, L, GOpts) ->
+    load_formula("*command-line*", Text, L, GOpts);
+load_source({file, File}, L, GOpts) ->
+    case file_kind(File, L) of
+	formula -> with_file(File, fun(Data) -> load_formula(File, Data, L, GOpts) end);
+	dimacs  -> with_file(File, fun(Data) -> load_dimacs(File, Data, L) end);
+	data    -> load_data(File, L)
+    end.
+
+file_kind(File, L) ->
+    Inputs = maps:get(input, L#loaded.sections, []),
+    case string:lowercase(filename:extension(File)) of
+	E when E =:= ".cnf"; E =:= ".snf"; E =:= ".dimacs" -> dimacs;
+	E when E =:= ".txt"; E =:= ".dat" -> data;
+	".varp" -> formula;
+	_ when Inputs =/= [] -> data;
+	_ -> formula
+    end.
+
+with_file(File, Fun) ->
+    case read_file(File) of
+	{ok, Data} ->
+	    Fun(Data);
+	{error, Reason} ->
+	    io:format("Unable to read file ~s (~w)\n", [File, Reason]),
+	    {error, Reason}
+    end.
+
+load_formula(Name, Data, L, GOpts) ->
+    case parse(Name, Data, GOpts#{ meta => L#loaded.meta }) of
+	{ok, {Sections, Assignments, Formula}} ->
+	    {ok, add(L, Sections, Assignments, Formula)};
+	Error ->
+	    Error    %% parse/3 has printed it
+    end.
+
+load_dimacs(File, Data, L) ->
+    case varp_dimacs:parse(Data) of
+	{error, Ln, Reason} ->
+	    io:format("~s:~w error: ~p\n", [File, Ln, Reason]),
+	    {error, Reason};
+	Clauses = {Kind, {_NVars, _NClauses, Sections, _CLs}} when
+	      Kind =:= cnf; Kind =:= snf ->
+	    {ok, add(L, Sections, [], Clauses)}
+    end.
+
+load_data(File, L) ->
+    Inputs = maps:get(input, L#loaded.sections, []),
+    case varp_input:file(Inputs, File, L#loaded.meta) of
+	{ok, MetaF, Formula} ->
+	    {ok, add_input(L#loaded{ data = true }, MetaF, Formula)};
+	Error ->
+	    Error
+    end.
+
+%% no data file: the input modules may read the bindings
+load_bindings(L = #loaded{ data = false }, _GOpts) ->
+    Inputs = maps:get(input, L#loaded.sections, []),
+    case varp_input:bindings(Inputs, L#loaded.meta) of
+	{ok, MetaF, Formula} -> {ok, add_input(L, MetaF, Formula)};
+	skip -> {ok, L};
+	Error -> Error
+    end;
+load_bindings(L, _GOpts) ->
+    {ok, L}.
+
+add(L, Sections, Assignments, Formula) ->
+    L#loaded{ sections = append_sections(L#loaded.sections, Sections),
+	      assignments = L#loaded.assignments ++ Assignments,
+	      formula = join_f('and', L#loaded.formula, Formula) }.
+
+add_input(L, MetaF, Formula) ->
+    L#loaded{ meta = maps:merge(L#loaded.meta, maps:from_list(MetaF)),
+	      formula = join_f('and', L#loaded.formula, Formula) }.
 
 global_option_spec() ->
     GlobalOptionList = global_options(),
@@ -683,6 +810,17 @@ parse_do_([{P, OptionList}|Ps], PluginMap, Acc) ->
 parse_do_([], _PluginMap, Acc) ->
     lists:reverse(Acc).
 
+list_plugins() ->
+    case application:get_env(varp, plugins) of
+	undefined -> ok;    
+	{ok,Ps} ->	
+	    io:format("~-8s ~s\n", ["Short", "Long"]),
+	    io:format("~-8s ~s\n", ["--------", "----------"]),
+	    lists:foreach(
+	      fun({ShortName,LongName,_Mod}) ->
+		      io:format("~-8s ~s\n", [ShortName, LongName])
+	      end, Ps)
+    end.
 
 %% load a map of plugins Name => Module | Atom => Module
 load_plugins() ->
@@ -727,18 +865,16 @@ load_plugin(Mod) ->
 	    false
     end.
 
-run_batch(Do,ArchiveType,ArchiveFile,GOpts) ->
-    {ok,Fs} = archive_file_list(ArchiveType,ArchiveFile),
+%% every formula of an archive, one run each
+run_batch(Do, ArchiveType, ArchiveFile, GOpts) ->
+    {ok,Fs} = archive_file_list(ArchiveType, ArchiveFile),
     lists:foreach(
       fun(F) ->
-	      AFile = filename:join(ArchiveFile,F),
-	      case load_files([AFile],[],true,empty_sections(),'and',GOpts) of
-		  {ok,{Sections,Assignments,Formula,GOpts1}} ->
-		      varp_run(Do,Formula,Assignments,
-			       section_opts(Sections, GOpts1));
-		  Error ->
-		      io:format("~s: error ~p\n", [F,Error]),
-		      ok
+	      case load([{file, filename:join(ArchiveFile, F)}], GOpts) of
+		  {ok, Assignments, Formula, GOpts1} ->
+		      varp_run(Do, Assignments, Formula, GOpts1);
+		  {error, _} ->
+		      put(exit_code, 1)
 	      end
       end, Fs).
 
@@ -751,7 +887,12 @@ varp_run(Do, Assignments, Formula0, GOpts) ->
     put(exit_code, 0),
     start_cprof(GOpts),
     start_fprof(GOpts),
-    try do_run(Do, Assignments, Formula, GOpts) of
+    try
+	case maps:get(check, GOpts, false) of
+	    true -> check_run(Assignments, Formula, GOpts);
+	    false -> do_run(Do, Assignments, Formula, GOpts)
+	end
+    of
 	Result -> Result
     catch
 	?EXCEPTION(error,Error,Trace) ->
@@ -767,6 +908,30 @@ varp_run(Do, Assignments, Formula0, GOpts) ->
 	stop_fprof(GOpts, false)
     end.
 
+
+%% --check: build the formula with undeclared symbols as errors and
+%% stop.  Prints the number of variables and clauses when it passes.
+check_run(Assignments, Formula, GOpts) ->
+    check_run(Assignments, Formula, GOpts#{ undeclared => strict, print => false }, 5).
+
+check_run(Assignments, Formula, GOpts, Retries) ->
+    Bs0 = varp_formula:new(GOpts),
+    try
+	Bs1 = varp_formula:build_assignment_defs(Assignments, Bs0),
+	{_, Bs2} = varp_formula:build(Formula, Bs1),
+	io:format("% OK ~w variables, ~w clauses\n",
+		  [get_number_of_variables(Bs2#bs.vp),
+		   varp_nif:getstat(Bs2#bs.vp, number_of_clauses)]),
+	{?DONE, [], Bs2}
+    catch
+	error:{unbound, Var} when Retries > 0, is_binary(Var) ->
+	    %% a bound such as k that the command line did not give:
+	    %% a check does not care which, take 1
+	    io:format("% assuming ~s=1\n", [Var]),
+	    Meta = maps:get(meta, GOpts, #{}),
+	    check_run(Assignments, Formula,
+		      GOpts#{ meta => Meta#{ Var => 1 } }, Retries - 1)
+    end.
 
 start_cprof(GOpts) ->
     case maps:get(cprof, GOpts) of
@@ -840,9 +1005,20 @@ format_error(Err) ->
 	    ["Variable ",VarName," is out of range\n"];
 	{empty_clause, _Where} ->
 	    ["Empty clause not allowed\n"];
+	{undeclared,Where,Line,Name,false} ->
+	    io_lib:format("~s:~w: '~s' is not declared", [Where,Line,Name]);
+	{undeclared,Where,Line,Name,Near} ->
+	    io_lib:format("~s:~w: '~s' is not declared, did you mean '~s'?",
+			  [Where,Line,Name,Near]);
 	{unable_to_unify,Name,Was,Is} ->
 	    io_lib:format("size ~s is ~w from an earlier argument, "
 			  "this argument has ~w bits\n", [Name,Was,Is]);
+	{circuit_meta_argument,C,P,V} ->
+	    io_lib:format("meta parameter ~s of circuit ~s needs an integer, got ~p\n", [P,C,V]);
+	{array_index,P,I,N} ->
+	    io_lib:format("~s[~w] is out of range, the array has ~w elements\n", [P,I,N]);
+	{not_an_array,P} ->
+	    io_lib:format("~s is not an array\n", [P]);
 	{circuit_missing_argument,C,P} ->
 	    io_lib:format("circuit ~s called without its ~s argument\n", [C,P]);
 	{define_argument,T} ->
@@ -1192,98 +1368,6 @@ order_decl([],Opts) ->
     end.
 
 %% load files and form a conjunction over all files
-load_files([F|Fs],Assignments0,Formula0,Sections,JoinOp,GOpts) ->
-    Ext = filename:extension(F),
-    if Ext =:= ".cnf"; Ext =:= ".snf"; Ext =:= ".dimacs" ->
-	    case read_file(F) of
-		{ok, Data} ->
-		    case varp_dimacs:parse(Data) of
-			Error={error,Ln,Reason} ->
-			    io:format("~s:~w error: ~p\n", [F,Ln,Reason]),
-			    Error;
-			Cnf = {cnf,{_NVars,_NClauses,Sections0,_CLs}} ->
-			    %% io:format("% loaded: ~p\n", [Cnf]),
-			    Formula1 = join_f(JoinOp,Cnf,Formula0),
-			    Sections1 = append_sections(Sections, Sections0),
-			    load_files(Fs,Assignments0,
-				       Formula1,Sections1,JoinOp,GOpts);
-			Snf = {snf,{_NVars,_NClauses,Sections0,_CLs}} ->
-			    %% io:format("% loaded: ~p\n", [Snf]),
-			    Formula1 = join_f(JoinOp,Snf,Formula0),
-			    Sections1 = append_sections(Sections, Sections0),
-			    load_files(Fs,Assignments0,
-				       Formula1,Sections1,JoinOp,GOpts)
-		    end;
-		Error={error,Reason} ->
-		    io:format("Unable to read file ~s (~w)\n",
-			      [F, Reason]),
-		    Error 
-	    end;
-       Ext =:= ".dat"; Ext =:= ".txt" -> %% fixme
-	    %% try input modules
-	    Input = maps:get(input, Sections, []),
-	    Meta  = maps:get(meta,GOpts,[]),
-	    case varp_input(Input, F, Meta) of
-		{ok,Formula} ->
-		    Formula1 = join_f(JoinOp,Formula,Formula0),
-		    load_files(Fs,Assignments0,Formula1,Sections,JoinOp,GOpts);
-		{ok,MetaF,Formula} ->
-		    %% io:format("Meta = ~p\n", [MetaF]),
-		    Meta1 = maps:merge(Meta, maps:from_list(MetaF)),
-		    %% io:format("Meta1 = ~p\n", [Meta1]),
-		    GOpts1 = maps:put(meta,Meta1,GOpts),
-		    Formula1 = join_f(JoinOp,Formula,Formula0),
-		    load_files(Fs,Assignments0,Formula1,Sections,JoinOp,GOpts1);
-		Error ->
-		    Error
-	    end;
-       true ->
-	    case read_file(F) of
-		{ok, Data} ->
-		    case parse(F, Data, GOpts) of
-			{ok,{Sections1,Assignments,Formula}} ->
-			    %% io:format("% loaded: ~s\n", [F]),
-			    Formula1 = join_f(JoinOp,Formula,Formula0),
-			    load_files(Fs,
-				       Assignments0++Assignments,
-				       Formula1,
-				       append_sections(Sections,Sections1),
-				       JoinOp,GOpts);
-			Error ->
-			    Error
-		    end;
-		Error={error,Reason} ->
-		    io:format("Unable to read file ~s (~w)\n",
-			      [F, Reason]),
-		    Error
-	    end
-    end;
-load_files([],Assignments,Formula,Sections,_JoinOp,GOpts) ->
-    {ok,{Sections,Assignments,Formula,GOpts}}.
-
-
-%% special input format
-varp_input([Input | InputList], FileName, Meta) ->
-    {M,F,A} = mfa_arg(Input, file),
-    case code:ensure_loaded(M) of
-	{module,Mod} ->
-	    case erlang:function_exported(M, F, length(A)+2) of
-		true ->
-		    apply(Mod, F, [FileName, Meta]++A);
-		false ->
-		    case erlang:function_exported(M, F, length(A)+1) of
-			true ->
-			    apply(Mod, F, [FileName]++A);
-			false ->
-			    varp_input(InputList, FileName, Meta)
-		    end
-	    end;
-	{error,_} ->
-	    varp_input(InputList, FileName, Meta)
-    end;
-varp_input([], _FileName, _Meta) ->
-    {error, no_input}.
-
 %% special output format
 varp_output([Out | OutputList], Fd, Partial, Model) ->
     {M,F,A} = mfa_arg(Out, output),
@@ -1320,12 +1404,16 @@ output_partial_model(Bs, _R) ->
 
 output_model(Bs,Partial,I) ->
     output_model_header(Bs,Partial,I),
-    Model = varp_formula:model(Bs),
-    case varp_nif:getopt(Bs#bs.vp,print) of
+    Flavour = varp_nif:getopt(Bs#bs.vp,print),
+    %% --print=literal shows a substituted variable as Y=X when the
+    %% representative X has no value
+    Model = varp_formula:model(Bs, #{subst => Flavour =:= literal}),
+    case Flavour of
 	false ->
 	    Model;
-	Flavour ->
+	_ ->
 	    put(meta, Bs#bs.meta), %% access to environment
+	    put(print_hex, maps:get(hex, Bs#bs.option, false)),
 	    case varp_output(Bs#bs.output, user, Partial, Model) of
 		{error, no_output} ->
 		    varp_formula:print_model(Flavour,I,Partial,Model),
@@ -1416,25 +1504,6 @@ fjoin(Fs) -> filename:join(Fs).
 
 
 %% load/parse formulas given on command line like -f "A && B"
-load_formulas([], A, _JoinOp, _GOpts) ->
-    {ok,{empty_sections(),[],A}};
-load_formulas(Fs, A, JoinOp, GOpts) ->
-    parse_formulas(Fs,[],A,empty_sections(),JoinOp,GOpts).
-
-parse_formulas([F|Fs], Assignments, Formula, Sections0,JoinOp,GOpts) ->
-    case parse("*command-line*", F, GOpts) of
-	{ok,{Sections1,Assignments1,Formula1}} ->
-	    parse_formulas(Fs,
-			   Assignments++Assignments1,
-			   join_f(JoinOp, Formula, Formula1),
-			   append_sections(Sections0, Sections1),
-			   JoinOp,GOpts);
-	Error ->
-	    Error
-    end;
-parse_formulas([], Assignments, Formula, Sections, _JoinOp,_GOpts) ->
-    {ok,{Sections,Assignments,Formula}}.
-
 empty_sections() ->
     #{ defs=>#{},
        decls=>#{}, 
@@ -1446,7 +1515,8 @@ empty_sections() ->
        assert=>[], 
        input=>[], 
        output=>[],
-       systems=>[] }.     %% system_info from varp_system
+       systems=>[],       %% system_info from varp_system
+       times=>#{} }.      %% Sym => position of the time parameter
 
 append_sections(M0=#{ decls:=D0,order:=O0,circuits:=C0,
 		      literals:=Ls0,defs:=Ds0,
@@ -1463,7 +1533,8 @@ append_sections(M0=#{ decls:=D0,order:=O0,circuits:=C0,
        output => T0++T1,
        file => maps:get(file, M1, maps:get(file, M0, "*internal*")),
        syms => merge_syms(S0,S1),
-       systems => maps:get(systems, M0, []) ++ maps:get(systems, M1, [])
+       systems => maps:get(systems, M0, []) ++ maps:get(systems, M1, []),
+       times => maps:merge(maps:get(times, M0, #{}), maps:get(times, M1, #{}))
      }.
 
 %% sum the occurrence counts and keep the earliest line
@@ -1497,6 +1568,7 @@ section_opts(Sections=#{ decls := Decls,
 	   output => Output,
 	   syms => Syms,
 	   systems => maps:get(systems, Sections, []),
+	   times => maps:get(times, Sections, #{}),
 	   file => maps:get(file, Sections, "*internal*")
 	  }.
 
@@ -1521,9 +1593,15 @@ process_args([Arg|As], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
 	undefined ->
 	    case string:split(Arg, "=") of
 		[Var,Value] ->
+		    MetaValue =
+			try list_to_integer(Value) of
+			    IValue -> IValue
+			catch error:_ ->
+				list_to_binary(Value)
+			end,
 		    process_args(As, Plugins, Do, Files,
 				 GOptSpec, GOpts, [{list_to_binary(Var),
-						    list_to_integer(Value)}|
+						    MetaValue}|
 						   Bound]);
 		_ ->
 		    process_args(As,Plugins,Do,[Arg|Files],
@@ -1700,7 +1778,16 @@ split_sections([{declare,DeclList}|Sections], Map=#{ decls:=Decl0 },GOpts) ->
     Bs = #bs { meta = maps:get(meta,GOpts,#{}) },  %% dummy bs
     case add_decls(DeclList, Decl0, Bs) of
 	{ok,Decls1} ->
-	    split_sections(Sections, Map#{ decls => Decls1 },GOpts);
+	    %% "declare P(a, time)": the position of the time parameter
+	    Times = lists:foldl(
+		      fun(D, T) ->
+			      {p,Sym,Args} = decl_pexpr(D),
+			      case time_position(Args) of
+				  false -> T#{ Sym => constant };
+				  Pos -> T#{ Sym => Pos }
+			      end
+		      end, maps:get(times, Map, #{}), DeclList),
+	    split_sections(Sections, Map#{ decls => Decls1, times => Times },GOpts);
 	Error ->
 	    Error
     end;
@@ -1740,6 +1827,16 @@ add_decls([{p,Sym,Args}|Ds], Decls, Bs) ->
     add_decls_(Sym, {bool,length(Args),1}, Ds, Decls, Bs);
 add_decls([], Decls, _Bs) ->
     {ok,Decls}.
+
+decl_pexpr({P={p,_,_},_Type,_Size}) -> P;
+decl_pexpr(P={p,_,_}) -> P.
+
+%% the index of the "time" parameter, 0 based, or false
+time_position(Args) ->
+    time_position(Args, 0).
+time_position([<<"time">>|_], I) -> I;
+time_position([_|As], I) -> time_position(As, I+1);
+time_position([], _I) -> false.
 
 add_decls_(Sym, Decl, Ds, Decls, Bs) ->
     case maps:find(Sym, Decls) of
@@ -2184,23 +2281,37 @@ vec_sat(V,V0,Q,F,R,FriendMap) ->
     vec_sat(V,V0,Q,F,R,true,FriendMap).
 
 vec_sat(V,V0,Q,F,R,Subst,FriendMap) ->
+    vec_sat(V,V0,Q,F,R,Subst,FriendMap,undefined).
+
+%% OnModel: a fun called when one assignment of the vector binds every
+%% variable without a conflict, which is a model. It is called while
+%% the bindings are in place (to print or collect the model) and its
+%% result is returned as {model, Result}.
+vec_sat(V,V0,Q,F,R,Subst,FriendMap,OnModel) ->
     V1 = vec_extend(V, V0, Q),
     V2 = vec_extend_friend(V, V1, F, FriendMap),
     V3 = vec_extend_rand(V, V2, R),
     ?dbg0("V0=~w, V1=~w, V2=~w, V3=~w\n", [V0,V1,V2,V3]),
-    vec_sat(V, V3, Subst).
+    vec_sat(V, V3, Subst, OnModel).
 
 vec_sat(Vp, Vi) ->
     vec_sat(Vp, Vi, true).
 
-vec_sat(V, Vec, Subst) when is_list(Vec) ->
+vec_sat(V, Vec, Subst) ->
+    vec_sat(V, Vec, Subst, undefined).
+
+vec_sat(V, Vec, Subst, OnModel) when is_list(Vec) ->
     0 = varp_nif:push(V),
-    Res = satv_(V,list_to_tuple(Vec)),
+    Res = try satv_(V,list_to_tuple(Vec),OnModel)
+	  catch throw:{'$vec_model', M} -> {model, M}
+	  end,
     varp_nif:pop(V, 0),
     ?dbg0("Vec ~w, Res=~w\n", [Vec, Res]),
     case Res of
 	false ->
 	    false;
+	{model, _} ->
+	    Res;
 	[] ->
 	    true;
 	Bs ->
@@ -2212,10 +2323,12 @@ vec_sat(V, Vec, Subst) when is_list(Vec) ->
 	    end
     end.
 
-satv_(V, Vt) when is_tuple(Vt) ->
+satv_(V, Vt, OnModel) when is_tuple(Vt) ->
     N = tuple_size(Vt),
-    Bt = bcpv_(V,(1 bsl N)-1, Vt, []),
-    satvar_(V, 0, N, Vt, Bt, []).
+    case bcpv_(V,(1 bsl N)-1, Vt, [], OnModel) of
+	false -> false;   %% a learned unit contradicts the base level
+	Bt -> satvar_(V, 0, N, Vt, Bt, [])
+    end.
 
 %% eval for variable I 
 satvar_(V, I, N, Vt, Bt, Bs) when I < N ->
@@ -2268,21 +2381,22 @@ interv_(V, [A|As]) -> varp_nif:intersect_marks(V, A), interv_(V, As);
 interv_(V, []) -> varp_nif:get_marked(V, true).
 
 
-bcpv_(_V,-1, _Vt, Acc) ->
+bcpv_(_V,-1, _Vt, Acc, _OnModel) ->
     list_to_tuple(Acc);
-bcpv_(V,I, Vt, Acc) ->
+bcpv_(V,I, Vt, Acc, OnModel) ->
     Vec = vtl(V, I, Vt),
     ?dbg0("bcpv: ~w\n", [Vec]),
     L = varp_nif:push(V),
     case varp_nif:vbcp(V, Vec) of
 	true ->
+	    model_found(V, OnModel),
 	    Ei = bcpv_bindings(V, L+1),
 	    varp_nif:pop(V, L),
-	    bcpv_(V,I-1, Vt, [Ei|Acc]);
+	    bcpv_(V,I-1, Vt, [Ei|Acc], OnModel);
 	{_J,_Lj} -> %% Vec[J]=Lj is inconsistent
 	    %% io:format("~w: level=~w\n", [L, varp_nif:level(V)]),
 	    varp_nif:pop(V, L),
-	    bcpv_(V, I-1, Vt, [false|Acc]);
+	    bcpv_(V, I-1, Vt, [false|Acc], OnModel);
 	    %% case varp_nif:implication_clause(V, -Lj) of
 	    %% -1 ->  %% Probably a unit
 	    %% varp_nif:pop(V, L),
@@ -2294,10 +2408,24 @@ bcpv_(V,I, Vt, Acc) ->
 	    %% varp_nif:pop(V, L),
 	    %% bcpv_(V, I-1, Vt, [false|Acc])
 	    %% FIX: optional learn option!
-	    bcpv_conflict(V,L,I-1, Vt, [false|Acc])
+	    bcpv_conflict(V,L,I-1, Vt, [false|Acc], OnModel)
     end.
 
-bcpv_conflict(Vp, L, I, Vt, Acc) ->
+%% every variable bound and no conflict: a model (a lucky shot)
+model_found(_V, undefined) ->
+    ok;
+model_found(V, OnModel) ->
+    NV = get_number_of_variables(V),
+    NB = get_number_of_bound_variables(V),
+    if NV =:= NB -> throw({'$vec_model', OnModel()});
+       true -> ok
+    end.
+
+%% a conflict while evaluating one assignment of the vector: learn from
+%% it. A learned unit goes to the base level; when it conflicts there
+%% the formula is inconsistent (the base level holds no decisions) and
+%% false is returned instead of the binding tuple.
+bcpv_conflict(Vp, L, I, Vt, Acc, OnModel) ->
     case varp_conflict:analyze(Vp, 0, local) of
 	[{1,_Count,Aix}|_] ->
 	    ?dbg0("UNIT=~w\n", [varp_nif:get_clause(Vp, Aix)]),
@@ -2305,25 +2433,24 @@ bcpv_conflict(Vp, L, I, Vt, Acc) ->
 	    true = varp_nif:move_clause(Vp, Aix, gamma),
 	    case varp_nif:bcp(Vp) of
 		true ->
-		    bcpv_(Vp,I, Vt, Acc);
+		    bcpv_(Vp,I, Vt, Acc, OnModel);
 		false ->
-		    L1 = varp_nif:push(Vp),
-		    bcpv_conflict(Vp, L1, I, Vt, Acc)
+		    false
 	    end;
 	[{_Len,_Count,Aix}|_] ->
-	    ?dbg1("LEARN=~w\n", [varp_nif:get_clause(Vp, Aix)]),
+	    ?dbg0("LEARN=~w\n", [varp_nif:get_clause(Vp, Aix)]),
 	    varp_nif:pop(Vp, L),
 	    {true,_Gix} = varp_nif:move_clause(Vp, Aix, gamma),
-	    bcpv_(Vp, I, Vt, Acc);
+	    bcpv_(Vp, I, Vt, Acc, OnModel);
 	[] ->
 	    varp_nif:pop(Vp, L),
-	    bcpv_(Vp,I,Vt,Acc)
+	    bcpv_(Vp,I,Vt,Acc, OnModel)
     end.
 
 -ifdef(unused).
 bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
-    ?dbg1("CCix=~w, Lj=~w\n", [CCix, Lj]),
-    ?dbg1("~w=>~s\n", [-Lj,format_clause(V,CCix)]),
+    ?dbg0("CCix=~w, Lj=~w\n", [CCix, Lj]),
+    ?dbg0("~w=>~s\n", [-Lj,format_clause(V,CCix)]),
     %% Bump?
     case varp_nif:conflict(V, 0, CCix, -Lj) of
 	undefined ->  %% duplicate
@@ -2343,7 +2470,7 @@ bcpv_vconflict(V,L,CCix,Lj,I,Vt,Acc) ->
 		    true = varp_nif:bcp(V),
 		    bcpv_(V,I, Vt, Acc);
 		Len ->
-		    ?dbg1("Removed: ~w\n,", [Len0-Len]),
+		    ?dbg0("Removed: ~w\n,", [Len0-Len]),
 		    %% io:format("LEARN=~w\n", [varp_nif:get_clause(V, Aix)]),
 		    varp_nif:pop(V, L),
 		    {true,_Gix} = varp_nif:move_clause(V,Aix,gamma),

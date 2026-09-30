@@ -21,7 +21,7 @@
 -behaviour(varp_plugin).
 
 -export([options/0, run/2, drive/5]).
--export([trace/1, format_trace/1]).
+-export([trace/1, trace/2, format_trace/1, format_trace/2]).
 
 -include("varp.hrl").
 
@@ -224,7 +224,7 @@ istep_ind(K, KMax, Step, Trace, Print, Info, Kind, Do, As, GOpts) ->
 	[Model|_] when RB =/= ?TIMEOUT ->
 	    info(GOpts, Print, "bmc: k=~w base case SAT, counterexample\n", [K]),
 	    result(Print, "bmc: counterexample at k=~w\n", [K]),
-	    trace_out(Trace, Print, Model),
+	    trace_out(Trace, Print, Model, GOpts),
 	    result(Print, "% FALSE\n", []),
 	    {RB, AccB, BsB};
 	_ when RB =:= ?TIMEOUT; RB =:= ?CANCEL; RB =:= ?ERROR ->
@@ -360,7 +360,7 @@ istep(K, KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, GOpts, Bs) ->
 				  Kind, BjParam, GOpts, Bs4);
 			[Model|_] ->
 			    result(Print, "bmc: counterexample at k=~w\n", [K]),
-			    trace_out(Trace, Print, Model),
+			    trace_out(Trace, Print, Model, GOpts),
 			    result(Print, "% 1\n", []),
 			    {R, Acc, Bs4}
 		    end;
@@ -465,7 +465,7 @@ loop(K, KMax, Step, Bound, Trace, Print, Do, As, Formula, GOpts) ->
 		[Model|_] ->
 		    result(Print, "bmc: ~s at k=~w\n",
 			   [maps:get(bmc_word, GOpts, "counterexample"), K]),
-		    trace_out(Trace, Print, Model),
+		    trace_out(Trace, Print, Model, GOpts),
 		    result(Print, "% 1\n", []),
 		    {R, Acc, Bs}
 	    end;
@@ -486,9 +486,9 @@ result(Out, Fmt, Args) when is_function(Out, 1) ->
 result(_, Fmt, Args) -> io:format(Fmt, Args).
 
 %% the trace table, when wanted
-trace_out(true, Print, Model) when Print =/= false ->
-    result(Print, "~s", [format_trace(Model)]);
-trace_out(_Trace, _Print, _Model) ->
+trace_out(true, Print, Model, GOpts) when Print =/= false ->
+    result(Print, "~s", [format_trace(Model, maps:get(times, GOpts, #{}))]);
+trace_out(_Trace, _Print, _Model, _GOpts) ->
     ok.
 
 %% progress lines: the log at info level, or the GUI fun
@@ -535,12 +535,20 @@ with_search(Do) ->
 %% column each, true booleans are listed in the last column.
 %% ------------------------------------------------------------------
 
-trace(Model) ->
-    Indexed = [{Step, {p,Name,lists:droplast(Args)}, Value}
+trace(Model) -> trace(Model, #{}).
+
+%% Times: Name => position of the time parameter, from the declarations
+%% ("declare Connected(a, b, time)").  A symbol with a time parameter
+%% is a column of the table; one declared without is constant over the
+%% run and printed once above it; an undeclared symbol (die_hard.varp,
+%% system locals) is step indexed by its last integer argument.
+trace(Model, Times) ->
+    Indexed = [{Step, {p,Name,Rest}, Value}
 	       || {{p,Name,Args}, Value} <- Model,
-		  Args =/= [], is_integer(lists:last(Args)),
+		  Args =/= [],
 		  binary:first(Name) =/= $$,   %% generated selectors
-		  Step <- [lists:last(Args)]],
+		  {Step, Rest} <- [split_time(Name, Args, Times)],
+		  is_integer(Step)],
     Vectors = lists:usort([Var || {_, Var, {_Type,_Bits}} <- Indexed]),
     Steps = lists:usort([S || {S,_,_} <- Indexed]),
     Rows = [{S,
@@ -550,6 +558,26 @@ trace(Model) ->
 	     lists:sort([var_name(Var) || {S1,Var,true} <- Indexed, S1 =:= S])}
 	    || S <- Steps],
     {Vectors, Rows}.
+
+%% {Step, the other arguments}; Step is false for a constant
+split_time(Name, Args, Times) ->
+    case maps:find(Name, Times) of
+	{ok, Pos} when is_integer(Pos), Pos < length(Args) ->
+	    {Before, [Step|After]} = lists:split(Pos, Args),
+	    {Step, Before ++ After};
+	{ok, constant} ->
+	    {false, Args};
+	_ ->
+	    {lists:last(Args), lists:droplast(Args)}
+    end.
+
+%% the constant relations of the model, printed once above the table
+constants(Model, Times) ->
+    [B || B = {{p,Name,Args}, V} <- Model,
+	  V =/= false, V =/= undefined,
+	  binary:first(Name) =/= $$,
+	  maps:get(Name, Times, undefined) =:= constant,
+	  Args =/= [] orelse true].
 
 value({_Var, {_Type, Bits}}) -> bits_to_string(Bits);
 value(false) -> "-".
@@ -570,8 +598,22 @@ fmt_arg(A) when is_integer(A) -> integer_to_list(A);
 fmt_arg(A) when is_binary(A) -> binary_to_list(A);
 fmt_arg(A) -> lists:flatten(io_lib:format("~p", [A])).
 
-format_trace(Model) ->
-    {Vectors, Rows} = trace(Model),
+format_trace(Model) -> format_trace(Model, #{}).
+
+format_trace(Model, Times) ->
+    {Vectors, Rows} = trace(Model, Times),
+    Header0 = case constants(Model, Times) of
+		  [] -> [];
+		  Cs -> ["  ", lists:join(",", [var_name({p,N,As}) ++ value_suffix(V)
+						  || {{p,N,As},V} <- Cs]), "\n"]
+	      end,
+    [Header0 | format_rows(Vectors, Rows)].
+
+value_suffix(true) -> "";
+value_suffix({_T,Bits}) -> "=" ++ bits_to_string(Bits);
+value_suffix(_) -> "".
+
+format_rows(Vectors, Rows) ->
     Header = ["step" | [var_name(V) || V <- Vectors]] ++ ["input"],
     Table = [[integer_to_list(S) | Vals] ++ [string:join(Inputs, " ")]
 	     || {S, Vals, Inputs} <- Rows],

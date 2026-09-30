@@ -8,7 +8,7 @@ Terminals
         'ODD' 'EVEN'
         'SUM' 'PROD' 'implies' 'equivalent'
         '<->' '>>>' '<<<' '..'
-        hexnum octnum binnum decnum flonum chrnum
+        hexnum octnum binnum decnum flonum '\''
 	'->' '<<' '>>' '<' '>' '>=' '<=' '==' '!=' ':='
 	'&&' '||'
 	'(' ')' '[' ']' '{' '}' ',' '.' '&' '*' '+' '-' '~' '!'
@@ -18,6 +18,7 @@ Terminals
         'circuit' 'in' 'out' 'return'
         'system' 'state' 'init' 'next' 'invariant' 'reach' 'eventually'
         'assume' 'channel' 'send' 'recv' 'when' 'instance' 'import' string
+        'meta'
         'min' 'max' 'abs'
 	.
 
@@ -66,11 +67,16 @@ assignment_def -> qassign : '$1'.
 %% is a constraint that holds for every index (see doc/CIRCUIT.md)
 qassign -> quantifier qassign : qassign('$1', '$2').
 qassign -> quantifier oexpr '=' lexpr ';' : qassign('$1', {lop,'=','$2','$4'}).
+%% a quantified call of a circuit without a return value
+qassign -> quantifier cname '(' arg_list ')' ';' :
+	      qassign('$1', {constraint, {cop, str('$2'), '$4'}}).
 
 definition_list -> definition : ['$1'].
 definition_list -> definition_list definition : '$1'++['$2'].
 
 definition -> 'define' pexpr lexpr ';' : {define,'$2','$3'}.
+%% an array, indexed at build time: define K = [1, 2, 3]; K[i]
+definition -> 'define' pexpr '=' '[' lexprs ']' ';' : {define,'$2',{array,'$5'}}.
 definition -> 'declare' pdecls ';'     : {declare,'$2'}.
 definition -> 'literals' ldecls ';'    : {literals,'$2'}.
 definition -> 'order' odecls ';'       : {order,'$2'}.
@@ -129,6 +135,8 @@ circuit_param_decl -> cpdecls : [{in,'$1'}].
 circuit_param_decl -> 'in' cpdecls : [{in,'$2'}].
 circuit_param_decl -> 'out' cpdecls : [{out,'$2'}].
 circuit_param_decl -> 'return' cpdecl : [{return,'$2'}].
+%% an integer parameter, evaluated at build time: an index, a width
+circuit_param_decl -> 'meta' cpdecls : [{meta,'$2'}].
 
 cpdecls -> cpdecl : ['$1'].
 cpdecls -> cpdecl '=' lexpr : [{'=','$1','$3'}].
@@ -145,6 +153,9 @@ circuit_defs -> circuit_defs circuit_def : '$1' ++ ['$2'].
 
 %% oexpr must be output args, lexpr may contain both in and out id's
 circuit_def -> 'declare' pdecls ';' : {declare,'$2'}.
+%% a macro local to the body, an array of the locals for instance
+circuit_def -> 'define' pexpr lexpr ';' : {define,'$2','$3'}.
+circuit_def -> 'define' pexpr '=' '[' lexprs ']' ';' : {define,'$2',{array,'$5'}}.
 circuit_def -> 'circuit' cname circuit_params '{'  circuit_defs '}' :
 		   varp_formula:add_circuit_def({circuit, str('$2'), '$3', '$5'}).
 circuit_def -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
@@ -236,7 +247,6 @@ constant -> octnum : oct('$1').
 constant -> decnum : dec('$1').
 constant -> binnum : bin('$1').
 constant -> flonum : flo('$1').
-constant -> chrnum : chr('$1').
 
 
 %%  'A' 'E' 
@@ -350,6 +360,8 @@ lexpr0 -> 'min' '(' lexpr ',' lexpr ')' : {p,<<"min">>,['$3','$5']}.
 lexpr0 -> 'max' '(' lexpr ',' lexpr ')' : {p,<<"max">>,['$3','$5']}.
 lexpr0 -> 'abs' '(' lexpr ')' : {p,<<"abs">>,['$3']}.
 lexpr0 -> pexpr : '$1'.
+%% 'X(a,b) is next(X(a,b)), the value in the following step
+lexpr0 -> '\'' pexpr : {p,<<"next">>,['$2']}.
 lexpr0 -> quantifier '(' lexprs ')' : {'$1','$3'}.
 lexpr0 -> quantifier lexpr0         : {'$1','$2'}.
 lexpr0 -> lexpr0 '[' expr ']'           : { bitindex, '$1', '$3'}.
@@ -461,7 +473,6 @@ oct({octnum,_Line,Val}) -> {const,list_to_integer(Val,8)}.
 hex({hexnum,_Line,"0x"++Val}) -> {const,list_to_integer(Val,16)};
 hex({hexnum,_Line,"0X"++Val}) -> {const,list_to_integer(Val,16)}.
 dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
-chr({chrnum,_Line,Val}) ->  {const,Val}.
 flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
 
 str({symbol,Ln,Name}) -> note_symbol(Name,Ln), Name;

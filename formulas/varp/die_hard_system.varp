@@ -9,7 +9,7 @@
 // each, the same models as die_hard.varp gives for n=6,7,8.
 
 system jugs {
-    state B:4, L:4;
+    state B(time):4, L(time):4;
     input fill_small, fill_big, empty_small, empty_big,
           small_to_big, big_to_small;
 
@@ -17,14 +17,12 @@ system jugs {
 
     next  [EQ 1](fill_small, fill_big, empty_small, empty_big,
                  small_to_big, big_to_small) and
-          (fill_small   implies (next(L) == 3 and next(B) == B)) and
-          (fill_big     implies (next(B) == 5 and next(L) == L)) and
-          (empty_small  implies (next(L) == 0 and next(B) == B)) and
-          (empty_big    implies (next(B) == 0 and next(L) == L)) and
-          (small_to_big implies (next(B) == min(B + L, 5) and
-                                 next(L) == L - (next(B) - B))) and
-          (big_to_small implies (next(L) == min(B + L, 3) and
-                                 next(B) == B - (next(L) - L)));
+          (fill_small   -> ('L == 3 and 'B == B)) and
+          (fill_big     -> ('B == 5 and 'L == L)) and
+          (empty_small  -> ('L == 0 and 'B == B)) and
+          (empty_big    -> ('B == 0 and 'L == L)) and
+          (small_to_big -> ('B == min(B + L, 5) and 'L == L - ('B - B))) and
+          (big_to_small -> ('L == min(B + L, 3) and 'B == B - ('L - L)));
 
     reach B == 4;
 }

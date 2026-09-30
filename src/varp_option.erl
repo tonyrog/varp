@@ -317,13 +317,13 @@ match_val_({enum,List}, Val) when is_list(List) ->
     end;
 match_val_({list,variable},Val) ->
     %% trick
-    {ok,Ts,_} = varp:tokens("{"++Val++"}"),
-    {ok,{_Decls,{vec,VarList}}} = varp_parse:parse(Ts),
+    {ok,Ts} = varp:tokens("{"++Val++"}"),
+    {ok,{_Defs,_Assign,{vec,VarList}}} = varp_parse:parse(Ts),
     {ok, VarList};
 match_val_({list,literal},Val) ->
     %% trick
-    {ok,Ts,_} = varp:tokens("{"++Val++"}"),
-    {ok,{_Decls,{vec,LiteralList}}} = varp_parse:parse(Ts),
+    {ok,Ts} = varp:tokens("{"++Val++"}"),
+    {ok,{_Defs,_Assign,{vec,LiteralList}}} = varp_parse:parse(Ts),
     {ok, LiteralList};
 match_val_({list,Spec}, Val) ->
     Vals = string:tokens(Val, ", "),

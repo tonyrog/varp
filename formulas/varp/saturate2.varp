@@ -1,0 +1,8 @@
+//
+// Test file for saturation 
+//
+
+((X && Y)   -> A && !B && C && !D) &&
+((X && !Y)  -> A && !B && C && !D) &&
+((!X && Y)  -> A && !B && C && !D) &&
+((!X && !Y) -> A && !B & !C &&  D)

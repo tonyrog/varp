@@ -93,13 +93,28 @@ format_binding({Var,Value}) ->
 	false -> [$!|VarFmt];
 	{uint,Vec} -> [VarFmt,"=",format_uint(Vec)];
 	{int,Vec} -> [VarFmt,"=",format_int(Vec)];
-	{bit,Vec} -> [VarFmt,"=",format_bit(Vec)]
+	{bit,Vec} -> [VarFmt,"=",format_bit(Vec)];
+	{equ,Rep} -> [VarFmt,"=",format_rep(Rep)];    %% substituted
+	{nequ,Rep} -> [VarFmt,"=!",format_rep(Rep)]
     end.
+
+%% the representative of a substituted variable
+format_rep(P={p,_,_}) -> format_p(P);
+format_rep({bit,P,Pos}) -> [format_p(P),"[",integer_to_list(Pos),"]"];
+format_rep({var,I}) -> ["#",integer_to_list(I)].
 
 format_uint(Tuple) when is_tuple(Tuple) ->
     List = tuple_to_list(Tuple),
     try list_to_integer(List, 2) of
-	UInt -> integer_to_list(UInt)
+	UInt ->
+	    case get(print_hex) of
+		true ->
+		    %% --hex: as many hex digits as the vector has nibbles
+		    Digits = (tuple_size(Tuple) + 3) div 4,
+		    io_lib:format("0x~*.16.0b", [Digits, UInt]);
+		_ ->
+		    integer_to_list(UInt)
+	    end
     catch
 	error:_ ->
 	    "0b"++List

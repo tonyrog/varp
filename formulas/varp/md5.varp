@@ -1,0 +1,102 @@
+// MD5 as a circuit: one 512 bit block in, the 128 bit digest out.
+//
+//     varp sat bj formulas/varp/md5.varp formulas/varp/hello.txt
+//     5eb63bbbe01eeed093cb22bb8f5acdc3
+//
+// The message is a .txt file on the command line (at most 55 bytes,
+// one block), padded into the words M(0..15) by the input module
+// md5_io, which also prints the digest of a model in hex.  Without a
+// message file M is free: constrain the digest, or some of the words,
+// to ask the reverse question.
+
+input md5_io;
+output md5_io;
+
+define K = [
+    3614090360, 3905402710, 606105819, 3250441966,
+    4118548399, 1200080426, 2821735955, 4249261313,
+    1770035416, 2336552879, 4294925233, 2304563134,
+    1804603682, 4254626195, 2792965006, 1236535329,
+    4129170786, 3225465664, 643717713, 3921069994,
+    3593408605, 38016083, 3634488961, 3889429448,
+    568446438, 3275163606, 4107603335, 1163531501,
+    2850285829, 4243563512, 1735328473, 2368359562,
+    4294588738, 2272392833, 1839030562, 4259657740,
+    2763975236, 1272893353, 4139469664, 3200236656,
+    681279174, 3936430074, 3572445317, 76029189,
+    3654602809, 3873151461, 530742520, 3299628645,
+    4096336452, 1126891415, 2878612391, 4237533241,
+    1700485571, 2399980690, 4293915773, 2240044497,
+    1873313359, 4264355552, 2734768916, 1309151649,
+    4149444226, 3174756917, 718787259, 3951481745
+];
+
+define R = [
+    7, 12, 17, 22, 7, 12, 17, 22,
+    7, 12, 17, 22, 7, 12, 17, 22,
+    5, 9, 14, 20, 5, 9, 14, 20,
+    5, 9, 14, 20, 5, 9, 14, 20,
+    4, 11, 16, 23, 4, 11, 16, 23,
+    4, 11, 16, 23, 4, 11, 16, 23,
+    6, 10, 15, 21, 6, 10, 15, 21,
+    6, 10, 15, 21, 6, 10, 15, 21
+];
+
+circuit f0(in B:32, C:32, D:32; return F:32) { F = (B & C) | (~B & D); }
+circuit f1(in B:32, C:32, D:32; return F:32) { F = (D & B) | (~D & C); }
+circuit f2(in B:32, C:32, D:32; return F:32) { F = B ^ C ^ D; }
+circuit f3(in B:32, C:32, D:32; return F:32) { F = C ^ (B | ~D); }
+
+// one round: i picks the constant and the rotation, W is the message
+// word of the round, F the round function of B, C, D
+circuit stir(meta i; in W:32, F:32, A:32, B:32, C:32, D:32;
+             out A1:32, B1:32, C1:32, D1:32)
+{
+    declare S:32;
+    S  = F + A + K[i] + W;          // cut to 32 bits: modulo 2^32
+    A1 = D;
+    B1 = B + (S <<< R[i]);
+    C1 = B;
+    D1 = C;
+}
+
+// word j of the 512 bit block, bit ranges are [low:high]
+define WORD(j) X[32*j : 32*j + 31];
+
+circuit md5(in X:512; return digest:128)
+{
+    declare Ah(i):32, Bh(i):32, Ch(i):32, Dh(i):32;
+    declare a:32, b:32, c:32, d:32;
+
+    Ah(0) = 0x67452301;
+    Bh(0) = 0xefcdab89;
+    Ch(0) = 0x98badcfe;
+    Dh(0) = 0x10325476;
+
+    [A i=0..15]  stir(i, WORD(i),              f0(Bh(i), Ch(i), Dh(i)),
+                      Ah(i), Bh(i), Ch(i), Dh(i), Ah(i+1), Bh(i+1), Ch(i+1), Dh(i+1));
+    [A i=16..31] stir(i, WORD((5*i + 1) % 16), f1(Bh(i), Ch(i), Dh(i)),
+                      Ah(i), Bh(i), Ch(i), Dh(i), Ah(i+1), Bh(i+1), Ch(i+1), Dh(i+1));
+    [A i=32..47] stir(i, WORD((3*i + 5) % 16), f2(Bh(i), Ch(i), Dh(i)),
+                      Ah(i), Bh(i), Ch(i), Dh(i), Ah(i+1), Bh(i+1), Ch(i+1), Dh(i+1));
+    [A i=48..63] stir(i, WORD((7*i) % 16),     f3(Bh(i), Ch(i), Dh(i)),
+                      Ah(i), Bh(i), Ch(i), Dh(i), Ah(i+1), Bh(i+1), Ch(i+1), Dh(i+1));
+
+    a = 0x67452301 + Ah(64);
+    b = 0xefcdab89 + Bh(64);
+    c = 0x98badcfe + Ch(64);
+    d = 0x10325476 + Dh(64);
+
+    // the digest is the bytes of a, b, c, d, each little endian, in
+    // that order: byte p of the digest is byte p%4 of word p/4, and
+    // byte 0 is the top of the vector, so that it prints as md5sum
+    define HW = [a, b, c, d];
+    [A p=0..15] digest[120 - 8*p : 127 - 8*p] = HW[p / 4][8*(p % 4) : 8*(p % 4) + 7];
+}
+
+declare M(j):32, X:512, digest:128;
+
+[A j=0..15] X[32*j : 32*j + 31] = M(j);
+digest = md5(X);
+
+true

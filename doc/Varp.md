@@ -94,6 +94,8 @@ a vector assigned to a narrower one is cut at the top.  `min` and
 `max` are built in.
 
 Integer constants are decimal, hex `0x1021`, octal or binary `0b101`.
+There are no character constants; the apostrophe is the "next step"
+prefix of transition systems, `'X`.
 
 ## Quantifiers
 
@@ -173,7 +175,14 @@ from full adders:
 
 Bits of vectors are read and assigned with `a[i]`, also as `out`
 arguments, quantifiers nest (`[A i=0..1] [A j=0..2] M(i,j) = ...;`)
-and the same statement works at the file level.
+and the same statement works at the file level.  A `meta` parameter
+is an integer at build time, `circuit round(meta i; in x:32; ...)`,
+and `define K = [7, 12, 17, 22];` is an array indexed by such
+integers, `K[i]`; `formulas/varp/md5.varp` computes MD5 with them,
+as a circuit `md5(in X:512; return digest:128)`, the message read by
+an input module (`input md5_io;`) from a `.txt` file on the command
+line.  Meta level expressions also have `c ? a : b`, and `len(s)`
+and `byte(s, i)` over a string binding such as `msg="hello"`.
 
 A parameter size that is a meta variable, `a:n`, is unified with the
 width of the argument, so a circuit written once adds operands of any
@@ -194,6 +203,28 @@ about; a file with only assignments asks whether they are consistent.
 
 # Running varp
 
+## Sources
+
+The sources of a run are the `-f` formulas, then the files, in order,
+and everything adds to one formula: sections, assignments and the
+formulas conjoined.  No source at all reads standard input, and a
+single `.tgz`/`.zip` runs every formula in it.  A `.cnf`/`.snf` file
+loads as clauses; a `.txt`/`.dat` file, or any other extension when
+the formula has declared input modules, is data for those modules:
+
+    input md5_io;                  // in the formula
+    varp sat bj md5.varp msg.txt   // line 1 of msg.txt (recno=N for line N)
+    varp sat bj msg="hello" md5.varp   // no file: the module reads the bindings
+
+An input module exports `file(File, Meta)`, `input(Line, Meta)` or
+`input(Meta)` and returns `{ok, Formula}` or `{ok, MetaBindings,
+Formula}`; `output(Fd, Partial, Model)` in an `output` module prints
+a model its own way.  Data may be a pattern with `*` for an unknown
+byte (`msg='hello*world'`, `digest='5eb6****...'`), and a partial
+model prints `*` for what is not known; `src/varp_pattern.erl` does
+both for any module.  `src/md5_io.erl` and `formulas/varp/sudoku_io.erl`
+are the examples, `src/varp_input.erl` has the protocol.
+
 ## Plugins
 
 A command line names a chain of plugins, each with its options.  The
@@ -208,7 +239,7 @@ mode plugins decide the question, the search plugins answer it:
 | `backjump`  | `bj`    | CDCL search with learning, restarts, minimisation |
 | `bmc`       | `bmc`   | bounded model checking of a `system`, see below  |
 | `order`     | `ord`   | the initial variable order                       |
-| `saturate`  | `s`     | probing of one or two literals at a time         |
+| `saturate`  | `s`     | probing of k literals at a time, see below       |
 | `cnf`, `validate`, `monitor`, `wx` | | export, model checking, progress, the GUI |
 
 `--max <N>` (`-n`) on the search plugin is the number of models to
@@ -224,8 +255,11 @@ The ones you reach for most, `varp --help` prints them all:
     --phase true|false|undefined  initial phase                   (true)
     --timeout <s>                 give up after s seconds
     --log info|debug              progress and statistics
-    --print model|erlang|dimacs|false   how models are printed
+    --print model|literal|erlang|dimacs|false   how models are printed
+                                  (literal: also Y=X for substituted Y)
     --undeclared none|typo|once|all     warnings about names
+    --check                       build only, undeclared names are errors
+    --hex                         print unsigned vectors in hex
 
 ## Backjump options
 
@@ -280,8 +314,12 @@ for a run that reaches the property, or proves that none does.
          6  4  3  big_to_small
     % 1
 
-Inside `next` a state variable is its current value and `next(X)` the
-value in the following step.  The items of a system:
+Inside `next` a state variable is its current value and `next(X)`, or
+`'X`, the value in the following step.  A declaration says where the
+step index of a variable goes with a parameter named `time`, `state
+Connected(a, b, time);` (last when absent), and a `declare` without
+one is a relation that is the same in every step.  The items of a
+system:
 
 | item                   | meaning                                                |
 |------------------------|--------------------------------------------------------|

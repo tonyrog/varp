@@ -141,22 +141,22 @@ read_text_clause(Fd, Bs) ->
 	{ok,Line} ->
 	    %% io:format("~s", [Line]),
 	    case varp:tokens(binary_to_list(Line)) of
-		{ok,[{identifier,_Ln,"d"}|Ts],Ln1} ->
-		    text_clause(Fd, Bs, Ts, Ln1, [], d);
-		{ok,[{identifier,_Ln,"a"}|Ts],Ln1} ->
-		    text_clause(Fd, Bs, Ts, Ln1, [], a);
-		{ok,Ts,Ln1} ->
-		    text_clause(Fd, Bs, Ts, Ln1, [], a)
+		{ok,[{identifier,_Ln,"d"}|Ts]} ->
+		    text_clause(Fd, Bs, Ts, 1, [], d);
+		{ok,[{identifier,_Ln,"a"}|Ts]} ->
+		    text_clause(Fd, Bs, Ts, 1, [], a);
+		{ok,Ts} -> %% fixme: line number from Ts
+		    text_clause(Fd, Bs, Ts, 1, [], a)
 	    end
     end.
 
-read_text_clause(Fd, Bs, Acc, Type) ->
+read_text_clause(Fd, Bs, Acc, Type, Ln) ->
     case file:read_line(Fd) of
 	eof -> eof;
 	{ok,Line} ->
 	    case varp:tokens(binary_to_list(Line)) of
-		{ok,Ts,Ln1} ->
-		    text_clause(Fd, Bs, Ts, Ln1, Acc, Type)
+		{ok,Ts} ->
+		    text_clause(Fd, Bs, Ts, Ln, Acc, Type)
 	    end
     end.
 
@@ -167,7 +167,7 @@ text_clause(Fd, Bs, Ts, Ln, Acc, Type) ->
 		0 ->
 		    {Type,snf_literals(CL--[0], Bs)};
 		_ ->
-		    read_text_clause(Fd, Bs, Acc+Ts, Type)
+		    read_text_clause(Fd, Bs, Acc+Ts, Type, Ln+1)
 	    end;
 	Error -> 
 	    Error

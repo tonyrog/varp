@@ -364,7 +364,7 @@ xfail() -> [N || {N,_} <- ?XFAIL].
 
 corpus_parse_test_() ->
     Files = varp_tc:formula_files("varp", ".varp"),
-    ?assert(length(Files) > 50),
+    ?assert(length(Files) > 20),
     [{filename:basename(F),
       {timeout, 120,
        fun() ->

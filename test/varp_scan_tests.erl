@@ -19,7 +19,8 @@ number_test() ->
     ?assertEqual([{hexnum,1,"0X1F"}], t("0X1F")),
     ?assertEqual([{octnum,1,"017"}], t("017")),
     ?assertEqual([{binnum,1,"0b1011"}], t("0b1011")),
-    ?assertEqual([{chrnum,1,"'a'"}], t("'a'")).
+    %% the apostrophe is the next-step prefix, not a character constant
+    ?assertEqual([{'\'',1},{symbol,1,<<"a">>}], t("'a")).
 
 operator_test() ->
     Ops = ["->","<->","<<",">>","<<<",">>>","&&","||","<=",">=",

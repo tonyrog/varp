@@ -237,11 +237,16 @@ top() ->
 	    Dir
     end.
 
+%% the formulas the tests read live under test/formulas, copied from
+%% formulas/ which is a scratch area; the corpus tests parse every file
+%% here, so only put in what should parse (or is on an XFAIL list)
 formula_dir(Sub) ->
-    filename:join([top(), "formulas", Sub]).
+    filename:join([top(), "test", "formulas", Sub]).
 
 formula_files(Sub, Ext) ->
-    filelib:wildcard(filename:join(formula_dir(Sub), "*"++Ext)).
+    %% not the lock files of an editor, ".#name.varp"
+    [F || F <- filelib:wildcard(filename:join(formula_dir(Sub), "*"++Ext)),
+	  string:prefix(filename:basename(F), ".#") =:= nomatch].
 
 tmpdir() ->
     Dir = filename:join(["/tmp", "varp_test_"++os:getpid()]),

@@ -1,0 +1,136 @@
+// Stop-and-wait transfer over a UDP-like network.
+//
+// A sender streams payloads 0,1,2,... to a receiver.  Every packet
+// carries a w bit sequence number (w=1 is the alternating bit
+// protocol) and the receiver acks with the sequence number it got.
+// Both directions are unreliable: a packet in flight sits in one of c
+// slots and the network may lose it, duplicate it into a free slot,
+// or deliver any slot (reordering).  With fifo=1 only the oldest
+// packet in a direction can be delivered, so loss and duplication
+// remain but no reordering.
+//
+// Meta variables: c slots per direction, w seq bits, d payload bits
+// (the payload counter, d big enough not to wrap within the bound:
+// arithmetic does not wrap by itself, Seq and Exp wrap explicitly),
+// fifo 0/1.
+//
+// State
+//   Seq:w, Cnt:d          sender: current seq and payload
+//   Exp:w, Rcnt:d, Bad    receiver: expected seq, payloads delivered,
+//                         Bad once a payload arrived out of order
+//   DV(s), DS(s), DC(s)   data slot s: valid, seq, payload
+//   AV(s), AS(s), AC(s)   ack slot s: valid, seq, payload (AC is only
+//                         a timestamp for the fifo rule)
+//
+// Input Act(a, s, t), exactly one per step:
+//   a=0 send (Seq,Cnt) into free data slot s
+//   a=1 deliver data slot s, ack into free ack slot t
+//   a=2 deliver ack slot s to the sender
+//   a=3 lose data slot s        a=4 lose ack slot s
+//   a=5 copy data slot s to t   a=6 copy ack slot s to t
+//
+//   varp bmc --k-max 16 --property sw_invariant bj c=2 w=1 d=5 fifo=1 \
+//        udp_stopwait.varp            % 0: loss and duplication are fine
+//   varp bmc --property sw_invariant bj c=2 w=1 d=4 fifo=0 \
+//        udp_stopwait.varp            reordering breaks it at k=7: a
+//                                     retransmitted payload 0 is still
+//                                     in flight when Exp is 0 again
+//   varp bmc --property sw_invariant bj c=2 w=2 d=5 fifo=0 \
+//        udp_stopwait.varp            two seq bits only delay it, k=13
+//   varp bmc --property sw_reach bj c=2 w=1 d=4 fifo=1 udp_stopwait.varp
+
+system sw {
+    state Seq:w, Cnt:d, Exp:w, Rcnt:d, Bad,
+          DV(s), DS(s):w, DC(s):d,
+          AV(s), AS(s):w, AC(s):d;
+    input Act(a, s, t);
+
+    init  Seq == 0 and Cnt == 0 and Exp == 0 and Rcnt == 0 and not Bad and
+          ([A s=0..c-1] (not DV(s) and not AV(s)));
+
+    // exactly one action, and only the (a,s,t) shapes that exist
+    next  [ONE a=0..6, s=0..c-1, t=0..c-1] Act(a, s, t);
+    next  [A a=0..6, s=0..c-1, t=0..c-1, a != 1, a != 5, a != 6, t != 0]
+              not Act(a, s, t);
+
+    // enabling conditions
+    next  [A s=0..c-1] (Act(0, s, 0) implies not DV(s));
+    next  [A s=0..c-1] [A t=0..c-1]
+              (Act(1, s, t) implies
+                 (DV(s) and not AV(t) and
+                  (fifo == 0 or [A u=0..c-1] (DV(u) implies (DC(u) >= DC(s))))));
+    next  [A s=0..c-1]
+              (Act(2, s, 0) implies
+                 (AV(s) and
+                  (fifo == 0 or [A u=0..c-1] (AV(u) implies (AC(u) >= AC(s))))));
+    next  [A s=0..c-1] (Act(3, s, 0) implies DV(s));
+    next  [A s=0..c-1] (Act(4, s, 0) implies AV(s));
+    next  [A s=0..c-1] [A t=0..c-1]
+              (Act(5, s, t) implies (DV(s) and not DV(t)));
+    next  [A s=0..c-1] [A t=0..c-1]
+              (Act(6, s, t) implies (AV(s) and not AV(t)));
+
+    // sender: send / retransmit the current packet
+    next  [A s=0..c-1]
+              (Act(0, s, 0) implies
+                 (next(DV(s)) and next(DS(s)) == Seq and next(DC(s)) == Cnt));
+
+    // receiver takes data slot s, acks with the seq it saw
+    next  [A s=0..c-1] [A t=0..c-1]
+              (Act(1, s, t) implies
+                 (not next(DV(s)) and
+                  next(AV(t)) and next(AS(t)) == DS(s) and
+                  next(AC(t)) == DC(s) and
+                  ((DS(s) == Exp) implies
+                     (next(Exp) == (Exp + 1) % (1 << w) and next(Rcnt) == Rcnt + 1 and
+                      (next(Bad) equ (Bad or (DC(s) != Rcnt))))) and
+                  ((DS(s) != Exp) implies
+                     (next(Exp) == Exp and next(Rcnt) == Rcnt and
+                      (next(Bad) equ Bad)))));
+
+    // sender takes ack slot s, advances on the ack of the current seq
+    next  [A s=0..c-1]
+              (Act(2, s, 0) implies
+                 (not next(AV(s)) and
+                  ((AS(s) == Seq) implies
+                     (next(Seq) == (Seq + 1) % (1 << w) and next(Cnt) == Cnt + 1)) and
+                  ((AS(s) != Seq) implies
+                     (next(Seq) == Seq and next(Cnt) == Cnt))));
+
+    // the network
+    next  [A s=0..c-1] (Act(3, s, 0) implies not next(DV(s)));
+    next  [A s=0..c-1] (Act(4, s, 0) implies not next(AV(s)));
+    next  [A s=0..c-1] [A t=0..c-1]
+              (Act(5, s, t) implies
+                 (next(DV(t)) and next(DS(t)) == DS(s) and
+                  next(DC(t)) == DC(s)));
+    next  [A s=0..c-1] [A t=0..c-1]
+              (Act(6, s, t) implies
+                 (next(AV(t)) and next(AS(t)) == AS(s) and
+                  next(AC(t)) == AC(s)));
+
+    // frames
+    next  ((not [E s=0..c-1] Act(2, s, 0)) implies
+             (next(Seq) == Seq and next(Cnt) == Cnt));
+    next  ((not [E s=0..c-1] [E t=0..c-1] Act(1, s, t)) implies
+             (next(Exp) == Exp and next(Rcnt) == Rcnt and
+              (next(Bad) equ Bad)));
+    next  [A s=0..c-1]
+              ((not Act(0, s, 0) and not Act(3, s, 0) and
+                not [E t=0..c-1] Act(1, s, t) and
+                not [E u=0..c-1] Act(5, u, s)) implies
+                 ((next(DV(s)) equ DV(s)) and next(DS(s)) == DS(s) and
+                  next(DC(s)) == DC(s)));
+    next  [A s=0..c-1]
+              ((not Act(2, s, 0) and not Act(4, s, 0) and
+                not [E u=0..c-1] Act(1, u, s) and
+                not [E u=0..c-1] Act(6, u, s)) implies
+                 ((next(AV(s)) equ AV(s)) and next(AS(s)) == AS(s) and
+                  next(AC(s)) == AC(s)));
+
+    // every delivered payload is the next one: no gap, no duplicate
+    invariant not Bad;
+
+    // three payloads get through
+    reach Rcnt == 3;
+}

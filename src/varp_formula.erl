@@ -30,7 +30,7 @@
 
 -export([order_first/2]).
 -export([order_last/2]).
--export([model/1]).
+-export([model/1, model/2]).
 -export([intersect_bindings/3]).
 -export([install_bindings/3]).
 -export([each_unbound/2]).
@@ -68,6 +68,16 @@
 	 (Op) =:= 'lt' orelse (Op) =:= 'gt' orelse
 	 (Op) =:= 'lte' orelse (Op) =:= 'gte' orelse
 	 (Op) =:= 'eq' orelse (Op) =:= 'neq')).
+%% the functions of eval_meta({call,...}); a name that is not declared
+%% or defined and is one of these is evaluated, not made a variable
+-define(is_meta_function(P),
+	(P =:= <<"len">> orelse P =:= <<"byte">> orelse P =:= <<"factorial">> orelse
+	 P =:= <<"binom">> orelse P =:= <<"sqrt">> orelse P =:= <<"isqrt">> orelse
+	 P =:= <<"sqr">> orelse P =:= <<"nroot">> orelse P =:= <<"ln">> orelse
+	 P =:= <<"log">> orelse P =:= <<"log2">> orelse P =:= <<"log10">> orelse
+	 P =:= <<"ilog2">> orelse P =:= <<"isize">> orelse P =:= <<"usize">> orelse
+	 P =:= <<"pow">> orelse P =:= <<"sin">> orelse P =:= <<"cos">> orelse
+	 P =:= <<"trunc">> orelse P =:= <<"round">>)).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
 
 
@@ -469,6 +479,12 @@ find_prop_def(P, Defs) ->
 	_ -> false
     end.
 
+%% element I of the array define P, 0 based
+array_element(P, Elems, I) when is_integer(I), I >= 0, I < length(Elems) ->
+    lists:nth(I+1, Elems);
+array_element(P, Elems, I) ->
+    error({array_index, P, I, length(Elems)}).
+
 find_subst(P, [E={_Qy,{p,P,_}}|_]) -> E;
 find_subst(P, [_|Bnd]) -> find_subst(P, Bnd);
 find_subst(_P ,[]) -> false.
@@ -598,6 +614,7 @@ warn_undeclared_(P, Arity, Mode, Bs) ->
 	    end
     end.
 
+report_undeclared(strict, _P, _N, _Syms) -> not_declared;
 report_undeclared(all, _P, _N, _Syms) -> not_declared;
 report_undeclared(once, _P, 1, _Syms) -> occurs_once;
 report_undeclared(typo, P, 1, Syms) ->
@@ -612,6 +629,20 @@ undeclared_warning(P, Arity, Line, Why, Bs) ->
     Name = if Arity =:= 0 -> [P];
 	      true -> [P,"/",integer_to_list(Arity)]
 	   end,
+    case maps:get(undeclared, Bs#bs.option, none) of
+	strict ->
+	    %% a declared name is an established spelling however
+	    %% seldom it occurs, so it can be the "did you mean"
+	    Syms0 = maps:get(syms, Bs#bs.option, #{}),
+	    Syms = maps:map(fun(Q, {N,L}) ->
+				    case maps:is_key(Q, Bs#bs.decls) of
+					true -> {max(N,2),L};
+					false -> {N,L}
+				    end
+			    end, Syms0),
+	    error({undeclared, Where, Line, lists:flatten(Name), near_miss(P, Syms)});
+	_ -> ok
+    end,
     case Why of
 	{looks_like,Q} ->
 	    ?warn("~s:~w: warning: '~s' occurs once, did you mean '~s'?\n",
@@ -764,6 +795,10 @@ bld(_X, V={p,P,Args}, Bs) ->
 	    case is_definition(P, Bs) of
 		true ->
 		    variable(V, Bs);
+		false when Arity > 0, ?is_meta_function(P) ->
+		    %% a built in meta function in formula position,
+		    %% byte(msg, i) == 98: its value as a constant
+		    bld(eval_meta({call,P,Args}, Bs), Bs);
 		false when Arity =:= 0, is_map_key(P, Bs#bs.meta) ->
 		    %% a bound meta variable used as a value, "A*B == n":
 		    %% the scanner makes no difference between P and n,
@@ -815,14 +850,25 @@ bld(_X,{expr,Expr}, Bs) ->
 	    N = varp_math:signed_size(W),
 	    const_vector(int,W,N,Bs)
     end;
+bld(X,{array,Fs}, Bs) ->
+    %% an array used as a value is its elements as a vector
+    bld(X,{vec,Fs}, Bs);
 bld(_X,{vec,Fs}, Bs) ->
     {Ys,Bs1} = bld_list(Fs, Bs),
     Ys1 = join_vector(Ys),
     {{bit,length(Ys1),[bit(Y)||Y <- Ys1]},Bs1};
 
-bld(_X,{bitindex,A,I},Bs) ->
+bld(X,{bitindex,A,I},Bs) ->
     I1 = eval_meta(I,Bs),
     case A of
+	{p,P,[]} when not is_map_key(P, Bs#bs.decls) ->
+	    %% "define K [..]; K[i]": the element, built as a formula
+	    case find_prop_def(P, Bs#bs.defs) of
+		{array,Elems} ->
+		    bld(X, array_element(P, Elems, I1), Bs);
+		_ ->
+		    variable({index,A,I1}, Bs)
+	    end;
 	{p,P,_Ps} ->  %% check if declared
 	    case varp:find_decl(P, Bs#bs.decls, icase(Bs)) of
 		error ->
@@ -1112,6 +1158,9 @@ circuit_params(Name, [{in,Ds}|Ps], In, Out, Ret) ->
     circuit_params(Name, Ps, In++[circuit_formal(Name,D) || D <- Ds], Out, Ret);
 circuit_params(Name, [{out,Ds}|Ps], In, Out, Ret) ->
     circuit_params(Name, Ps, In, Out++[circuit_formal(Name,D) || D <- Ds], Ret);
+circuit_params(Name, [{meta,Ds}|Ps], In, Out, Ret) ->
+    Ms = [(circuit_formal(Name,D))#{ type => meta } || D <- Ds],
+    circuit_params(Name, Ps, In++Ms, Out, Ret);
 circuit_params(Name, [{return,D}|Ps], In, Out, undefined) ->
     circuit_params(Name, Ps, In, Out, circuit_formal(Name,D));
 circuit_params(Name, [{return,_}|_], _In, _Out, _Ret) ->
@@ -1166,7 +1215,19 @@ circuit_bind_(Name, [F=#{name := N}|Fs], I, NPos, Pos, Named, Acc, Bs) ->
 			end
 		end
 	end,
-    {V,Bs1} = circuit_arg(F, Expr, Bs),
+    {V,Bs1} = case F of
+		  #{ type := meta } ->
+		      %% an integer at build time, bound as a meta
+		      %% variable for the body (build_circuit restores
+		      %% the caller's bindings afterwards)
+		      Int = try eval_meta(Expr, Bs)
+			    catch error:{unbound, Var} -> {variable, Var}
+			    end,
+		      is_integer(Int) orelse error({circuit_meta_argument, Name, N, Int}),
+		      {{meta,Int}, Bs#bs{ meta = maps:put(N, Int, Bs#bs.meta) }};
+		  _ ->
+		      circuit_arg(F, Expr, Bs)
+	      end,
     circuit_bind_(Name, Fs, I+1, NPos, Pos, Named, [{N,V}|Acc], Bs1);
 circuit_bind_(_Name, [], _I, _NPos, _Pos, _Named, Acc, Bs) ->
     {lists:reverse(Acc), Bs}.
@@ -1184,12 +1245,12 @@ circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
 		  %% a macro ("define seed 0xffff;") is expanded by
 		  %% variable/2, anything else is an undeclared vector
 		  %% of the parameter's width
-		  case match_def(P, As, Bs#bs.defs) of
+		  case maps:is_key({P,length(As)}, Bs#bs.defs) of
 		      false ->
 			  N = eval_meta(Size, Bs),
 			  Decls = maps:put(P, {Type,length(As),N}, Bs#bs.decls),
 			  Bs#bs { decls = Decls };
-		      _ ->
+		      true ->
 			  Bs
 		  end;
 	      {ok,_Decl} ->
@@ -1242,9 +1303,21 @@ circuit_value(RName, Bs) ->
 
 %% Rewrite the body: formal parameters become values, every other
 %% predicate/variable name is prefixed, macros and circuit names are kept.
+%% a quantifier binds names for its body: they are integers, not
+%% locals, and are not renamed
+circuit_rename({{Q,Binds},Body}, Env, Prefix, Defs) when is_atom(Q),
+							  is_list(Binds) ->
+    Bound = [V || {op,'=',V,_} <- Binds, is_binary(V)],
+    Env1 = maps:merge(Env, maps:from_list([{V,bound} || V <- Bound])),
+    {{Q,circuit_rename(Binds, Env, Prefix, Defs)},
+     circuit_rename(Body, Env1, Prefix, Defs)};
 circuit_rename({p,P,As}, Env, Prefix, Defs) ->
     As1 = circuit_rename(As, Env, Prefix, Defs),
     case maps:find(P, Env) of
+	{ok,bound} ->
+	    {p,P,As1};
+	{ok,{meta,I}} when As1 =:= [] ->
+	    {const,I};
 	{ok,V} when As1 =:= [] ->
 	    {value,V};
 	{ok,_} ->
@@ -1269,6 +1342,13 @@ circuit_rename([H|T], Env, Prefix, Defs) ->
 circuit_rename(X, _Env, _Prefix, _Defs) ->
     X.
 
+build_circuit_body([{define,{p,Name,Ps},Def}|Body], Bs) ->
+    %% a macro of the instance; its body was renamed with the rest
+    Formals = [P || P <- Ps],
+    Defs = maps:update_with({Name,length(Formals)},
+			    fun(L) -> L ++ [{Formals,Def}] end,
+			    [{Formals,Def}], Bs#bs.defs),
+    build_circuit_body(Body, Bs#bs{ defs = Defs });
 build_circuit_body([{declare,Ds}|Body], Bs) ->
     case varp:add_decls(Ds, Bs#bs.decls, Bs) of
 	{ok,Decls} -> build_circuit_body(Body, Bs#bs { decls = Decls });
@@ -1530,6 +1610,8 @@ eval_domain(Expr, Bs) ->
 
 eval_meta(I, _Bs) when is_integer(I) -> I;
 eval_meta({const,V}, _Bs) -> V;
+eval_meta({uint,_N,V}, _Bs) when is_integer(V) -> V;   %% a literal in a formula
+eval_meta({int,_N,V}, _Bs) when is_integer(V) -> V;
 eval_meta({range,A,B}, Bs) ->
     A1 = eval_meta(A,Bs),
     B1 = eval_meta(B,Bs),
@@ -1540,6 +1622,7 @@ eval_meta({range,A,B}, Bs) ->
 eval_meta(<<"true">>, _Bs)  -> true;
 eval_meta(<<"false">>, _Bs) -> false;
 eval_meta({p,ID,[]}, Bs) when is_binary(ID) -> eval_id(ID, Bs);
+eval_meta({p,F,As}, Bs) when is_binary(F) -> eval_meta({call,F,As}, Bs);  %% len(msg) in a define
 eval_meta(ID, Bs) when is_binary(ID) -> eval_id(ID, Bs);
 eval_meta({call,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
@@ -1573,6 +1656,13 @@ eval_meta({call,F,As},Bs) ->
 	{<<"min">>,[A,B]}   -> min(A,B);
 	{<<"sum">>,As}      ->
 	    lists:foldl(fun(Ai,Sum) -> eval_meta(Ai,Bs)+Sum end, 0, As);
+	%% strings, from a binding such as msg="hello world"
+	{<<"len">>,[S]} when is_list(S) -> length(S);
+	{<<"byte">>,[S,I]} when is_list(S), is_integer(I) ->
+	    %% byte I of the string, 0 past the end
+	    if I >= 0, I < length(S) -> lists:nth(I+1, S);
+	       true -> 0
+	    end;
 	%% ordsets
 	{<<"union">>,[A,B]}   -> ordsets:union(A,B);
 	{<<"subtract">>,[A,B]}   -> ordsets:subtract(A,B);
@@ -1607,6 +1697,18 @@ eval_meta(Ls, Bs) when is_list(Ls) -> %% FIXME!?
     eval_meta_list(Ls, Bs);
 eval_meta({vec,Ls}, Bs) -> %% literal vector
     eval_meta_list(Ls, Bs);
+eval_meta({array,Ls}, Bs) ->
+    eval_meta_list(Ls, Bs);
+eval_meta({bitindex,{p,P,[]},I}, Bs) ->
+    case find_prop_def(P, Bs#bs.defs) of
+	{array,Elems} -> eval_meta(array_element(P, Elems, eval_meta(I,Bs)), Bs);
+	_ -> error({not_an_array, P})
+    end;
+eval_meta({op,'ite',C,A,B},Bs) ->
+    case eval_meta(C,Bs) of
+	true -> eval_meta(A,Bs);
+	false -> eval_meta(B,Bs)
+    end;
 eval_meta({op,Op,A},Bs) ->
     case {Op,eval_meta(A,Bs)} of
 	{'neg',A1} -> -A1;
@@ -2207,12 +2309,19 @@ each_variable_(Bs, Fun, X, N) ->
 %% Partial numbers look like {x,{int,{$*,$1,$0,..,$*,$1}}}
 %%
 model(Bs) ->
-    model_(Bs#bs.vp).
-    
-model_(Vp) ->
-    lists:keysort(1, collect_model(Vp)).
+    model(Bs, #{}).
 
-collect_model(Vp) ->
+%% subst => true: a substituted boolean whose representative has no
+%% value is {Var, {equ, Rep}} or {Var, {nequ, Rep}}, where Rep is the
+%% representative {p,Name,Args}, a bit {bit,{p,..},Pos} of a vector,
+%% or an internal variable {var, I}
+model(Bs, Opts) ->
+    model_(Bs#bs.vp, maps:get(subst, Opts, false)).
+
+model_(Vp, Subst) ->
+    lists:keysort(1, collect_model(Vp, Subst)).
+
+collect_model(Vp, Subst) ->
     case varp_nif:first_symbol(Vp) of
 	false -> %% fixme mixed model! CNF with is declarations
 	    N = varp:get_number_of_variables(Vp),
@@ -2231,7 +2340,11 @@ collect_model(Vp) ->
 		      case varp_nif:get_symbol(Vp,I) of
 			  [] -> Acc;
 			  [{{Name,Args},bool,1,0}] ->
-			      Value = varp_nif:value(Vp,I),
+			      Value = case varp_nif:value(Vp,I) of
+					  undefined when Subst ->
+					      representative(Vp, I);
+					  V0 -> V0
+				      end,
 			      [{{p,Name,Args},Value}|Acc];
 			  [{{Name,Args},Type,Len,Pos}] ->
 			      Value = varp_nif:value(Vp,I),
@@ -2264,6 +2377,23 @@ model_vars(Vp,[X|Xs],Y,Ms) ->
     end;
 model_vars(_Vp,[],_Y,Ms) ->
     Ms.
+
+%% the representative of a substituted variable, undefined when the
+%% variable is not substituted
+representative(Vp, I) ->
+    case varp_nif:bound(Vp, I) of
+	L when is_integer(L) ->
+	    Rep = case varp_nif:get_symbol(Vp, abs(L)) of
+		      [{{Name,Args},bool,1,0}] -> {p,Name,Args};
+		      [{{Name,Args},_Type,_Len,Pos}] -> {bit,{p,Name,Args},Pos};
+		      [] -> {var, abs(L)}
+		  end,
+	    if L > 0 -> {equ, Rep};
+	       true -> {nequ, Rep}
+	    end;
+	_ ->
+	    undefined
+    end.
 
 %% int/uint/bit is represented as ascii vector {Type,{$0|$1|$*,...}}
 %% where the bit tuple is MSB (high to low) 

@@ -384,10 +384,12 @@ typedef struct _allocator_t
     slist_t free_list;   // list of free objects
 } allocator_t;
 
-// Dirty scheduler stack size is set to 40K default?
-#define ONSTACK_LIMIT (64*1024)
+// Scheduler thread stacks are small (a dirty scheduler has 40K words
+// by default) and a NIF may keep several of these arrays at once, so
+// only small arrays go on the stack. The limit is in bytes.
+#define ONSTACK_LIMIT (8*1024)
 
-#define ON_STACK(n) ((n) < ONSTACK_LIMIT)
+#define ON_STACK(nbytes) ((nbytes) < ONSTACK_LIMIT)
 
 #if defined(__WIN32__) || defined(_WIN32)
 
@@ -398,7 +400,7 @@ typedef struct _allocator_t
 #define FREE_STACK(onstk,ptr)  if (!(onstk)) free((ptr))
 #endif
 
-#define STK_BEGIN(type,name,n) do { int name##_onstack = ON_STACK((n)); type* name = ALLOC_STACK(name##_onstack,sizeof(type)*(n)); do {
+#define STK_BEGIN(type,name,n) do { int name##_onstack = ON_STACK(sizeof(type)*(n)); type* name = ALLOC_STACK(name##_onstack,sizeof(type)*(n)); do {
 #define STK_LEAVE(name) goto L##name
 #define STK_END0(name) } while(0); FREE_STACK(name##_onstack,(name)); } while(0)
 #define STK_END(name)  } while(0); L##name: FREE_STACK(name##_onstack,(name)); } while(0)
@@ -4596,7 +4598,12 @@ static ERL_NIF_TERM varp_variable_info(ErlNifEnv* env, int argc,
 	    return enif_make_undefined(env);
     }
     case VARINFO_SYMBOL: {
-	literal_t* lp = &var->lit[LIT_POS];
+	// a substituted variable keeps its own names
+	variable_t* var0;
+	literal_t* lp;
+	if (!vif_get_v(env, vp, argv[1], &var0))
+	    return enif_raise_exception(env, ATOM(variable));
+	lp = &var0->lit[LIT_POS];
 	size_t n = dynarray_size(lp->sref);
 	ERL_NIF_TERM list = enif_make_list(env, 0);
 	int i;
@@ -5367,7 +5374,12 @@ static ERL_NIF_TERM varp_value(ErlNifEnv* env, int argc,
     case I_TRUE:  return enif_make_boolean(env, true);
     case I_FALSE: return enif_make_boolean(env, false);
     case I_UNDEF: return enif_make_undefined(env);
-    case I_BOUND: return enif_make_undefined(env);
+    case I_BOUND: // substituted: the value is that of the representative
+	switch(get_value(vp, resolve_lit(vp, x))) {
+	case I_TRUE:  return enif_make_boolean(env, true);
+	case I_FALSE: return enif_make_boolean(env, false);
+	default: return enif_make_undefined(env);
+	}
     default: return enif_make_badarg(env);
     }
 }

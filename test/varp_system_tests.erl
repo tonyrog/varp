@@ -30,8 +30,9 @@ expand_test() ->
     ?assertEqual({p,<<"c">>,[<<"k">>]}, Formula),
     Names = [N || {define,{p,N,_},_} <- Defs],
     ?assertEqual([<<"c_init">>,<<"c_next">>,<<"c_reach">>,<<"c">>], Names),
-    ?assertMatch([{declare,[{{p,<<"x">>,[<<"$t">>]},uint,2}]},
-		  {declare,[{p,<<"up">>,[<<"$t">>]}]} | _], Defs),
+    %% the declarations keep "time" as the placeholder of the step
+    ?assertMatch([{declare,[{{p,<<"x">>,[<<"time">>]},uint,2}]},
+		  {declare,[{p,<<"up">>,[<<"time">>]}]} | _], Defs),
     %% next: x -> x($t-1), next(x) -> x($t), up -> up($t)
     [Next] = [B || {define,{p,<<"c_next">>,_},B} <- Defs],
     ?assertMatch({lop,imp,
@@ -248,4 +249,52 @@ dining_test_() ->
 					       "reach p2_st == 4;", all)),
 	      {R,[_|_],_} = varp_tc:run(T, [{bmc,[{k_max,10}]}]),
 	      ?assert(R =:= ?DONE orelse R =:= ?CONTINUE)
+      end}}].
+
+%% the time parameter of a declaration says where the step index goes,
+%% "state Connected(a, b, time)"; a declaration without one is a
+%% constant relation, the same in every step; 'X(a) is next(X(a))
+time_position_test_() ->
+    Pots = "declare TopOf(a, b);\n"
+	"system pots {\n"
+	"  state Connected(a, b, time);\n"
+	"  input Dial(time, a, b);\n"
+	"  init  [A a=0..1] [A b=0..1] (not Connected(a, b));\n"
+	"  next  [A a=0..1] [A b=0..1] ('Connected(a, b) equ (Dial(a, b) and TopOf(a, b)));\n"
+	"  reach Connected(0, 1);\n"
+	"}\n"
+	"TopOf(0, 1) and not TopOf(1, 0) and pots(k)\n",
+    [{"step index at the declared position", {timeout, 120,
+      fun() ->
+	      [M|_] = varp_tc:models(Pots, opts(<<"k">>, 1)),
+	      Names = [N || {N,true} <- M],
+	      ?assert(lists:member("Connected(0,1,1)", Names)),
+	      ?assert(lists:member("Dial(1,0,1)", Names)),
+	      ?assert(lists:member("TopOf(0,1)", Names)),
+	      ?assertEqual(32, varp_tc:count(Pots, opts(<<"k">>, 1)))
+      end}},
+     {"the trace has the constants above and time columns", {timeout, 120,
+      fun() ->
+	      {Sections, As, F} = varp_tc:parse(Pots, #{}),
+	      GOpts = varp:section_opts(Sections, varp:load_option_list([{print,false}])),
+	      Times = maps:get(times, GOpts),
+	      ?assertEqual(constant, maps:get(<<"TopOf">>, Times)),
+	      ?assertEqual(2, maps:get(<<"Connected">>, Times)),
+	      ?assertEqual(0, maps:get(<<"Dial">>, Times)),
+	      Do = varp:parse_do([{bmc,[{k_max,3}]}]),
+	      {_, [Model|_], _} = varp:do_run(Do, As, F, GOpts#{ meta => #{} }),
+	      Text = lists:flatten(varp_bmc:format_trace(Model, maps:get(times, GOpts))),
+	      ?assert(string:find(Text, "TopOf(0,1)") =/= nomatch),
+	      [First|_] = string:split(Text, "\n"),
+	      ?assert(string:find(First, "TopOf") =/= nomatch),
+	      ?assert(string:find(Text, "Connected(0,1)") =/= nomatch)
+      end}},
+     {"'X is next(X)", {timeout, 120,
+      fun() ->
+	      New = read("die_hard_system.varp"),
+	      Q = lists:flatten(string:replace(
+			  lists:flatten(string:replace(New, "next(B)", "'B", all)),
+			  "next(L)", "'L", all)),
+	      ?assertEqual(varp_tc:count(New, opts(<<"k">>, 7)),
+			   varp_tc:count(Q, opts(<<"k">>, 7)))
       end}}].

@@ -1,0 +1,14 @@
+// a generic n bit ripple carry adder, written in varp
+declare A:n, B:n, S:n;
+
+circuit rca(in Y:n, Z:n; out CO:(n+1); return X:n)
+{
+    !CO[0];
+    [A i=0..n-1] ( (X[i]  <-> (Y[i] xor Z[i] xor CO[i])) and
+                   (CO[i+1] <-> ((Y[i] and Z[i]) or
+                                 (CO[i] and (Y[i] xor Z[i])))) );
+}
+
+declare C:(n+1);
+S = rca(A, B, C);
+(A == 5) && (B == 6)

@@ -624,3 +624,11 @@ Models are presented with some of:
 - all instances and flow positions (maybe line numbers)
 
 input variables must be accessible
+
+- warn on bitwise operators over booleans, and a cast to say it is meant
+
+  `!B & !C` (single &) in formulas/varp/saturate2.varp parses as the
+  bitwise and of two booleans and happens to mean the same thing, but
+  it is a slip most of the time. A warning like --undeclared, and a
+  cast syntax so an intentional mix (encodings, a bit used as a
+  boolean, a boolean packed into a vector) stays quiet.

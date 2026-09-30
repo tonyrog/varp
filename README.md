@@ -131,7 +131,10 @@ search. Follow one with `bt` or `bj`:
 
     --formula, -f <string>     formula on the command line (repeatable)
     --print, -p <how>          false|literal|erlang|model|dimacs   (model)
-                               false suppresses the summary line too
+                               false suppresses the summary line too;
+                               literal prints false literals as well and
+                               a substituted Y whose representative X has
+                               no value as Y=X (or Y=!X)
     --method <how>             collect|count                       (collect)
     --timeout, -t <seconds>    float|infinity                      (infinity)
     --log <level>              debug|info|...|none                 (none)
@@ -143,6 +146,9 @@ search. Follow one with `bt` or `bj`:
     --version, -V              print the version
     --help, -h[=<plugin>]      this, or a plugin's options
     --lib <dir>                circuit library, <name>.varp loaded on use
+    --hex                      print unsigned vector values in hex
+    --check                    parse and build only; an undeclared symbol
+                               is an error with its line (and a guess)
                                (lib/default: op_add, op_mul, op_lt, ...)
 
 Encoding and search behaviour:
@@ -234,6 +240,26 @@ prints a counterexample as a trace, one row per step:
                 --subst, -s <bool>    substitute equal literals (true)
                 --friend, -f <N>  --seq, -q <N>  --random, -r <N>
                 --timeout, -t <s>                          (infinity)
+                --model <bool>        stop with a model found (true)
+                --warn <bool>         warn when the main variable is
+                                      unbound, no sat before  (true)
+
+    saturate probes: every vector of level + seq + friend + random
+    unbound variables is propagated in all its assignments, and what
+    every consistent assignment agrees on is kept (a value, or with
+    --subst an equivalence Y=X). All assignments inconsistent means the
+    formula is. One assignment that binds every variable is a model,
+    reported at once and the run stops (--model false to just go on,
+    for instance to enumerate all models with bt --max 0 after it).
+    It warns when the main variable is unbound, since that is mostly
+    a forgotten sat; --warn=false when the clauses alone are the point.
+    It needs the main variable bound, so put sat (or
+    unsat, prove) before it: with the message bits ordered first and a
+    vector of one byte, the unknown byte of an md5 preimage is such a
+    model:
+
+        varp sat order --first=X saturate -k=1 -seq=7 \
+             msg='hello *orld' digest=5eb63bbbe01eeed093cb22bb8f5acdc3 md5.varp
 
     reduction   --size, -n <N>|all                                 (0)
     rat         --type, -r both|min|pos|neg                      (min)
@@ -259,6 +285,8 @@ covers circuits, and [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md)
 transition systems (`system { state ... next ... reach ... }`, channels
 and instances) for bounded model checking; `formulas/varp/fpga.varp` and
 `fpga_adder.varp` compute lookup table configurations from a target
+circuit, `md5.varp` is MD5 as a circuit (`varp sat bj md5.varp fox.txt`
+prints the digest, the message file read by an input module),
 circuit (bit m of the table is the target on the bits of m), and
 `fpga_fabric.varp` programs a net of four cells with routing bits into a
 2 bit adder. A taste:
@@ -301,7 +329,10 @@ options, so a library and the formula that uses it can be separate:
 
     varp sat bj lib/arith.varp puzzle.varp
 
-With no file varp reads standard input.
+With no file varp reads standard input.  A `.txt` or `.dat` file is
+data for the input modules a formula declares (`input md5_io;`), line
+`recno` of it, or with no file at all the bindings (`msg="hello"`);
+see `src/varp_input.erl` for the module protocol.
 
 GUI and packaging
 -----------------

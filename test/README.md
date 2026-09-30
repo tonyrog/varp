@@ -18,7 +18,7 @@ To run a single suite:
 |------------------------|----------------------------------------------------------|
 | `varp_tc`              | helpers, not a test module                               |
 | `varp_scan_tests`      | `varp_scan.xrl` / `varp_scani.xrl`, tokens and comments  |
-| `varp_parse_tests`     | `varp_parse.yrl`, ASTs, precedence, sections, circuits, and the `formulas/varp` corpus |
+| `varp_parse_tests`     | `varp_parse.yrl`, ASTs, precedence, sections, circuits, and the `test/formulas/varp` corpus |
 | `varp_formula_tests`   | `varp_formula:build/2` - connectives, quantifiers, arithmetic, vectors, defines |
 | `varp_circuit_tests`   | `varp_circuit:test/0` plus the `circuit` language construct |
 | `varp_arith_tests`     | `varp_arith:test/0` and `varp_bitvec`/`varp_math`         |
@@ -57,7 +57,12 @@ today are listed twice, on purpose:
   * `varp_parse_tests:grammar_limitation_test_/0` asserts that each of
     them is *still* a syntax error, so fixing the grammar makes the
     test fail and reminds you to trim the list
-  * `varp_parse_tests:?XFAIL` names the files under `formulas/varp`
+  * `varp_parse_tests:?XFAIL` names the files under `test/formulas/varp`
+
+`test/formulas/` holds copies of the formulas the tests read; `formulas/`
+itself is a scratch area and nothing in it is run by the tests. A new
+example a test needs is copied here, and every file here must parse
+(or be on the XFAIL list).
     that do not parse, with the reason
 
 `varp_backend_tests` has the same arrangement for `?CNF_XFAIL` and

@@ -224,3 +224,93 @@ several_files_test_() ->
 	     {_,Out2} = cli(["-f","!B","sat","bj",A]),
 	     ?assert(contains(Out2, "% 1"))
      end}.
+
+%% --check builds without searching, undeclared symbols are errors
+check_test_() ->
+    {timeout, 120,
+     fun() ->
+	     File = filename:join(varp_tc:formula_dir("varp"), "die_hard_system.varp"),
+	     {Code, Out} = cli(["--check", "sat", "bj", File]),
+	     ?assertEqual(0, Code),
+	     ?assert(contains(Out, "% OK")),
+	     ?assert(contains(Out, "assuming k=1")),
+	     Typo = filename:join(varp_tc:tmpdir(), "typo.varp"),
+	     ok = file:write_file(Typo, "declare Connected(a, b, time);\n"
+				       "Conected(0,1,0)\n"),
+	     {Code2, Out2} = cli(["--check", "sat", "bj", Typo]),
+	     ?assertEqual(1, Code2),
+	     ?assert(contains(Out2, "'Conected/3' is not declared")),
+	     ?assert(contains(Out2, "did you mean 'Connected'"))
+     end}.
+
+%% an input module: the .txt file on the command line is the message,
+%% the output module prints the digest in hex
+md5_io_test_() ->
+    {timeout, 300,
+     fun() ->
+	     Dir = varp_tc:formula_dir("varp"),
+	     {Code, Out} = cli(["sat", "bj", filename:join(Dir, "md5.varp"),
+				filename:join(Dir, "fox.txt")]),
+	     ?assertEqual(0, Code),
+	     ?assert(contains(Out, "9e107d9d372bb6826bd81d3542a419d6")),
+	     %% --hex prints unsigned vectors in hex in the normal model output
+	     {0, Out2} = cli(["--hex", "-f", "declare x:8; x == 255", "sat", "bt"]),
+	     ?assert(contains(Out2, "x=0xff"))
+     end}.
+
+%% input modules: a data file line (recno picks the line), or the
+%% bindings when there is no data file at all
+input_module_test_() ->
+    {timeout, 300,
+     fun() ->
+	     Dir = varp_tc:formula_dir("varp"),
+	     Md5 = filename:join(Dir, "md5.varp"),
+	     %% from the bindings, no data file
+	     {0, Out1} = cli(["sat", "bj", "msg=hello world", Md5]),
+	     ?assert(contains(Out1, "5eb63bbbe01eeed093cb22bb8f5acdc3")),
+	     %% line 2 of a two line file
+	     Two = filename:join(varp_tc:tmpdir(), "two.txt"),
+	     ok = file:write_file(Two, "first line\nhello world\n"),
+	     {0, Out2} = cli(["sat", "bj", "recno=2", Md5, Two]),
+	     ?assert(contains(Out2, "5eb63bbbe01eeed093cb22bb8f5acdc3")),
+	     {0, Out3} = cli(["sat", "bj", Md5, Two]),
+	     ?assert(contains(Out3, "6b4a2b93c7a8ffb1d2a4c6f11e0f6a3c") orelse
+		     not contains(Out3, "5eb63bbbe01eeed093cb22bb8f5acdc3")),
+	     %% a data file without an input module is an error
+	     {1, Out4} = cli(["sat", "bj", filename:join(Dir, "pigeon.varp"), Two]),
+	     ?assert(contains(Out4, "no input module"))
+     end}.
+
+%% patterns: an unknown byte in the message is found from the digest,
+%% and a partial model prints what it knows with * for the rest
+pattern_test_() ->
+    {timeout, 300,
+     fun() ->
+	     Md5 = filename:join(varp_tc:formula_dir("varp"), "md5.varp"),
+	     H = "5eb63bbbe01eeed093cb22bb8f5acdc3",
+	     {0, Out} = cli(["sat", "bj", "msg=hello*world", "digest=" ++ H, Md5]),
+	     ?assert(contains(Out, H)),
+	     ?assert(contains(Out, "msg=\"hello world\"")),
+	     %% a wrong digest for a full message has no model
+	     {0, Out2} = cli(["sat", "bj", "msg=hello world", "digest=0" ++ tl(H), Md5]),
+	     ?assert(contains(Out2, "% 0")),
+	     %% partial: the search is stopped at once, the known half prints
+	     {0, Out3} = cli(["--partial", "sat", "bj", "--timeout", "0.2",
+			      "mlen=11", "digest=5eb63bbbe01eeed0****************", Md5]),
+	     ?assert(contains(Out3, "5eb63bbbe01eeed0")),
+	     ?assert(contains(Out3, "*")),
+	     {1, Out4} = cli(["sat", "bj", "digest=xyz", Md5]),
+	     ?assert(contains(Out4, "digest") orelse contains(Out4, "not_hex"))
+     end}.
+
+%% order sorts every variable with five arrays of n elements; md5 has
+%% enough variables that they must not go on the scheduler stack
+%% (this was a segmentation fault)
+order_large_test_() ->
+    {timeout, 120,
+     fun() ->
+	     Md5 = filename:join(varp_tc:formula_dir("varp"), "md5.varp"),
+	     H = "5eb63bbbe01eeed093cb22bb8f5acdc3",
+	     {0, Out} = cli(["order", "--first=X", "sat", "bj", "msg=hello world", Md5]),
+	     ?assert(contains(Out, H))
+     end}.

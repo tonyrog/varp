@@ -12,7 +12,7 @@
 -export([run/2]).
 -export([options/0]).
 -export([saturate/5, saturate/6]).
--export([saturate/8, saturate/9]).
+-export([saturate/8, saturate/9, saturate/10]).
 
 %% -define(DEBUG, true).
 %% -compile(export_all).
@@ -77,10 +77,23 @@ options() ->
 	spec  =>  {enum,[?BOOL]},
 	default => true,
 	description => "Enable substitution"
+      },
+     #{ long  => "model",
+	key   => model,
+	spec  =>  {enum,[?BOOL]},
+	default => true,
+	description => "Stop with the model when an assignment binds every variable"
+      },
+     #{ long  => "warn",
+	key   => warn,
+	spec  =>  {enum,[?BOOL]},
+	default => true,
+	description => "Warn when the main variable is unbound (no sat/unsat/prove before)"
       }
      ].
 
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
+    maps:get(warn, Param, true) andalso warn_unbound_main(Bs),
     varp_nif:setopt(Bs#bs.vp, max_conflicting, 1),
     K = maps:get(level, Param, 1),
     Q = maps:get(q, Param, 1),
@@ -90,8 +103,28 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Threshold = maps:get(threshold, Param, 0),
     Laps = maps:get(laps, Param, infinity),
     Subst = maps:get(subst, Param, true),
+    Model = maps:get(model, Param, true),
     ?dbg0("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
-    saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold,Subst).
+    saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold,Subst,Model).
+
+%% probing propagates from what is bound; without the main variable
+%% (sat, unsat or prove before saturate) nothing much is. Saturating
+%% just the clauses is a use as well, --warn=false then
+warn_unbound_main(Bs) ->
+    case Bs#bs.main of
+	Main when is_integer(Main), Main =/= ?T, Main =/= ?F ->
+	    case varp_nif:value(Bs#bs.vp, Main) of
+		undefined ->
+		    io:format("saturate: the main variable is not bound, "
+			      "put sat, unsat or prove before saturate "
+			      "(--warn=false if that is intended)\n");
+		_ ->
+		    ok
+	    end;
+	_ ->
+	    ok
+    end,
+    ok.
 
 saturate(Bs,K,Timeout,MaxLaps,Threshold) ->
     saturate(Bs,K,Timeout,MaxLaps,Threshold,true).
@@ -103,6 +136,12 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
     saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold, true).
 
 saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst) ->
+    saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,true).
+
+%% Model: report a model when an assignment of a vector binds every
+%% variable (a search plugin after saturate finds it as well, but this
+%% is the assignment just made, at once)
+saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model) ->
     varp_nif:setopt(Bs#bs.vp, xref, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     N = varp:get_number_of_bound_variables(Bs#bs.vp),
@@ -112,17 +151,28 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst) ->
 			varp:make_friend_map(Bs#bs.vp)
 		end,
     %% io:format("FriendMap = ~w\n", [FriendMap]),
-    case loop(Bs1,K,Q,F,R,N,MaxLaps,Threshold,Subst,FriendMap) of
+    OnModel = if Model -> fun() -> varp:output_model(Bs1, false, 1) end;
+		 true -> undefined
+	      end,
+    case loop(Bs1,K,Q,F,R,N,MaxLaps,Threshold,Subst,FriendMap,OnModel) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
+	{model, Found} ->
+	    %% one assignment of a vector bound every variable
+	    varp_nif:setopt(Bs1#bs.vp, xref, false),
+	    Acc = case varp_nif:getopt(Bs1#bs.vp, method) of
+		      collect -> [Found];
+		      count -> 1
+		  end,
+	    {?DONE,Acc,Bs1};
 	{Reason,Bs2} -> 
 	    varp_nif:setopt(Bs2#bs.vp, xref, false),
 	    ?dbg0("saturate limit ~w\n", [Reason]),
 	    {Reason,[],Bs2}
     end.
 
-loop(Bs,K,Q,F,R,N,Laps,Threshold,Subst,FriendMap) ->
-    case lap(Bs,K,Q,F,R,Subst,FriendMap) of
+loop(Bs,K,Q,F,R,N,Laps,Threshold,Subst,FriendMap,OnModel) ->
+    case lap(Bs,K,Q,F,R,Subst,FriendMap,OnModel) of
 	true ->
 	    N1 = varp:get_number_of_bound_variables(Bs#bs.vp),
 	    ?dbg0("Laps=~w n=~w\n", [Laps, N]),
@@ -132,7 +182,7 @@ loop(Bs,K,Q,F,R,N,Laps,Threshold,Subst,FriendMap) ->
 	       Laps1 =:= 0 ->
 		    loop_done(?ITERATIONS,Laps,Bs);
 	       true ->
-		    loop(Bs,K,Q,F,R,N1,Laps1,Threshold,Subst,FriendMap)
+		    loop(Bs,K,Q,F,R,N1,Laps1,Threshold,Subst,FriendMap,OnModel)
 	    end;
 	Result -> Result
     end.
@@ -145,13 +195,13 @@ loop_done(Reason, _Laps, Bs) ->
 %% R number of randomly selected variables
 %% Variables in every eval is K+Q+R
 
-lap(Bs,K,Q,F,R,Subst,FriendMap) ->
+lap(Bs,K,Q,F,R,Subst,FriendMap,OnModel) ->
     case varp:vec_create(Bs#bs.vp, varp_nif:next_unbound(Bs#bs.vp), K) of
 	[] -> true;
-	Vec0 -> lap_(Bs,Vec0,Q,F,R,1,Subst,FriendMap)
+	Vec0 -> lap_(Bs,Vec0,Q,F,R,1,Subst,FriendMap,OnModel)
     end.
 
-lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap) when Count band ?COUNT =:= 0 ->
+lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) when Count band ?COUNT =:= 0 ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,?TIMEOUT} ->
@@ -165,17 +215,18 @@ lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap) when Count band ?COUNT =:= 0 ->
 	{true,What} ->
 	    {What, Bs};
 	false ->
-	    lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap)
+	    lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel)
     end;
-lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap) ->
-    lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap).
+lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) ->
+    lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel).
 
-lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap) ->
-    case varp:vec_sat(Bs#bs.vp,Vec0,Q,F,R,Subst,FriendMap) of
+lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) ->
+    case varp:vec_sat(Bs#bs.vp,Vec0,Q,F,R,Subst,FriendMap,OnModel) of
 	false -> false;
+	{model, _} = Found -> Found;
 	true ->
 	    case varp:vec_step(Bs#bs.vp, Vec0) of
 		false -> true;
-		Vec1 -> lap_(Bs,Vec1,Q,F,R,Count+1,Subst,FriendMap)
+		Vec1 -> lap_(Bs,Vec1,Q,F,R,Count+1,Subst,FriendMap,OnModel)
 	    end
     end.

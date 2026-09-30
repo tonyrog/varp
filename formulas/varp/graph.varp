@@ -1,0 +1,11 @@
+//
+// Graph with n nodes and m edges
+//
+
+[A i=1..n] V(i) &&
+[A i=1..n, j=1..n] (E(i,j) -> V(i) && V(j)) &&
+// no loops
+not [E i=1..n] E(i,i) &&
+// connected V(i) and V(j)
+[A i=1..n,j=1..n] (E(i,j) || [E k=1..n] (E(i,k) && E(k,j)))
+

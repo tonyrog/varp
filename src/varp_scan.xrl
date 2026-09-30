@@ -33,6 +33,7 @@ assert              : {token,{'assert',TokenLine}}.
 circuit             : {token,{'circuit',TokenLine}}.
 input               : {token,{'input',TokenLine}}.
 import              : {token,{'import',TokenLine}}.
+meta                : {token,{'meta',TokenLine}}.
 in                  : {token,{'in',TokenLine}}.
 output              : {token,{'output',TokenLine}}.
 out                 : {token,{'out',TokenLine}}.
@@ -108,7 +109,7 @@ max                 : {token,{'max',TokenLine}}.
 0{D}+{IS}?          : {token,{octnum,TokenLine,TokenChars}}.
 {D}+{IS}?           : {token,{decnum,TokenLine,TokenChars}}.
 
-'(\^.|\.|[^\'])+'	    : {token,{chrnum,TokenLine,TokenChars}}.
+'		    : {token,{'\'',TokenLine}}.
 
 %% floating point not yet supported!
 %% {D}+{E}{FS}?	      : {token,{flonum,TokenLine,TokenChars}}.

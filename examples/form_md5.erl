@@ -217,7 +217,6 @@ md5_block(W,Bs0) ->
     {D2,Bs9} = varp_formula:operation('+',D0,D1,Bs8),
     {{A2,B2,C2,D2},Bs9}.
 
-
 md5_(I,W,A,B,C,D,Bs) when I < 16 ->
     %% F = {'|',{'&',B,C},{'&',{'~',B},D}},
     {B1,Bs1} = varp_formula:operation('~',B,Bs),

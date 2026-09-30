@@ -476,3 +476,77 @@ size_unification_test_() ->
 	      ?assertEqual(5, Get("circuit add2(in a:n, b:n; return s:n) { s = a + b; }\n"
 				  "declare A:3, B:3;\nadd2(A, B) == 7 && A == 2", "B"))
       end}}].
+
+%%%-------------------------------------------------------------------
+%%% Meta parameters and arrays: "circuit c(meta i; ...)" takes an
+%%% integer at build time, "define K = [..]" is indexed by it
+%%%-------------------------------------------------------------------
+
+meta_parameter_test_() ->
+    Lib = "define K = [10, 20, 30, 40];\n"
+	"circuit pick(meta i; return r:8) { r = K[i]; }\n"
+	"circuit shift(meta i; in x:8; return r:8) { r = x << i; }\n",
+    [{"an array element by a meta parameter", {timeout, 60,
+      fun() ->
+	      [M] = models(Lib ++ "declare v:8; v = pick(2); true"),
+	      ?assertEqual(30, proplists:get_value("v", M))
+      end}},
+     {"a quantifier variable as the argument", {timeout, 60,
+      fun() ->
+	      [M] = models(Lib ++ "declare V(j):8; [A j=0..3] V(j) = pick(j); true"),
+	      ?assertEqual([10,20,30,40],
+			   [proplists:get_value("V("++integer_to_list(J)++")", M) || J <- [0,1,2,3]])
+      end}},
+     {"a meta parameter in an expression", {timeout, 60,
+      fun() ->
+	      [M] = models(Lib ++ "declare x:8, y:8; x == 3 && y == shift(2, x)"),
+	      ?assertEqual(12, proplists:get_value("y", M))
+      end}},
+     {"an array of formulas", {timeout, 60,
+      fun() ->
+	      Ms = models("declare p, q, r;\ndefine F = [p, q, r];\n"
+			  "[A i=0..2] (F[i] equ (i == 1))"),
+	      ?assertEqual([[{"q",true}]], [[B || B = {_,true} <- M] || M <- Ms])
+      end}},
+     {"errors", {timeout, 60,
+      fun() ->
+	      ?assertError({array_index,<<"K">>,4,4}, models(Lib ++ "declare v:8; v = pick(4); true")),
+	      ?assertError({circuit_meta_argument,<<"pick">>,<<"i">>,_},
+			   models(Lib ++ "declare v:8, w:8; v = pick(w); true"))
+      end}}].
+
+%% md5 as a circuit: the message words come from md5_io (the input
+%% module of the file), here as a formula appended in place of "true"
+md5_test_() ->
+    Digest = fun(Msg) ->
+		     {ok, _Meta, F} = md5_io:input(Msg, #{}),
+		     Text = read_formula("md5.varp"),
+		     %% the bytes of each word are pinned one by one; sum them
+		     Bytes = [{J, V bsl Lo}
+			      || {lop,eq,{bitrange,{p,<<"M">>,[J]},Lo,_,1},{const,V}} <- flatten_and(F)],
+		     Sum = lists:foldl(fun({J, X}, Acc) -> maps:update_with(J, fun(Y) -> X bor Y end, X, Acc) end,
+				       #{}, Bytes),
+		     Words = [io_lib:format("M(~w) == ~w", [J, V]) || {J, V} <- maps:to_list(Sum)],
+		     Body = lists:flatten(lists:join(" && ", Words)),
+		     T = lists:flatten(string:replace(Text, "\ntrue\n", "\n" ++ Body ++ "\n", all)),
+		     [M] = models(T),
+		     io_lib:format("~32.16.0b", [proplists:get_value("digest", M)])
+	     end,
+    [{"empty", {timeout, 300,
+      fun() -> ?assertEqual("d41d8cd98f00b204e9800998ecf8427e", lists:flatten(Digest(<<>>))) end}},
+     {"hello world", {timeout, 300,
+      fun() -> ?assertEqual("5eb63bbbe01eeed093cb22bb8f5acdc3", lists:flatten(Digest(<<"hello world">>))) end}},
+     {"too long", fun() -> ?assertMatch({error,{message_too_long,_,55}}, md5_io:input(binary:copy(<<"x">>, 56), #{})) end}].
+
+flatten_and({lop,'and',A,B}) -> flatten_and(A) ++ flatten_and(B);
+flatten_and(F) -> [F].
+
+%% the meta functions len and byte over a string binding, and ?: at
+%% the meta level
+meta_string_test() ->
+    Ms = varp_tc:models("define L len(msg);
+declare N:8;
+"
+			"[A i=0..L-1] (B(i) equ (byte(msg, i) == 98)) && N == (L > 2 ? byte(msg, 2) : 0)",
+			#{meta => #{<<"msg">> => "abc"}}),
+    ?assertEqual([[{"B(0)",false},{"B(1)",true},{"B(2)",false},{"N",99}]], Ms).

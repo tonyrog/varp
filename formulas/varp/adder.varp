@@ -1,0 +1,25 @@
+
+declare C:4;
+
+circuit half_adder(in y, z; return x; out co)
+{
+    x = y xor z;
+    co = y and z;
+}
+
+circuit adder(in y, z; in ci; return x; out co)
+{
+  declare yz;
+  yz = (y xor z);
+  x = yz xor ci;
+  co = (y and z) or (ci and yz);
+}
+
+c0 = half_adder(a0, b0, co0);
+c1 = adder(a1, b1, co0, co1);
+c2 = adder(a2, b2, co1, co2);
+c3 = adder(a3, b3, co3, co3);
+
+a0 && b0 && !co1 && !co2 && !co3 && 
+(C[0]==c0) && (C[1]==c1) && (C[2]==c2) && (C[3]==c3) &&
+(C > 10)

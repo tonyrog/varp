@@ -42,6 +42,7 @@
 -define(S, <<"$s">>).   %% step variable of the unrolling quantifiers
 -define(L, <<"$l">>).   %% loop step of a lasso
 -define(BOUND, <<"k">>). %% the binding the default formula uses
+-define(TIME, <<"time">>). %% the parameter that is the step index
 -define(ALL, <<"$all">>).            %% the composition of all systems
 -define(ALL_INIT, <<"$all_init">>).
 -define(ALL_NEXT, <<"$all_next">>).
@@ -98,8 +99,10 @@ expand_defs([], _PS, Acc, Systems) ->
 %% {states, inputs} declared anywhere in the file
 shared_names(Defs) ->
     Items = lists:append([Is || {system,_,_,Is,_} <- Defs]),
-    #{ states => lists:usort([decl_name(D) || {state,Ds} <- Items, D <- Ds]),
-       inputs => lists:usort([decl_name(D) || {input,Ds} <- Items, D <- Ds]) }.
+    Ds = [D || {Tag,Ds0} <- Items, Tag =:= state orelse Tag =:= input, D <- Ds0],
+    #{ states => lists:usort([decl_name(D) || {state,Ds1} <- Items, D <- Ds1]),
+       inputs => lists:usort([decl_name(D) || {input,Ds1} <- Items, D <- Ds1]),
+       times => maps:from_list([{decl_name(D), time_pos(D)} || D <- Ds]) }.
 
 %% ------------------------------------------------------------------
 %% Instances: "instance p1 = producer(out = ch1);" copies the template
@@ -314,9 +317,15 @@ expand({system, Name, Params, Items, _Line}, Path, Shared) ->
 expand({system, Name, _Params, Items}, Path, Shared) ->
     States = [decl_name(D) || {state,Ds} <- Items, D <- Ds],
     Inputs = [decl_name(D) || {input,Ds} <- Items, D <- Ds],
-    %% own declarations first: they decide the kind of a name
+    %% own declarations first: they decide the kind of a name.  A
+    %% declaration names the position of the time index, "state
+    %% Connected(a, b, time)"; without it the time is last
+    Times = maps:from_list([{decl_name(D), time_pos(D)}
+			    || {Tag,Ds} <- Items, Tag =:= state orelse Tag =:= input,
+			       D <- Ds]),
     Vars = #{ states => States ++ (maps:get(states, Shared) -- Inputs),
-	      inputs => Inputs ++ (maps:get(inputs, Shared) -- States) },
+	      inputs => Inputs ++ (maps:get(inputs, Shared) -- States),
+	      times => maps:merge(maps:get(times, Shared, #{}), Times) },
     Decls = [{declare, [index_decl(D) || D <- Ds]}
 	     || {Tag,Ds} <- Items, Tag =:= state orelse Tag =:= input],
     Init = conj([E || {init,E} <- Items]),
@@ -469,10 +478,34 @@ channel_op({recv,Ch,X,C}) ->
 decl_name({{p,Name,_},_Type,_Width}) -> Name;
 decl_name({p,Name,_}) -> Name.
 
+%% the declared parameters with a "time" among them, last by default
 index_decl({{p,Name,Params},Type,Width}) ->
-    {{p,Name,Params++[?T]},Type,Width};
+    {{p,Name,with_time(Params)},Type,Width};
 index_decl({p,Name,Params}) ->
-    {p,Name,Params++[?T]}.
+    {p,Name,with_time(Params)}.
+
+with_time(Params) ->
+    case lists:member(?TIME, Params) of
+	true -> Params;
+	false -> Params ++ [?TIME]
+    end.
+
+%% 0 based position of the time index of a declaration
+time_pos(D) ->
+    {p,_,Params} = decl_pexpr(D),
+    case string:str(Params, [?TIME]) of
+	0 -> length(Params);          %% appended by with_time
+	I -> I - 1
+    end.
+
+decl_pexpr({P={p,_,_},_Type,_Width}) -> P;
+decl_pexpr(P={p,_,_}) -> P.
+
+%% put the step at the time position of Name's declaration
+at_time(Name, Params, Step, #{ vars := #{ times := Times } }) ->
+    Pos = maps:get(Name, Times, length(Params)),
+    {Before, After} = lists:split(min(Pos, length(Params)), Params),
+    Before ++ [Step] ++ After.
 
 %% ------------------------------------------------------------------
 %% properties, unrolled to the bound $k
@@ -528,7 +561,8 @@ rw(Name, Ctx) when is_binary(Name) ->
 rw({p, <<"next">>, [Arg]}, Ctx=#{ mode := next }) ->
     case next_arg(Arg, Ctx) of
 	{Name, Params} ->
-	    {p, Name, [rw(P, Ctx) || P <- Params] ++ [maps:get(idx, Ctx)]};
+	    {p, Name, at_time(Name, [rw(P, Ctx) || P <- Params],
+			      maps:get(idx, Ctx), Ctx)};
 	false ->
 	    erlang:error({system, {next_of_non_state, Arg}})
     end;
@@ -538,7 +572,7 @@ rw({p, Name, Params}, Ctx) ->
     Params1 = [rw(P, Ctx) || P <- Params],
     case var_kind(Name, Ctx) of
 	none -> {p, Name, Params1};
-	Kind -> {p, Name, Params1 ++ [step(Kind, Ctx)]}
+	Kind -> {p, Name, at_time(Name, Params1, step(Kind, Ctx), Ctx)}
     end;
 rw({{Q, Binds}, Body}, Ctx) when is_list(Binds) ->
     %% quantifier: its variables shadow state names in the body

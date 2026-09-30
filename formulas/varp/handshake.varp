@@ -1,0 +1,44 @@
+// Two machines talking: a sender and a receiver connected by a
+// valid/ready handshake, one byte per transfer.  Systems in one file
+// compose synchronously, and a name declared in both is one shared
+// variable: the sender writes data/valid, the receiver writes ready,
+// and each reads the other's value from the previous step.
+//
+//     varp bmc formulas/varp/handshake.varp
+//
+// asks for the shortest run in which the receiver has added up "ABC".
+// The receiver may stall (toggle its ready), so the run also shows
+// the sender holding data while ready is low.
+
+system sender {
+    state data:8, valid, count:4;   // count = bytes handed over
+    state ready;                     // written by the receiver
+    input go;                        // when to offer the next byte
+
+    init  not valid and count == 0;
+
+    // idle: offer the next byte when told to
+    next  (not valid and go) implies
+              (next(valid) and next(data) == count + 65 and next(count) == count);
+    next  (not valid and not go) implies
+              (not next(valid) and next(count) == count);
+    // offering: handed over when the receiver was ready
+    next  (valid and ready) implies
+              (not next(valid) and next(count) == count + 1);
+    next  (valid and not ready) implies
+              (next(valid) and next(data) == data and next(count) == count);
+}
+
+system receiver {
+    state ready, sum:8;
+    state data:8, valid;             // written by the sender
+    input stall;
+
+    init  ready and sum == 0;
+
+    next  (valid and ready) implies (next(sum) == sum + data);
+    next  (not (valid and ready)) implies (next(sum) == sum);
+    next  next(ready) == not stall;
+
+    reach sum == 65 + 66 + 67;       // "ABC" received
+}
