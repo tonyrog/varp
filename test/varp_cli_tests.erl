@@ -9,8 +9,8 @@
 
 cli(Args) -> varp_tc:cli(Args).
 
-f(Name) -> filename:join([varp_tc:top(), "formulas", "varp", Name]).
-d(Name) -> filename:join([varp_tc:top(), "formulas", "dimacs", Name]).
+f(Name) -> filename:join(varp_tc:formula_dir("varp"), Name).
+d(Name) -> filename:join(varp_tc:formula_dir("dimacs"), Name).
 
 contains(Out, Text) ->
     string:find(Out, Text) =/= nomatch.

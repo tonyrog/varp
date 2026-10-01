@@ -120,6 +120,10 @@ system_item -> 'invariant' lexpr ';'   : {invariant,'$2'}.
 system_item -> 'reach' lexpr ';'       : {reach,'$2'}.
 system_item -> 'eventually' lexpr ';'  : {eventually,'$2'}.
 system_item -> 'assume' lexpr ';'      : {assume,'$2'}.
+%% a macro of the system: inlined into the other items before the
+%% step index is added, so 'X and state names in it mean what they
+%% mean in the item, and an argument may be a state, push(b, T(a,1))
+system_item -> 'define' pexpr lexpr ';' : {define,'$2','$3'}.
 system_item -> 'send' sym lexpr ';'    : {send,'$2','$3',true}.
 system_item -> 'send' sym lexpr 'when' lexpr ';' : {send,'$2','$3','$5'}.
 system_item -> 'recv' sym sym ';'      : {recv,'$2','$3',true}.

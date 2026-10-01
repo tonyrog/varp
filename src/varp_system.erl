@@ -284,6 +284,11 @@ composite(Names, Systems) ->
 	 inputs => lists:usort(lists:append([maps:get(inputs,I) || {_,_,I} <- Systems])),
 	 props => lists:append([maps:get(props,I) || {_,_,I} <- Systems]) }}].
 
+format_error({define_arguments, Name, N, M}) ->
+    lists:flatten(io_lib:format("the system macro ~s takes ~w arguments, called with ~w",
+				[Name, N, M]));
+format_error({define_recursion, Name}) ->
+    lists:flatten(io_lib:format("the system macro ~s calls itself", [Name]));
 format_error(next_outside_next) ->
     "next(...) is only allowed in the next item of a system";
 format_error({next_of_non_state, _Arg}) ->
@@ -314,7 +319,9 @@ expand(S) -> expand(S, undefined, #{ states => [], inputs => [] }).
 %% the state and input names of the other systems.
 expand({system, Name, Params, Items, _Line}, Path, Shared) ->
     expand({system, Name, Params, Items}, Path, Shared);
-expand({system, Name, _Params, Items}, Path, Shared) ->
+expand({system, Name, _Params, Items0}, Path, Shared) ->
+    %% the macros of the system are inlined first
+    Items = inline_items(Items0),
     States = [decl_name(D) || {state,Ds} <- Items, D <- Ds],
     Inputs = [decl_name(D) || {input,Ds} <- Items, D <- Ds],
     %% own declarations first: they decide the kind of a name.  A
@@ -545,6 +552,95 @@ property(eventually, P, InitName, NextName, Vars) ->
      {{'ANY',[{op,'=',?L,{range,{const,0},{op,sub,?K,{const,1}}}}]}, Loop}}.
 
 %% ------------------------------------------------------------------
+%% the macros of a system: "define pop(a) ... ;" inside the body.  A
+%% call pop(1), or pop(1) as the argument of another macro (a call
+%% node), is replaced by the body with the parameters substituted, so
+%% next(X) and the state names in it are rewritten with the item that
+%% uses it.  An argument is any expression, a state cell included.
+%% ------------------------------------------------------------------
+
+-define(INLINE_DEPTH, 64).
+
+inline_items(Items) ->
+    Macros = [{{Name, length(Params)}, {Params, Body}}
+	      || {define, {p, Name, Params}, Body} <- Items],
+    case Macros of
+	[] -> Items;
+	_ ->
+	    [case I of
+		 {define, _, _} -> I;
+		 {state, _} -> I;
+		 {input, _} -> I;
+		 _ -> inline(I, Macros, ?INLINE_DEPTH)
+	     end || I <- Items]
+    end.
+
+inline({Tag, Name, Args}, Macros, Depth) when Tag =:= p; Tag =:= call ->
+    Args1 = [inline(A, Macros, Depth) || A <- Args],
+    case lists:keyfind({Name, length(Args1)}, 1, Macros) of
+	{_, _} when Depth =:= 0 ->
+	    erlang:error({system, {define_recursion, Name}});
+	{_, {Params, Body}} ->
+	    inline(substitute(Body, lists:zip(Params, Args1)), Macros, Depth-1);
+	false ->
+	    case [N || {{N,_},_} <- Macros, N =:= Name] of
+		[] -> {Tag, Name, Args1};
+		_ -> arity_error(Name, Macros, length(Args1))
+	    end
+    end;
+inline({{Q, Binds}, Body}, Macros, Depth) ->
+    {{Q, [inline(B, Macros, Depth) || B <- Binds]}, inline(Body, Macros, Depth)};
+inline(T, Macros, Depth) when is_tuple(T) ->
+    list_to_tuple([inline(X, Macros, Depth) || X <- tuple_to_list(T)]);
+inline(L, Macros, Depth) when is_list(L) ->
+    [inline(X, Macros, Depth) || X <- L];
+inline(Name, Macros, _Depth) when is_binary(Name) ->
+    %% a macro without parameters used as a name
+    case lists:keyfind({Name, 0}, 1, Macros) of
+	{_, {[], Body}} -> Body;
+	false -> Name
+    end;
+inline(X, _Macros, _Depth) ->
+    X.
+
+arity_error(Name, Macros, M) ->
+    [N|_] = [N || {{N0,N},_} <- Macros, N0 =:= Name],
+    erlang:error({system, {define_arguments, Name, N, M}}).
+
+%% the parameters of a macro body become the arguments; a parameter
+%% is a bare name or the name applied to nothing.  A quantifier in
+%% the body that binds the same name shadows it
+substitute(Body, []) -> Body;
+substitute(Name, Subst) when is_binary(Name) ->
+    case lists:keyfind(Name, 1, Subst) of
+	{_, Arg} -> Arg;
+	false -> Name
+    end;
+substitute({p, Name, []}, Subst) ->
+    case lists:keyfind(Name, 1, Subst) of
+	{_, Arg} -> Arg;
+	false -> {p, Name, []}
+    end;
+substitute({{Q, Binds}, Body}, Subst) ->
+    Bound = [V || {op,'=',V,_} <- Binds, is_binary(V)],
+    Subst1 = [S || S = {N,_} <- Subst, not lists:member(N, Bound)],
+    %% the binder keeps its name, its range is outside the binding, a
+    %% condition among the binds is inside it
+    Binds1 = [case B of
+		  {op,'=',V,Range} when is_binary(V) ->
+		      {op,'=',V,substitute(Range, Subst)};
+		  _ ->
+		      substitute(B, Subst1)
+	      end || B <- Binds],
+    {{Q, Binds1}, substitute(Body, Subst1)};
+substitute(T, Subst) when is_tuple(T) ->
+    list_to_tuple([substitute(X, Subst) || X <- tuple_to_list(T)]);
+substitute(L, Subst) when is_list(L) ->
+    [substitute(X, Subst) || X <- L];
+substitute(X, _Subst) ->
+    X.
+
+%% ------------------------------------------------------------------
 %% rewrite a body: state and input names get a step argument
 %%   init/prop: X -> X(Idx)
 %%   next:      X -> X(Idx-1), next(X) -> X(Idx), input u -> u(Idx)
@@ -572,6 +668,14 @@ rw({p, Name, Params}, Ctx) ->
     Params1 = [rw(P, Ctx) || P <- Params],
     case var_kind(Name, Ctx) of
 	none -> {p, Name, Params1};
+	Kind -> {p, Name, at_time(Name, Params1, step(Kind, Ctx), Ctx)}
+    end;
+%% the argument of a define call is parsed as a call node: a state or
+%% input there is the predicate at this step, PUSH(2, Tower(1,1))
+rw({call, Name, Params}, Ctx) when is_binary(Name) ->
+    Params1 = [rw(P, Ctx) || P <- Params],
+    case var_kind(Name, Ctx) of
+	none -> {call, Name, Params1};
 	Kind -> {p, Name, at_time(Name, Params1, step(Kind, Ctx), Ctx)}
     end;
 rw({{Q, Binds}, Body}, Ctx) when is_list(Binds) ->

@@ -630,6 +630,8 @@ load_error({error, Reason}, _GOpts) ->
 	    io:format("the digest pattern has ~w nibbles, ~w wanted\n", [N, Want]);
 	{digest, {not_hex, C}} ->
 	    io:format("'~s' in the digest is not a hex digit or *\n", [C]);
+	{_Line, Mod, _Msg} when is_atom(Mod) ->
+	    ok;   %% a parse error, printed where it happened
 	Other when is_tuple(Other) ->
 	    io:format("input: ~p\n", [Other]);
 	_ ->

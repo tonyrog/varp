@@ -35,7 +35,19 @@ found_at_six_test_() ->
 	     ?assertEqual({1,["5","0"],["fill_big"]}, lists:nth(2, Rows)),
 	     Text1 = lists:flatten(varp_bmc:format_trace(Model)),
 	     ?assert(string:find(Text1, "step") =/= nomatch),
-	     ?assert(string:find(Text1, "fill_big") =/= nomatch)
+	     ?assert(string:find(Text1, "fill_big") =/= nomatch),
+	     %% with the input names, an input is listed on the row it
+	     %% was chosen in (the one it leads away from); the last
+	     %% row has none and the free input of step 0 is dropped
+	     Inputs = [<<"fill_small">>,<<"fill_big">>,<<"empty_small">>,
+		       <<"empty_big">>,<<"small_to_big">>,<<"big_to_small">>],
+	     {_, Rows3} = varp_bmc:trace(Model, #{}, Inputs),
+	     ?assertEqual({0,["0","0"],["fill_big"]}, hd(Rows3)),
+	     ?assertEqual({6,["4","3"],[]}, lists:last(Rows3)),
+	     ?assertEqual([S || {S,_,_} <- Rows], [S || {S,_,_} <- Rows3]),
+	     [?assertEqual(I, I3) || {{_,_,[I]}, {_,_,[I3]}} <- lists:zip(tl(Rows), lists:droplast(Rows3))],
+	     Text3 = lists:flatten(varp_bmc:format_trace(Model, #{}, Inputs)),
+	     ?assertEqual(nomatch, string:find(Text3, " \n"))
      end}.
 
 bound_too_small_test_() ->
@@ -377,3 +389,19 @@ global_no_properties_test_() ->
       ?_assertNot(Sat(Go(true, "A(2) == 3", 2)))},
      {"a -f survives: reachable value is satisfiable",
       ?_assert(Sat(Go(true, "A(2) == 2", 2)))}].
+
+%% Towers of Hanoi written with system macros (doc/MODEL_CHECKING.md):
+%% the shortest solution has 2^n - 1 moves
+hanoi_test_() ->
+    {timeout, 300,
+     fun() ->
+	     Text = read("hanoi_macros.varp"),
+	     {R, [Model|_], _} = varp_tc:run(Text, [{bmc,[{k_max,8}]}], #{meta => #{<<"n">> => 3}}),
+	     ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	     {_, Rows} = varp_bmc:trace(Model),
+	     ?assertEqual(8, length(Rows)),
+	     {7, Vals, _} = lists:last(Rows),
+	     ?assertEqual(["0","0","0","0","0","0","1","2","3"], Vals),
+	     ?assertMatch({?INCONSISTENT, [], _},
+			  varp_tc:run(Text, [{bmc,[{k_max,6}]}], #{meta => #{<<"n">> => 3}}))
+     end}.

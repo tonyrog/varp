@@ -21,7 +21,7 @@
 -behaviour(varp_plugin).
 
 -export([options/0, run/2, drive/5]).
--export([trace/1, trace/2, format_trace/1, format_trace/2]).
+-export([trace/1, trace/2, trace/3, format_trace/1, format_trace/2, format_trace/3]).
 
 -include("varp.hrl").
 
@@ -487,7 +487,9 @@ result(_, Fmt, Args) -> io:format(Fmt, Args).
 
 %% the trace table, when wanted
 trace_out(true, Print, Model, GOpts) when Print =/= false ->
-    result(Print, "~s", [format_trace(Model, maps:get(times, GOpts, #{}))]);
+    Inputs = lists:append([maps:get(inputs, Info, [])
+			   || Info <- maps:get(systems, GOpts, [])]),
+    result(Print, "~s", [format_trace(Model, maps:get(times, GOpts, #{}), Inputs)]);
 trace_out(_Trace, _Print, _Model, _GOpts) ->
     ok.
 
@@ -535,14 +537,20 @@ with_search(Do) ->
 %% column each, true booleans are listed in the last column.
 %% ------------------------------------------------------------------
 
-trace(Model) -> trace(Model, #{}).
+trace(Model) -> trace(Model, #{}, []).
+trace(Model, Times) -> trace(Model, Times, []).
 
 %% Times: Name => position of the time parameter, from the declarations
 %% ("declare Connected(a, b, time)").  A symbol with a time parameter
 %% is a column of the table; one declared without is constant over the
 %% run and printed once above it; an undeclared symbol (die_hard.varp,
 %% system locals) is step indexed by its last integer argument.
-trace(Model, Times) ->
+%% Inputs: the input names of the systems.  next(t) relates state t-1
+%% to state t and the input of step t is the choice made in state
+%% t-1, so a boolean input of step t is listed on row t-1, the row it
+%% was taken from; the input of step 0 belongs to no row.  Other
+%% booleans (state) stay on their own row.
+trace(Model, Times, Inputs) ->
     Indexed = [{Step, {p,Name,Rest}, Value}
 	       || {{p,Name,Args}, Value} <- Model,
 		  Args =/= [],
@@ -551,11 +559,15 @@ trace(Model, Times) ->
 		  is_integer(Step)],
     Vectors = lists:usort([Var || {_, Var, {_Type,_Bits}} <- Indexed]),
     Steps = lists:usort([S || {S,_,_} <- Indexed]),
+    IsInput = fun({p,Name,_}) -> lists:member(Name, Inputs) end,
     Rows = [{S,
 	     [value(lists:keyfind(V, 1, [{Var,Val} || {S1,Var,Val} <- Indexed,
 						      S1 =:= S]))
 	      || V <- Vectors],
-	     lists:sort([var_name(Var) || {S1,Var,true} <- Indexed, S1 =:= S])}
+	     lists:sort([var_name(Var) || {S1,Var,true} <- Indexed, S1 =:= S,
+					  not IsInput(Var)] ++
+			[var_name(Var) || {S1,Var,true} <- Indexed, S1 =:= S+1,
+					  IsInput(Var)])}
 	    || S <- Steps],
     {Vectors, Rows}.
 
@@ -598,10 +610,11 @@ fmt_arg(A) when is_integer(A) -> integer_to_list(A);
 fmt_arg(A) when is_binary(A) -> binary_to_list(A);
 fmt_arg(A) -> lists:flatten(io_lib:format("~p", [A])).
 
-format_trace(Model) -> format_trace(Model, #{}).
+format_trace(Model) -> format_trace(Model, #{}, []).
+format_trace(Model, Times) -> format_trace(Model, Times, []).
 
-format_trace(Model, Times) ->
-    {Vectors, Rows} = trace(Model, Times),
+format_trace(Model, Times, Inputs) ->
+    {Vectors, Rows} = trace(Model, Times, Inputs),
     Header0 = case constants(Model, Times) of
 		  [] -> [];
 		  Cs -> ["  ", lists:join(",", [var_name({p,N,As}) ++ value_suffix(V)
@@ -630,4 +643,4 @@ format_row(Cells, Widths) ->
 		     true -> string:pad(Cell, W, leading)
 		  end
 	      end || I <- lists:seq(1, N)],
-    ["  ", string:join(Padded, "  "), "\n"].
+    [string:trim(["  ", string:join(Padded, "  ")], trailing), "\n"].

@@ -83,6 +83,8 @@ format_symbol({int,V,_N,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
 format_symbol({bitindex,V,I}) ->
     format_symbol(V)++"["++integer_to_list(I)++"]";
+format_symbol({f,Name,Args}) ->   %% a define argument that is a call
+    format_symbol({p,Name,Args});
 format_symbol(Var={p,_,_}) ->
     format_p(Var).
 

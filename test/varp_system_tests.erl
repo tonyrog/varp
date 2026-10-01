@@ -42,6 +42,65 @@ expand_test() ->
 		   {lop,add,{p,<<"x">>,[{op,sub,<<"$t">>,{const,1}}]},_}}},
 		 Next).
 
+%% a state used as the argument of a define call is parsed as a call
+%% node; it is the state at the step like any other reference
+define_argument_test() ->
+    {ok,{Defs,[],_}} =
+	parse("define PUSH(p, d) (T(p, 1) == d);\n"
+	      "system s { state T(p,y):2; input m;\n"
+	      "  init T(1,1) == 1;\n"
+	      "  next m implies PUSH(2, T(1,1)); }\n"),
+    [Next] = [B || {define,{p,<<"s_next">>,_},B} <- Defs],
+    ?assertMatch({lop,imp,
+		  {p,<<"m">>,[<<"$t">>]},
+		  {p,<<"PUSH">>,
+		   [{const,2},
+		    {p,<<"T">>,[{const,1},{const,1},{op,sub,<<"$t">>,{const,1}}]}]}},
+		 Next).
+
+%% a define inside the system is inlined before the step index is
+%% added: 'x in it becomes x($t) in a next item, a state argument is
+%% the state at the step, and a macro may call a macro
+macro_test() ->
+    {ok,{Defs,[],_}} =
+	parse("system s { state x:2, y:2; input up;\n"
+	      "  define grow(v, d) 'v == v + d;\n"
+	      "  define step(d) grow(x, d) && grow(y, d);\n"
+	      "  define zero x == 0;\n"
+	      "  init zero;\n"
+	      "  next up implies step(y); }\n"),
+    [Init] = [B || {define,{p,<<"s_init">>,_},B} <- Defs],
+    ?assertMatch({lop,eq,{p,<<"x">>,[<<"$t">>]},_}, Init),
+    [Next] = [B || {define,{p,<<"s_next">>,_},B} <- Defs],
+    T1 = {op,sub,<<"$t">>,{const,1}},
+    ?assertEqual({lop,imp,
+		  {p,<<"up">>,[<<"$t">>]},
+		  {lop,'and',
+		   {lop,eq,{p,<<"x">>,[<<"$t">>]},
+		    {lop,add,{p,<<"x">>,[T1]},{p,<<"y">>,[T1]}}},
+		   {lop,eq,{p,<<"y">>,[<<"$t">>]},
+		    {lop,add,{p,<<"y">>,[T1]},{p,<<"y">>,[T1]}}}}},
+		 Next),
+    %% the macros are not exported
+    ?assertEqual([], [N || {define,{p,N,_},_} <- Defs,
+			   lists:member(N, [<<"grow">>,<<"step">>,<<"zero">>])]).
+
+%% a quantifier in the body that binds a parameter's name shadows it
+macro_shadow_test() ->
+    {ok,{Defs,[],_}} =
+	parse("system s { state x(i,time):2;\n"
+	      "  define all(i) [A i=1..2] (x(i) == 0);\n"
+	      "  init all(7); }\n"),
+    [Init] = [B || {define,{p,<<"s_init">>,_},B} <- Defs],
+    ?assertMatch({{'ALL',[{op,'=',<<"i">>,_}]},
+		  {lop,eq,{p,<<"x">>,[<<"i">>,<<"$t">>]},_}}, Init).
+
+macro_error_test() ->
+    ?assertMatch({error,{_,varp_parse,"the system macro f takes 1 arguments, called with 2"}},
+		 parse("system s { state x:2; define f(a) x == a; init f(1,2); }\n")),
+    ?assertMatch({error,{_,varp_parse,"the system macro f calls itself"}},
+		 parse("system s { state x:2; define f(a) f(a); init f(1); }\n")).
+
 %% a file with its own formula keeps it
 own_formula_test() ->
     {ok,{_Defs,[],Formula}} =
