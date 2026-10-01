@@ -221,6 +221,10 @@ prints a counterexample as a trace, one row per step:
                 --induction <bool>         prove an invariant by k-induction (false)
                 --property <macro>         which property, e.g. dining_invariant
                 --incremental <bool>       one clause database for all bounds (true)
+                --saturate <N>             probe every new step at level N  (0)
+                --saturate-friend <N>, --saturate-random <N>   wider vectors
+                --saturate-laps <N>        laps per step, 0 = fixpoint   (1)
+                --saturate-timeout <s>     probing time per step  (infinity)
                 --keep-learned auto|<bool> keep learned clauses between bounds
                 --reset-order auto|<bool>  restore the variable order per bound
                                            (auto: keep and no reset with --bump-decay)
@@ -230,7 +234,10 @@ prints a counterexample as a trace, one row per step:
 
     order       --sort <order>[,<order>]  identity|random|degree|rank|user,
                                           each with an optional +, - or =
-                --first, -f "v1,..,vn"    literals sorted first
+                --first, -f "v1,..,vn"    literals sorted first; the bare
+                                          name of a predicate with arguments
+                                          (Move for Move(p,q,time)) is every
+                                          instance, earliest step first
                 --last, -l "v1,..,vn"     literals sorted last
                 --display, -d <bool>
 

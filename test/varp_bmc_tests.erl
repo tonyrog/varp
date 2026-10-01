@@ -405,3 +405,20 @@ hanoi_test_() ->
 	     ?assertMatch({?INCONSISTENT, [], _},
 			  varp_tc:run(Text, [{bmc,[{k_max,6}]}], #{meta => #{<<"n">> => 3}}))
      end}.
+
+%% --saturate 1: probing after every step gives the same bound and
+%% trace, from a database with what the steps force bound for good
+saturate_test_() ->
+    {timeout, 300,
+     fun() ->
+	     Text = read("die_hard_system.varp"),
+	     {_, [M1|_], _} = varp_tc:run(Text, [{bmc,[{k_max,10}]}]),
+	     {_, [M2|_], _} = varp_tc:run(Text, [{bmc,[{k_max,10},{saturate,1}]}]),
+	     ?assertEqual(varp_bmc:trace(M1), varp_bmc:trace(M2)),
+	     Hanoi = read("hanoi_macros.varp"),
+	     {R, [M|_], _} = varp_tc:run(Hanoi, [{bmc,[{k_max,8},{saturate,1}]}],
+					 #{meta => #{<<"n">> => 3}}),
+	     ?assert(R =:= ?DONE orelse R =:= ?CONTINUE),
+	     {_, Rows} = varp_bmc:trace(M),
+	     ?assertEqual(8, length(Rows))
+     end}.

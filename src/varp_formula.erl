@@ -273,7 +273,20 @@ order_first(Bs, VarList) ->
 
 variable_list_(Bs, [X|Vs], Acc) when is_integer(X) ->
     variable_list_(Bs, Vs, [X|Acc]);
+variable_list_(Bs, [{p,Name,[]}|Vs], Acc) when is_binary(Name) ->
+    %% the bare name of a predicate with arguments, "order
+    %% --first=Move" for Move(p,q,time): every instance that exists,
+    %% earliest step (last argument) first
+    case predicate_instances(Bs, Name) of
+	[] -> variable_list_1(Bs, {p,Name,[]}, Vs, Acc);
+	Insts -> variable_list_(Bs, Insts ++ Vs, Acc)
+    end;
 variable_list_(Bs, [V|Vs], Acc) ->
+    variable_list_1(Bs, V, Vs, Acc);
+variable_list_(Bs, [], Acc) ->
+    {Acc,Bs}.
+
+variable_list_1(Bs, V, Vs, Acc) ->
     case bld(V, Bs) of
 	{{bool,X}, Bs1} ->
 	    ?dbg0("~w = ~w\n", [V, X]),
@@ -284,9 +297,24 @@ variable_list_(Bs, [V|Vs], Acc) ->
 	    variable_list_(Bs1, Vs, cat(Xs,Acc));
 	{{uint,_N,Xs}, Bs1} ->
 	    variable_list_(Bs1, Vs, cat(Xs,Acc))
-    end;
-variable_list_(Bs, [], Acc) ->
-    {Acc,Bs}.
+    end.
+
+predicate_instances(Bs, Name) ->
+    case maps:find(Name, maps:get(decls, Bs#bs.option, #{})) of
+	{ok, {_Type, Arity, _}} when Arity > 0 ->
+	    Vp = Bs#bs.vp,
+	    Args = instances_(Vp, Name, varp_nif:first_symbol(Vp), []),
+	    [{p,Name,A} || {_,A} <- lists:sort([{lists:reverse(A),A} || A <- Args])];
+	_ ->
+	    []
+    end.
+
+instances_(_Vp, _Name, false, Acc) ->
+    Acc;
+instances_(Vp, Name, Sym={Name,Args}, Acc) when Args =/= [] ->
+    instances_(Vp, Name, varp_nif:next_symbol(Vp, Sym), [Args|Acc]);
+instances_(Vp, Name, Sym, Acc) ->
+    instances_(Vp, Name, varp_nif:next_symbol(Vp, Sym), Acc).
 
 cat([X|Xs], Ys) -> cat(Xs, [X|Ys]);
 cat([], Ys) -> Ys.

@@ -107,6 +107,38 @@ options() ->
 	default => true,
 	description => "Keep the clause database between bounds "
 	    "(needs a system definition and the backjump plugin)."
+      },
+     #{ long => "saturate",
+	key => saturate,
+	spec => unsigned,
+	default => 0,
+	description => "Incremental: probe the clauses of every new step at "
+	    "this saturation level before the search, 0 = off. What every "
+	    "assignment forces is bound for good, equal literals are merged."
+      },
+     #{ long => "saturate-friend",
+	key => saturate_friend,
+	spec => unsigned,
+	default => 0,
+	description => "Friend variables in every probe vector (saturate --friend)."
+      },
+     #{ long => "saturate-random",
+	key => saturate_random,
+	spec => unsigned,
+	default => 0,
+	description => "Random variables in every probe vector (saturate --random)."
+      },
+     #{ long => "saturate-laps",
+	key => saturate_laps,
+	spec => unsigned,
+	default => 1,
+	description => "Laps over the variables per step, 0 = to a fixpoint."
+      },
+     #{ long => "saturate-timeout",
+	key => saturate_timeout,
+	spec => {union,[float,{enum,[{"infinity",infinity}]}]},
+	default => infinity,
+	description => "Seconds of probing per step."
       }
     ].
 
@@ -175,7 +207,12 @@ drive_bounds(Target, KMin, KMax, Step, Bound, Trace, Print,
 			Assignments,
 			GOpts#{ print => false, method => collect,
 				keep_learned => auto(keep_learned, Param, GOpts),
-				reset_order => auto(reset_order, Param, GOpts) });
+				reset_order => auto(reset_order, Param, GOpts),
+				saturate => maps:get(saturate, Param, 0),
+				saturate_opts => {maps:get(saturate_friend, Param, 0),
+						  maps:get(saturate_random, Param, 0),
+						  maps:get(saturate_laps, Param, 1),
+						  maps:get(saturate_timeout, Param, infinity)} });
 	false ->
 	    loop(KMin, KMax, Step, Bound, Trace, Print,
 		 Do1, Assignments, Formula, GOpts#{ print => false, method => collect })
@@ -320,7 +357,7 @@ istep(K, KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, GOpts, Bs) ->
 		 0 -> {true, Bs};
 		 _ -> assert_formula(varp_system:next_formula(Info, K), Bs)
 	     end,
-    case StepOk of
+    case saturate_step(StepOk, K, Print, GOpts) of
 	{false, Bs1} ->
 	    info(GOpts, Print, "bmc: k=~w no path of that length\n", [K]),
 	    result(Print, "% 0\n", []),
@@ -375,6 +412,40 @@ istep(K, KMin, KMax, Step, Trace, Print, Info, Kind, BjParam, GOpts, Bs) ->
 		    {R, Acc, Bs4}
 	    end
     end.
+
+%% --saturate N: probe the clause database at level N once the
+%% transition into step K is in, at the top level, so what every
+%% assignment forces is bound for good and equal literals are merged
+%% before the search.  Every assignment contradictory means no path.
+%% One lap by default: the clauses of the earlier steps were probed
+%% before.  Friend and random variables widen the vector at level 1,
+%% a timeout caps the step.
+saturate_step({true, Bs}, K, Print, GOpts) ->
+    case maps:get(saturate, GOpts, 0) of
+	0 -> {true, Bs};
+	Level ->
+	    Vp = Bs#bs.vp,
+	    B0 = varp:get_number_of_bound_variables(Vp),
+	    S0 = varp_nif:getstat(Vp, number_of_subst_variables),
+	    T0 = erlang:monotonic_time(),
+	    %% laps 0 is the saturate convention for "to a fixpoint"
+	    {F, Rnd, Laps, Timeout} = maps:get(saturate_opts, GOpts, {0, 0, 1, infinity}),
+	    R = varp_saturate:saturate(Bs, Level, 0, F, Rnd, Timeout, Laps, 0, true, false),
+	    Ts = erlang:convert_time_unit(erlang:monotonic_time()-T0,
+					  native, microsecond) / 1000000,
+	    case R of
+		{?INCONSISTENT, _, Bs1} ->
+		    info(GOpts, Print, "bmc: k=~w saturate ~.2fs: contradictory\n", [K, Ts]),
+		    {false, Bs1};
+		{_, _, Bs1} ->
+		    info(GOpts, Print, "bmc: k=~w saturate ~.2fs bound=~w subst=~w\n",
+			 [K, Ts, varp:get_number_of_bound_variables(Vp) - B0,
+			  varp_nif:getstat(Vp, number_of_subst_variables) - S0]),
+		    {true, Bs1}
+	    end
+    end;
+saturate_step(StepOk, _K, _Print, _GOpts) ->
+    StepOk.
 
 del_clauses(_Vp, false) -> ok;
 del_clauses(Vp, I) ->
