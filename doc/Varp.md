@@ -239,6 +239,7 @@ mode plugins decide the question, the search plugins answer it:
 | `backjump`  | `bj`    | CDCL search with learning, restarts, minimisation |
 | `bmc`       | `bmc`   | bounded model checking of a `system`, see below  |
 | `order`     | `ord`   | the initial variable order                       |
+| `parallel`  | `par`   | the rest of the chain in cloned instances        |
 | `saturate`  | `s`     | probing of k literals at a time, see below       |
 | `cnf`, `validate`, `monitor`, `wx` | | export, model checking, progress, the GUI |
 

@@ -18,6 +18,7 @@
 		    {"red",   "reduction",   varp_reduction},
 		    {"rat",   "rat",         varp_rat},
 		    {"cnf",   "cnf",         varp_cnf},
+		    {"par",   "parallel",    varp_parallel},
 		    {"mon",   "monitor",     varp_monitor},
 		    {"clean", "clean",       varp_clean},
 		    {"succ",  "succ",        varp_succ},

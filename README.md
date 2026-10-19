@@ -107,6 +107,7 @@ given, each one seeing the state the previous one left behind.
 | `bt`       | `backtrack`  | plain backtracking search                         |
 | `bj`       | `backjump`   | CDCL with clause learning and restarts            |
 | `ord`      | `order`      | choose the variable order                         |
+| `par`      | `parallel`   | run the rest of the chain in cloned instances     |
 | `s`        | `saturate`   | saturation / lookahead preprocessing              |
 | `so`       | `satord`     | pick an order by sampling models                  |
 | `red`      | `reduction`  | add reduced clauses                               |
@@ -232,6 +233,20 @@ prints a counterexample as a trace, one row per step:
     varp bmc formulas/varp/die_hard_system.varp
     varp bmc --bound n bj --minimize recursive formulas/varp/die_hard.varp
 
+    parallel    --clones, -n <N>     clones of the built formula, one process
+                                     each, the rest of the chain runs in every
+                                     clone and the first to finish answers
+                                     (default: the online schedulers)
+                --seed <N>           base seed, clone i gets seed+i  (-1: the
+                                     formula's)
+                --shuffle <bool>     random variable order in every clone but
+                                     the first                       (true)
+                --share <bool>       permanent bindings found in one clone
+                                     go to all, imported at a restart (true)
+                --stat <bool>        report the winner and the facts shared
+
+    varp sat parallel --clones 8 --stat bj formula.varp
+
     order       --sort <order>[,<order>]  identity|random|degree|rank|user,
                                           each with an optional +, - or =
                 --first, -f "v1,..,vn"    literals sorted first; the bare
@@ -239,6 +254,10 @@ prints a counterexample as a trace, one row per step:
                                           (Move for Move(p,q,time)) is every
                                           instance, earliest step first
                 --last, -l "v1,..,vn"     literals sorted last
+                --ignore-file <bool>      ignore the order section in the
+                                          file; otherwise each of --sort,
+                                          --first and --last given on the
+                                          command line wins over the file
                 --display, -d <bool>
 
     saturate    --level, -k <N>       saturation level             (1)

@@ -3507,6 +3507,11 @@ static void cleanup(varp_t* vp)
     dynvar_clear(vp->tlit);
     dynvar_clear(vp->ulit);
 
+    for (i = 0; i < (int)dynvar_size(vp->xopt); i++) {
+	if (vp->xopt[i].data) VARP_FREE(vp->xopt[i].data);
+    }
+    dynvar_clear(vp->xopt);
+
     allocator_cleanup(&vp->dyn_allocator);
     allocator_cleanup(&vp->var_allocator);
     allocator_cleanup(&vp->sym_allocator);
@@ -3665,13 +3670,15 @@ static int vif_clone_config(ErlNifEnv* env,
 			    const ERL_NIF_TERM value,
 			    varp_clone_opt_t* opt)
 {
-    if (!vif_setopt(env, key, value, &opt->config)) {
+    if (vif_setopt(env, key, value, &opt->config))
+	return 1;
+    else {
 	if (EQUAL_KEY(env, level, key)) {
 	    int level;
 	    if (!enif_get_int(env, value, &level)) return 0;
 	    if (level < -1) return 0;
 	    opt->level = level;
-	    return 0;
+	    return 1;
 	}
 	else if (EQUAL_KEY(env, set, key)) {
 	    int si;
@@ -5280,8 +5287,13 @@ static ERL_NIF_TERM varp_order_first(ErlNifEnv* env, int argc,
 		STK_LEAVE(lit);
 	    }
 	    // insert all (reversed) first, will produce the correct order!
+	    // A bound variable is skipped: at level 0 it stays bound, it
+	    // is never decided, and after order_sort it is not in the
+	    // list at all (moving it would corrupt the list).
 	    for (i = len-1; i >= 0; i--) {
 		variable_t* var = var_l(vp, lit[i]);
+		if (is_constant_l(vp, lit[i]) || variable_is_bound(vp, var))
+		    continue;
 		if (!cdlist_is_first(&vp->order_list, var)) {
 		    if (set_phase)
 			vp->var_lev[INDEX(lit[i])].phase = 
@@ -5327,6 +5339,8 @@ static ERL_NIF_TERM varp_order_last(ErlNifEnv* env, int argc,
 	    }
 	    for (i = 0; i < (int)len; i++) {
 		variable_t* var = var_l(vp, lit[i]);
+		if (is_constant_l(vp, lit[i]) || variable_is_bound(vp, var))
+		    continue;   // see order_first
 		if (!cdlist_is_last(&vp->order_list, var)) {
 		    if (set_phase)
 			vp->var_lev[INDEX(lit[i])].phase = 
@@ -6168,13 +6182,17 @@ static int parse_clone_opts(ErlNifEnv* env, ERL_NIF_TERM map,
 	return 0;
 
     while (enif_map_iterator_get_pair(env, &iter, &key, &value)) {
-	if (vif_clone_config(env, key, value, opt) < 0)
+	if (!vif_clone_config(env, key, value, opt)) {
+	    enif_map_iterator_destroy(env, &iter);
 	    return 0;
+	}
 	enif_map_iterator_next(env, &iter);
     }
     enif_map_iterator_destroy(env, &iter);
     return 1;
 }
+
+static int addopt(varp_t* vp);
 
 // copy (clone) the varp structure (clauses and variables)
 // but leave the xref etc for the cloneer to speficy
@@ -6212,8 +6230,21 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     if (setup(vp, &opt.config) < 0)
 	goto error;
 
+    // the options set with setopt (print, partial, starexec, ...)
+    for (i = 0; i < (int)dynvar_size(vp0->xopt); i++) {
+	int j;
+	if ((j = addopt(vp)) < 0)
+	    goto error;
+	vp->xopt[j].key = vp0->xopt[i].key;
+	vp->xopt[j].size = vp0->xopt[i].size;
+	if ((vp->xopt[j].data = VARP_ALLOC(vp0->xopt[i].size)) == NULL)
+	    goto error;
+	memcpy(vp->xopt[j].data, vp0->xopt[i].data, vp0->xopt[i].size);
+    }
+
+    // setup made slot 0 (the constant), the rest are the variables
     vsize = dynvar_size(vp0->var_map);
-    if (add_variables(vp, vsize) < 0)
+    if (add_variables(vp, vsize - dynvar_size(vp->var_map)) < 0)
 	goto error;
 
     for (i = 1; i < (int)vsize; i++) {
@@ -6227,22 +6258,46 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
 	vp->lit_mark[MAKE_LIT(i,0)] = mark0 & (VAR_ATOM|VAR_USED);
 	var->act = var0->act;
 	var->rank = var0->rank;
+	vp->var_lev[i].phase = vp0->var_lev[i].phase;
 
 	switch(v) {
 	case I_FALSE:
 	case I_TRUE:
-	    if (vp0->var_lev[var0->ix].level <= opt.level)
+	    if (vp0->var_lev[var0->ix].level <= opt.level) {
 		set_vv(vp, var, v);
+		// clause indices are not kept, so a binding has its
+		// level but no reason clause in the clone
+		vp->var_lev[i].level = vp0->var_lev[i].level;
+		vp->var_lev[i].implication_clause = CLAUSE_NONE;
+	    }
 	    break;
 	case I_BOUND:
 	    bnd_vv(vp, var);
 	    j = export_l(var0->bl);
 	    var->bl = vindex_l(vp, j);
+	    vp->var_lev[i].level = vp0->var_lev[i].level;
+	    vp->var_lev[i].implication_clause = CLAUSE_NONE;
+	    vp->num_subst++;
 	    break;
 	case I_UNDEF:
 	default:
 	    break;
 	}
+    }
+
+    // the variable order of the original (order_sort leaves the bound
+    // variables out of the list, the clone does the same)
+    cdlist_init(&vp->order_list);
+    vp->top = NULL;
+    {
+	variable_t* var0;
+	for (var0 = cdlist_first(&vp0->order_list); var0 != NULL;
+	     var0 = cdlist_next(var0)) {
+	    dlist_insert_last(&vp->order_list, vp->var_map[var0->ix]);
+	}
+	cdlist_renumber(&vp->order_list);
+	setup_top(vp);
+	vp->heap_dirty = 1;
     }
 
     for (i = 0; i < MAX_NUM_SYMSTACKS; i++) {
@@ -6271,19 +6326,27 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     if (opt.level >= (int)dynvar_size(vp->bnd))
 	resize_levels(vp, dynvar_size(vp0->bnd));
 
+    vp->num_bound = 0;
     for (i = 0; i <= opt.level; i++) {  // clone undo structure
 	int m = vp0->bnd[i].size;
 	lit_t* srcv = bindings(vp0, &vp0->bnd[i]);
-	lit_t* dstv = bindings(vp, &vp->bnd[i]);
+	lit_t* dstv;
 	int li = export_l(vp0->bnd[i].decision);
 	int j;
 	vp->bnd[i].decision = vindex_l(vp, li);
+	vp->bnd[i].value = vp0->bnd[i].value;
 	vp->bnd[i].t = vp0->bnd[i].t;
 	vp->bnd[i].offs = vp0->bnd[i].offs;
+	vp->bnd[i].size = m;
+	dstv = bindings(vp, &vp->bnd[i]);
 	for (j = 0; j < m; j++) {
 	    dstv[j] = srcv[j];
 	}
+	if (i < opt.level)
+	    vp->num_bound += m;
     }
+    vp->level = opt.level;
+    vp->report_index = vp->bnd[0].size; // born with these, do not report them
 
     // pending propagations: clone them, or start with nothing pending
     if (opt.queue) {

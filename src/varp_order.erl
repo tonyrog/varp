@@ -39,12 +39,11 @@ options() ->
 	default => [],
 	description => "Literals sorted last."
       },
-     #{ override => "override",
-	short => "x",
-	key => override,
-	spec => {enum,[{"file",file},{"cmdline",cmdline}]},
-	default => cmdline,
-	description => "Selected order from command line or file"
+     #{ long => "ignore-file",
+	key => ignore_file,
+	spec => {enum,[?BOOL]},
+	default => false,
+	description => "Ignore the order section in the file."
       },
      #{ long => "display",
 	short => "d",
@@ -56,28 +55,27 @@ options() ->
 
 run(Bs, Param0) when is_record(Bs, bs), is_map(Param0) ->
     ?dbg("file order=~p\n", [maps:get(order,Bs#bs.option,[])]),
-    case maps:get(override, Param0) of
-	file ->
-	    FileOrder = maps:get(order, Bs#bs.option, []),
-	    Param1 = case proplists:get_value(first, FileOrder) of
-			 undefined -> Param0;
-			 First -> maps:put(first, First, Param0)
-		     end,
-	    Param2 = case proplists:get_value(last, FileOrder) of
-			 undefined -> Param1;
-			 Last -> maps:put(last, Last, Param1)
-		     end,
-	    Param3 = case proplists:get_value(sort, FileOrder) of
-			 undefined -> Param2;
-			 Sort -> maps:put(sort, Sort, Param2)
-		     end,
-	    order_literals(Bs, Param3);
-	cmdline ->
-	    order_literals(Bs, Param0)
+    case maps:get(ignore_file, Param0) of
+	true -> order_literals(Bs, Param0);
+	false -> order_literals(Bs, file_order(Bs, Param0))
     end.
 
+%% the order section in the file fills in what the command line did not
+%% give: --first, --last and --sort each win over the file on their own
+file_order(Bs, Param0) ->
+    FileOrder = maps:get(order, Bs#bs.option, []),
+    lists:foldl(
+      fun({Key, Default}, Param) ->
+	      case {maps:get(Key, Param, Default),
+		    proplists:get_value(Key, FileOrder)} of
+		  {_, undefined} -> Param;
+		  {Default, Value} -> maps:put(Key, Value, Param);
+		  {_, _} -> Param
+	      end
+      end, Param0, [{first, []}, {last, []}, {sort, [identity]}]).
+
 order_literals(Bs, Param) ->
-    ?dbg0("order params=~p\n", [Param]),
+    ?dbg1("order params=~p\n", [Param]),
     Seed = case maps:get(seed,Param) of
 	       -1 -> varp_nif:getopt(Bs#bs.vp,seed);
 	       S0 -> S0

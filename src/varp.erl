@@ -21,7 +21,8 @@
 -export([read_file/1]).
 -export([file/1, string/1]).
 -export([archive_path/1]).
--export([output_model/3]).
+-export([output_model/3, output_model/4]).
+-export([do/3]).
 -export([empty_sections/0]).
 -export([split_sections/1, split_sections/2]).
 -export([section_opts/2]).
@@ -1160,7 +1161,7 @@ do_run_(Do, Assignments, Formula, GOpts) ->
 		   is_integer(Acc) -> Acc
 		end,
 	    if N =:= 0 ->
-		    output_partial_model(Bs2,R);
+		    output_partial_model(Bs3,R);
 	       true ->
 		    ok
 	    end,
@@ -1174,6 +1175,9 @@ do_run_(Do, Assignments, Formula, GOpts) ->
     end.
 
 
+%% a driver plugin runs the rest of the chain itself
+do([{varp_parallel,Param}|Do],Acc0,Bs) when not is_map_key(chain, Param) ->
+    do([{varp_parallel,Param#{chain => Do}}],Acc0,Bs);
 do([{Plugin,Param}|Do],Acc0,Bs) ->
     S0 = stat(Bs),
     ?info(Bs#bs.option, "pass ~p\n", [Plugin]),
@@ -1405,11 +1409,17 @@ output_partial_model(Bs, _R) ->
     end.
 
 output_model(Bs,Partial,I) ->
-    output_model_header(Bs,Partial,I),
     Flavour = varp_nif:getopt(Bs#bs.vp,print),
     %% --print=literal shows a substituted variable as Y=X when the
     %% representative X has no value
     Model = varp_formula:model(Bs, #{subst => Flavour =:= literal}),
+    output_model(Bs,Partial,I,Model).
+
+%% print a model found earlier (the parallel driver prints the
+%% winner's models after the race)
+output_model(Bs,Partial,I,Model) ->
+    output_model_header(Bs,Partial,I),
+    Flavour = varp_nif:getopt(Bs#bs.vp,print),
     case Flavour of
 	false ->
 	    Model;

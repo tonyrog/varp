@@ -314,3 +314,29 @@ order_large_test_() ->
 	     {0, Out} = cli(["order", "--first=X", "sat", "bj", "msg=hello world", Md5]),
 	     ?assert(contains(Out, H))
      end}.
+
+%% an order in the file whose first literals are bound at level 0 (by
+%% units): order_sort drops bound variables from the order list, and
+%% order_first must skip them rather than move them (that corrupted
+%% the list and left the file order without effect)
+order_bound_first_test_() ->
+    {timeout, 60,
+     fun() ->
+	     N = 30,
+	     Order = string:join([io_lib:format("P(~w)", [I]) || I <- lists:seq(1, N)], ","),
+	     Body = string:join([io_lib:format("(P(~w) -> (L(~w) && L(~w)))", [I, I, I+1])
+				 || I <- lists:seq(1, N)], " && "),
+	     Units = string:join([io_lib:format("!P(~w)", [I]) || I <- lists:seq(1, 5)], " && "),
+	     File = varp_tc:tmpfile("order_bound.varp"),
+	     ok = file:write_file(File, lists:flatten(["order ", Order, ";\n", Body, " && ", Units, "\n"])),
+	     {0, Out} = cli(["sat", "order", "--display", "bj", File]),
+	     [Line|_] = [L || L <- string:split(Out, "\n", all), string:prefix(L, "P(") =/= nomatch],
+	     ?assertEqual("P(6) P(7) P(8)", string:slice(Line, 0, 14)),
+	     %% --ignore-file leaves the order section alone
+	     {0, Out2} = cli(["sat", "order", "--ignore-file", "--display", "bj", File]),
+	     ?assertEqual(nomatch, string:find(Out2, "P(6) P(7)")),
+	     %% a --first on the command line wins over the file's
+	     {0, Out3} = cli(["sat", "order", "--first=P(20),P(21)", "--display", "bj", File]),
+	     [Line3|_] = [L || L <- string:split(Out3, "\n", all), string:prefix(L, "P(") =/= nomatch],
+	     ?assertEqual("P(20) P(21)", string:slice(Line3, 0, 11))
+     end}.

@@ -508,7 +508,7 @@ find_prop_def(P, Defs) ->
     end.
 
 %% element I of the array define P, 0 based
-array_element(P, Elems, I) when is_integer(I), I >= 0, I < length(Elems) ->
+array_element(_P, Elems, I) when is_integer(I), I >= 0, I < length(Elems) ->
     lists:nth(I+1, Elems);
 array_element(P, Elems, I) ->
     error({array_index, P, I, length(Elems)}).
@@ -2386,6 +2386,7 @@ collect_model(Vp, Subst) ->
 	      end, [], lists:seq(1, N))
     end.
 
+-if(not_used).
 
 model_vars(Vp,[{Type,X,N,I}|Xs],Y,Ms) ->
     V = case varp_nif:value(Vp, Y) of
@@ -2405,6 +2406,7 @@ model_vars(Vp,[X|Xs],Y,Ms) ->
     end;
 model_vars(_Vp,[],_Y,Ms) ->
     Ms.
+-endif.
 
 %% the representative of a substituted variable, undefined when the
 %% variable is not substituted

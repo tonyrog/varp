@@ -209,6 +209,14 @@ init() ->
 new(Options) when is_map(Options) ->
     ?nif_stub().
 
+%% A clone is a new instance with the variables, the symbols, the
+%% options (new/1 and setopt), the variable order and the phases of
+%% the original, the bindings up to 'level' (default 0, the permanent
+%% ones) and the clause sets asked for (default delta only, so a
+%% complete copy of a built formula is set => [alpha,beta,gamma,delta]).
+%% Clause indices are not kept: a cloned binding has its level but no
+%% reason clause.  The clone is independent of the original and may be
+%% used from another process.
 -spec clone(Vp::varp(), Opts::clone_opts()) -> varp().
 -type clone_opts() :: #{
 			%% clone bindings up until level 'Level'

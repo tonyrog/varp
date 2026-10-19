@@ -2,6 +2,7 @@
 -module(varp_nif_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("varp.hrl").
 
 nif_library_test_() ->
     {timeout, 900, fun() -> ?assertEqual(ok, varp_nif_test:all()) end}.
@@ -68,3 +69,60 @@ default_option_test() ->
       end,
       [{xref,false},{hash,false},{icase,false},{decay,0.0},
        {use_phase,false},{seed,0},{qtype,lifo}]).
+
+%% a clone is a copy of the variables, the clauses, the level 0
+%% bindings, the symbols, the options and the variable order, and
+%% searching in the clone leaves the original alone
+clone_test() ->
+    Vp = varp_nif:new(#{}),
+    {1,4} = varp_nif:add_variables(Vp, 4),
+    varp_nif:add_symbol(Vp, {<<"A">>,[]}, 1, bool),
+    varp_circuit:clause(Vp, [1,2]),
+    varp_circuit:clause(Vp, [-1,3]),
+    varp_circuit:clause(Vp, [-2,3]),
+    varp_circuit:clause(Vp, [4]),       %% a level 0 binding
+    ?assertEqual(true, varp_nif:bcp(Vp)),
+    ok = varp_nif:setopt(Vp, partial, true),
+    varp_nif:order_first(Vp, [3]),
+    Order = varp:order_all(Vp),
+    ?assertEqual(3, hd(Order)),
+    W = varp_nif:clone(Vp, #{level => 0}),
+    ?assertEqual(varp:get_number_of_variables(Vp), varp:get_number_of_variables(W)),
+    ?assertEqual(varp_nif:getstat(Vp, number_of_clauses), varp_nif:getstat(W, number_of_clauses)),
+    ?assertEqual(1, varp_nif:getstat(W, number_of_bound_variables)),
+    ?assertEqual(true, varp_nif:value(W, 4)),
+    ?assertEqual(0, varp_nif:variable_info(W, 4, level)),
+    ?assertEqual({bool,1}, varp_nif:find_symbol(W, {<<"A">>,[]})),
+    ?assertEqual(true, varp_nif:getopt(W, partial)),
+    ?assertEqual(Order, varp:order_all(W)),
+    %% a bad clone option is refused, not ignored
+    ?assertError(badarg, varp_nif:clone(Vp, #{nonsense => 1})),
+    %% search in the clone: 1 forces 3, the original keeps 1 unbound
+    varp_nif:push(W),
+    ?assertEqual(true, varp_nif:bind(W, 1)),
+    ?assertEqual(true, varp_nif:bcp(W)),
+    ?assertEqual(true, varp_nif:value(W, 3)),
+    ?assertEqual(undefined, varp_nif:value(Vp, 1)),
+    ?assertEqual(0, varp_nif:level(Vp)).
+
+%% clones of a built formula solve it in processes of their own and
+%% find the same model as the original
+clone_solve_test_() ->
+    {timeout, 60,
+     fun() ->
+	     {ok, Text} = file:read_file(filename:join(varp_tc:formula_dir("varp"), "send_more.varp")),
+	     {continue, [], Bs} =
+		 varp_tc:quiet(fun() -> varp_tc:run(binary_to_list(Text), [{satisfy,[]}]) end),
+	     Vp = Bs#bs.vp,
+	     [{varp_backjump, Param}] = varp:parse_do([{backjump,[]}]),
+	     Self = self(),
+	     [spawn_link(fun() ->
+				 W = varp_nif:clone(Vp, #{level => 0, set => [alpha,beta,gamma,delta]}),
+				 R = varp_tc:quiet(fun() -> varp_backjump:run(Bs#bs{vp = W}, Param) end),
+				 Self ! {clone, I, R}
+			 end) || I <- [1,2]],
+	     Clones = [receive {clone, I, R} -> R end || I <- [1,2]],
+	     ?assertEqual(0, varp_nif:level(Vp)),
+	     {continue, [Model], _} = varp_tc:quiet(fun() -> varp_backjump:run(Bs, Param) end),
+	     [?assertEqual({continue, [Model]}, {R, Ms}) || {R, Ms, _} <- Clones]
+     end}.

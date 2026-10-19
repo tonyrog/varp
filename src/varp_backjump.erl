@@ -398,7 +398,50 @@ main_bcp(Bs,Param,Level,MaxLearned,MR) ->
 	    end
     end.
 
+%% facts (permanent bindings) found elsewhere, handed over by an
+%% import fun in Param (varp_parallel): they go in at level 0, which
+%% is a restart; a fact that is false here means the formula has no
+%% models at all
 restart(Bs,Param,MaxLearned,MR) ->
+    case import_facts(Bs, Param) of
+	ok ->
+	    restart_(Bs,Param,MaxLearned,MR);
+	false ->
+	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
+	    display_stat(Bs,Param),
+	    case MR#m.n of
+		0 -> return(?INCONSISTENT, MR, Bs);
+		_ -> return(?DONE, MR, Bs)
+	    end
+    end.
+
+import_facts(Bs, Param) ->
+    case maps:get(import, Param, undefined) of
+	undefined -> ok;
+	Import ->
+	    case Import() of
+		[] -> ok;
+		Lits ->
+		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
+		    varp_formula:proof_output(Bs,$c,"import"),
+		    import_facts_(Bs#bs.vp, Lits)
+	    end
+    end.
+
+import_facts_(_Vp, []) ->
+    ok;
+import_facts_(Vp, [L|Ls]) ->
+    case varp_nif:value(Vp, L) of
+	true -> import_facts_(Vp, Ls);
+	false -> false;
+	undefined ->
+	    case varp_nif:bind(Vp, L) andalso varp_nif:bcp(Vp) of
+		true -> import_facts_(Vp, Ls);
+		false -> false
+	    end
+    end.
+
+restart_(Bs,Param,MaxLearned,MR) ->
     RestartByTimeout = restart_by_timeout(Bs, Param), %% also restart!!
     RestartByCount = restart_by_counter(Bs, Param),
     case need_purge(Bs, Param, MaxLearned) of
