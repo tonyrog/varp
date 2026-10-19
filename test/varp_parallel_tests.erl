@@ -92,6 +92,29 @@ saturate_then_backjump_test() ->
     {_, [Model0], _} = seq(F),
     ?assertEqual(lists:sort(Model0), lists:sort(Model)).
 
+%% clauses learned elsewhere go into the learned set as this instance
+%% reads them: a true literal drops the clause, false literals are left
+%% out (a unit binds), an empty one is a contradiction
+import_clauses_test() ->
+    {_, _, Bs} = varp_tc:quiet(fun() -> varp_tc:run("(A || B || C) && (D || E)", [{satisfy,[]}]) end),
+    Vp = Bs#bs.vp,
+    [A, B, D] = [var(Bs, N) || N <- ["A", "B", "D"]],
+    true = varp_nif:bind(Vp, -D), true = varp_nif:bcp(Vp),
+    G0 = varp_nif:clauseset_size(Vp, ?GAMMA),
+    ?assertEqual(true, varp:import_clauses(Vp, [[-A, B, D]])),
+    ?assertEqual(G0 + 1, varp_nif:clauseset_size(Vp, ?GAMMA)),
+    %% the same one again is not added
+    ?assertEqual(true, varp:import_clauses(Vp, [[-A, B, D]])),
+    ?assertEqual(G0 + 1, varp_nif:clauseset_size(Vp, ?GAMMA)),
+    %% satisfied: dropped
+    ?assertEqual(true, varp:import_clauses(Vp, [[B, -D]])),
+    ?assertEqual(G0 + 1, varp_nif:clauseset_size(Vp, ?GAMMA)),
+    %% a unit after the false literal is left out
+    ?assertEqual(true, varp:import_clauses(Vp, [[-A, D]])),
+    ?assertEqual(false, varp_nif:value(Vp, A)),
+    %% and a contradiction
+    ?assertEqual(false, varp:import_clauses(Vp, [[A, D]])).
+
 %% parallel with nothing after it has nothing to run
 empty_chain_test() ->
     {continue, [], _} =
@@ -104,6 +127,7 @@ cli_test_() ->
 	     F = filename:join(varp_tc:formula_dir("varp"), "send_more.varp"),
 	     {0, Out} = varp_tc:cli(["sat", "parallel", "--clones", "2", "--stat", "bj", F]),
 	     ?assertNotEqual(nomatch, string:find(Out, "parallel: clone")),
+	     ?assertNotEqual(nomatch, string:find(Out, "clauses shared")),
 	     ?assertNotEqual(nomatch, string:find(Out, "D=7,E=5,M=1,N=6,O=0,R=8,S=9,Y=2")),
 	     %% the model is printed once
 	     ?assertEqual(1, length(string:split(Out, "S=9", all)) - 1),
@@ -112,8 +136,13 @@ cli_test_() ->
 	     ?assertNotEqual(nomatch, string:find(Out1, "monitor: permanent")),
 	     %% no models, with four clones sharing facts
 	     P = filename:join(varp_tc:formula_dir("varp"), "pigeon.varp"),
-	     {0, Out2} = varp_tc:cli(["sat", "parallel", "--clones", "4", "bj", "n=7", P]),
+	     {0, Out2} = varp_tc:cli(["sat", "parallel", "--clones", "4", "--stat", "bj", "n=7", P]),
 	     ?assertNotEqual(nomatch, string:find(Out2, "% 0")),
+	     %% and without clause sharing
+	     {0, Out2b} = varp_tc:cli(["sat", "parallel", "--clones", "4", "--share-len", "0", "--stat",
+				       "bj", "n=7", P]),
+	     ?assertNotEqual(nomatch, string:find(Out2b, "% 0")),
+	     ?assertNotEqual(nomatch, string:find(Out2b, "0 clauses shared")),
 	     %% saturate in segments: the substitutions reach the original
 	     %% too, and all clones are waited for
 	     {0, Out3} = varp_tc:cli(["sat", "mon", "parallel", "--clones", "3", "--stat",

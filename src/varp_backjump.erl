@@ -293,7 +293,7 @@ conflict(Bs,Param,MaxLearned,MR) ->
 	LClauses2 = [{1,_Count,_}|_] ->
 	    %% has unit! jump to top-level and install
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-	    move_to_gamma(Bs, LClauses2),
+	    move_to_gamma(Bs, Param, LClauses2),
 	    main_bcp(Bs,Param,?TOP_LEVEL,MaxLearned,MR);
 
 	[{_Len,Count,Aix}] -> %% one clause only
@@ -305,7 +305,7 @@ conflict(Bs,Param,MaxLearned,MR) ->
 	    M = maps:get(stumble_olle,Param),
 	    JLevel = do_jump(Bs,L,K,M,D1,D2,J2,J3),
 	    varp_nif:pop(Bs#bs.vp, JLevel),
-	    move_to_gamma(Bs,ALen,Aix),
+	    move_to_gamma(Bs,Param,ALen,Aix),
 	    main_bcp(Bs,Param,JLevel,MaxLearned,MR);
 
 	LClauses2 -> %% no units determine level
@@ -338,9 +338,9 @@ conflict(Bs,Param,MaxLearned,MR) ->
 	    %% FIXME if JLevel = J3 then we SHOULD select
 	    %% corresponding literal for -L2/-L3 as next unbound
 	    varp_nif:pop(Bs#bs.vp, JLevel),
-	    move_to_gamma(Bs, LClauses5),
+	    move_to_gamma(Bs, Param, LClauses5),
 	    %% install the conflict clause
-	    move_to_gamma(Bs,ALen,Aix),
+	    move_to_gamma(Bs,Param,ALen,Aix),
 	    main_bcp(Bs,Param,JLevel,MaxLearned,MR)
     end.
 
@@ -354,26 +354,40 @@ jump_info(V, Cix) ->
     varp_nif:clause_info(V, Cix, jump).
 
 %% Move a list of clauses from alpha to gamma (install them)
-move_to_gamma(Bs, [{Len,Count,Aix}|LCs]) ->
+move_to_gamma(Bs, Param, [{Len,Count,Aix}|LCs]) ->
     minimize_count(Bs, Count),
-    move_to_gamma(Bs, Len, Aix),
-    move_to_gamma(Bs, LCs);
-move_to_gamma(_Bs, []) ->
+    move_to_gamma(Bs, Param, Len, Aix),
+    move_to_gamma(Bs, Param, LCs);
+move_to_gamma(_Bs, _Param, []) ->
     ok.
 
-move_to_gamma(Bs, 1, Aix) ->
+move_to_gamma(Bs, _Param, 1, Aix) ->
     varp_formula:proof_output(Bs,$a,Aix),
     true = varp_nif:move_clause(Bs#bs.vp, Aix, gamma),
     counters:add(Bs#bs.clen, 1, 1);
-move_to_gamma(Bs, Len, Aix) ->
+move_to_gamma(Bs, Param, Len, Aix) ->
     {true,Gix} = varp_nif:move_clause(Bs#bs.vp, Aix, gamma),
     varp_formula:proof_output(Bs,$a,Gix),
+    export_clause(Bs, Param, Len, Gix),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_CLAUSES, 1),
     counters:add(Bs#bs.counters, ?COUNTER_CONFLICT_LITERALS, Len),
     if Len >= 1023 ->
 	    counters:add(Bs#bs.clen, 1024, 1);
        true ->
 	    counters:add(Bs#bs.clen, Len, 1)
+    end.
+
+%% a short learned clause goes to the other instances through the
+%% export fun in Param (varp_parallel); a unit is a fact and goes
+%% through the facts (bcp reports it at level 0)
+export_clause(Bs, Param, Len, Gix) ->
+    case maps:get(export, Param, undefined) of
+	undefined ->
+	    ok;
+	Export when Len =< map_get(share_len, Param) ->
+	    Export(varp_nif:get_clause(Bs#bs.vp, Gix));
+	_ ->
+	    ok
     end.
 
 %% after conflict clause generation we need to run bcp and
@@ -403,7 +417,7 @@ main_bcp(Bs,Param,Level,MaxLearned,MR) ->
 %% is a restart; a fact that is false here means the formula has no
 %% models at all
 restart(Bs,Param,MaxLearned,MR) ->
-    case import_facts(Bs, Param) of
+    case import(Bs, Param) of
 	ok ->
 	    restart_(Bs,Param,MaxLearned,MR);
 	false ->
@@ -413,6 +427,12 @@ restart(Bs,Param,MaxLearned,MR) ->
 		0 -> return(?INCONSISTENT, MR, Bs);
 		_ -> return(?DONE, MR, Bs)
 	    end
+    end.
+
+import(Bs, Param) ->
+    case import_facts(Bs, Param) of
+	ok -> import_clauses(Bs, Param);
+	false -> false
     end.
 
 import_facts(Bs, Param) ->
@@ -427,6 +447,24 @@ import_facts(Bs, Param) ->
 		    %% literals and substitutions (the latter become
 		    %% clauses here, the cross reference is off)
 		    case varp:import_facts(Bs#bs.vp, Facts) of
+			true -> ok;
+			false -> false
+		    end
+	    end
+    end.
+
+%% short clauses learned elsewhere, the same way (varp:import_clauses
+%% puts them in gamma, where the purge treats them as the own ones)
+import_clauses(Bs, Param) ->
+    case maps:get(import_clauses, Param, undefined) of
+	undefined -> ok;
+	Import ->
+	    case Import() of
+		[] -> ok;
+		Clauses ->
+		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
+		    varp_formula:proof_output(Bs,$c,"import clauses"),
+		    case varp:import_clauses(Bs#bs.vp, Clauses) of
 			true -> ok;
 			false -> false
 		    end

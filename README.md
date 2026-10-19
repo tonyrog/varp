@@ -246,7 +246,10 @@ prints a counterexample as a trace, one row per step:
                                      at a restart of bj, between two probes
                                      of saturate) and to the original
                                      instance                        (true)
-                --stat <bool>        report the winner and the facts shared
+                --share-len <N>      learned clauses up to this length go
+                                     to the other clones, imported at a
+                                     restart (0: none)              (8)
+                --stat <bool>        report the winner and what was shared
 
     varp sat parallel --clones 8 --stat bj formula.varp
     varp sat parallel --clones 8 saturate -k 2 bj formula.varp
@@ -262,6 +265,14 @@ prints a counterexample as a trace, one row per step:
     parallel sees them all. The fixpoint of saturation with substitution
     depends on the order the facts are found in, so a divided run can end
     a few bindings off a sequential one, either way.
+
+    The learned clauses are shared through a ring (an ETS table with a
+    sequence number per clause): bj in a clone puts every learned clause
+    of at most --share-len literals in it, and reads the clauses of the
+    others from its own cursor at a restart, into its learned set, where
+    the purge treats them as its own. Facts are the cheap and always
+    useful part; clauses cost memory in every clone, so the length is
+    kept short.
 
     order       --sort <order>[,<order>]  identity|random|degree|rank|user,
                                           each with an optional +, - or =

@@ -18,6 +18,13 @@
 %%%    the formula keeps what the race found.  A fact one clone learns
 %%%    is sound for the formula, so every clone may use it.
 %%%
+%%%    Short clauses learned by backjump in one clone go to the others
+%%%    through a ring: an ETS table with a sequence number per clause,
+%%%    which every clone reads from its own cursor at a restart (see
+%%%    the export and import_clauses hooks in varp_backjump). Old
+%%%    entries are dropped as the ring moves on; a clone far behind
+%%%    misses them, which is no harm, they are learned clauses.
+%%%
 %%%    A saturate in the chain is divided: clone i probes segment i of
 %%%    the variables (see --segment in varp_saturate), so the clones
 %%%    together probe every vector once and share what they find. The
@@ -48,6 +55,14 @@
 %% facts does not restart the search every time
 -define(IMPORT_BATCH, 32).
 -define(IMPORT_AGE, 200).
+
+%% the clause ring: entries older than this many clauses are dropped,
+%% every so many exports
+-define(RING_SIZE, 65536).
+-define(RING_SWEEP, 4096).
+
+%% the ring, in the clone's Param
+-record(ring, {tab, seq, len}).
 
 %% the distributor's state (see the distributor below)
 -record(dist, {
@@ -86,11 +101,17 @@ options() ->
 	default => true,
 	description => "Share permanent bindings and substitutions between the clones."
       },
+     #{ long => "share-len",
+	key => share_len,
+	spec => unsigned,
+	default => 8,
+	description => "Share learned clauses up to this length (0: none)."
+      },
      #{ long => "stat",
 	key => stat,
 	spec => {enum,[?BOOL]},
 	default => false,
-	description => "Report the winner and the facts shared."
+	description => "Report the winner and what was shared."
       }].
 
 %% the chain after parallel comes in Param (varp:do/3 puts it there)
@@ -124,7 +145,18 @@ run_clones(Bs, Param, Chain, N) ->
     %% cross reference; it is put back as it was afterwards
     Xref = varp_nif:getopt(Vp, xref),
     Share andalso varp_nif:setopt(Vp, xref, true),
-    Chain1 = import_chain(Chain, Dist),
+    Ring = case Share andalso maps:get(share_len, Param) > 0 of
+	       true ->
+		   #ring{tab = ets:new(varp_shared_clauses,
+				       [ordered_set, public,
+					{write_concurrency, true},
+					{read_concurrency, true}]),
+			 seq = atomics:new(1, []),
+			 len = maps:get(share_len, Param)};
+	       false ->
+		   undefined
+	   end,
+    Chain1 = clause_chain(import_chain(Chain, Dist), Ring),
     Clones = [{I, spawn_link(fun() ->
 				     clone(I, N, Bs, Param, Chain1, Seed0+I, Dist, Driver, Ref)
 			     end)} || I <- lists:seq(0, N-1)],
@@ -135,15 +167,16 @@ run_clones(Bs, Param, Chain, N) ->
     import_original(Bs, drain_all(Ref)),
     flush_results(Ref),
     varp_nif:setopt(Vp, xref, Xref),
+    SharedClauses = stop_ring(Ring),
     case Result of
 	{Winner, {R, Acc, BsW}} ->
-	    stat(Param, "parallel: clone ~w finished first (~.2fs), ~w facts shared\n",
-		 [Winner, (T1-T0)/1000, Shared]),
+	    stat(Param, "parallel: clone ~w finished first (~.2fs), ~w facts and ~w clauses shared\n",
+		 [Winner, (T1-T0)/1000, Shared, SharedClauses]),
 	    output_models(Bs, BsW, Acc),
 	    {R, Acc, BsW};
 	{all, Results} ->
-	    stat(Param, "parallel: all ~w clones finished (~.2fs), ~w facts shared\n",
-		 [N, (T1-T0)/1000, Shared]),
+	    stat(Param, "parallel: all ~w clones finished (~.2fs), ~w facts and ~w clauses shared\n",
+		 [N, (T1-T0)/1000, Shared, SharedClauses]),
 	    %% the original has every shared fact; without sharing the
 	    %% facts are in the clones, so the first one answers
 	    case Share of
@@ -170,6 +203,63 @@ import_chain(Chain, _Dist) ->
 				   idle => fun ?MODULE:idle/1}};
 	 _ -> {P, Prm}
      end || {P, Prm} <- Chain].
+
+%% the backjump plugins in the chain get the clause ring
+clause_chain(Chain, undefined) ->
+    Chain;
+clause_chain(Chain, Ring) ->
+    [case P of
+	 varp_backjump ->
+	     {P, Prm#{export => fun(Lits) -> export_clause(Ring, Lits) end,
+		      import_clauses => fun() -> import_clauses(Ring) end,
+		      share_len => Ring#ring.len}};
+	 _ -> {P, Prm}
+     end || {P, Prm} <- Chain].
+
+%% the clauses shared, and the ring is gone
+stop_ring(undefined) ->
+    0;
+stop_ring(#ring{tab=Tab, seq=Seq}) ->
+    N = atomics:get(Seq, 1),
+    ets:delete(Tab),
+    N.
+
+%% the export hook, run in the clone process on a short learned
+%% clause: into the ring under the next sequence number, and now and
+%% then the oldest entries are dropped
+export_clause(#ring{tab=Tab, seq=Seq}, Lits) ->
+    N = atomics:add_get(Seq, 1, 1),
+    ets:insert(Tab, {N, self(), Lits}),
+    case N rem ?RING_SWEEP of
+	0 when N > ?RING_SIZE ->
+	    ets:select_delete(Tab, [{{'$1', '_', '_'}, [{'<', '$1', N - ?RING_SIZE}], [true]}]);
+	_ ->
+	    ok
+    end.
+
+%% the import hook, run in the clone process at a restart: the clauses
+%% of the others since the clone's cursor, in batches like the facts
+import_clauses(#ring{tab=Tab, seq=Seq}) ->
+    N = atomics:get(Seq, 1),
+    Cursor = case get(clause_cursor) of
+		 undefined -> N;      %% nothing before the clone started
+		 C -> C
+	     end,
+    Now = erlang:monotonic_time(millisecond),
+    Since = case get(clause_import_time) of
+		undefined -> put(clause_import_time, Now), Now;
+		T -> T
+	    end,
+    if N - Cursor >= ?IMPORT_BATCH; N > Cursor, Now - Since >= ?IMPORT_AGE ->
+	    put(clause_cursor, N),
+	    put(clause_import_time, Now),
+	    Self = self(),
+	    ets:select(Tab, [{{'$1', '$2', '$3'},
+			      [{'>', '$1', Cursor}, {'=<', '$1', N}, {'=/=', '$2', Self}],
+			      ['$3']}]);
+       true ->
+	    []
+    end.
 
 %% clone I of N probes segment I when it saturates (when the clones
 %% share what they find, that is; without sharing each probes it all):

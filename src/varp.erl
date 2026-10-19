@@ -88,7 +88,7 @@
 -export([vtl/3]).
 -export([intersect/1, intersect/2]).
 -export([install_bindings/2, install_bindings/3]).
--export([import_facts/2, resolve/2]).
+-export([import_facts/2, import_clauses/2, resolve/2]).
 -export([vec_sat/2, vec_sat/5, vec_sat/6, vec_sat/7, vec_sat/8]).
 -export([vec_sat_lap/5]).
 
@@ -2761,6 +2761,38 @@ import_fact(Vp, {X, Y}) ->
 		false ->
 		    add_equivalence(Vp, Xl, Yl)
 	    end
+    end.
+
+%% Import clauses learned in another instance of the same formula into
+%% the learned set (gamma) at level 0. A clause is first read against
+%% what this instance knows: one with a true literal is dropped, false
+%% literals are left out, one that is left empty contradicts the
+%% instance (false), and one that is here already is not added again.
+%% The units that come out of it are propagated at the end.
+import_clauses(Vp, Clauses) ->
+    import_clauses_(Vp, Clauses) andalso varp_nif:bcp(Vp).
+
+import_clauses_(_Vp, []) ->
+    true;
+import_clauses_(Vp, [Lits|Clauses]) ->
+    case import_clause(Vp, Lits, []) of
+	true -> import_clauses_(Vp, Clauses);
+	false -> false
+    end.
+
+import_clause(Vp, [L|Ls], Acc) ->
+    case varp_nif:value(Vp, L) of
+	true -> true;
+	false -> import_clause(Vp, Ls, Acc);
+	undefined -> import_clause(Vp, Ls, [L|Acc])
+    end;
+import_clause(_Vp, [], []) ->
+    false;
+import_clause(Vp, [], Acc) ->
+    Lits = lists:reverse(Acc),
+    case varp_nif:find_clause(Vp, Lits) of
+	false -> varp_nif:add_clause(Vp, Lits, ?GAMMA) =/= false;
+	_Cix -> true
     end.
 
 %% a literal as it stands now: its value, or the free literal that
