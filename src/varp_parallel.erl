@@ -11,12 +11,27 @@
 %%%    the others are killed.
 %%%
 %%%    A distributor process subscribes to the permanent (level 0)
-%%%    bindings of every clone and hands each new one to all clones,
-%%%    which import them at their next restart (see the import hook in
-%%%    varp_backjump), and to the original instance, so a monitor on
-%%%    it sees them and the formula keeps what the race found.  A fact
-%%%    one clone learns is sound for the formula, so every clone may
-%%%    use it.
+%%%    bindings and substitutions of every clone and hands each new one
+%%%    to all clones, which import them at their next restart (see the
+%%%    import hook in varp_backjump) or between two probes (saturate),
+%%%    and to the original instance, so a monitor on it sees them and
+%%%    the formula keeps what the race found.  A fact one clone learns
+%%%    is sound for the formula, so every clone may use it.
+%%%
+%%%    A saturate in the chain is divided: clone i probes segment i of
+%%%    the variables (see --segment in varp_saturate), so the clones
+%%%    together probe every vector once and share what they find. The
+%%%    segment of a variable is that of its equivalence class (the
+%%%    substitutions shared so far, kept as a union-find per clone):
+%%%    probing one member of a class is probing them all, and which
+%%%    member is the free one differs between the clones, so the class
+%%%    must have one owner whichever member stands for it.
+%%%
+%%%    The first clone with a decisive result (models, inconsistent, an
+%%%    abort) answers; a clone that just continues (saturate at its
+%%%    fixpoint, no models) is waited out, and when every clone does
+%%%    that the answer is continue with the original instance, which
+%%%    then holds all the shared facts.
 %%% @end
 %%% Created : 19 Oct 2026 by Tony Rogvall <tony@rogvall.se>
 
@@ -24,7 +39,7 @@
 -behaviour(varp_plugin).
 
 -export([options/0, run/2]).
--export([drain_facts/0]).
+-export([drain_facts/0, drain_now/0, idle/1]).
 
 -include("varp.hrl").
 
@@ -33,6 +48,17 @@
 %% facts does not restart the search every time
 -define(IMPORT_BATCH, 32).
 -define(IMPORT_AGE, 200).
+
+%% the distributor's state (see the distributor below)
+-record(dist, {
+	  driver,          %% gets the facts too, for the original
+	  ref,             %% tags the messages to the driver
+	  clones = [],     %% the subscribed clone processes
+	  seen = #{},      %% the facts sent, once each
+	  n = 0,           %% number of facts sent
+	  idle = #{},      %% clones idle on all n facts
+	  done = #{}       %% clones past saturate, never waited for
+	 }).
 
 options() ->
     [#{ long => "clones",
@@ -58,7 +84,7 @@ options() ->
 	key => share,
 	spec => {enum,[?BOOL]},
 	default => true,
-	description => "Share permanent bindings between the clones."
+	description => "Share permanent bindings and substitutions between the clones."
       },
      #{ long => "stat",
 	key => stat,
@@ -81,77 +107,159 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 run_clones(Bs, Param, Chain, N) ->
     Vp = Bs#bs.vp,
     Driver = self(),
+    %% the messages to the driver carry a reference of this run: the
+    %% driver may be a long-lived process (a shell, a test) and a clone
+    %% that finished just as the winner did leaves its result behind
+    Ref = make_ref(),
     Seed0 = case maps:get(seed, Param) of
 		-1 -> varp_nif:getopt(Vp, seed);
 		S -> S
 	    end,
-    Dist = case maps:get(share, Param) of
-	       true -> spawn_link(fun() -> distributor([Driver], #{}, 0) end);
+    Share = maps:get(share, Param),
+    Dist = case Share of
+	       true -> spawn_link(fun() -> distributor(#dist{driver=Driver, ref=Ref}) end);
 	       false -> undefined
 	   end,
+    %% substitutions go into the original with subst, which needs the
+    %% cross reference; it is put back as it was afterwards
+    Xref = varp_nif:getopt(Vp, xref),
+    Share andalso varp_nif:setopt(Vp, xref, true),
     Chain1 = import_chain(Chain, Dist),
     Clones = [{I, spawn_link(fun() ->
-				     clone(I, Bs, Param, Chain1, Seed0+I, Dist, Driver)
+				     clone(I, N, Bs, Param, Chain1, Seed0+I, Dist, Driver, Ref)
 			     end)} || I <- lists:seq(0, N-1)],
     T0 = erlang:monotonic_time(millisecond),
-    Result = wait_result(Bs, Clones),
+    Result = wait_result(Bs, Ref, Dist, Clones, []),
     T1 = erlang:monotonic_time(millisecond),
     Shared = stop_distributor(Dist),
-    import_original(Bs, drain_all()),
+    import_original(Bs, drain_all(Ref)),
+    flush_results(Ref),
+    varp_nif:setopt(Vp, xref, Xref),
     case Result of
 	{Winner, {R, Acc, BsW}} ->
 	    stat(Param, "parallel: clone ~w finished first (~.2fs), ~w facts shared\n",
 		 [Winner, (T1-T0)/1000, Shared]),
 	    output_models(Bs, BsW, Acc),
 	    {R, Acc, BsW};
+	{all, Results} ->
+	    stat(Param, "parallel: all ~w clones finished (~.2fs), ~w facts shared\n",
+		 [N, (T1-T0)/1000, Shared]),
+	    %% the original has every shared fact; without sharing the
+	    %% facts are in the clones, so the first one answers
+	    case Share of
+		true ->
+		    {?CONTINUE, [], Bs};
+		false ->
+		    {_, {_, _, Bs0}} = lists:keyfind(0, 1, Results),
+		    {?CONTINUE, [], Bs0}
+	    end;
 	{Winner, Other} ->
 	    io:format("parallel: clone ~w failed: ~p\n", [Winner, Other]),
 	    {?ERROR, [], Bs}
     end.
 
-%% the backjump plugins in the chain get the import hook
+%% the solvers in the chain get the import hook: backjump takes the
+%% facts in batches at a restart, saturate takes them all between two
+%% probes (its lap stands at level 0, so there is nothing to undo)
 import_chain(Chain, undefined) ->
     Chain;
 import_chain(Chain, _Dist) ->
     [case P of
 	 varp_backjump -> {P, Prm#{import => fun ?MODULE:drain_facts/0}};
+	 varp_saturate -> {P, Prm#{import => fun ?MODULE:drain_now/0,
+				   idle => fun ?MODULE:idle/1}};
 	 _ -> {P, Prm}
      end || {P, Prm} <- Chain].
 
-%% the first clone to answer wins, the rest are killed (unlinked
-%% first, a linked kill would take the driver with it); meanwhile the
-%% facts the clones share go into the original as well
-wait_result(Bs, Clones) ->
-    receive
-	{result, I, Pid, Result} ->
-	    [begin unlink(P), exit(P, kill) end || {_, P} <- Clones, P =/= Pid],
-	    unlink(Pid),
-	    {I, Result};
-	{fact, X} ->
-	    import_original(Bs, [X]),
-	    wait_result(Bs, Clones)
+%% clone I of N probes segment I when it saturates (when the clones
+%% share what they find, that is; without sharing each probes it all):
+%% the variables whose equivalence class, by its lowest member, is
+%% I modulo N
+segment_chain(Chain, _I, _N, undefined) ->
+    Chain;
+segment_chain(Chain, I, N, _Dist) ->
+    Mine = fun(X) -> class_of(abs(X)) rem N =:= I end,
+    [case P of
+	 varp_saturate -> {P, Prm#{segment => Mine}};
+	 _ -> {P, Prm}
+     end || {P, Prm} <- Chain].
+
+%% the equivalence classes of the substitutions this clone has
+%% received, a union-find in the process dictionary keyed by variable:
+%% the class is named by its lowest variable
+class_of(X) ->
+    case get({class, X}) of
+	undefined -> X;
+	Y -> class_of(Y)
     end.
 
-%% a fact goes into the original at level 0 when it is free there; a
-%% contradiction means the formula has no models, which the clones
-%% report on their own, so the original is just left as it is
+note_fact({X, Y}) ->
+    case {class_of(abs(X)), class_of(abs(Y))} of
+	{C, C} -> ok;
+	{Cx, Cy} when Cx < Cy -> put({class, Cy}, Cx);
+	{Cx, Cy} -> put({class, Cx}, Cy)
+    end;
+note_fact(_X) ->
+    ok.
+
+%% the first clone with a decisive answer wins, the rest are killed
+%% (unlinked first, a linked kill would take the driver with it); a
+%% clone that just continues is noted, and when all do, that is the
+%% answer. Meanwhile the facts the clones share go into the original
+wait_result(Bs, Ref, Dist, Clones, Done) ->
+    receive
+	{result, Ref, I, Pid, Result} ->
+	    case decisive(Result) of
+		true ->
+		    [begin unlink(P), exit(P, kill) end || {_, P} <- Clones, P =/= Pid],
+		    unlink(Pid),
+		    {I, Result};
+		false ->
+		    unlink(Pid),
+		    %% the others need not wait for this one at a fixpoint
+		    Dist =/= undefined andalso (Dist ! {done, Pid}),
+		    Done1 = [{I, Result}|Done],
+		    case length(Done1) =:= length(Clones) of
+			true -> {all, Done1};
+			false -> wait_result(Bs, Ref, Dist, Clones, Done1)
+		    end
+	    end;
+	{fact, Ref, Fact} ->
+	    import_original(Bs, [Fact]),
+	    wait_result(Bs, Ref, Dist, Clones, Done)
+    end.
+
+%% continue without models is what saturate at its fixpoint, or a
+%% search that just ran out, says: nothing to answer with yet
+decisive({?CONTINUE, [], _Bs}) -> false;
+decisive({?CONTINUE, 0, _Bs}) -> false;
+decisive(_) -> true.
+
+%% a fact goes into the original at level 0; a contradiction means the
+%% formula has no models, which the clones report on their own, so the
+%% original is just left as it is
 import_original(_Bs, []) ->
     ok;
-import_original(Bs, [X|Xs]) ->
+import_original(Bs, Facts) ->
     Vp = Bs#bs.vp,
-    case varp_nif:level(Vp) =:= 0 andalso varp_nif:value(Vp, X) of
-	undefined ->
-	    _ = varp_nif:bind(Vp, X) andalso varp_nif:bcp(Vp),
-	    import_original(Bs, Xs);
-	_ ->
-	    import_original(Bs, Xs)
+    case varp_nif:level(Vp) of
+	0 -> _ = varp:import_facts(Vp, Facts), ok;
+	_ -> ok
     end.
 
-drain_all() ->
+drain_all(Ref) ->
     receive
-	{fact, X} -> [X|drain_all()]
+	{fact, Ref, Fact} -> [Fact|drain_all(Ref)]
     after 0 ->
 	[]
+    end.
+
+%% the results of clones that finished as the winner did
+flush_results(Ref) ->
+    receive
+	{result, Ref, _I, _Pid, _Result} -> flush_results(Ref)
+    after 0 ->
+	ok
     end.
 
 stop_distributor(undefined) ->
@@ -186,8 +294,10 @@ output_models(_Bs, _BsW, _Count) ->
 %% the clone process
 %%--------------------------------------------------------------------
 
-clone(I, Bs, Param, Chain, Seed, Dist, Driver) ->
+clone(I, N, Bs, Param, Chain0, Seed, Dist, Driver, Ref) ->
     process_flag(trap_exit, false),
+    put(distributor, Dist),
+    Chain = segment_chain(Chain0, I, N, Dist),
     W = varp_nif:clone(Bs#bs.vp, #{level => 0, set => [alpha,beta,gamma,delta]}),
     varp_nif:setopt(W, seed, Seed),
     varp_nif:setopt(W, print, false, user),
@@ -206,7 +316,7 @@ clone(I, Bs, Param, Chain, Seed, Dist, Driver) ->
 	     catch ?EXCEPTION(Class, Reason, Trace) ->
 		     {crashed, {Class, Reason, ?GET_STACK(Trace)}}
 	     end,
-    Driver ! {result, I, self(), Result}.
+    Driver ! {result, Ref, I, self(), Result}.
 
 %% the distributor must be the subscriber (the nif sends to the caller
 %% of subscribe), and the search waits until it listens
@@ -236,36 +346,93 @@ drain_facts() ->
 
 drain(undefined) ->
     drain({[], erlang:monotonic_time(millisecond)});
-drain({Lits, Since}) ->
+drain({Facts, Since}) ->
     receive
-	{fact, L} -> drain({[L|Lits], Since})
+	{fact, Fact} -> count_fact(Fact), drain({[Fact|Facts], Since})
     after 0 ->
-	{Lits, Since}
+	{Facts, Since}
     end.
+
+%% the import hook for saturate: everything that has arrived, at once
+drain_now() ->
+    {Facts, _Since} = drain(get(pending_facts)),
+    erase(pending_facts),
+    Facts.
+
+%% the facts this clone has received, so the distributor can tell an
+%% idle report that has seen everything it sent from one that has not;
+%% a substitution also goes into the classes
+count_fact(Fact) ->
+    note_fact(Fact),
+    put(fact_count, fact_count() + 1).
+
+fact_count() ->
+    case get(fact_count) of
+	undefined -> 0;
+	N -> N
+    end.
+
+%% the idle hook for saturate, run in the clone process. At its
+%% fixpoint (true) the clone tells the distributor, then waits for
+%% facts from the others to lap on again, or for finish when every
+%% clone is there. Leaving saturate another way (laps, timeout) it
+%% says it is done, so the others do not wait for it.
+idle(true) ->
+    get(distributor) ! {idle, self(), fact_count()},
+    receive
+	{fact, Fact} -> count_fact(Fact), [Fact|drain_now()];
+	finish -> finish
+    end;
+idle(false) ->
+    get(distributor) ! {done, self()},
+    finish.
 
 %%--------------------------------------------------------------------
 %% the distributor: one subscriber for every clone, each permanent
-%% binding goes to all clones and the driver once (a clone that has
-%% it already ignores it, so nothing echoes)
+%% binding X and substitution {X,Y} goes to all clones and the driver
+%% once (an instance that has it already ignores it, so nothing echoes)
+%%
+%% It also keeps the saturating clones together at the fixpoint: a
+%% clone that has nothing more to find says idle with the number of
+%% facts it has received, a fact sent out puts everyone back to work,
+%% and when every clone is idle on everything sent (or done with
+%% saturate) they all get finish. The messages from a clone (its
+%% facts, then its idle) and to it (facts, then finish) are each in
+%% order, so a clone counted idle has seen every fact there is.
 %%--------------------------------------------------------------------
 
-distributor(Clones, Seen, N) ->
+distributor(D=#dist{driver=Driver, ref=Ref, clones=Clones, seen=Seen, n=N}) ->
     receive
 	{subscribe, Pid, W} ->
 	    ok = varp_nif:subscribe(W, variable),
 	    Pid ! {subscribed, self()},
-	    distributor([Pid|Clones], Seen, N);
-	{varp, X, _Info} when is_integer(X) ->
-	    case maps:is_key(X, Seen) of
+	    distributor(D#dist{clones=[Pid|Clones]});
+	{varp, Fact, _Info} ->
+	    case maps:is_key(Fact, Seen) of
 		true ->
-		    distributor(Clones, Seen, N);
+		    distributor(D);
 		false ->
-		    [Pid ! {fact, X} || Pid <- Clones],
-		    distributor(Clones, Seen#{X => true}, N+1)
+		    Driver ! {fact, Ref, Fact},
+		    [Pid ! {fact, Fact} || Pid <- Clones],
+		    distributor(D#dist{seen=Seen#{Fact => true}, n=N+1, idle=#{}})
 	    end;
-	{varp, {_X,_Y}, _Info} ->
-	    %% substitutions are not shared (yet)
-	    distributor(Clones, Seen, N);
+	{idle, Pid, N} ->  %% idle on everything sent so far
+	    finish(D#dist{idle=(D#dist.idle)#{Pid => true},
+			  done=maps:remove(Pid, D#dist.done)});
+	{idle, _Pid, _Behind} ->
+	    distributor(D);
+	{done, Pid} ->
+	    finish(D#dist{done=(D#dist.done)#{Pid => true},
+			  idle=maps:remove(Pid, D#dist.idle)});
 	{stop, From} ->
 	    From ! {shared, self(), N}
+    end.
+
+finish(D=#dist{clones=Clones, idle=Idle, done=Done}) ->
+    case map_size(Idle) + map_size(Done) >= length(Clones) of
+	true ->
+	    [Pid ! finish || Pid <- maps:keys(Idle)],
+	    distributor(D#dist{idle=#{}});
+	false ->
+	    distributor(D)
     end.

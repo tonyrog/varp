@@ -12,7 +12,7 @@
 -export([run/2]).
 -export([options/0]).
 -export([saturate/5, saturate/6]).
--export([saturate/8, saturate/9, saturate/10]).
+-export([saturate/8, saturate/9, saturate/10, saturate/12]).
 
 %% -define(DEBUG, true).
 %% -compile(export_all).
@@ -71,6 +71,18 @@ options() ->
 	default => 0,
 	description => "Max saturation lap count"
       },
+     #{ long  => "segment",
+	key   => segment,
+	spec  => unsigned,
+	default => 0,
+	description => "Probe segment i of --segments: the variables with index i modulo n"
+      },
+     #{ long  => "segments",
+	key   => segments,
+	spec  => unsigned,
+	default => 1,
+	description => "Number of segments the variables are divided in"
+      },
      #{ long  => "subst",
 	short => "s",
 	key   => subst,
@@ -92,6 +104,22 @@ options() ->
       }
      ].
 
+%% the constants of a lap
+-record(lap, {
+	  k,          %% vector size
+	  q, f, r,    %% extra variables: next, friend, random
+	  subst,      %% substitute equal literals
+	  friend_map,
+	  on_model,   %% fun called with a model in place, or undefined
+	  segment,    %% fun(X) -> boolean(): probe the vectors led by
+		      %% the variables X it says yes to (undefined: all)
+	  import,     %% fun() -> [fact], facts from other instances to
+		      %% take in between the probes, or undefined
+	  idle        %% fun(Fixpoint) -> finish | [fact]: at the fixpoint
+		      %% wait for more facts from the other instances or
+		      %% for the word that all are there, or undefined
+	 }).
+
 run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     maps:get(warn, Param, true) andalso warn_unbound_main(Bs),
     varp_nif:setopt(Bs#bs.vp, max_conflicting, 1),
@@ -104,8 +132,10 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
     Laps = maps:get(laps, Param, infinity),
     Subst = maps:get(subst, Param, true),
     Model = maps:get(model, Param, true),
-    ?dbg0("k=~w,q=~w,f=~w,r=~w,laps=~w\n", [K,Q,F,R,Laps]),
-    saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold,Subst,Model).
+    Segment = segment(maps:get(segment, Param, 0), maps:get(segments, Param, 1)),
+    Hooks = {maps:get(import, Param, undefined), maps:get(idle, Param, undefined)},
+    ?dbg0("k=~w,q=~w,f=~w,r=~w,laps=~w,segment=~w\n", [K,Q,F,R,Laps,Segment]),
+    saturate(Bs,K,Q,F,R,Timeout,Laps,Threshold,Subst,Model,Segment,Hooks).
 
 %% probing propagates from what is bound; without the main variable
 %% (sat, unsat or prove before saturate) nothing much is. Saturating
@@ -138,10 +168,26 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold) ->
 saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst) ->
     saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,true).
 
+saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model) ->
+    saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model,undefined,{undefined,undefined}).
+
+%% --segment i --segments n: the variables i, i+n, i+2n, ... (a fun
+%% from varp_parallel instead divides by equivalence class, see there)
+segment(Fun, _N) when is_function(Fun, 1) ->
+    Fun;
+segment(_I, N) when N =< 1 ->
+    undefined;
+segment(I, N) ->
+    fun(X) -> X rem N =:= I end.
+
 %% Model: report a model when an assignment of a vector binds every
 %% variable (a search plugin after saturate finds it as well, but this
 %% is the assignment just made, at once)
-saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model) ->
+%% Segment: only the vectors led by the variables the fun says yes to
+%% are probed; n instances with the segments 0..n-1 together probe
+%% every vector once, and what they find they share (varp_parallel),
+%% with the hooks {Import,Idle} of the #lap record
+saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model,Segment,{Import,Idle}) ->
     varp_nif:setopt(Bs#bs.vp, xref, true),
     Bs1 = varp:set_local_timeout(Bs, Timeout),
     N = varp:get_number_of_bound_variables(Bs#bs.vp),
@@ -154,7 +200,9 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model) ->
     OnModel = if Model -> fun() -> varp:output_model(Bs1, false, 1) end;
 		 true -> undefined
 	      end,
-    case loop(Bs1,K,Q,F,R,N,MaxLaps,Threshold,Subst,FriendMap,OnModel) of
+    Lap = #lap{k=K, q=Q, f=F, r=R, subst=Subst, friend_map=FriendMap,
+	       on_model=OnModel, segment=Segment, import=Import, idle=Idle},
+    case loop(Bs1,Lap,N,MaxLaps,Threshold) of
 	false ->
 	    {?INCONSISTENT,[],Bs1};
 	{model, Found} ->
@@ -171,23 +219,49 @@ saturate(Bs,K,Q,F,R,Timeout,MaxLaps,Threshold,Subst,Model) ->
 	    {Reason,[],Bs2}
     end.
 
-loop(Bs,K,Q,F,R,N,Laps,Threshold,Subst,FriendMap,OnModel) ->
-    case lap(Bs,K,Q,F,R,Subst,FriendMap,OnModel) of
+%% laps until a lap binds nothing (more than Threshold) or the laps
+%% run out; imported facts count as bound, so an instance keeps
+%% lapping while the others still find things
+loop(Bs,Lap,N,Laps,Threshold) ->
+    case lap(Bs,Lap) of
 	true ->
 	    N1 = varp:get_number_of_bound_variables(Bs#bs.vp),
 	    ?dbg0("Laps=~w n=~w\n", [Laps, N]),
 	    Laps1 = Laps-1,
 	    if N1 - N =< Threshold ->
-		    loop_done(?THRESHOLD,Laps,Bs);
+		    fixpoint(Bs,Lap,Laps,Threshold);
 	       Laps1 =:= 0 ->
-		    loop_done(?ITERATIONS,Laps,Bs);
+		    loop_done(?ITERATIONS,Lap,Bs);
 	       true ->
-		    loop(Bs,K,Q,F,R,N1,Laps1,Threshold,Subst,FriendMap,OnModel)
+		    loop(Bs,Lap,N1,Laps1,Threshold)
 	    end;
-	Result -> Result
+	false -> false;
+	{model,_} = Found -> Found;
+	{Reason,Bs1} -> loop_done(Reason,Lap,Bs1)   %% timeout, cancel
     end.
 
-loop_done(Reason, _Laps, Bs) ->
+%% at the fixpoint an instance of a group waits for facts from the
+%% others, and laps again on them, or for the word that all are there
+fixpoint(Bs,#lap{idle=undefined},_Laps,_Threshold) ->
+    {?THRESHOLD,Bs};
+fixpoint(Bs,Lap=#lap{idle=Idle},Laps,Threshold) ->
+    case Idle(true) of
+	finish ->
+	    {?THRESHOLD,Bs};
+	Facts ->
+	    case varp:import_facts(Bs#bs.vp, Facts) of
+		false -> false;
+		true ->
+		    N = varp:get_number_of_bound_variables(Bs#bs.vp),
+		    loop(Bs,Lap,N,Laps,Threshold)
+	    end
+    end.
+
+%% leaving before the fixpoint: the group is told not to wait
+loop_done(Reason, #lap{idle=undefined}, Bs) ->
+    {Reason,Bs};
+loop_done(Reason, #lap{idle=Idle}, Bs) ->
+    _ = Idle(false),
     {Reason,Bs}.
 
 %% Run one lap over all variables given 
@@ -195,13 +269,17 @@ loop_done(Reason, _Laps, Bs) ->
 %% R number of randomly selected variables
 %% Variables in every eval is K+Q+R
 
-lap(Bs,K,Q,F,R,Subst,FriendMap,OnModel) ->
-    case varp:vec_create(Bs#bs.vp, varp_nif:next_unbound(Bs#bs.vp), K) of
-	[] -> true;
-	Vec0 -> lap_(Bs,Vec0,Q,F,R,1,Subst,FriendMap,OnModel)
+lap(Bs,Lap) ->
+    case import(Bs, Lap) of
+	false -> false;
+	true ->
+	    case segment_vec(Bs#bs.vp, varp:vec_create(Bs#bs.vp, Lap#lap.k), Lap) of
+		[] -> true;
+		Vec0 -> lap_(Bs,Vec0,1,Lap)
+	    end
     end.
 
-lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) when Count band ?COUNT =:= 0 ->
+lap_(Bs,Vec0,Count,Lap) when Count band ?COUNT =:= 0 ->
     case varp:check_timeout_or_cancel(Bs,?COUNTER_ST_BCP_COUNTER,
 				      ?CHECK_INTERVAL) of
 	{true,?TIMEOUT} ->
@@ -215,18 +293,61 @@ lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) when Count band ?COUNT =:= 0 -
 	{true,What} ->
 	    {What, Bs};
 	false ->
-	    lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel)
+	    lap__(Bs,Vec0,Count,Lap)
     end;
-lap_(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) ->
-    lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel).
+lap_(Bs,Vec0,Count,Lap) ->
+    lap__(Bs,Vec0,Count,Lap).
 
-lap__(Bs,Vec0,Q,F,R,Count,Subst,FriendMap,OnModel) ->
-    case varp:vec_sat(Bs#bs.vp,Vec0,Q,F,R,Subst,FriendMap,OnModel) of
+lap__(Bs,Vec0,Count,Lap) ->
+    #lap{q=Q, f=F, r=R, subst=Subst, friend_map=FriendMap, on_model=OnModel} = Lap,
+    case import(Bs, Lap) andalso
+	varp:vec_sat(Bs#bs.vp,Vec0,Q,F,R,Subst,FriendMap,OnModel) of
 	false -> false;
 	{model, _} = Found -> Found;
 	true ->
-	    case varp:vec_step(Bs#bs.vp, Vec0) of
-		false -> true;
-		Vec1 -> lap_(Bs,Vec1,Q,F,R,Count+1,Subst,FriendMap,OnModel)
+	    case segment_vec(Bs#bs.vp, varp:vec_step(Bs#bs.vp, Vec0), Lap) of
+		[] -> true;
+		Vec1 -> lap_(Bs,Vec1,Count+1,Lap)
 	    end
+    end.
+
+%% The vector as the lap steps it, moved on to the segment: the lead
+%% variable (the last of the list, the slowest to step) must be in
+%% it, so the lap skips to the next lead that is, and starts a fresh
+%% vector from there. [] when the lap is over.
+segment_vec(_Vp, false, _Lap) ->
+    [];
+segment_vec(_Vp, [], _Lap) ->
+    [];
+segment_vec(_Vp, Vec, #lap{segment=undefined}) ->
+    Vec;
+segment_vec(Vp, Vec, Lap=#lap{segment=Mine, k=K}) ->
+    Lead = lists:last(Vec),
+    case Mine(Lead) of
+	true -> Vec;
+	false ->
+	    case next_lead(Vp, Lead, Mine) of
+		false -> [];
+		Lead1 -> segment_vec(Vp, varp:vec_create(Vp, Lead1, K), Lap)
+	    end
+    end.
+
+next_lead(Vp, X, Mine) ->
+    case varp_nif:next_unbound(Vp, X) of
+	false -> false;
+	X1 ->
+	    case Mine(X1) of
+		true -> X1;
+		false -> next_lead(Vp, X1, Mine)
+	    end
+    end.
+
+%% facts from the other instances go in between the probes, at level
+%% 0 where the lap stands; false when one contradicts this instance
+import(_Bs, #lap{import=undefined}) ->
+    true;
+import(Bs, #lap{import=Import}) ->
+    case Import() of
+	[] -> true;
+	Facts -> varp:import_facts(Bs#bs.vp, Facts)
     end.

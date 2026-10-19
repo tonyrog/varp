@@ -421,23 +421,15 @@ import_facts(Bs, Param) ->
 	Import ->
 	    case Import() of
 		[] -> ok;
-		Lits ->
+		Facts ->
 		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
 		    varp_formula:proof_output(Bs,$c,"import"),
-		    import_facts_(Bs#bs.vp, Lits)
-	    end
-    end.
-
-import_facts_(_Vp, []) ->
-    ok;
-import_facts_(Vp, [L|Ls]) ->
-    case varp_nif:value(Vp, L) of
-	true -> import_facts_(Vp, Ls);
-	false -> false;
-	undefined ->
-	    case varp_nif:bind(Vp, L) andalso varp_nif:bcp(Vp) of
-		true -> import_facts_(Vp, Ls);
-		false -> false
+		    %% literals and substitutions (the latter become
+		    %% clauses here, the cross reference is off)
+		    case varp:import_facts(Bs#bs.vp, Facts) of
+			true -> ok;
+			false -> false
+		    end
 	    end
     end.
 

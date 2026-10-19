@@ -1,6 +1,9 @@
 %%% The parallel driver: the chain after it runs in cloned instances,
-%%% the first clone to finish answers, and permanent bindings found
-%%% in one clone reach the others through the distributor.
+%%% the first clone with a decisive answer wins, and permanent bindings
+%%% and substitutions found in one clone reach the others through the
+%%% distributor. A saturate in the chain is divided between the clones
+%%% by segments of the variables, and the result of a chain where every
+%%% clone just continues is the original instance with all the facts.
 -module(varp_parallel_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("varp.hrl").
@@ -40,6 +43,55 @@ original_untouched_test() ->
     %% the returned state is the winner's, with the model bound
     ?assertNotEqual(0, varp_nif:level(Bs#bs.vp)).
 
+%% saturate divided between three clones: C comes from probing A (both
+%% ways give C), E from probing D, and A=B is a substitution. The
+%% result is the original instance, at level 0, with all of it.
+-define(SAT_F, "(A == B) && (A || C) && (!A || C) && (D || E) && (!D || E) && (F || G || H)").
+
+saturate(Opts) ->
+    varp_tc:quiet(fun() ->
+			  varp_tc:run(?SAT_F, [{satisfy,[]},{parallel,Opts},{saturate,[{level,1}]}])
+		  end).
+
+var(Bs, Name) ->
+    {_, X} = varp_nif:find_symbol(Bs#bs.vp, {list_to_binary(Name), []}),
+    X.
+
+saturate_segments_test() ->
+    {continue, [], Seq} =
+	varp_tc:quiet(fun() -> varp_tc:run(?SAT_F, [{satisfy,[]},{saturate,[{level,1}]}]) end),
+    {continue, [], Bs} = saturate([{clones,3}]),
+    Vp = Bs#bs.vp,
+    ?assertEqual(0, varp_nif:level(Vp)),
+    ?assertEqual(true, varp_nif:value(Vp, var(Bs, "C"))),
+    ?assertEqual(true, varp_nif:value(Vp, var(Bs, "E"))),
+    %% one of A and B stands for the other
+    ?assert(is_integer(varp_nif:bound(Vp, var(Bs, "A"))) orelse
+	    is_integer(varp_nif:bound(Vp, var(Bs, "B")))),
+    ?assertEqual(varp:get_number_of_bound_variables(Seq#bs.vp),
+		 varp:get_number_of_bound_variables(Vp)),
+    %% the cross reference is as it was
+    ?assertEqual(false, varp_nif:getopt(Vp, xref)).
+
+%% without sharing every clone saturates it all, and the first one
+%% answers with its instance
+saturate_share_off_test() ->
+    {continue, [], Bs} = saturate([{clones,2},{share,false}]),
+    ?assertEqual(true, varp_nif:value(Bs#bs.vp, var(Bs, "C"))),
+    ?assertEqual(true, varp_nif:value(Bs#bs.vp, var(Bs, "E"))).
+
+%% saturate and then the search, in two clones: the model of the
+%% formula with a unique one
+saturate_then_backjump_test() ->
+    F = "(A || B) && (!A || C) && (!B || !C) && (C || D) && !D",
+    {_, [Model], _} =
+	varp_tc:quiet(fun() ->
+			      varp_tc:run(F, [{satisfy,[]},{parallel,[{clones,2}]},
+					      {saturate,[{level,1}]},{backjump,[]}])
+		      end),
+    {_, [Model0], _} = seq(F),
+    ?assertEqual(lists:sort(Model0), lists:sort(Model)).
+
 %% parallel with nothing after it has nothing to run
 empty_chain_test() ->
     {continue, [], _} =
@@ -61,5 +113,16 @@ cli_test_() ->
 	     %% no models, with four clones sharing facts
 	     P = filename:join(varp_tc:formula_dir("varp"), "pigeon.varp"),
 	     {0, Out2} = varp_tc:cli(["sat", "parallel", "--clones", "4", "bj", "n=7", P]),
-	     ?assertNotEqual(nomatch, string:find(Out2, "% 0"))
+	     ?assertNotEqual(nomatch, string:find(Out2, "% 0")),
+	     %% saturate in segments: the substitutions reach the original
+	     %% too, and all clones are waited for
+	     {0, Out3} = varp_tc:cli(["sat", "mon", "parallel", "--clones", "3", "--stat",
+				      "saturate", "-k=1", F]),
+	     ?assertNotEqual(nomatch, string:find(Out3, "monitor: substitut")),
+	     ?assertNotEqual(nomatch, string:find(Out3, "monitor: permanent")),
+	     ?assertNotEqual(nomatch, string:find(Out3, "parallel: all 3 clones finished")),
+	     %% saturate in segments and then the race
+	     {0, Out4} = varp_tc:cli(["sat", "parallel", "--clones", "3", "saturate", "-k=1", "bj", F]),
+	     ?assertNotEqual(nomatch, string:find(Out4, "D=7,E=5,M=1,N=6,O=0,R=8,S=9,Y=2")),
+	     ?assertEqual(1, length(string:split(Out4, "S=9", all)) - 1)
      end}.

@@ -88,6 +88,7 @@
 -export([vtl/3]).
 -export([intersect/1, intersect/2]).
 -export([install_bindings/2, install_bindings/3]).
+-export([import_facts/2, resolve/2]).
 -export([vec_sat/2, vec_sat/5, vec_sat/6, vec_sat/7, vec_sat/8]).
 -export([vec_sat_lap/5]).
 
@@ -2724,6 +2725,65 @@ install_binding(Vp, {X,Y}, _Level = 0, _Subst = true) ->
     end;
 install_binding(_Vp, _Bnd, _Level, _Subst) ->
     false.
+
+%% Import facts found in another instance of the same formula (a clone
+%% in the parallel driver) at level 0: a literal is bound, and a
+%% substitution {X,Y} (Y stands for X, as the nif reports it) is made
+%% with subst when the cross reference is on, else kept as the two
+%% binary clauses of the equivalence. Both sides are resolved first,
+%% since this instance may have bound or substituted them already.
+%% false when a fact contradicts the instance: the formula has no models.
+import_facts(_Vp, []) ->
+    true;
+import_facts(Vp, [Fact|Facts]) ->
+    case import_fact(Vp, Fact) of
+	true -> import_facts(Vp, Facts);
+	false -> false
+    end.
+
+import_fact(Vp, X) when is_integer(X) ->
+    case resolve(Vp, X) of
+	true -> true;
+	false -> false;
+	L -> varp_nif:bind(Vp, L) andalso varp_nif:bcp(Vp)
+    end;
+import_fact(Vp, {X, Y}) ->
+    case {resolve(Vp, X), resolve(Vp, Y)} of
+	{V, V} -> true;
+	{Xv, Yv} when is_boolean(Xv), is_boolean(Yv) -> false;
+	{Xv, Yl} when is_boolean(Xv) -> import_fact(Vp, signed(Yl, Xv));
+	{Xl, Yv} when is_boolean(Yv) -> import_fact(Vp, signed(Xl, Yv));
+	{Xl, Yl} when Xl =:= -Yl -> false;
+	{Xl, Yl} ->
+	    case varp_nif:getopt(Vp, xref) of
+		true ->
+		    varp_nif:subst(Vp, Xl, Yl) andalso varp_nif:bcp(Vp);
+		false ->
+		    add_equivalence(Vp, Xl, Yl)
+	    end
+    end.
+
+%% a literal as it stands now: its value, or the free literal that
+%% represents it (itself when it is not substituted)
+resolve(Vp, L) ->
+    case varp_nif:bound(Vp, L) of
+	undefined -> L;
+	V when is_boolean(V) -> V;
+	R when is_integer(R) -> resolve(Vp, R)
+    end.
+
+signed(L, true) -> L;
+signed(L, false) -> -L.
+
+%% X = Y as two clauses in the formula set
+add_equivalence(Vp, X, Y) ->
+    clause_added(varp_nif:add_clause(Vp, [-X, Y], ?DELTA)) andalso
+	clause_added(varp_nif:add_clause(Vp, [X, -Y], ?DELTA)) andalso
+	varp_nif:bcp(Vp).
+
+clause_added(false) -> false;
+clause_added(error) -> false;
+clause_added(_Cix) -> true.
 
 %%
 vec_value(V, Vec) ->

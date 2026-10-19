@@ -241,12 +241,27 @@ prints a counterexample as a trace, one row per step:
                                      formula's)
                 --shuffle <bool>     random variable order in every clone but
                                      the first                       (true)
-                --share <bool>       permanent bindings found in one clone
-                                     go to all, imported at a restart, and
-                                     to the original instance        (true)
+                --share <bool>       permanent bindings and substitutions
+                                     found in one clone go to all (imported
+                                     at a restart of bj, between two probes
+                                     of saturate) and to the original
+                                     instance                        (true)
                 --stat <bool>        report the winner and the facts shared
 
     varp sat parallel --clones 8 --stat bj formula.varp
+    varp sat parallel --clones 8 saturate -k 2 bj formula.varp
+
+    The first clone with a decisive answer (models, no models, an abort)
+    wins. A saturate in the chain is divided: clone i probes segment i
+    of the variables (by equivalence class, so a class has one owner
+    whichever member stands for it), the clones share what they find
+    and lap again on each other's facts until none of them has anything
+    left, and then every clone goes on with the rest of the chain. With
+    nothing after saturate every clone just continues, and the answer is
+    the original instance with all the facts, so a monitor before
+    parallel sees them all. The fixpoint of saturation with substitution
+    depends on the order the facts are found in, so a divided run can end
+    a few bindings off a sequential one, either way.
 
     order       --sort <order>[,<order>]  identity|random|degree|rank|user,
                                           each with an optional +, - or =
@@ -270,6 +285,9 @@ prints a counterexample as a trace, one row per step:
                 --model <bool>        stop with a model found (true)
                 --warn <bool>         warn when the main variable is
                                       unbound, no sat before  (true)
+                --segment <i>, --segments <n>  probe only the vectors
+                                      led by variable i, i+n, i+2n, ...
+                                      (parallel gives each clone one)
 
     saturate probes: every vector of level + seq + friend + random
     unbound variables is propagated in all its assignments, and what

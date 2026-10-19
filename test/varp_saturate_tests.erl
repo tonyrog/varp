@@ -34,6 +34,29 @@ models(F, Do) ->
     end.
 
 %%%-------------------------------------------------------------------
+%%% segments: --segment i --segments n probes the variables i modulo n
+%%% only (varp_parallel gives every clone one segment)
+%%%-------------------------------------------------------------------
+
+%% one segment of two binds no more than the whole, the two together
+%% (one after the other, in the same instance) bind it all
+segment_test() ->
+    F = "(A == B) && (A || C) && (!A || C) && (D || E) && (!D || E) && (F || G || H)",
+    {continue, [], All} = saturate(F, [{level,1}]),
+    N = stat(All, number_of_bound_variables),
+    {continue, [], S0} = saturate(F, [{level,1},{segment,0},{segments,2}]),
+    ?assert(stat(S0, number_of_bound_variables) =< N),
+    {continue, [], Both} =
+	varp_tc:quiet(fun() ->
+			      varp_tc:run(F, [{satisfy,[]},
+					      {saturate,[{level,1},{segment,0},{segments,2}]},
+					      {saturate,[{level,1},{segment,1},{segments,2}]}])
+		      end),
+    ?assertEqual(N, stat(Both, number_of_bound_variables)),
+    ?assertEqual(true, varp_nif:value(Both#bs.vp, index(Both, "C"))),
+    ?assertEqual(true, varp_nif:value(Both#bs.vp, index(Both, "E"))).
+
+%%%-------------------------------------------------------------------
 %%% level 1
 %%%-------------------------------------------------------------------
 
