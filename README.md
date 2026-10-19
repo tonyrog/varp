@@ -249,7 +249,8 @@ prints a counterexample as a trace, one row per step:
                 --share-len <N>      learned clauses up to this length go
                                      to the other clones, imported at a
                                      restart (0: none)              (8)
-                --stat <bool>        report the winner and what was shared
+                --stat <bool>        report the winner, what was shared and
+                                     every clone's counters
 
     varp sat parallel --clones 8 --stat bj formula.varp
     varp sat parallel --clones 8 saturate -k 2 bj formula.varp

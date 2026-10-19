@@ -128,6 +128,8 @@ cli_test_() ->
 	     {0, Out} = varp_tc:cli(["sat", "parallel", "--clones", "2", "--stat", "bj", F]),
 	     ?assertNotEqual(nomatch, string:find(Out, "parallel: clone")),
 	     ?assertNotEqual(nomatch, string:find(Out, "clauses shared")),
+	     ?assertNotEqual(nomatch, string:find(Out, "parallel: clone   1: #conflict:")),
+	     ?assertNotEqual(nomatch, string:find(Out, "parallel: total: #conflict:")),
 	     ?assertNotEqual(nomatch, string:find(Out, "D=7,E=5,M=1,N=6,O=0,R=8,S=9,Y=2")),
 	     %% the model is printed once
 	     ?assertEqual(1, length(string:split(Out, "S=9", all)) - 1),
