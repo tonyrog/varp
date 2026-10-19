@@ -215,8 +215,10 @@ new(Options) when is_map(Options) ->
 %% ones) and the clause sets asked for (default delta only, so a
 %% complete copy of a built formula is set => [alpha,beta,gamma,delta]).
 %% Clause indices are not kept: a cloned binding has its level but no
-%% reason clause.  The clone is independent of the original and may be
-%% used from another process.
+%% reason clause.  The statistics counters (bcp, conflicts, ...) continue
+%% from the values of the original, so a difference against a snapshot
+%% of the original is the work done by the clone.  The clone is
+%% independent of the original and may be used from another process.
 -spec clone(Vp::varp(), Opts::clone_opts()) -> varp().
 -type clone_opts() :: #{
 			%% clone bindings up until level 'Level'

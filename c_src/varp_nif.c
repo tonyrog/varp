@@ -6230,6 +6230,11 @@ static ERL_NIF_TERM varp_clone(ErlNifEnv* env, int argc,
     if (setup(vp, &opt.config) < 0)
 	goto error;
 
+    // the clone continues the statistics counters of the original, so
+    // a difference against a snapshot of the original is the work done
+    // by the clone, and clause stamps stay in the past of its bcp clock
+    memcpy(vp->counter, vp0->counter, sizeof(vp->counter));
+
     // the options set with setopt (print, partial, starexec, ...)
     for (i = 0; i < (int)dynvar_size(vp0->xopt); i++) {
 	int j;

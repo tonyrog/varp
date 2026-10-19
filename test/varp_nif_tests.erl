@@ -89,6 +89,8 @@ clone_test() ->
     W = varp_nif:clone(Vp, #{level => 0}),
     ?assertEqual(varp:get_number_of_variables(Vp), varp:get_number_of_variables(W)),
     ?assertEqual(varp_nif:getstat(Vp, number_of_clauses), varp_nif:getstat(W, number_of_clauses)),
+    %% the clone continues the counters, so a stat difference stays positive
+    ?assertEqual(varp_nif:getstat(Vp, bcp_counter), varp_nif:getstat(W, bcp_counter)),
     ?assertEqual(1, varp_nif:getstat(W, number_of_bound_variables)),
     ?assertEqual(true, varp_nif:value(W, 4)),
     ?assertEqual(0, varp_nif:variable_info(W, 4, level)),
