@@ -13,8 +13,10 @@
 %%%    A distributor process subscribes to the permanent (level 0)
 %%%    bindings of every clone and hands each new one to all clones,
 %%%    which import them at their next restart (see the import hook in
-%%%    varp_backjump).  A fact one clone learns is sound for the
-%%%    formula, so every clone may use it.
+%%%    varp_backjump), and to the original instance, so a monitor on
+%%%    it sees them and the formula keeps what the race found.  A fact
+%%%    one clone learns is sound for the formula, so every clone may
+%%%    use it.
 %%% @end
 %%% Created : 19 Oct 2026 by Tony Rogvall <tony@rogvall.se>
 
@@ -84,7 +86,7 @@ run_clones(Bs, Param, Chain, N) ->
 		S -> S
 	    end,
     Dist = case maps:get(share, Param) of
-	       true -> spawn_link(fun() -> distributor([], #{}, 0) end);
+	       true -> spawn_link(fun() -> distributor([Driver], #{}, 0) end);
 	       false -> undefined
 	   end,
     Chain1 = import_chain(Chain, Dist),
@@ -92,9 +94,10 @@ run_clones(Bs, Param, Chain, N) ->
 				     clone(I, Bs, Param, Chain1, Seed0+I, Dist, Driver)
 			     end)} || I <- lists:seq(0, N-1)],
     T0 = erlang:monotonic_time(millisecond),
-    Result = wait_result(Clones),
+    Result = wait_result(Bs, Clones),
     T1 = erlang:monotonic_time(millisecond),
     Shared = stop_distributor(Dist),
+    import_original(Bs, drain_all()),
     case Result of
 	{Winner, {R, Acc, BsW}} ->
 	    stat(Param, "parallel: clone ~w finished first (~.2fs), ~w facts shared\n",
@@ -116,13 +119,39 @@ import_chain(Chain, _Dist) ->
      end || {P, Prm} <- Chain].
 
 %% the first clone to answer wins, the rest are killed (unlinked
-%% first, a linked kill would take the driver with it)
-wait_result(Clones) ->
+%% first, a linked kill would take the driver with it); meanwhile the
+%% facts the clones share go into the original as well
+wait_result(Bs, Clones) ->
     receive
 	{result, I, Pid, Result} ->
 	    [begin unlink(P), exit(P, kill) end || {_, P} <- Clones, P =/= Pid],
 	    unlink(Pid),
-	    {I, Result}
+	    {I, Result};
+	{fact, X} ->
+	    import_original(Bs, [X]),
+	    wait_result(Bs, Clones)
+    end.
+
+%% a fact goes into the original at level 0 when it is free there; a
+%% contradiction means the formula has no models, which the clones
+%% report on their own, so the original is just left as it is
+import_original(_Bs, []) ->
+    ok;
+import_original(Bs, [X|Xs]) ->
+    Vp = Bs#bs.vp,
+    case varp_nif:level(Vp) =:= 0 andalso varp_nif:value(Vp, X) of
+	undefined ->
+	    _ = varp_nif:bind(Vp, X) andalso varp_nif:bcp(Vp),
+	    import_original(Bs, Xs);
+	_ ->
+	    import_original(Bs, Xs)
+    end.
+
+drain_all() ->
+    receive
+	{fact, X} -> [X|drain_all()]
+    after 0 ->
+	[]
     end.
 
 stop_distributor(undefined) ->
@@ -216,8 +245,8 @@ drain({Lits, Since}) ->
 
 %%--------------------------------------------------------------------
 %% the distributor: one subscriber for every clone, each permanent
-%% binding goes to all clones once (a clone that has it already
-%% ignores it, so nothing echoes)
+%% binding goes to all clones and the driver once (a clone that has
+%% it already ignores it, so nothing echoes)
 %%--------------------------------------------------------------------
 
 distributor(Clones, Seen, N) ->

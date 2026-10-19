@@ -55,6 +55,9 @@ cli_test_() ->
 	     ?assertNotEqual(nomatch, string:find(Out, "D=7,E=5,M=1,N=6,O=0,R=8,S=9,Y=2")),
 	     %% the model is printed once
 	     ?assertEqual(1, length(string:split(Out, "S=9", all)) - 1),
+	     %% the shared facts reach the original: a monitor on it sees them
+	     {0, Out1} = varp_tc:cli(["sat", "mon", "parallel", "--clones", "2", "bj", F]),
+	     ?assertNotEqual(nomatch, string:find(Out1, "monitor: permanent")),
 	     %% no models, with four clones sharing facts
 	     P = filename:join(varp_tc:formula_dir("varp"), "pigeon.varp"),
 	     {0, Out2} = varp_tc:cli(["sat", "parallel", "--clones", "4", "bj", "n=7", P]),

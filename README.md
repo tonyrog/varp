@@ -242,7 +242,8 @@ prints a counterexample as a trace, one row per step:
                 --shuffle <bool>     random variable order in every clone but
                                      the first                       (true)
                 --share <bool>       permanent bindings found in one clone
-                                     go to all, imported at a restart (true)
+                                     go to all, imported at a restart, and
+                                     to the original instance        (true)
                 --stat <bool>        report the winner and the facts shared
 
     varp sat parallel --clones 8 --stat bj formula.varp
