@@ -20,7 +20,12 @@
 -include("varp.hrl").
 
 -define(CHECK_INTERVAL, 1000).
--define(COUNT, 16#1ff).
+%% the clock is read at every probe (a probe is at least two bcps, the
+%% clock read is nothing next to that) and the timer and the cancel
+%% message are looked at once per CHECK_INTERVAL ms; with a mask here
+%% a level 2 or 3 lap on a large formula overran its timeout by the
+%% time of the probes in between
+-define(COUNT, 0).
 
 options() ->
     [#{ long  => "timeout",
