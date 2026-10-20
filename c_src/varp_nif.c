@@ -4862,7 +4862,7 @@ typedef enum {
 typedef enum {
     ORDER_ASCEND     = 0,    // ascending order
     ORDER_DESCEND    = 1,    // descending order
-    ORDER_INTERLEAVE = 2     // interleve order
+    ORDER_INTERLEAVE = 2     // ascending, then woven from both ends
 } order_dir_t;
 
 #ifdef DEBUG_ORDER
@@ -5101,6 +5101,19 @@ static int vif_get_order(ErlNifEnv* env, ERL_NIF_TERM arg,
     return 1;
 }
 
+// weave the sorted variables from both ends: 1,2,3,4,5 => 1,5,2,4,3
+// so that the search attacks the order from the top and the bottom
+static void order_interleave(int* map, int m)
+{
+    int i, lo = 0, hi = m-1;
+    int* tmp = enif_alloc(sizeof(int)*m);
+    if (tmp == NULL) return;
+    for (i = 0; i < m; i++)
+	tmp[i] = (i & 1) ? map[hi--] : map[lo++];
+    memcpy(map, tmp, sizeof(int)*m);
+    enif_free(tmp);
+}
+
 static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 				    const ERL_NIF_TERM argv[])
 {
@@ -5219,6 +5232,10 @@ static ERL_NIF_TERM varp_order_sort(ErlNifEnv* env, int argc,
 	    kp.sort_key = sort_key;
 
 	    QSORT(sort_map, m, sizeof(int), cmp_keys, &kp);
+	    // '=' on the first key: the ascending order woven from both
+	    // ends; on the second key it only breaks ties, ascending
+	    if (dir[0] == ORDER_INTERLEAVE)
+		order_interleave(sort_map, m);
 	    // setup variable phases & order
 	    k1 = sort_key[0];
 	    k2 = sort_key[1];

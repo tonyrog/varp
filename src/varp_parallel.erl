@@ -111,7 +111,7 @@ options() ->
 	key => stat,
 	spec => {enum,[?BOOL]},
 	default => false,
-	description => "Report the winner and what was shared."
+	description => "Report the winner, what was shared and every clone's counters."
       }].
 
 %% the chain after parallel comes in Param (varp:do/3 puts it there)
@@ -157,9 +157,17 @@ run_clones(Bs, Param, Chain, N) ->
 		   undefined
 	   end,
     Chain1 = clause_chain(import_chain(Chain, Dist), Ring),
+    %% the instances are cloned here so that the driver can read their
+    %% counters at the end, also from the clones that were killed; the
+    %% counters start as the original's (varp_nif:clone copies them)
+    Instances = [begin
+		     W = varp_nif:clone(Vp, #{level => 0, set => [alpha,beta,gamma,delta]}),
+		     {I, W, snapshot(W)}
+		 end || I <- lists:seq(0, N-1)],
     Clones = [{I, spawn_link(fun() ->
-				     clone(I, N, Bs, Param, Chain1, Seed0+I, Dist, Driver, Ref)
-			     end)} || I <- lists:seq(0, N-1)],
+				     clone(I, N, Bs#bs{vp = W}, Param, Chain1,
+					   Seed0+I, Dist, Driver, Ref)
+			     end)} || {I, W, _} <- Instances],
     T0 = erlang:monotonic_time(millisecond),
     Result = wait_result(Bs, Ref, Dist, Clones, []),
     T1 = erlang:monotonic_time(millisecond),
@@ -172,11 +180,13 @@ run_clones(Bs, Param, Chain, N) ->
 	{Winner, {R, Acc, BsW}} ->
 	    stat(Param, "parallel: clone ~w finished first (~.2fs), ~w facts and ~w clauses shared\n",
 		 [Winner, (T1-T0)/1000, Shared, SharedClauses]),
+	    clone_summary(Param, Instances, Winner),
 	    output_models(Bs, BsW, Acc),
 	    {R, Acc, BsW};
 	{all, Results} ->
 	    stat(Param, "parallel: all ~w clones finished (~.2fs), ~w facts and ~w clauses shared\n",
 		 [N, (T1-T0)/1000, Shared, SharedClauses]),
+	    clone_summary(Param, Instances, none),
 	    %% the original has every shared fact; without sharing the
 	    %% facts are in the clones, so the first one answers
 	    case Share of
@@ -301,7 +311,7 @@ wait_result(Bs, Ref, Dist, Clones, Done) ->
 	{result, Ref, I, Pid, Result} ->
 	    case decisive(Result) of
 		true ->
-		    [begin unlink(P), exit(P, kill) end || {_, P} <- Clones, P =/= Pid],
+		    kill_clones([P || {_, P} <- Clones, P =/= Pid]),
 		    unlink(Pid),
 		    {I, Result};
 		false ->
@@ -317,6 +327,45 @@ wait_result(Bs, Ref, Dist, Clones, Done) ->
 	{fact, Ref, Fact} ->
 	    import_original(Bs, [Fact]),
 	    wait_result(Bs, Ref, Dist, Clones, Done)
+    end.
+
+%% the losers are killed and waited for, so that nobody touches an
+%% instance when its counters are read; a clone that has already
+%% finished is gone, which the monitor reports just the same
+kill_clones(Pids) ->
+    Mons = [begin
+		unlink(P),
+		M = monitor(process, P),
+		exit(P, kill),
+		M
+	    end || P <- Pids],
+    [receive {'DOWN', M, process, _, _} -> ok after 5000 -> ok end || M <- Mons],
+    ok.
+
+%% the counters of an instance when its clone starts; the clone adds
+%% to them, so the difference at the end is the clone's own work
+snapshot(W) ->
+    {varp_nif:getstat(W, conflict_counter), varp_nif:getstat(W, bcp_counter)}.
+
+%% with --stat: one line per clone and the sum, the way to see what
+%% all the clones did and not only the winner
+clone_summary(Param, Instances, Winner) ->
+    case maps:get(stat, Param) of
+	false ->
+	    ok;
+	true ->
+	    Rows = [{I,
+		     varp_nif:getstat(W, conflict_counter) - C0,
+		     varp_nif:getstat(W, bcp_counter) - B0,
+		     varp_nif:getstat(W, number_of_clauses),
+		     varp_nif:getstat(W, number_of_dead_clauses)}
+		    || {I, W, {C0, B0}} <- Instances],
+	    [io:format("parallel: clone ~3w: #conflict:~w, bcp:~w, #clauses:~w, #dead:~w~s\n",
+		       [I, C, B, Nc, Nd, case I of Winner -> " *"; _ -> "" end])
+	     || {I, C, B, Nc, Nd} <- Rows],
+	    io:format("parallel: total: #conflict:~w, bcp:~w\n",
+		      [lists:sum([C || {_, C, _, _, _} <- Rows]),
+		       lists:sum([B || {_, _, B, _, _} <- Rows])])
     end.
 
 %% continue without models is what saturate at its fixpoint, or a
@@ -384,11 +433,12 @@ output_models(_Bs, _BsW, _Count) ->
 %% the clone process
 %%--------------------------------------------------------------------
 
+%% Bs holds the clone's own instance (cloned by the driver)
 clone(I, N, Bs, Param, Chain0, Seed, Dist, Driver, Ref) ->
     process_flag(trap_exit, false),
     put(distributor, Dist),
     Chain = segment_chain(Chain0, I, N, Dist),
-    W = varp_nif:clone(Bs#bs.vp, #{level => 0, set => [alpha,beta,gamma,delta]}),
+    W = Bs#bs.vp,
     varp_nif:setopt(W, seed, Seed),
     varp_nif:setopt(W, print, false, user),
     case I > 0 andalso maps:get(shuffle, Param) of
@@ -396,8 +446,7 @@ clone(I, N, Bs, Param, Chain0, Seed, Dist, Driver, Ref) ->
 	false -> ok
     end,
     subscribe(Dist, W),
-    BsW = Bs#bs{ vp = W,
-		 counters = counters:new(?NUM_COUNTERS, []),
+    BsW = Bs#bs{ counters = counters:new(?NUM_COUNTERS, []),
 		 d1 = counters:new(1024, []),
 		 d2 = counters:new(1024, []),
 		 clen = counters:new(1024, []) },

@@ -251,21 +251,16 @@ match_value(Spec, Val, As) ->
 	false  -> false
     end.
 
-%% Match a value list
--ifdef(unused).
-match_values(Spec,Vs,As) ->
-    match_values(Spec,Vs,[],As).
--endif.
-
-match_values(Spec,[V|Vs],Acc,As) ->
-    case match_value(Spec,V,As) of
-	{ok,Value,As1} ->
-	    match_values(Spec,Vs,[Value|Acc],As1);
-	false ->
-	    false
+%% the elements of a list value; match_val, not match_value, so that
+%% an element may start with = (the order key =identity) without it
+%% being taken for the = between an option and its value
+match_vals(Spec,[V|Vs],Acc) ->
+    case match_val(Spec,V) of
+	{ok,Value} -> match_vals(Spec,Vs,[Value|Acc]);
+	false -> false
     end;
-match_values(_Spec,[],Acc,As) ->
-    {ok,lists:reverse(Acc),As}.
+match_vals(_Spec,[],Acc) ->
+    {ok,lists:reverse(Acc)}.
 
 match_val({multiple,Spec}, Val) ->
     match_val_(Spec, Val);
@@ -326,9 +321,7 @@ match_val_({list,literal},Val) ->
     {ok,{_Defs,_Assign,{vec,LiteralList}}} = varp_parse:parse(Ts),
     {ok, LiteralList};
 match_val_({list,Spec}, Val) ->
-    Vals = string:tokens(Val, ", "),
-    {ok,Vs,_} = match_values(Spec, Vals, [], []),
-    {ok,Vs};
+    match_vals(Spec, string:tokens(Val, ", "), []);
 match_val_({union,Ts}, Val) ->
     match_union_(Ts, Val);
 match_val_(void, "") ->

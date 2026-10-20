@@ -275,8 +275,16 @@ prints a counterexample as a trace, one row per step:
     useful part; clauses cost memory in every clone, so the length is
     kept short.
 
-    order       --sort <order>[,<order>]  identity|random|degree|rank|user,
-                                          each with an optional +, - or =
+    order       --sort <order>[,<order>]  identity|random|degree|rank,
+                                          each with an optional +, - or =:
+                                          + ascending, - descending, =
+                                          interleaved, the ascending order
+                                          woven from both ends (1,2,3,4,5
+                                          becomes 1,5,2,4,3) so the search
+                                          attacks it from the top and the
+                                          bottom; the second key breaks
+                                          ties of the first. identity is
+                                          +identity, the others are -
                 --first, -f "v1,..,vn"    literals sorted first; the bare
                                           name of a predicate with arguments
                                           (Move for Move(p,q,time)) is every

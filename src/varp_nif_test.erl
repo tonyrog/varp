@@ -928,18 +928,17 @@ order_rank() ->
     ok.
 
 order_random() ->
-    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),    
+    {V, [X1,X2,X3,X4,X5,X6]} = order_install(),
+    %% '=' is the ascending order woven from both ends: +random with
+    %% seed 1001 is [X4,X5,X3,X6,X1,X2] (below), woven X4,X2,X5,X1,X3,X6
     ok = varp_nif:order_sort(V, '=random', undefined, 1001),
-    [X4,X5,X3,X6,X1,X2] = varp:order_all(V),
-    [-1,-1,-1,1,1,1] = varp:phase_all(V),
-    
-    %% ?verbose("random,1001, Vs = ~p\n", [Sort1]),
+    [X4,X2,X5,X1,X3,X6] = varp:order_all(V),
+    [-1,1,-1,1,-1,1] = varp:phase_all(V),
 
+    %% +random with seed 1003 is [X1,X2,X3,X6,X4,X5], phases 1,-1,1,-1,1,1
     ok = varp_nif:order_sort(V, '=random', undefined, 1003),
-    %% Rand1003 = [-X1,X4,-X6,-X2,X3,X5],
-    [X1,X2,X3,X6,X4,X5] = varp:order_all(V),
-    [1,-1,1,-1,1,1] = varp:phase_all(V),
-    %% ?verbose("random,1003, Vs = ~p\n", [Sort2]),
+    [X1,X5,X2,X4,X3,X6] = varp:order_all(V),
+    [1,1,-1,1,1,-1] = varp:phase_all(V),
 
     %% variants
     ok = varp_nif:order_sort(V, '+random', undefined, 1001),
