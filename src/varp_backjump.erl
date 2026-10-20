@@ -10,6 +10,7 @@
 
 -export([run/2]).
 -export([options/0]).
+-export([restart_steps/1]).
 
 %% -define(DEBUG, true).
 -include("varp.hrl").
@@ -18,32 +19,8 @@
 
 %% -compile(export_all).
 
--define(SORT(Ord1,Ord2),
-	{order,[{sort,[(Ord),(Ord2)]},{seed,0}]}).
-
--define(REORDER_NONE,
-	[
-	]).
-
--define(REORDER_SATURATE, 
-	[
-	 {0,{saturate,[{level,1},{laps,1}]}}
-	]).
-
--define(REORDER_0,
-	[
-	 {0,?SORT(degree,random)},
-	 {1,?SORT(rank,random)},
-	 {2,?SORT(random,random)}
-	]).
-
--define(REORDER_1,
-	[
-	 {0,?SORT(rank,random)}
-	 {1,{saturate,[{level,1},{laps,1}]}}
-	]).
-
--define(REORDER, ?REORDER_NONE).
+%% a restart strategy is a chain of plugin steps (see restart_steps)
+-define(RESTART_NONE, "").
 
 options() ->
     [#{ long  => "timeout",
@@ -141,6 +118,15 @@ options() ->
 	default => infinity,
 	description => "Restart interval in seconds"},
 
+     #{ long => "restart",
+	key => restart,
+	spec => string,
+	default => ?RESTART_NONE,
+	description => "Restart strategy: plugin steps with their options, "
+		       "separated by |, run at level 0 one per restart in "
+		       "turn (skip: a plain restart). "
+		       "\"order --sort rank,random | saturate -k 1 -l 1 | skip\""},
+
      #{ long => "bump",
 	key => bump,
 	spec => {union,[integer,float01,{enum,[?BUMP]}]},
@@ -159,12 +145,12 @@ options() ->
 	description => "Display statistics."
       },
 
-     %% internal options
-     #{ key => reorder,
-	spec => {list,
-		 {integer,{atom,{list,term}}}},
-	default => ?REORDER,
-	description => "Internal reorder list"}
+     %% internal option: the step the first restart takes (a clone in
+     %% varp_parallel starts at its own number, so the clones differ)
+     #{ key => restart_offset,
+	spec => unsigned,
+	default => 0,
+	description => "First restart step"}
     ].
      
 -record(m,
@@ -175,7 +161,18 @@ options() ->
 	 ms = []
 	}).
 	 
-run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
+run(Bs, Param0) when is_record(Bs, bs), is_map(Param0) ->
+    ?dbg0("~w: bj cube=~w\n", [self(), maps:get(assume, Param0, [])]),
+    case restart_steps(maps:get(restart, Param0, ?RESTART_NONE)) of
+	{error, Reason} ->
+	    io:format("backjump: --restart: ~s\n", [Reason]),
+	    {?ERROR, [], Bs};
+	Steps ->
+	    ?dbg0("restart_steps = ~p\n", [Steps]),
+	    run_(Bs, Param0#{restart_steps => Steps})
+    end.
+
+run_(Bs, Param) ->
     MaxConflicting = maps:get(max_conflicts,Param),
     varp_nif:setopt(Bs#bs.vp, max_conflicting, MaxConflicting),
     varp_nif:setopt(Bs#bs.vp, xref, false), %% not while building clauses
@@ -216,14 +213,15 @@ assume_(Vp, [L|Ls]) ->
 	    end
     end.
 
-%% no (more) models under the assumptions; the formula itself may
-%% have some, so this is DONE rather than INCONSISTENT when models
-%% were collected before
+%% no (more) models under the assumptions: the formula itself may
+%% have some, so this is DONE, not INCONSISTENT, which is reserved for
+%% a contradiction at level 0 (the formula has no models at all; after
+%% that the instance is spent, a cube search must not go on in it)
 assumptions_failed(Bs, Param, MR) ->
     varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
     display_stat(Bs, Param),
-    case MR#m.n of
-	0 -> return(?INCONSISTENT, MR, Bs);
+    case {MR#m.n, maps:get(assume, Param, [])} of
+	{0, []} -> return(?INCONSISTENT, MR, Bs);
 	_ -> return(?DONE, MR, Bs)
     end.
 
@@ -471,68 +469,132 @@ import_clauses(Bs, Param) ->
 	    end
     end.
 
+%% a restart (the learned clauses over the limit, the bcp counter or
+%% the timer) pops to level 0, and the next step of the restart
+%% strategy runs there before the search starts over
 restart_(Bs,Param,MaxLearned,MR) ->
     RestartByTimeout = restart_by_timeout(Bs, Param), %% also restart!!
     RestartByCount = restart_by_counter(Bs, Param),
-    case need_purge(Bs, Param, MaxLearned) of
-	true ->
+    Purge = need_purge(Bs, Param, MaxLearned),
+    if Purge; RestartByCount; RestartByTimeout ->
 	    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-	    varp_formula:proof_output(Bs,$c,"purge"),
-	    ?dbg0("purge\n",[]),
-	    varp_formula:del_unused_clauses(Bs),
-	    MaxLearned1 = max_learned_inc(Bs, Param, MaxLearned),
-	    _KeepSize = keep_size(Bs, Param, MaxLearned1),
-	    init(Bs, Param, MaxLearned1, MR);
-	false ->
-	    if RestartByCount ->
-		    varp_formula:proof_output(Bs,$c,"counter limit"),
-		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-		    reorder(Bs, Param),
-		    init(Bs, Param, MaxLearned, MR);
-	       RestartByTimeout ->
-		    varp_formula:proof_output(Bs,$c,"timeout"),
-		    varp_nif:pop(Bs#bs.vp, ?TOP_LEVEL),
-		    reorder(Bs, Param),
-		    init(Bs, Param, MaxLearned, MR);
-	       true ->
-		    timeout_or_cancel(Bs,Param,MaxLearned,MR)
+	    MaxLearned1 =
+		case Purge of
+		    true ->
+			varp_formula:proof_output(Bs,$c,"purge"),
+			?dbg0("purge\n",[]),
+			varp_formula:del_unused_clauses(Bs),
+			MaxLearned2 = max_learned_inc(Bs, Param, MaxLearned),
+			_KeepSize = keep_size(Bs, Param, MaxLearned2),
+			MaxLearned2;
+		    false when RestartByCount ->
+			varp_formula:proof_output(Bs,$c,"counter limit"),
+			MaxLearned;
+		    false ->
+			varp_formula:proof_output(Bs,$c,"timeout"),
+			MaxLearned
+		end,
+	    case restart_step(Bs, Param) of
+		ok ->
+		    init(Bs, Param, MaxLearned1, MR);
+		?INCONSISTENT ->
+		    %% the step found the formula contradictory at level 0
+		    display_stat(Bs, Param),
+		    case MR#m.n of
+			0 -> return(?INCONSISTENT, MR, Bs);
+			_ -> return(?DONE, MR, Bs)
+		    end;
+		What ->
+		    return(What, MR, Bs)
+	    end;
+       true ->
+	    timeout_or_cancel(Bs,Param,MaxLearned,MR)
+    end.
+
+%% --restart "step | step | ...": each step is a plugin with its
+%% options, as on the command line, parsed once here. skip is a plain
+%% restart. The steps are taken in turn, one per restart.
+restart_steps("") ->
+    [];
+restart_steps(String) ->
+    _ = application:load(varp),  %% the plugin list is in the app env
+    Plugins = varp:load_plugins(),
+    try
+	[restart_step_(string:lexemes(Step, " \t"), Plugins)
+	 || Step <- string:split(String, "|", all)]
+    catch
+	throw:{error, _} = Error -> Error
+    end.
+
+restart_step_([], _Plugins) ->
+    throw({error, "empty step"});
+restart_step_(["skip"], _Plugins) ->
+    skip;
+restart_step_([Name|Args], Plugins) ->
+    case maps:get(Name, Plugins, undefined) of
+	undefined ->
+	    throw({error, "unknown plugin " ++ Name});
+	Mod ->
+	    OptionInfoList = Mod:options(),
+	    OptionSpec = maps:put('$plugin', Mod,
+				  varp_option:options_spec(OptionInfoList)),
+	    OptMap = varp_option:default_opts(OptionInfoList),
+	    case varp_option:process_args(Args, OptionSpec, OptMap, []) of
+		{[], StepParam, []} ->
+		    {Mod, step_param(Mod, StepParam)};
+		{Rest, _, Bound} ->
+		    throw({error, "not an option of " ++ Name ++ ": " ++
+			       lists:join(" ", Rest ++ [V || {V,_} <- Bound])})
 	    end
     end.
 
-    
+%% what a step may not do inside a search: saturate reports no
+%% models (the search finds them, and would count them twice) and
+%% does not warn about the main variable
+step_param(varp_saturate, Param) ->
+    Param#{model => false, warn => false};
+step_param(_Mod, Param) ->
+    Param.
 
-reorder(Bs, Param) ->
-    N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
-    counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
-    reorder_(Bs, N, maps:get(reorder,Param)).
-
-reorder_(_Bs, _N, []) ->
-    ok;
-reorder_(Bs,  N, Reorder) ->
-    ReorderMap = maps:from_list(Reorder),
-    case maps:find(N rem maps:size(ReorderMap), ReorderMap) of
-	{ok,skip} ->
-	    ?dbg0("Skip:\n", []),
+%% run the next step at level 0. The instance is what the step works
+%% on; the state record it returns is dropped (a step's own timeout
+%% must not become the search's). The cross reference and the
+%% conflict limit are the search's own again afterwards. An order
+%% step without a seed of its own gets a new one every time, or every
+%% random order would be the same.
+restart_step(Bs, Param) ->
+    case maps:get(restart_steps, Param, []) of
+	[] ->
 	    ok;
-	{ok,{order,Opts}} ->
-	    ?dbg0("Reorder: ~p\n", [Opts]),
-	    Seed = proplists:get_value(seed, Opts, 0),
-	    case proplists:get_value(sort, Opts, []) of
-		[] -> ok;
-		[Key1] ->
-		    varp_nif:order_sort(Bs#bs.vp,Key1,Seed);
-		[Key1,Key2] ->
-		    varp_nif:order_sort(Bs#bs.vp,Key1,Key2,Seed)
-	    end;
-	{ok,{saturate,Opts}} ->
-	    ?dbg0("Saturate: ~p\n", [Opts]),
-	    Laps = proplists:get_value(laps,Opts,0),
-	    Timeout = proplists:get_value(timeout,Opts,infinity),
-	    varp_saturate:saturate(Bs,1,Timeout,Laps,0);
-	_ ->
-	    Seed = varp_nif:getopt(Bs#bs.vp,seed),
-	    varp_nif:order_sort(Bs#bs.vp,random,Seed)
+	Steps ->
+	    N = counters:get(Bs#bs.counters,?COUNTER_REORDER_COUNTER),
+	    counters:add(Bs#bs.counters,?COUNTER_REORDER_COUNTER, 1),
+	    I = (N + maps:get(restart_offset, Param, 0)) rem length(Steps),
+	    case lists:nth(I+1, Steps) of
+		skip ->
+		    ok;
+		_Step={Mod, StepParam0} ->
+		    Vp = Bs#bs.vp,
+		    varp_formula:proof_output(Bs,$c,"restart " ++ atom_to_list(Mod)),
+		    StepParam = step_seed(Vp, StepParam0, N),
+		    Xref = varp_nif:getopt(Vp, xref),
+		    MaxConflicting = varp_nif:getopt(Vp, max_conflicting),
+		    {Result, _Acc, _Bs1} = Mod:run(Bs, StepParam),
+		    varp_nif:setopt(Vp, xref, Xref),
+		    varp_nif:setopt(Vp, max_conflicting, MaxConflicting),
+		    case Result of
+			?INCONSISTENT -> ?INCONSISTENT;
+			?CANCEL -> ?CANCEL;
+			?TIMEOUT when _Bs1#bs.t_local =:= undefined -> ?TIMEOUT;
+			_ -> ok
+		    end
+	    end
     end.
+
+step_seed(Vp, Param = #{seed := -1}, N) ->
+    Param#{seed => varp_nif:getopt(Vp, seed) + N};
+step_seed(_Vp, Param, _N) ->
+    Param.
 
 
 return(What, MR, Bs) ->

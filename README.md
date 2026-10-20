@@ -196,6 +196,7 @@ plugin reads back:
                                            (with --bump-decay only none matters)
                 --restart-counter <N>                              (0)
                 --restart-interval <s>                     (infinity)
+                --restart "<step> | <step> | ..."   restart strategy
                 --stumble <L>              extra jump if D1 >= L   (0)
                 --olle <K>                 extra jump if D1 >= K*D2 (0)
                 --stumble-olle <bool>      require both        (false)
@@ -210,6 +211,18 @@ to the next level. The learned clause limit is
                  infinity              otherwise
 
 and the number kept on a reduction is `max(K, P*MaxLearned)`.
+
+A restart (the limit, the counter or the timer) pops to level 0, and
+`--restart` says what to do there before the search starts over: a
+chain of plugin steps with their ordinary options, separated by `|`,
+taken in turn, one per restart. `skip` is a plain restart. Every
+plugin is a possible step; a `saturate` step reports no models (the
+search finds them), an `order` step with `random` and no `--seed`
+gets a new seed every time, and a step's own `--timeout` ends the
+step only. Under `parallel`, clone i takes step i first.
+
+    varp sat bj --restart-counter 100000 \
+        --restart "order --sort rank,random | saturate -k 1 -l 1 --timeout 1 | skip" f.varp
 
 `bmc` is a driver for bounded model checking (see
 [`doc/MODEL_CHECKING.md`](doc/MODEL_CHECKING.md)): it rebuilds the
@@ -246,6 +259,9 @@ prints a counterexample as a trace, one row per step:
                                      at a restart of bj, between two probes
                                      of saturate) and to the original
                                      instance                        (true)
+                --cubes <K>          split the search instead of repeating
+                                     it: cubes over the first K variables
+                                     of the order, from a queue      (0)
                 --share-len <N>      learned clauses up to this length go
                                      to the other clones, imported at a
                                      restart (0: none)              (8)
@@ -254,6 +270,22 @@ prints a counterexample as a trace, one row per step:
 
     varp sat parallel --clones 8 --stat bj formula.varp
     varp sat parallel --clones 8 saturate -k 2 bj formula.varp
+    varp --method count sat order --first A,B,C parallel --clones 8 --cubes 3 bt --max 0 f.varp
+
+Without `--cubes` every clone searches the whole formula (a
+portfolio: the clones differ in seed, order and restart step, and the
+first one wins). With `--cubes K` the search is split: a cube is an
+assignment of the first K unbound variables of the order that
+propagation does not refute, the clones take cubes from a queue and
+search under them as assumptions, and what they learn is still valid
+for the whole formula, so sharing goes on. The cubes are disjoint, so
+`--max 0` counts every model exactly once across the clones; with the
+default `--max 1` the first model wins. A cube without models is just
+the next cube, when every cube is empty the formula has no models,
+and a clone that refutes the formula at level 0 ends it all at once.
+The part of the chain before the search (`order`, `saturate`) runs
+once in every clone. `order --first` before `parallel` picks the cube
+variables.
 
     The first clone with a decisive answer (models, no models, an abort)
     wins. A saturate in the chain is divided: clone i probes segment i

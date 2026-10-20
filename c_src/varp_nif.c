@@ -265,6 +265,7 @@ static void varp_unload(ErlNifEnv* env, void* priv_data);
     NIF( "vbcp",                2,  varp_vbcp ) \
     NIF( "vbcp",                3,  varp_vbcp ) \
     NIF( "undo",                1,  varp_undo ) \
+    NIF( "undo",                2,  varp_undo ) \
     NIF( "add_clause",          2,  varp_add_clause ) \
     NIF( "add_clause",          3,  varp_add_clause ) \
     NIF( "get_clause",          2,  varp_get_clause ) \
@@ -6997,17 +6998,25 @@ static ERL_NIF_TERM varp_bcp(ErlNifEnv* env, int argc,
 
 // undo
 
+// undo(Vp) / undo(Vp, Base): flip the latest decision that still has
+// its other value to try, undoing the levels above it. Base is the
+// level the search must stay above: the assumptions of a cube sit on
+// the levels 1..Base and are never flipped. false when nothing is left.
 static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 			      const ERL_NIF_TERM argv[])
 {
-    UNUSED(argc);
     varp_t* vp;
     int level;
+    int base = 0;
 
     if (!enif_get_resource(env, argv[0], varp_res, (void**) &vp))
 	return enif_make_badarg(env);
+    if (argc == 2) {
+	if (!enif_get_int(env, argv[1], &base) || (base < 0))
+	    return enif_make_badarg(env);
+    }
 
-    while((level = vp->level) > 0) {
+    while((level = vp->level) > base) {
 	unbind_level(vp, level);
 	if (vp->bnd[level].decision != LIT_FALSE) {
 	    lit_t xl = vp->bnd[level].decision;
@@ -7033,7 +7042,7 @@ static ERL_NIF_TERM varp_undo(ErlNifEnv* env, int argc,
 	    DBG("fixme: undo uUNDEF\r\n");
 	    return enif_make_boolean(env, false);
 	}
-	if (level == 1)
+	if (level == base+1)
 	    break;
 	pop_level(vp);
     }

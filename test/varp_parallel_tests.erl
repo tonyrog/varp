@@ -4,6 +4,8 @@
 %%% distributor. A saturate in the chain is divided between the clones
 %%% by segments of the variables, and the result of a chain where every
 %%% clone just continues is the original instance with all the facts.
+%%% With --cubes the search is split over assignments of the first
+%%% variables instead of repeated, and the models of the cubes add up.
 -module(varp_parallel_tests).
 -include_lib("eunit/include/eunit.hrl").
 -include("varp.hrl").
@@ -152,8 +154,78 @@ cli_test_() ->
 	     ?assertNotEqual(nomatch, string:find(Out3, "monitor: substitut")),
 	     ?assertNotEqual(nomatch, string:find(Out3, "monitor: permanent")),
 	     ?assertNotEqual(nomatch, string:find(Out3, "parallel: all 3 clones finished")),
+	     %% cubes: pigeon n=7 is unsatisfiable in every cube
+	     {0, Out5} = varp_tc:cli(["sat", "parallel", "--clones", "3", "--cubes", "3", "--stat",
+				      "bt", "n=7", P]),
+	     ?assertNotEqual(nomatch, string:find(Out5, "8 cubes over 3 variables")),
+	     ?assertNotEqual(nomatch, string:find(Out5, "all cubes searched")),
+	     ?assertNotEqual(nomatch, string:find(Out5, "% 0")),
+	     %% the chain before the search runs once, the model is printed once
+	     {0, Out6} = varp_tc:cli(["sat", "parallel", "--clones", "2", "--cubes", "3", "--stat",
+				      "saturate", "-k=1", "bj", F]),
+	     ?assertNotEqual(nomatch, string:find(Out6, "cubes over 3 variables")),
+	     ?assertEqual(1, length([L || L <- string:split(Out6, "\n", all),
+					string:prefix(L, "1: ") =/= nomatch])),
 	     %% saturate in segments and then the race
 	     {0, Out4} = varp_tc:cli(["sat", "parallel", "--clones", "3", "saturate", "-k=1", "bj", F]),
 	     ?assertNotEqual(nomatch, string:find(Out4, "D=7,E=5,M=1,N=6,O=0,R=8,S=9,Y=2")),
 	     ?assertEqual(1, length(string:split(Out4, "S=9", all)) - 1)
      end}.
+
+%% --cubes: the search is split over the assignments of the first K
+%% variables of the order; the cubes are disjoint, so the counts add up
+%% and every model is collected once
+cubes_count_test() ->
+    F = "(A || B) && (C || D) && (E || F)",
+    Count = fun(Chain) ->
+		    varp_tc:quiet(fun() -> varp_tc:run(F, Chain, #{method => count}) end)
+	    end,
+    {?DONE, 27, _} = Count([{satisfy,[]},{backtrack,[{max,0}]}]),
+    {?DONE, 27, _} = Count([{satisfy,[]},{parallel,[{clones,3},{cubes,2}]},{backtrack,[{max,0}]}]),
+    {?DONE, 27, _} = Count([{satisfy,[]},{parallel,[{clones,3},{cubes,2}]},{backjump,[{max,0}]}]),
+    %% more cube variables than clones, and than the formula needs
+    {?DONE, 27, _} = Count([{satisfy,[]},{parallel,[{clones,2},{cubes,6}]},{backtrack,[{max,0}]}]),
+    {?DONE, Models, _} =
+	varp_tc:quiet(fun() ->
+			      varp_tc:run(F, [{satisfy,[]},{parallel,[{clones,3},{cubes,2}]},
+					      {backjump,[{max,0}]}])
+		      end),
+    ?assertEqual(27, length(lists:usort(Models))).
+
+%% the first model wins, whichever cube it is in
+cubes_sat_test() ->
+    F = "(A || B) && (!A || C) && (!B || !C) && (C || D) && !D",
+    {_, [Model], _} = run(F, [{clones,3},{cubes,2}]),
+    {_, [Model0], _} = seq(F),
+    ?assertEqual(lists:sort(Model0), lists:sort(Model)).
+
+%% no models (two of three and at most one of three): every cube
+%% refuted by propagation when A and B come first, or every cube
+%% searched and found empty when D and E come first
+cubes_unsat_test() ->
+    Core = "(A || B) && (A || C) && (B || C) && (!A || !B) && (!A || !C) && (!B || !C)",
+    {?INCONSISTENT, _, _} = run(Core ++ " && (D || E)", [{clones,2},{cubes,2}]),
+    {?INCONSISTENT, _, _} = run("(D || E) && " ++ Core, [{clones,2},{cubes,2}]).
+
+%% backtrack under assumptions stays inside them
+backtrack_assume_test() ->
+    F = "(A || B) && (C || D)",
+    {Bs, Vp} = begin
+		   Bs0 = varp_tc:quiet(fun() -> element(3, varp_tc:run(F, [{satisfy,[]}], #{method => count})) end),
+		   {Bs0, Bs0#bs.vp}
+	       end,
+    A = element(2, varp_nif:find_symbol(Vp, {<<"A">>,[]})),
+    C = element(2, varp_nif:find_symbol(Vp, {<<"C">>,[]})),
+    %% A true leaves B free: 2*3; A false forces B: 3; A and not C
+    %% forces D with B free: 2
+    Count = fun(Assume) ->
+		    R = varp_backtrack:run(Bs, #{max => 0, assume => Assume}),
+		    varp_nif:pop(Vp, 0),
+		    {element(1, R), element(2, R)}
+	    end,
+    ?assertEqual({?DONE, 6}, Count([A])),
+    ?assertEqual({?DONE, 3}, Count([-A])),
+    ?assertEqual({?DONE, 2}, Count([A, -C])),
+    ?assertEqual({?DONE, 9}, Count([])),
+    %% an empty cube is done with nothing, not inconsistent
+    ?assertEqual({?DONE, 0}, Count([A, -A])).

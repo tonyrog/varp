@@ -156,12 +156,7 @@
 	{"rank", rank},              %% == '-rank'
 	{"+rank", '+rank'},
 	{"-rank", '-rank'},
-	{"=rank", '=rank'},
-
-	{"user", user},              %% == '-user'
-	{"+user", '+user'},
-	{"-user", '-user'},
-	{"=user", '=user'}
+	{"=rank", '=rank'}
        ).
 
 -define(BUMP,

@@ -75,24 +75,6 @@
 	 config_notebook
 	}).
 
--define(SORT(Ord,Ord2),
-	{order,[{sort,[(Ord),(Ord2)]},{seed,0}]}).
-
--define(REORDER_NONE,
-	[
-	]).
-
--define(REORDER_0,
-	[
-	 {1,?SORT(degree,random)},
-	 {2,?SORT(rank,random)},
-	 {3,?SORT(random,random)}
-	]).
-
--define(REORDER_1,
-	[
-	 {1,?SORT(random,undefined)}
-	]).
 
 version() ->
     {ok,Vsn} = application:get_key(varp, vsn),
@@ -995,7 +977,6 @@ order(DoAscend, Ord) ->
 		degree    -> '-degree';
 		rank      -> '-rank';
 		activity  -> '-degree';
-		user      -> '-user';
 		random    -> '-random';
 		identity  -> '-identity';
 		undefined -> undefined
@@ -1005,7 +986,6 @@ order(DoAscend, Ord) ->
 		degree    -> '+degree';
 		rank      -> '+rank';
 		activity  -> '+degree';
-		user      -> '+user';
 		random    -> '+random';
 		identity  -> '+identity';
 		undefined -> undefined
@@ -1029,7 +1009,7 @@ read_backjump_params(S,I) ->
      {restart_counter,    read_param(?BJK(I,restart_counter), S, 0) },
      {restart_interval,   read_param(?BJK(I,restart_interval), S, 0)},
      {bump,               read_param(?BJK(I,bump), S, 1) },
-     {reorder, ?REORDER_NONE}
+     {restart, ""}
     ].
 
 read_saturate_params(S,I) ->

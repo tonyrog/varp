@@ -62,6 +62,9 @@
 -define(RING_SWEEP, 4096).
 
 %% the ring, in the clone's Param
+%% the cube queue of the driver
+-record(cq, {queue, acc, max}).
+
 -record(ring, {tab, seq, len}).
 
 %% the distributor's state (see the distributor below)
@@ -101,6 +104,14 @@ options() ->
 	default => true,
 	description => "Share permanent bindings and substitutions between the clones."
       },
+     #{ long => "cubes",
+	key => cubes,
+	spec => unsigned,
+	default => 0,
+	description => "Split the search instead of repeating it: cubes over "
+		       "the first N variables of the order, handed to the "
+		       "clones from a queue (0: every clone searches everything)."
+      },
      #{ long => "share-len",
 	key => share_len,
 	spec => unsigned,
@@ -127,7 +138,6 @@ run(Bs, Param) when is_record(Bs, bs), is_map(Param) ->
 
 run_clones(Bs, Param, Chain, N) ->
     Vp = Bs#bs.vp,
-    Driver = self(),
     %% the messages to the driver carry a reference of this run: the
     %% driver may be a long-lived process (a shell, a test) and a clone
     %% that finished just as the winner did leaves its result behind
@@ -137,6 +147,26 @@ run_clones(Bs, Param, Chain, N) ->
 		S -> S
 	    end,
     Share = maps:get(share, Param),
+    %% the cubes are made on the original before anything else happens
+    %% to it; no cube at all means propagation refutes every assignment
+    case cube_mode(Vp, Param, Chain) of
+	{cubes, [], _} ->
+	    stat(Param, "parallel: no cube survives propagation\n", []),
+	    varp:no_models(Bs);
+	Mode ->
+	    run_clones(Bs, Param, Chain, N, Mode, Ref, Seed0, Share)
+    end.
+
+run_clones(Bs, Param, Chain, N, Mode, Ref, Seed0, Share) ->
+    Vp = Bs#bs.vp,
+    Driver = self(),
+    case Mode of
+	{cubes, Cubes, _} ->
+	    stat(Param, "parallel: ~w cubes over ~w variables\n",
+		 [length(Cubes), maps:get(cubes, Param)]);
+	portfolio ->
+	    ok
+    end,
     Dist = case Share of
 	       true -> spawn_link(fun() -> distributor(#dist{driver=Driver, ref=Ref}) end);
 	       false -> undefined
@@ -166,10 +196,16 @@ run_clones(Bs, Param, Chain, N) ->
 		 end || I <- lists:seq(0, N-1)],
     Clones = [{I, spawn_link(fun() ->
 				     clone(I, N, Bs#bs{vp = W}, Param, Chain1,
-					   Seed0+I, Dist, Driver, Ref)
+					   Seed0+I, Dist, Driver, Ref, Mode)
 			     end)} || {I, W, _} <- Instances],
     T0 = erlang:monotonic_time(millisecond),
-    Result = wait_result(Bs, Ref, Dist, Clones, []),
+    Result = case Mode of
+		 portfolio ->
+		     wait_result(Bs, Ref, Dist, Clones, []);
+		 {cubes, Cubes0, Max} ->
+		     Q = #cq{queue = Cubes0, max = Max, acc = acc0(Vp)},
+		     wait_cubes(Bs, Ref, Dist, Clones, Q, [])
+	     end,
     T1 = erlang:monotonic_time(millisecond),
     Shared = stop_distributor(Dist),
     import_original(Bs, drain_all(Ref)),
@@ -183,6 +219,18 @@ run_clones(Bs, Param, Chain, N) ->
 	    clone_summary(Param, Instances, Winner),
 	    output_models(Bs, BsW, Acc),
 	    {R, Acc, BsW};
+	{cubes, Acc} ->
+	    %% every cube searched: the models of all of them, or none
+	    stat(Param, "parallel: all cubes searched (~.2fs), ~w facts and ~w clauses shared\n",
+		 [(T1-T0)/1000, Shared, SharedClauses]),
+	    clone_summary(Param, Instances, none),
+	    case Acc of
+		_ when Acc =:= []; Acc =:= 0 ->
+		    varp:no_models(Bs);
+		_ ->
+		    output_models(Bs, Bs, Acc),
+		    {?DONE, Acc, Bs}
+	    end;
 	{all, Results} ->
 	    stat(Param, "parallel: all ~w clones finished (~.2fs), ~w facts and ~w clauses shared\n",
 		 [N, (T1-T0)/1000, Shared, SharedClauses]),
@@ -329,6 +377,134 @@ wait_result(Bs, Ref, Dist, Clones, Done) ->
 	    wait_result(Bs, Ref, Dist, Clones, Done)
     end.
 
+%% --cubes K: the search is split instead of repeated. A cube is an
+%% assignment of the first K unbound variables of the order that
+%% propagation does not refute; the clones take cubes from the queue
+%% here and search under them as assumptions (backtrack and backjump
+%% take assume in Param; what they learn never depends on the
+%% assumptions, so facts and clauses are still shared). The models of
+%% the cubes are disjoint, so counting adds up; the first model wins
+%% when max is 1, and max models in all end it otherwise. A cube
+%% without models is DONE with nothing, just the next cube;
+%% INCONSISTENT is a contradiction at level 0, the formula has no
+%% models at all (and the instance is spent), so it ends everything.
+%% The part of the chain before the search (saturate, order) runs
+%% once in every clone.
+cube_mode(Vp, Param, Chain) ->
+    case maps:get(cubes, Param) of
+	0 ->
+	    portfolio;
+	K ->
+	    case [Prm || {P, Prm} <- Chain, is_search(P)] of
+		[] ->
+		    io:format("parallel: --cubes needs backtrack or backjump "
+			      "in the chain, every clone searches everything\n"),
+		    portfolio;
+		[SearchParam|_] ->
+		    {cubes, cubes(Vp, K), maps:get(max, SearchParam, 1)}
+	    end
+    end.
+
+is_search(varp_backtrack) -> true;
+is_search(varp_backjump) -> true;
+is_search(_) -> false.
+
+%% the cubes as literal lists, in the order of a depth first walk; a
+%% variable the cube so far already binds is left out of it
+cubes(Vp, K) ->
+    Vars = lists:sublist(varp:order_all(Vp), K),
+    Level = varp_nif:level(Vp),
+    Cubes = cubes_(Vp, Vars, [], []),
+    varp_nif:pop(Vp, Level),
+    lists:reverse(Cubes).
+
+cubes_(_Vp, [], Cube, Acc) ->
+    [lists:reverse(Cube)|Acc];
+cubes_(Vp, [X|Xs], Cube, Acc) ->
+    case varp_nif:value(Vp, X) of
+	undefined ->
+	    Acc1 = cube_branch(Vp, X, Xs, Cube, Acc),
+	    cube_branch(Vp, -X, Xs, Cube, Acc1);
+	_ ->
+	    cubes_(Vp, Xs, Cube, Acc)
+    end.
+
+cube_branch(Vp, L, Xs, Cube, Acc) ->
+    Level = varp_nif:level(Vp),
+    varp_nif:push(Vp),
+    Acc1 = case varp_nif:bind(Vp, L) andalso varp_nif:bcp(Vp) of
+	       true -> cubes_(Vp, Xs, [L|Cube], Acc);
+	       false -> Acc
+	   end,
+    varp_nif:pop(Vp, Level),
+    Acc1.
+
+acc0(Vp) ->
+    case varp_nif:getopt(Vp, method) of
+	count -> 0;
+	_ -> []
+    end.
+
+%% the driver in cube mode: hands out cubes, adds up what comes back
+wait_cubes(Bs, Ref, Dist, Clones, Q, Done) ->
+    receive
+	{next_cube, Ref, Pid} ->
+	    case Q#cq.queue of
+		[C|Cs] ->
+		    Pid ! {cube, Ref, C},
+		    wait_cubes(Bs, Ref, Dist, Clones, Q#cq{queue = Cs}, Done);
+		[] ->
+		    Pid ! {cube, Ref, done},
+		    wait_cubes(Bs, Ref, Dist, Clones, Q, Done)
+	    end;
+	{cube_result, Ref, I, _Pid, Result} ->
+	    case Result of
+		{?INCONSISTENT, _, BsW} ->
+		    kill_clones([P || {_, P} <- Clones]),
+		    {I, {?INCONSISTENT, Q#cq.acc, BsW}};
+		{R, Acc1, BsW} when R =:= ?DONE; R =:= ?CONTINUE ->
+		    Acc = varp:combine_result(Q#cq.acc, Acc1),
+		    case enough(Acc, Q#cq.max) of
+			true ->
+			    %% the winner keeps asking for cubes, so it goes too
+			    kill_clones([P || {_, P} <- Clones]),
+			    {I, {?DONE, Acc, BsW}};
+			false ->
+			    wait_cubes(Bs, Ref, Dist, Clones, Q#cq{acc = Acc}, Done)
+		    end;
+		{What, Acc1, BsW} ->
+		    kill_clones([P || {_, P} <- Clones]),
+		    {I, {What, varp:combine_result(Q#cq.acc, Acc1), BsW}};
+		Other ->
+		    kill_clones([P || {_, P} <- Clones]),
+		    {I, Other}
+	    end;
+	{result, Ref, I, Pid, Result} ->
+	    %% the chain before the search was decisive, or the clone
+	    %% found the queue empty
+	    case decisive(Result) of
+		true ->
+		    kill_clones([P || {_, P} <- Clones, P =/= Pid]),
+		    unlink(Pid),
+		    {I, Result};
+		false ->
+		    unlink(Pid),
+		    Dist =/= undefined andalso (Dist ! {done, Pid}),
+		    Done1 = [{I, Result}|Done],
+		    case length(Done1) =:= length(Clones) of
+			true -> {cubes, Q#cq.acc};
+			false -> wait_cubes(Bs, Ref, Dist, Clones, Q, Done1)
+		    end
+	    end;
+	{fact, Ref, Fact} ->
+	    import_original(Bs, [Fact]),
+	    wait_cubes(Bs, Ref, Dist, Clones, Q, Done)
+    end.
+
+enough(_Acc, 0) -> false;
+enough(Acc, Max) when is_integer(Acc) -> Acc >= Max;
+enough(Acc, Max) -> length(Acc) >= Max.
+
 %% the losers are killed and waited for, so that nobody touches an
 %% instance when its counters are read; a clone that has already
 %% finished is gone, which the monitor reports just the same
@@ -396,7 +572,9 @@ drain_all(Ref) ->
 %% the results of clones that finished as the winner did
 flush_results(Ref) ->
     receive
-	{result, Ref, _I, _Pid, _Result} -> flush_results(Ref)
+	{result, Ref, _I, _Pid, _Result} -> flush_results(Ref);
+	{cube_result, Ref, _I, _Pid, _Result} -> flush_results(Ref);
+	{next_cube, Ref, _Pid} -> flush_results(Ref)
     after 0 ->
 	ok
     end.
@@ -434,10 +612,10 @@ output_models(_Bs, _BsW, _Count) ->
 %%--------------------------------------------------------------------
 
 %% Bs holds the clone's own instance (cloned by the driver)
-clone(I, N, Bs, Param, Chain0, Seed, Dist, Driver, Ref) ->
+clone(I, N, Bs, Param, Chain0, Seed, Dist, Driver, Ref, Mode) ->
     process_flag(trap_exit, false),
     put(distributor, Dist),
-    Chain = segment_chain(Chain0, I, N, Dist),
+    Chain = offset_chain(segment_chain(Chain0, I, N, Dist), I),
     W = Bs#bs.vp,
     varp_nif:setopt(W, seed, Seed),
     varp_nif:setopt(W, print, false, user),
@@ -451,11 +629,53 @@ clone(I, N, Bs, Param, Chain0, Seed, Dist, Driver, Ref) ->
 		 d2 = counters:new(1024, []),
 		 clen = counters:new(1024, []) },
     put(output_model_header, false),  %% the driver prints the header
-    Result = try varp:do(Chain, [], BsW)
+    Result = try search(Mode, Chain, BsW, Driver, Ref, I)
 	     catch ?EXCEPTION(Class, Reason, Trace) ->
 		     {crashed, {Class, Reason, ?GET_STACK(Trace)}}
 	     end,
     Driver ! {result, Ref, I, self(), Result}.
+
+search(portfolio, Chain, Bs, _Driver, _Ref, _I) ->
+    varp:do(Chain, [], Bs);
+search({cubes, _, _}, Chain, Bs, Driver, Ref, I) ->
+    {Prefix, Search} = lists:splitwith(fun({P, _}) -> not is_search(P) end, Chain),
+    case varp:do(Prefix, [], Bs) of
+	{?CONTINUE, Acc, Bs1} when Acc =:= []; Acc =:= 0 ->
+	    %% a pass line and a counter block per cube is too much
+	    Opt = Bs1#bs.option,
+	    Log = min(maps:get(log, Opt, ?LOG_LEVEL_NONE), ?LOG_LEVEL_WARNING),
+	    cube_loop(Search, Bs1#bs{option = Opt#{log => Log}}, Driver, Ref, I);
+	Decisive ->
+	    Decisive
+    end.
+
+%% one cube at a time from the driver, the search under it as
+%% assumptions; the instance is back at level 0 before the next
+cube_loop(Search, Bs, Driver, Ref, I) ->
+    Driver ! {next_cube, Ref, self()},
+    receive
+	{cube, Ref, done} ->
+	    {?CONTINUE, [], Bs};
+	{cube, Ref, Cube} ->
+	    Result = varp:do(assume_chain(Search, Cube), [], Bs),
+	    varp_nif:pop(Bs#bs.vp, 0),
+	    Driver ! {cube_result, Ref, I, self(), Result},
+	    cube_loop(Search, Bs, Driver, Ref, I)
+    end.
+
+assume_chain(Chain, Cube) ->
+    [case is_search(P) of
+	 true -> {P, Prm#{assume => Cube}};
+	 false -> {P, Prm}
+     end || {P, Prm} <- Chain].
+
+%% clone I takes step I of a backjump restart strategy (--restart)
+%% first, so that the clones try different things
+offset_chain(Chain, I) ->
+    [case P of
+	 varp_backjump -> {P, Prm#{restart_offset => I}};
+	 _ -> {P, Prm}
+     end || {P, Prm} <- Chain].
 
 %% the distributor must be the subscriber (the nif sends to the caller
 %% of subscribe), and the search waits until it listens

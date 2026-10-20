@@ -51,7 +51,7 @@
 -export([phase/2, set_phase/2]).
 -export([push/1]).
 -export([pop/1, pop/2]).
--export([undo/1]).
+-export([undo/1, undo/2]).
 -export([bcp/1, bcp/2, bcp/3]).
 -export([nbcp/1]).
 -export([vbcp/2, vbcp/3]).
@@ -490,8 +490,16 @@ pop(_Vp) ->
 pop(_Vp, _Level) ->
     ?nif_stub().
 
--spec undo(Vp::varp()) -> ok.
+%% flip the latest decision with a value left to try, undoing the
+%% levels above it; false when the search is exhausted
+-spec undo(Vp::varp()) -> boolean().
 undo(_Vp) ->
+    ?nif_stub().
+
+%% the same, staying above Level: the assumptions of a cube on the
+%% levels 1..Level are never flipped
+-spec undo(Vp::varp(), Level::integer()) -> boolean().
+undo(_Vp, _Level) ->
     ?nif_stub().
 
 -spec bcp(Vp::varp()) ->

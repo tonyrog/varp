@@ -75,7 +75,7 @@ file_order(Bs, Param0) ->
       end, Param0, [{first, []}, {last, []}, {sort, [identity]}]).
 
 order_literals(Bs, Param) ->
-    ?dbg1("order params=~p\n", [Param]),
+    ?dbg("order params=~p\n", [Param]),
     Seed = case maps:get(seed,Param) of
 	       -1 -> varp_nif:getopt(Bs#bs.vp,seed);
 	       S0 -> S0

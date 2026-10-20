@@ -27,6 +27,7 @@
 -export([split_sections/1, split_sections/2]).
 -export([section_opts/2]).
 -export([load_plugins/0]).
+-export([no_models/1, combine_result/2]).
 -export([load_do/0, load_do/1]).
 -export([parse_do/1, parse_do/2]).
 
