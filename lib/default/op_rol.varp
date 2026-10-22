@@ -1,0 +1,6 @@
+// a rotated left k steps, k a build time constant: bit i comes from
+// bit (i - k) mod n
+circuit op_rol(meta k; in a:n; return r:n)
+{
+    [A i=0..(n-1)] r[i] = a[(i + n - k % n) % n];
+}

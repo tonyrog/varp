@@ -247,28 +247,52 @@ add_atom(Bs) ->
     varp_nif:add_variable(Bs#bs.vp, _IsAtom=true).
 
 find_var({p,Name,Args}, Bs) ->
-    Sym = {Name,Args},
-    case varp_nif:find_symbol(Bs#bs.vp, Sym) of
+    case find_sym({Name,Args}, Bs) of
 	false ->
 	    error;
 	Val -> 
 	    {ok,Val}
     end;
 find_var({Type,Name,Args}, Bs) ->
-    Sym = {Name,Args},
-    case varp_nif:find_symbol(Bs#bs.vp, Sym) of
+    case find_sym({Name,Args}, Bs) of
 	false ->
 	    error;
 	Val -> 
 	    {ok,{Type,length(Val),Val}}
     end.
-    
+
+%% A local of a circuit instance (its name carries the instance prefix,
+%% "op_add#3.C") is kept in #bs.locals and never enters the symbol
+%% table, so a model does not list it and a formula with many
+%% instances does not fill the table; --locals keeps them visible.
+%% The map goes away with the instance (build_circuit restores the
+%% caller's), nothing outside the body can name a local anyway.
+find_sym(Sym, Bs) ->
+    case maps:find(Sym, Bs#bs.locals) of
+	{ok,Val} -> Val;
+	error -> varp_nif:find_symbol(Bs#bs.vp, Sym)
+    end.
+
+hidden_name(Name, Bs) when is_binary(Name) ->
+    binary:match(Name, <<"#">>) =/= nomatch andalso
+	not maps:get(locals, Bs#bs.option, false);
+hidden_name(_Name, _Bs) ->
+    false.
+
+new_symbol(Sym={Name,_Args}, Ls, Type, Bs) ->
+    case hidden_name(Name, Bs) of
+	true ->
+	    %% what varp_nif:find_symbol would have answered
+	    Bs#bs { locals = maps:put(Sym, {Type,Ls}, Bs#bs.locals) };
+	false ->
+	    add_symbol(Bs, Sym, Ls, Type),
+	    Bs
+    end.
 
 make_variable({p,Name,Args}, Bs) ->
     L = add_atom(Bs),
-    Var = {Name,Args},
-    add_symbol(Bs, Var, L, bool),
-    {{bool,L}, Bs}.
+    Bs1 = new_symbol({Name,Args}, L, bool, Bs),
+    {{bool,L}, Bs1}.
 
 order_last(Bs, VarList) ->
     {RevLast,Bs1} = variable_list_(Bs,VarList,[]),
@@ -996,10 +1020,17 @@ bld(X,_Bld={lop,Op,A,B}, Bs) ->
     operation2(Op,X,Y,Z,Bs2);
 bld(X,_Bld={lop,ite,C,T,E}, Bs) ->
     ?dbg1("op = ~p\n", [_Bld]),
-    {Cf,Bs1} = bld(C, Bs),
-    {Tf,Bs2} = bld(T, Bs1),
-    {Ef,Bs3} = bld(E, Bs2),
-    ite(X,Cf,Tf,Ef,Bs3);
+    %% a condition known when building picks its branch and the other
+    %% is never built: that is what ends a recursive circuit,
+    %% "(n == 1) ? a[0] : u2b(..) + u2b(..)"
+    case bld(C, Bs) of
+	{{bool,?T},Bs1} -> bld(X, T, Bs1);
+	{{bool,?F},Bs1} -> bld(X, E, Bs1);
+	{Cf,Bs1} ->
+	    {Tf,Bs2} = bld(T, Bs1),
+	    {Ef,Bs3} = bld(E, Bs2),
+	    ite(X,Cf,Tf,Ef,Bs3)
+    end;
 
 bld(X,{'ALL',Ys}, Bs) ->
     {Ys1,Bs1} = bld_args(Ys,Bs),
@@ -1188,7 +1219,7 @@ build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
 		   is_binary(Sz)],
     Meta0 = Bs0#bs.meta,
     Bs0_1 = Bs0#bs { meta = maps:without(Sizes, Meta0) },
-    {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0_1),
+    {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0_1, Meta0),
     {Prefix,Bs2} = circuit_prefix(Name, Bs1),
     {RetName,Bs3} = circuit_return(Return, Prefix, Bs2),
     %% a local of the body (declare, define) shadows a meta variable
@@ -1201,7 +1232,7 @@ build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
     %% locals and nested circuit definitions do not leak into the caller,
     %% but declarations made for the arguments (in Bs1) do.
     {Value, Bs5#bs { decls = Bs1#bs.decls, circuits = Bs1#bs.circuits,
-		     meta = Meta0 }}.
+		     locals = Bs1#bs.locals, meta = Meta0 }}.
 
 %% the names a circuit body declares or defines
 circuit_locals(Defs) ->
@@ -1247,7 +1278,11 @@ circuit_formal(Name, D) ->
     error({circuit_parameter, Name, D}).
 
 %% bind the call arguments to the formal parameters
-circuit_bind(Name, Formals, Args, Bs) ->
+%% The argument expressions belong to the caller and are built with
+%% the caller's meta bindings (CallerMeta): a circuit calling itself,
+%% "u2b(a >> (n/2))", means the caller's n, not the fresh one of the
+%% instance being bound.
+circuit_bind(Name, Formals, Args, Bs, CallerMeta) ->
     {Named,Pos} =
 	lists:partition(fun({'=',N,_}) -> is_binary(N);
 			   (_) -> false
@@ -1262,9 +1297,9 @@ circuit_bind(Name, Formals, Args, Bs) ->
 	[] -> ok;
 	Unknown -> error({circuit_unknown_argument, Name, Unknown})
     end,
-    circuit_bind_(Name, Formals, 1, length(Pos), Pos, NamedMap, [], Bs).
+    circuit_bind_(Name, Formals, 1, length(Pos), Pos, NamedMap, [], Bs, CallerMeta).
 
-circuit_bind_(Name, [F=#{name := N}|Fs], I, NPos, Pos, Named, Acc, Bs) ->
+circuit_bind_(Name, [F=#{name := N}|Fs], I, NPos, Pos, Named, Acc, Bs, CallerMeta) ->
     Expr =
 	if I =< NPos ->
 		case maps:is_key(N, Named) of
@@ -1287,16 +1322,16 @@ circuit_bind_(Name, [F=#{name := N}|Fs], I, NPos, Pos, Named, Acc, Bs) ->
 		      %% an integer at build time, bound as a meta
 		      %% variable for the body (build_circuit restores
 		      %% the caller's bindings afterwards)
-		      Int = try eval_meta(Expr, Bs)
+		      Int = try eval_meta(Expr, Bs#bs{ meta = CallerMeta })
 			    catch error:{unbound, Var} -> {variable, Var}
 			    end,
 		      is_integer(Int) orelse error({circuit_meta_argument, Name, N, Int}),
 		      {{meta,Int}, Bs#bs{ meta = maps:put(N, Int, Bs#bs.meta) }};
 		  _ ->
-		      circuit_arg(F, Expr, Bs)
+		      circuit_arg(F, Expr, Bs, CallerMeta)
 	      end,
-    circuit_bind_(Name, Fs, I+1, NPos, Pos, Named, [{N,V}|Acc], Bs1);
-circuit_bind_(_Name, [], _I, _NPos, _Pos, _Named, Acc, Bs) ->
+    circuit_bind_(Name, Fs, I+1, NPos, Pos, Named, [{N,V}|Acc], Bs1, CallerMeta);
+circuit_bind_(_Name, [], _I, _NPos, _Pos, _Named, Acc, Bs, _CallerMeta) ->
     {lists:reverse(Acc), Bs}.
 
 %% Build one argument.  When the parameter is typed and the argument is a
@@ -1305,7 +1340,7 @@ circuit_bind_(_Name, [], _I, _NPos, _Pos, _Named, Acc, Bs) ->
 %% (a:n) is unified with the width of the argument, whatever the argument
 %% is: a declared vector, an expression or a constant.  The first use
 %% binds it, later uses must agree.
-circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
+circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs, CallerMeta)
   when Type =/= bool ->
     Bs1 = case varp:find_decl(P, Bs#bs.decls, icase(Bs)) of
 	      error ->
@@ -1323,13 +1358,18 @@ circuit_arg(#{type := Type, size := Size}, Expr={p,P,As}, Bs)
 	      {ok,_Decl} ->
 		  Bs
 	  end,
-    {V, Bs2} = bld(Expr, Bs1),
+    {V, Bs2} = bld_arg(Expr, Bs1, CallerMeta),
     {V, unify_size(Size, V, Bs2)};
-circuit_arg(#{type := Type, size := Size}, Expr, Bs) when Type =/= bool ->
-    {V, Bs1} = bld(Expr, Bs),
+circuit_arg(#{type := Type, size := Size}, Expr, Bs, CallerMeta) when Type =/= bool ->
+    {V, Bs1} = bld_arg(Expr, Bs, CallerMeta),
     {V, unify_size(Size, V, Bs1)};
-circuit_arg(_F, Expr, Bs) ->
-    bld(Expr, Bs).
+circuit_arg(_F, Expr, Bs, CallerMeta) ->
+    bld_arg(Expr, Bs, CallerMeta).
+
+%% an argument built in the caller's meta scope, the instance's kept
+bld_arg(Expr, Bs, CallerMeta) ->
+    {V, Bs1} = bld(Expr, Bs#bs{ meta = CallerMeta }),
+    {V, Bs1#bs{ meta = Bs#bs.meta }}.
 
 %% a:n against a value of width N
 unify_size(Name, {T,N,_}, Bs) when is_binary(Name),
@@ -1696,6 +1736,10 @@ eval_meta({range,A,B}, Bs) ->
 eval_meta(<<"true">>, _Bs)  -> true;
 eval_meta(<<"false">>, _Bs) -> false;
 eval_meta({p,ID,[]}, Bs) when is_binary(ID) -> eval_id(ID, Bs);
+%% an argument expression of a circuit call in a meta position,
+%% "op_rol(n - (m % n), X)": the formula operators as meta operators
+eval_meta({lop,Op,A,B}, Bs) when is_atom(Op) -> eval_meta({op,Op,A,B}, Bs);
+eval_meta({lop,Op,A}, Bs) when is_atom(Op) -> eval_meta({op,Op,A}, Bs);
 eval_meta({p,F,As}, Bs) when is_binary(F) -> eval_meta({call,F,As}, Bs);  %% len(msg) in a define
 eval_meta(ID, Bs) when is_binary(ID) -> eval_id(ID, Bs);
 eval_meta({call,F,As},Bs) ->
@@ -1940,17 +1984,14 @@ var_vector(Type,V,N,Bs) ->
     {p,Name,Args} = expand_meta(V,Bs),
     N1 = eval_meta(N,Bs),
     Sym = {Name,Args},
-    case varp_nif:find_symbol(Bs#bs.vp, Sym) of
+    case find_sym(Sym, Bs) of
 	{Type,Ls} ->
-	    %% io:format("var_vector (~w) ~p = ~p\n", [N1,Sym,{Type,Ls}]),
 	    {{Type,length(Ls),Ls},Bs};
 	false ->
 	    {V1,Vn} = varp_nif:add_variables(Bs#bs.vp, N1, true),
 	    Ls = lists:seq(V1,Vn),
-	    Var = {Name,Args},
-	    add_symbol(Bs, Var, Ls, Type),
-	    %% io:format("add var_vector (~w) ~p = ~p\n", [N1,Sym,{Type,Ls}]),
-	    {{Type,N1,Ls},Bs}
+	    Bs1 = new_symbol(Sym, Ls, Type, Bs),
+	    {{Type,N1,Ls},Bs1}
     end.
 
 %%
@@ -2187,10 +2228,53 @@ builtin1(Op, X, A, Bs) ->
 %% Binary operator
 %%
 operation2(Op,A,B,Bs) ->
-    case lib_op2(Op, A, B, Bs) of
-	builtin -> builtin2(Op, A, B, Bs);
-	Result -> Result
+    case fold2(Op, A, B, Bs) of
+	false ->
+	    case lib_op2(Op, A, B, Bs) of
+		builtin -> builtin2(Op, A, B, Bs);
+		Result -> Result
+	    end;
+	Folded -> Folded
     end.
+
+%% Two constant operands give a constant, no gates: "n / 2" in a body
+%% where n is a size, "(n == 1) ? .. : .." as the end of a recursion.
+%% Division by zero is left to the encoder and its --divz.
+fold2(Op, A, B, Bs) when is_tuple(A), is_tuple(B),
+			 (?is_vec_type(element(1,A)) orelse
+			  ?is_vec_type(element(1,B))) ->
+    case {vconst(A), vconst(B)} of
+	{Av, Bv} when is_integer(Av), is_integer(Bv) ->
+	    case fold2_(Op, Av, Bv) of
+		none -> false;
+		true -> {{bool,?T}, Bs};
+		false -> {{bool,?F}, Bs};
+		R when is_integer(R), R >= 0 ->
+		    const_vector(uint, R, varp_math:unsigned_size(R), Bs);
+		R when is_integer(R) ->
+		    const_vector(int, R, varp_math:signed_size(R), Bs)
+	    end;
+	_ -> false
+    end;
+fold2(_Op, _A, _B, _Bs) ->
+    false.
+
+fold2_('add', A, B) -> A + B;
+fold2_('sub', A, B) -> A - B;
+fold2_('mul', A, B) -> A * B;
+fold2_('div', A, B) when B =/= 0 -> A div B;
+fold2_('rem', A, B) when B =/= 0 -> A rem B;
+fold2_('min', A, B) -> erlang:min(A, B);
+fold2_('max', A, B) -> erlang:max(A, B);
+fold2_('shl', A, B) -> A bsl B;
+fold2_('shr', A, B) -> A bsr B;
+fold2_('lt', A, B) -> A < B;
+fold2_('lte', A, B) -> A =< B;
+fold2_('gt', A, B) -> A > B;
+fold2_('gte', A, B) -> A >= B;
+fold2_('eq', A, B) -> A == B;
+fold2_('neq', A, B) -> A =/= B;
+fold2_(_Op, _A, _B) -> none.
 
 builtin2(Op,{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
     X = case Op of
@@ -2358,7 +2442,7 @@ lib_ops(Bs) ->
     maps:get(ops, Bs#bs.option, builtin) =:= lib.
 
 lib_op1(Op, A, Bs) ->
-    case lib_ops(Bs) andalso element(1, A) =/= bool of
+    case is_tuple(A) andalso lib_ops(Bs) andalso element(1, A) =/= bool of
 	false -> builtin;
 	true ->
 	    case Op of
@@ -2370,12 +2454,14 @@ lib_op1(Op, A, Bs) ->
 	    end
     end.
 
-lib_op2(Op, A, B, Bs) ->
+lib_op2(Op, A, B, Bs) when is_tuple(A), is_tuple(B) ->
     case lib_ops(Bs) andalso
 	not (element(1, A) =:= bool andalso element(1, B) =:= bool) of
 	false -> builtin;
 	true -> lib_op2_(Op, lib_type(A, B), A, B, Bs)
-    end.
+    end;
+lib_op2(_Op, _A, _B, _Bs) ->
+    builtin.
 
 lib_type(A, B) ->
     case varp_arith:mix_type(A, B) of
@@ -2421,6 +2507,15 @@ lib_op2_(Op, T, A, K, Bs) when Op =:= 'shl'; Op =:= 'shr' ->
 		int -> lib_call(<<"op_sar">>, [{const,abs(N)}, Arg], Bs);
 		uint -> lib_call(<<"op_shr">>, [{const,abs(N)}, Arg], Bs)
 	    end
+    end;
+lib_op2_(Op, T, A, K, Bs) when Op =:= 'rol'; Op =:= 'ror' ->
+    case varp_arith:vconst(K) of
+	N when is_integer(N), N >= 0 ->
+	    [Arg|_] = lib_args(T, A, A),
+	    Name = <<"op_", (atom_to_binary(Op))/binary>>,
+	    {V, Bs1} = lib_call(Name, [{const,N}, Arg], Bs),
+	    {lib_retag(T, V), Bs1};
+	_ -> builtin
     end;
 lib_op2_(_Op, _T, _A, _B, _Bs) ->
     builtin.

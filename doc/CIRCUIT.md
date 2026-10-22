@@ -256,6 +256,7 @@ is loaded the first time its name is used:
 | `op_shl(meta k; a:n)`     | `a << k`         | `n+k`, wiring         |
 | `op_shr(meta k; a:n)`     | `a >> k`         | `n`, zeros in         |
 | `op_sar(meta k; a:n/signed)` | `a >> k` signed | `n` signed, sign in |
+| `op_rol op_ror(meta k; a:n)` | rotate left, right | `n`, wiring          |
 
 Unsigned except the `op_s*` circuits; a narrower operand is zero
 extended.  The signed circuits sign extend their operands first:
@@ -288,6 +289,38 @@ without a statement, so `op_mul(X, Y)` just works; the statement is
 for files that want to say what they depend on.  A circuit the file
 defines itself shadows the library's.  Another encoding is another
 directory with the same names, `varp --lib lib/fast ...`.
+
+## Locals and the model
+
+The locals of an instance, the `declare`d names, the return and
+every undeclared name of the body, carry the instance prefix
+(`op_add#3.C`) and are kept out of the solver's symbol table: a model
+does not list them and a formula with hundreds of instances does not
+fill the table with names nothing can refer to.  `--locals true`
+puts them in the table, which is the way to look inside a circuit
+while writing it.  Arguments declared on the caller's behalf
+(`R = plus(A, B)` with `R` undeclared) are the caller's and stay
+visible.
+
+## Recursive circuits
+
+A circuit may call itself: its name is known inside its own body,
+the arguments of the call are built with the caller's size bindings
+(`u2b(a >> (n/2))` means the caller's `n`), and the instance gets its
+own.  What ends the recursion is `?:` on a condition that is known
+when building: two constant operands fold into a constant (`n == 1`,
+`n / 2`, `3 * 4`) and a `?:` with a constant condition builds only
+the branch it picks, so the other call is never made.
+
+    // the bit count of a, ilog2(n)+1 bits (formulas/varp/u2b.varp)
+    circuit u2b(in a:n; return s:(ilog2(n)+1))
+    {
+        s = (n == 1) ? a[0] : ( u2b(a >> (n/2)) + u2b(a[0:(n/2-1)]) );
+    }
+
+The low half is a bit range of `a`, not a local, since a local
+`declare b:(n/2)` would have width 0 in the instance with `n == 1`:
+every statement of a body is built, only `?:` selects.
 
 ## The library in place of the operators
 

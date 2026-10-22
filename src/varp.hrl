@@ -119,6 +119,7 @@
 	 decls=#{} :: pdecl(),
 	 circuits=#{} :: #{ binary() => #circuit{} },
 	 cseq=0 :: integer(),  %% circuit instance counter (unique local prefix)
+	 locals=#{} :: map(), %% circuit locals kept out of the symbol table
 	 subst=[],             %% var/function substitution(s)
 	 literals=#{} :: #{ atom() => true },
 	 assert=[],            %% list of assertions [A1,...An]

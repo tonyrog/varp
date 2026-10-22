@@ -322,6 +322,13 @@ global_options() ->
 	 description => "Build the arithmetic and comparison operators from "
 	     "the circuit library (lib) or the built in encoders (builtin)."
        },
+      #{ long => "locals",
+	 key => locals,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "Keep the locals of circuit instances (op_add#1.C) "
+	     "in the symbol table, so that models show them."
+       },
       #{ long  => "timeout",
 	 short => "t",
 	 key   => timeout,

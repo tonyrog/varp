@@ -59,10 +59,10 @@ b(false) -> 0.
 %% locals get a unique per instance prefix, so two instances of the same
 %% circuit do not share their internal variables
 instance_prefix_test() ->
-    [M] = models(?HA
-		 "S1 = half_adder(A1,B1,C1);"
-		 "S2 = half_adder(A2,B2,C2);"
-		 "A1 && B1 && !A2 && !B2"),
+    [M] = varp_tc:models(?HA
+			 "S1 = half_adder(A1,B1,C1);"
+			 "S2 = half_adder(A2,B2,C2);"
+			 "A1 && B1 && !A2 && !B2", #{locals => true}),
     Names = [N || {N,_} <- M],
     ?assert(lists:member("half_adder#1.x", Names)),
     ?assert(lists:member("half_adder#2.x", Names)),
@@ -103,10 +103,24 @@ local_declare_test() ->
 %% a circuit is a closed scope: a body name never refers to a global
 closed_scope_test() ->
     %% 'A' inside the body is half_adder#1.A, not the outer A
-    [M] = models("circuit c(in y; return x) { x = y and A; }"
-		 "Y = c(B); !A && Y"),
+    [M] = varp_tc:models("circuit c(in y; return x) { x = y and A; }"
+			 "Y = c(B); !A && Y", #{locals => true}),
     ?assertEqual(false, proplists:get_value("A", M)),
     ?assertEqual(true, proplists:get_value("c#1.A", M)).
+
+%% the locals of an instance are not in the symbol table, so a model
+%% does not list them, unless --locals asks for them
+hidden_locals_test() ->
+    T = "circuit c(in y; return x) { declare t; t = y and A; x = t; } Y = c(B); !A && Y",
+    [M] = models(T),
+    ?assertEqual([{"A",false},{"B",true},{"Y",true}], lists:sort(M)),
+    [M1] = varp_tc:models(T, #{locals => true}),
+    ?assertEqual(["A","B","Y","c#1.A","c#1.t","c#1.x"], lists:sort([K || {K,_} <- M1])),
+    %% a vector local, and a local referenced twice is one variable
+    [M2] = models("circuit c(in a:4; return r:4) { declare t:4; t = a + 1; r = t * t; }"
+		  "declare X:4, R:4; X == 2 && R == c(X)"),
+    ?assertEqual(9, proplists:get_value("R", M2)),
+    ?assertEqual(["R","X"], [K || {K,_} <- lists:sort(M2)]).
 
 nested_circuit_test() ->
     T = "circuit and3(in a1, a2, a3 = true; return x) { x = a1 and a2 and a3; }"
@@ -136,8 +150,8 @@ nested_circuit_test() ->
 	"}\n").
 
 arith_circuit_test() ->
-    [M] = models("declare R:4,A:4,B:4;" ?PLUS
-		 "R = plus(A,B); (A == 5) && (B == 4)"),
+    [M] = varp_tc:models("declare R:4,A:4,B:4;" ?PLUS
+			 "R = plus(A,B); (A == 5) && (B == 4)", #{locals => true}),
     ?assertEqual(9, proplists:get_value("R", M)),
     ?assertEqual(9, proplists:get_value("plus#1.X", M)).
 
@@ -538,6 +552,48 @@ size_as_value_test_() ->
       fun() -> ?assertEqual(7, V(C ++ "define k 7; x = k;" ++ Call, K)) end}},
      {"a quantifier variable still shadows", {timeout, 60,
       fun() -> ?assertEqual(6, V(C ++ "[A n=1..2] x[n] = true; x[0] = false;" ++ Call, #{})) end}}].
+
+%% A circuit may call itself: the name is known inside its own body,
+%% the arguments are built in the caller's size bindings, and a ?:
+%% whose condition is a constant builds only the branch it picks,
+%% which is what ends the recursion.  u2b counts the bits of a.
+-define(U2B,
+	"circuit u2b(in a:n; return s:(ilog2(n)+1)) {\n"
+	"  s = (n == 1) ? a[0] : ( u2b(a >> (n/2)) + u2b(a[0:(n/2-1)]) );\n"
+	"}\n").
+
+recursive_circuit_test_() ->
+    [{"bit count of a 10 bit value", {timeout, 120,
+      fun() ->
+	      %% 0x2c5 = 1011000101
+	      ?assertEqual(5, proplists:get_value("S", hd(models(
+		  ?U2B "declare A:10, S:4; A == 0x2c5 && S == u2b(A)")))),
+	      %% 10 choose 3 values have three bits set
+	      ?assertEqual(120, count(?U2B "declare A:10; u2b(A) == 3"))
+      end}},
+     {"equal to the counting quantifier", {timeout, 300,
+      fun() ->
+	      ?assert(varp_tc:is_tautology(
+			?U2B "declare A:7; (u2b(A) == 3) equ ([EQ 3,i=0..6] A[i])")),
+	      ?assert(varp_tc:is_tautology(
+			?U2B "declare A:8; (u2b(A) >= 5) equ ([GTE 5,i=0..7] A[i])"))
+      end}},
+     {"one bit", {timeout, 60,
+      fun() ->
+	      ?assertEqual([[{"A",1}]], models(?U2B "declare A:1; u2b(A) == 1"))
+      end}}].
+
+%% constant operands fold when building, and a ?: on a constant
+%% condition builds one branch
+constant_fold_test() ->
+    ?assertEqual(5,  proplists:get_value("x", hd(models("declare x:4; x = (2 == 2) ? 5 : 6;")))),
+    ?assertEqual(6,  proplists:get_value("x", hd(models("declare x:4; x = (2 < 1) ? 5 : 6;")))),
+    ?assertEqual(10, proplists:get_value("x", hd(models("declare x:4; x = 3 * 4 - 2;")))),
+    ?assertEqual(5,  proplists:get_value("x", hd(models("declare x:4; x = 11 / 2;")))),
+    %% a size in a condition: the (n == 1) of u2b with n bound
+    ?assertEqual(7,  proplists:get_value("x", hd(models(
+	"circuit c(in a:n; return x:4) { x = (n == 2) ? 7 : 9; }"
+	"declare A:2, x:4; x == c(A)")))).
 
 %% md5 as a circuit: the message words come from md5_io (the input
 %% module of the file), here as a formula appended in place of "true"

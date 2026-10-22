@@ -1,0 +1,16 @@
+// unary to binary representation (bit count)
+// n inputs give ilog2(n)+1 binary bits
+//
+// The halves go through the circuit itself.  The condition is on the
+// size n, known when building, so only one branch of ?: is built and
+// the recursion ends at one bit.  The low half is a bit range of a,
+// so there is no local that would have width 0 at n == 1.
+circuit u2b(in a:n; return s:(ilog2(n)+1))
+{
+    s = (n == 1) ? a[0] : ( u2b(a >> (n/2)) + u2b(a[0:(n/2-1)]) );
+}
+
+// test case: every 10 bit value with three bits set, 120 of them
+declare A:10;
+
+u2b(A) == 3

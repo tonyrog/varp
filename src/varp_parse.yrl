@@ -40,7 +40,7 @@ Nonterminals
         pdecl pdecls
         assignment_defs assignment_def
         circuit_params circuit_param_decls circuit_param_decl
-        circuit_defs circuit_def arg_list arg 
+        circuit_defs circuit_def circuit_head arg_list arg 
         cpdecls cpdecl 
         .
 
@@ -87,11 +87,13 @@ definition -> 'import' sym ';'    : import('$2', line('$1')).
 definition -> 'import' cname ';'  : import(str('$2'), line('$1')).
 definition -> 'import' string ';' : import(element(3,'$2'), line('$1')).
 definition -> 'output' sym ';' : {output,'$2'}.
-definition -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
-		  varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
+definition -> circuit_head '{' circuit_defs '}' : circuit_end('$1', '$3').
+
+%% the head registers the name before the body is scanned, so that a
+%% circuit can call itself (the scanner marks a known name as cname);
 %% a definition of a name the library also has: the file's own wins
-definition -> 'circuit' cname circuit_params '{'  circuit_defs '}' :
-		  varp_formula:add_circuit_def({circuit, str('$2'), '$3', '$5'}).
+circuit_head -> 'circuit' sym circuit_params : circuit_head('$2', '$3').
+circuit_head -> 'circuit' cname circuit_params : circuit_head(str('$2'), '$3').
 definition -> 'system' sym '{' system_items '}' :
 		  {system,'$2',[],'$4',line('$1')}.
 definition -> 'system' sym circuit_params '{' system_items '}' :
@@ -160,10 +162,7 @@ circuit_def -> 'declare' pdecls ';' : {declare,'$2'}.
 %% a macro local to the body, an array of the locals for instance
 circuit_def -> 'define' pexpr lexpr ';' : {define,'$2','$3'}.
 circuit_def -> 'define' pexpr '=' '[' lexprs ']' ';' : {define,'$2',{array,'$5'}}.
-circuit_def -> 'circuit' cname circuit_params '{'  circuit_defs '}' :
-		   varp_formula:add_circuit_def({circuit, str('$2'), '$3', '$5'}).
-circuit_def -> 'circuit' sym circuit_params '{'  circuit_defs '}' :
-		   varp_formula:add_circuit_def({circuit, '$2', '$3', '$5'}).
+circuit_def -> circuit_head '{' circuit_defs '}' : circuit_end('$1', '$3').
 circuit_def -> oexpr '=' lexpr ';' : {lop,'=','$1','$3'}.
 circuit_def -> qassign : '$1'.
 %% a bare formula in a body is a constraint, it lets a body use
@@ -478,6 +477,13 @@ hex({hexnum,_Line,"0x"++Val}) -> {const,list_to_integer(Val,16)};
 hex({hexnum,_Line,"0X"++Val}) -> {const,list_to_integer(Val,16)}.
 dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
 flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
+
+circuit_head(Name, Params) ->
+    varp_formula:add_circuit_def({circuit, Name, Params, []}),
+    {Name, Params}.
+
+circuit_end({Name, Params}, Defs) ->
+    varp_formula:add_circuit_def({circuit, Name, Params, Defs}).
 
 str({symbol,Ln,Name}) -> note_symbol(Name,Ln), Name;
 str({cname,Ln,Name}) -> note_symbol(Name,Ln), Name.

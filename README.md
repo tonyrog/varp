@@ -156,6 +156,7 @@ Encoding and search behaviour:
 
     --adder plain|fast                  style of adder            (plain)
     --ops builtin|lib                   operators from the circuit library (builtin)
+    --locals <bool>                     show circuit locals in models (false)
     --assoc left|right|balanced|none    how all/any are built     (none)
     --carry, --borrow, --overflow       true|false|ignore         (ignore)
     --divz true|false|ignore            divide by zero            (false)
@@ -176,6 +177,8 @@ library instead of the built in encoders, `op_add` for `X + Y`, the
 is a matter of another `--lib` directory; `doc/CIRCUIT.md` has the
 details.  The built in encoders stay the reference: `--carry`,
 `--borrow` and `--overflow` are theirs only, `--divz` holds in both.
+The locals of a circuit instance (`op_add#3.C`) are not in the symbol
+table and a model does not list them; `--locals true` keeps them.
     --phase true|false|undefined        initial phase             (true)
     --bump-decay <f>           VSIDS activity decay per conflict; 0 keeps
                                the old order-list bump             (0.95)

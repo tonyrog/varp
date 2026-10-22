@@ -322,8 +322,12 @@ grammar_limitation_test_() ->
       ?_assertMatch({error,_}, err("ALL && B"))},
      {"code {} block",
       ?_assertMatch({error,_}, err("code { int x = 1; }"))},
+     %% the name of a circuit is known from its head on, so a call
+     %% statement right after the definition parses (it used to be a
+     %% syntax error: the name was a plain symbol until the token
+     %% after the closing brace had been scanned)
      {"bare circuit call statement",
-      ?_assertMatch({error,_},
+      ?_assertMatch({ok,_},
 		    err("circuit c(in y; out o) { o = not y; } c(A,B); true"))}
     ].
 

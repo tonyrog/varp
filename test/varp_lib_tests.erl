@@ -131,6 +131,14 @@ smin_smax_sneg_test() ->
     %% -(-8) = 8 needs the extra bit
     ?assertEqual(8,  v("declare X:4/signed,Z:5/signed; (X==-8) && (Z==op_sneg(X))", "Z")).
 
+%% rotations by a build time constant
+rotate_test() ->
+    ?assertEqual(6,  v("declare X:4,Z:4; (X==3) && (Z==op_rol(1,X))", "Z")),
+    ?assertEqual(9,  v("declare X:4,Z:4; (X==3) && (Z==op_ror(1,X))", "Z")),
+    ?assertEqual(6,  v("declare X:4,Z:4; (X==3) && (Z==op_rol(5,X))", "Z")),
+    ?assertEqual(3,  v("declare X:4,Z:4; (X==3) && (Z==op_rol(4,X))", "Z")),
+    ?assertEqual(12, v("declare X:4,Z:4; (X==3) && (Z==op_ror(2,X))", "Z")).
+
 %% shifts by a build time constant (a meta parameter)
 shift_test() ->
     ?assertEqual(12, v("declare X:4,Z:6; (X==3) && (Z==op_shl(2,X))", "Z")),
@@ -198,6 +206,8 @@ proof_test_() ->
 	 {"op_shl",  "declare X:n; op_shl(m, X) == X << m"},
 	 {"op_shr",  "declare X:n; op_shr(m, X) == X >> m"},
 	 {"op_sar",  "declare X:n/signed; op_sar(m, X) == X >> m"},
+	 {"op_rol",  "declare X:n; op_rol(m, op_ror(m, X)) == X"},
+	 {"op_ror",  "declare X:n; op_ror(m, X) == op_rol(n - (m % n), X)"},
 	 {"op_lt",   "declare X:n, Y:m; op_lt(X,Y) equ (X < Y)"},
 	 {"op_lte",  "declare X:n, Y:m; op_lte(X,Y) equ (X <= Y)"},
 	 {"op_gt",   "declare X:n, Y:m; op_gt(X,Y) equ (X > Y)"},
@@ -263,7 +273,8 @@ ops_lib_test_() ->
     ++
     [{"the library is in use", {timeout, 60,
       fun() ->
-	      [M|_] = varp_tc:models("declare X:2,Y:2; X + Y == 3", #{ops => lib}),
+	      [M|_] = varp_tc:models("declare X:2,Y:2; X + Y == 3",
+				     #{ops => lib, locals => true}),
 	      ?assert(lists:any(fun({K,_}) -> lists:prefix("op_add#", K) end, M))
       end}},
      {"a file circuit shadows the library under --ops lib", {timeout, 60,
