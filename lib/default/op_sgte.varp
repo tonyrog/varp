@@ -1,0 +1,4 @@
+circuit op_sgte(in a:n/signed, b:m/signed; return q)
+{
+    q = !op_slt(a, b);
+}

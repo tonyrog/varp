@@ -1,0 +1,14 @@
+// a < b, signed: sign extend both to max(n,m) bits, invert the sign
+// bits and compare unsigned (that maps -2^(k-1)..2^(k-1)-1 onto
+// 0..2^k-1 in order)
+circuit op_slt(in a:n/signed, b:m/signed; return q)
+{
+    declare A:(max(n,m)), B:(max(n,m));
+    [A i=0..(max(n,m)-2), i<n]  A[i] = a[i];
+    [A i=0..(max(n,m)-2), i>=n] A[i] = a[n-1];
+    [A i=0..(max(n,m)-2), i<m]  B[i] = b[i];
+    [A i=0..(max(n,m)-2), i>=m] B[i] = b[m-1];
+    A[max(n,m)-1] = !a[n-1];
+    B[max(n,m)-1] = !b[m-1];
+    q = op_lt(A, B);
+}

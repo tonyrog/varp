@@ -104,6 +104,22 @@ compare_test() ->
     ?assert(unsat("declare X:4,Y:4; (X==3) && (Y==5) && op_eq(X,Y)")),
     ?assert(sat("declare X:4,Y:4; (X==3) && (Y==5) && op_lt(X,Y) && !op_gt(X,Y) && !op_eq(X,Y)")).
 
+%% signed comparisons: the narrower operand is sign extended
+scompare_test() ->
+    D = "declare X:4/signed,Y:4/signed;",
+    ?assert(sat(D ++ "(X==-3) && (Y==5) && op_slt(X,Y)")),
+    ?assert(unsat(D ++ "(X==-3) && (Y==5) && op_sgt(X,Y)")),
+    ?assert(sat(D ++ "(X==-8) && (Y==7) && op_slt(X,Y) && op_slte(X,Y) && op_sneq(X,Y)")),
+    ?assert(sat(D ++ "(X==7) && (Y==-8) && op_sgt(X,Y) && op_sgte(X,Y)")),
+    ?assert(sat(D ++ "(X==-3) && (Y==-3) && op_slte(X,Y) && op_sgte(X,Y) && op_seq(X,Y)")),
+    ?assert(unsat(D ++ "(X==-3) && (Y==-3) && op_slt(X,Y)")),
+    %% unsigned the same bits say 13 < 5 is false
+    ?assert(unsat("declare X:4,Y:4; (X==13) && (Y==5) && op_lt(X,Y)")),
+    %% mixed widths: -1:3 == -1:5, and -4:3 < 15:5
+    ?assert(sat("declare X:3/signed,Y:5/signed; (X==-1) && (Y==-1) && op_seq(X,Y)")),
+    ?assert(unsat("declare X:3/signed,Y:5/signed; (X==-1) && (Y==-1) && op_sneq(X,Y)")),
+    ?assert(sat("declare X:3/signed,Y:5/signed; (X==-4) && (Y==15) && op_slt(X,Y)")).
+
 min_max_test() ->
     ?assertEqual(3, v("declare X:4,Y:4,Z:4; (X==3) && (Y==5) && (Z==op_min(X,Y))","Z")),
     ?assertEqual(5, v("declare X:4,Y:4,Z:4; (X==3) && (Y==5) && (Z==op_max(X,Y))","Z")).
@@ -150,6 +166,12 @@ proof_test_() ->
 	 {"op_sadd", "declare X:n/signed, Y:m/signed; op_sadd(X,Y) == X + Y"},
 	 {"op_ssub", "declare X:n/signed, Y:m/signed; op_ssub(X,Y) == X - Y"},
 	 {"op_smul", "declare X:n/signed, Y:m/signed; op_smul(X,Y) == X * Y"},
+	 {"op_slt",  "declare X:n/signed, Y:m/signed; op_slt(X,Y) equ (X < Y)"},
+	 {"op_slte", "declare X:n/signed, Y:m/signed; op_slte(X,Y) equ (X <= Y)"},
+	 {"op_sgt",  "declare X:n/signed, Y:m/signed; op_sgt(X,Y) equ (X > Y)"},
+	 {"op_sgte", "declare X:n/signed, Y:m/signed; op_sgte(X,Y) equ (X >= Y)"},
+	 {"op_seq",  "declare X:n/signed, Y:m/signed; op_seq(X,Y) equ (X == Y)"},
+	 {"op_sneq", "declare X:n/signed, Y:m/signed; op_sneq(X,Y) equ (X != Y)"},
 	 {"op_lt",   "declare X:n, Y:m; op_lt(X,Y) equ (X < Y)"},
 	 {"op_lte",  "declare X:n, Y:m; op_lte(X,Y) equ (X <= Y)"},
 	 {"op_gt",   "declare X:n, Y:m; op_gt(X,Y) equ (X > Y)"},

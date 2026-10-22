@@ -515,6 +515,30 @@ meta_parameter_test_() ->
 			   models(Lib ++ "declare v:8, w:8; v = pick(w); true"))
       end}}].
 
+%% a size parameter, or a meta variable of the caller, is a value in
+%% the body, "x = n;" or "(i < n) ? a[i] : a[n-1]", the way "A*B == n"
+%% works at the top level; a declare or define in the body shadows it
+size_as_value_test_() ->
+    C = "circuit c(in a:n; return x:(n+1)) { ",
+    Call = " }\ndeclare A:2, X:3; A == 2 && X == c(A)",
+    V = fun(Text, Opts) ->
+		[M] = varp_tc:models(Text, Opts),
+		proplists:get_value("X", M)
+	end,
+    K = #{meta => #{<<"k">> => 5}},
+    [{"the size itself", {timeout, 60,
+      fun() -> ?assertEqual(2, V(C ++ "x = n;" ++ Call, #{})) end}},
+     {"sign extension with ?:", {timeout, 60,
+      fun() -> ?assertEqual(6, V(C ++ "[A i=0..n] x[i] = (i < n) ? a[i] : a[n-1];" ++ Call, #{})) end}},
+     {"a meta variable of the caller", {timeout, 60,
+      fun() -> ?assertEqual(5, V(C ++ "x = k;" ++ Call, K)) end}},
+     {"shadowed by a local declare", {timeout, 60,
+      fun() -> ?assertEqual(3, V(C ++ "declare k:3; k = 3; x = k;" ++ Call, K)) end}},
+     {"shadowed by a local define", {timeout, 60,
+      fun() -> ?assertEqual(7, V(C ++ "define k 7; x = k;" ++ Call, K)) end}},
+     {"a quantifier variable still shadows", {timeout, 60,
+      fun() -> ?assertEqual(6, V(C ++ "[A n=1..2] x[n] = true; x[0] = false;" ++ Call, #{})) end}}].
+
 %% md5 as a circuit: the message words come from md5_io (the input
 %% module of the file), here as a formula appended in place of "true"
 md5_test_() ->

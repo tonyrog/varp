@@ -1,0 +1,4 @@
+circuit op_sneq(in a:n/signed, b:m/signed; return q)
+{
+    q = !op_seq(a, b);
+}

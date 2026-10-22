@@ -1170,13 +1170,31 @@ build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
     {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0_1),
     {Prefix,Bs2} = circuit_prefix(Name, Bs1),
     {RetName,Bs3} = circuit_return(Return, Prefix, Bs2),
-    Body = circuit_rename(Defs, maps:from_list(Bnd), Prefix, Bs3#bs.defs),
+    %% a local of the body (declare, define) shadows a meta variable
+    %% of the same name, like a declared symbol does at the top level
+    Meta = maps:without(circuit_locals(Defs), Bs3#bs.meta),
+    Body = circuit_rename(Defs, maps:from_list(Bnd), Prefix, Bs3#bs.defs,
+                          Meta),
     Bs4 = build_circuit_body(Body, Bs3),
     {Value,Bs5} = circuit_value(RetName, Bs4),
     %% locals and nested circuit definitions do not leak into the caller,
     %% but declarations made for the arguments (in Bs1) do.
     {Value, Bs5#bs { decls = Bs1#bs.decls, circuits = Bs1#bs.circuits,
 		     meta = Meta0 }}.
+
+%% the names a circuit body declares or defines
+circuit_locals(Defs) ->
+    lists:append(
+      [case D of
+	   {declare,Ds} -> [P || Decl <- Ds, P <- [local_name(Decl)], P =/= undefined];
+	   {define,{p,P,_},_} -> [P];
+	   _ -> []
+       end || D <- Defs]).
+
+local_name({'=',D,_Default}) -> local_name(D);
+local_name({{p,P,_},_Type,_Size}) -> P;
+local_name({p,P,_}) -> P;
+local_name(_) -> undefined.
 
 %% split the parameter list into {In, Out, Return}
 circuit_params(Name, Params) ->
@@ -1333,14 +1351,14 @@ circuit_value(RName, Bs) ->
 %% predicate/variable name is prefixed, macros and circuit names are kept.
 %% a quantifier binds names for its body: they are integers, not
 %% locals, and are not renamed
-circuit_rename({{Q,Binds},Body}, Env, Prefix, Defs) when is_atom(Q),
+circuit_rename({{Q,Binds},Body}, Env, Prefix, Defs, Meta) when is_atom(Q),
 							  is_list(Binds) ->
     Bound = [V || {op,'=',V,_} <- Binds, is_binary(V)],
     Env1 = maps:merge(Env, maps:from_list([{V,bound} || V <- Bound])),
-    {{Q,circuit_rename(Binds, Env, Prefix, Defs)},
-     circuit_rename(Body, Env1, Prefix, Defs)};
-circuit_rename({p,P,As}, Env, Prefix, Defs) ->
-    As1 = circuit_rename(As, Env, Prefix, Defs),
+    {{Q,circuit_rename(Binds, Env, Prefix, Defs, Meta)},
+     circuit_rename(Body, Env1, Prefix, Defs, Meta)};
+circuit_rename({p,P,As}, Env, Prefix, Defs, Meta) ->
+    As1 = circuit_rename(As, Env, Prefix, Defs, Meta),
     case maps:find(P, Env) of
 	{ok,bound} ->
 	    {p,P,As1};
@@ -1353,21 +1371,28 @@ circuit_rename({p,P,As}, Env, Prefix, Defs) ->
 	error ->
 	    case maps:is_key({P,length(As1)}, Defs) of
 		true  -> {p,P,As1};
-		false -> {p,<<Prefix/binary,P/binary>>,As1}
+		false ->
+		    %% a size parameter of this instance (a:n) or a meta
+		    %% variable of the caller used as a value, "x = n;"
+		    %% or "(i < n) ? ..": its number, as at the top level
+		    case maps:find(P, Meta) of
+			{ok,I} when As1 =:= [], is_integer(I) -> {const,I};
+			_ -> {p,<<Prefix/binary,P/binary>>,As1}
+		    end
 	    end
     end;
 %% a nested circuit definition keeps its own scope, it is renamed when
 %% it is instantiated
-circuit_rename(C={circuit,_Name,_Params,_Body}, _Env, _Prefix, _Defs) ->
+circuit_rename(C={circuit,_Name,_Params,_Body}, _Env, _Prefix, _Defs, _Meta) ->
     C;
-circuit_rename({cop,Name,As}, Env, Prefix, Defs) ->
-    {cop,Name,circuit_rename(As, Env, Prefix, Defs)};
-circuit_rename(T, Env, Prefix, Defs) when is_tuple(T) ->
-    list_to_tuple(circuit_rename(tuple_to_list(T), Env, Prefix, Defs));
-circuit_rename([H|T], Env, Prefix, Defs) ->
-    [circuit_rename(H, Env, Prefix, Defs) |
-     circuit_rename(T, Env, Prefix, Defs)];
-circuit_rename(X, _Env, _Prefix, _Defs) ->
+circuit_rename({cop,Name,As}, Env, Prefix, Defs, Meta) ->
+    {cop,Name,circuit_rename(As, Env, Prefix, Defs, Meta)};
+circuit_rename(T, Env, Prefix, Defs, Meta) when is_tuple(T) ->
+    list_to_tuple(circuit_rename(tuple_to_list(T), Env, Prefix, Defs, Meta));
+circuit_rename([H|T], Env, Prefix, Defs, Meta) ->
+    [circuit_rename(H, Env, Prefix, Defs, Meta) |
+     circuit_rename(T, Env, Prefix, Defs, Meta)];
+circuit_rename(X, _Env, _Prefix, _Defs, _Meta) ->
     X.
 
 build_circuit_body([{define,{p,Name,Ps},Def}|Body], Bs) ->
