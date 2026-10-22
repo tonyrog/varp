@@ -72,7 +72,7 @@
 	end).
 
 -define(dbg0(F,As), ok).
--define(dbg1(F,A), io:format((F),(A))).
+-define(dbg1(F,A), ok).
 -ifdef(DEBUG).
 -define(dbg(F,A), io:format((F),(A))).
 -define(dcall(Fun), Fun()).
@@ -120,6 +120,7 @@
 	 circuits=#{} :: #{ binary() => #circuit{} },
 	 cseq=0 :: integer(),  %% circuit instance counter (unique local prefix)
 	 locals=#{} :: map(), %% circuit locals kept out of the symbol table
+	 visible=#{} :: map(), %% locals declared /visible, by prefixed name
 	 subst=[],             %% var/function substitution(s)
 	 literals=#{} :: #{ atom() => true },
 	 assert=[],            %% list of assertions [A1,...An]

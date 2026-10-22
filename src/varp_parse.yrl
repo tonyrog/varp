@@ -307,6 +307,12 @@ pdecl -> pexpr ':' sexpr '/' 'signed'   : {'$1',int,'$3'}.
 pdecl -> pexpr ':' sexpr '/' 'unsigned' : {'$1',uint,'$3'}.
 pdecl -> pexpr ':' sexpr                : {'$1',uint,'$3'}.
 pdecl -> pexpr                          : '$1'.
+%% "declare t:4 /visible;" in a circuit body: the local stays in the
+%% symbol table and shows in models
+pdecl -> pexpr ':' sexpr '/' 'signed' '/' symbol   : visible('$7', {'$1',int,'$3'}).
+pdecl -> pexpr ':' sexpr '/' 'unsigned' '/' symbol : visible('$7', {'$1',uint,'$3'}).
+pdecl -> pexpr ':' sexpr '/' symbol                : visible('$5', {'$1',uint,'$3'}).
+pdecl -> pexpr '/' symbol                          : visible('$3', '$1').
 
 pdecls -> pdecl : ['$1'].
 pdecls -> pdecls ',' pdecl : '$1'++['$3'].
@@ -477,6 +483,11 @@ hex({hexnum,_Line,"0x"++Val}) -> {const,list_to_integer(Val,16)};
 hex({hexnum,_Line,"0X"++Val}) -> {const,list_to_integer(Val,16)}.
 dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
 flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
+
+visible({symbol,_Ln,<<"visible">>}, Decl) -> {visible, Decl};
+visible({symbol,Ln,Other}, _Decl) ->
+    return_error(Ln, io_lib:format("unknown declaration qualifier /~s, "
+				   "expected /signed, /unsigned or /visible", [Other])).
 
 circuit_head(Name, Params) ->
     varp_formula:add_circuit_def({circuit, Name, Params, []}),

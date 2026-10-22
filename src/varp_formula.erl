@@ -275,7 +275,8 @@ find_sym(Sym, Bs) ->
 
 hidden_name(Name, Bs) when is_binary(Name) ->
     binary:match(Name, <<"#">>) =/= nomatch andalso
-	not maps:get(locals, Bs#bs.option, false);
+	not maps:get(locals, Bs#bs.option, false) andalso
+	not maps:is_key(Name, Bs#bs.visible);
 hidden_name(_Name, _Bs) ->
     false.
 
@@ -1243,6 +1244,7 @@ circuit_locals(Defs) ->
 	   _ -> []
        end || D <- Defs]).
 
+local_name({visible,D}) -> local_name(D);
 local_name({'=',D,_Default}) -> local_name(D);
 local_name({{p,P,_},_Type,_Size}) -> P;
 local_name({p,P,_}) -> P;
@@ -1464,8 +1466,14 @@ build_circuit_body([{define,{p,Name,Ps},Def}|Body], Bs) ->
 			    [{Formals,Def}], Bs#bs.defs),
     build_circuit_body(Body, Bs#bs{ defs = Defs });
 build_circuit_body([{declare,Ds}|Body], Bs) ->
-    case varp:add_decls(Ds, Bs#bs.decls, Bs) of
-	{ok,Decls} -> build_circuit_body(Body, Bs#bs { decls = Decls });
+    %% "declare t:4 /visible;": the (prefixed) name is excepted from
+    %% hiding and ends up in the symbol table like a top level name
+    Vis = [local_name(D) || {visible,D} <- Ds],
+    Ds1 = [case D of {visible,D1} -> D1; _ -> D end || D <- Ds],
+    Visible = maps:merge(Bs#bs.visible, maps:from_list([{N,true} || N <- Vis])),
+    case varp:add_decls(Ds1, Bs#bs.decls, Bs) of
+	{ok,Decls} ->
+	    build_circuit_body(Body, Bs#bs { decls = Decls, visible = Visible });
 	{error,Reason} -> error(Reason)
     end;
 build_circuit_body([C={circuit,Name,_Params,_Defs}|Body], Bs) ->

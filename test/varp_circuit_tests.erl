@@ -122,6 +122,22 @@ hidden_locals_test() ->
     ?assertEqual(9, proplists:get_value("R", M2)),
     ?assertEqual(["R","X"], [K || {K,_} <- lists:sort(M2)]).
 
+%% "declare t /visible;" keeps that local in the symbol table
+visible_local_test() ->
+    T = "circuit c(in y; return x) { declare t /visible, u; t = y and A; u = t; x = u; }"
+	"Y = c(B); !A && Y",
+    [M] = models(T),
+    ?assertEqual(["A","B","Y","c#1.t"], lists:sort([K || {K,_} <- M])),
+    ?assertEqual(true, proplists:get_value("c#1.t", M)),
+    [M2] = models("circuit c(in a:4; return r:4) {"
+		  "  declare t:4 /visible, s:4/signed /visible, w:4; t = a + 1; s = 0 - t; w = t; r = w; }"
+		  "declare X:4, R:4; X == 2 && R == c(X)"),
+    ?assertEqual(["R","X","c#1.s","c#1.t"], lists:sort([K || {K,_} <- M2])),
+    ?assertEqual(3, proplists:get_value("c#1.t", M2)),
+    ?assertEqual(-3, proplists:get_value("c#1.s", M2)),
+    %% a misspelled qualifier is a syntax error
+    ?assertMatch({error,_}, varp_tc:parse_only("circuit c(in y; return x) { declare t /visble; x = y; } true")).
+
 nested_circuit_test() ->
     T = "circuit and3(in a1, a2, a3 = true; return x) { x = a1 and a2 and a3; }"
 	"circuit mix(in a, b, c; return x; out t)"

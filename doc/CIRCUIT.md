@@ -159,6 +159,7 @@ disappears with it.
 A body may contain
 
     declare <decls> ;          a local, sized, variable
+    declare t:4 /visible ;     a local that models show (see below)
     circuit <name> (...) {...} a nested circuit
     <lvalue> = <expr> ;        an assignment
     <formula> ;                a constraint, it must hold
@@ -256,7 +257,7 @@ is loaded the first time its name is used:
 | `op_shl(meta k; a:n)`     | `a << k`         | `n+k`, wiring         |
 | `op_shr(meta k; a:n)`     | `a >> k`         | `n`, zeros in         |
 | `op_sar(meta k; a:n/signed)` | `a >> k` signed | `n` signed, sign in |
-| `op_rol op_ror(meta k; a:n)` | rotate left, right | `n`, wiring          |
+| `op_rol op_ror(meta k; a:n)` | `a <<< k`, `a >>> k` | `n`, wiring        |
 
 Unsigned except the `op_s*` circuits; a narrower operand is zero
 extended.  The signed circuits sign extend their operands first:
@@ -297,8 +298,9 @@ every undeclared name of the body, carry the instance prefix
 (`op_add#3.C`) and are kept out of the solver's symbol table: a model
 does not list them and a formula with hundreds of instances does not
 fill the table with names nothing can refer to.  `--locals true`
-puts them in the table, which is the way to look inside a circuit
-while writing it.  Arguments declared on the caller's behalf
+puts them all in the table, and `declare t:4 /visible;` (after
+`/signed` when both: `s:4/signed /visible`) keeps one local visible,
+which is the way to look inside a circuit while writing it.  Arguments declared on the caller's behalf
 (`R = plus(A, B)` with `R` undeclared) are the caller's and stay
 visible.
 
@@ -334,9 +336,10 @@ since the encoders give a signed result for those, `<<` and `>>` take
 `op_shl`, `op_shr` or `op_sar` with the constant shift count as the
 meta parameter, and `/` passes a fresh symbol of the caller for the
 remainder.  Division by zero gets the `--divz` status like the
-encoders; `--carry`, `--borrow` and `--overflow` are not reproduced.
-Rotation, the bitwise operators on signed operands and the `=` test
-stay built in.  A circuit the file defines itself shadows the
+encoders, `<<<` and `>>>` take `op_rol` and `op_ror`; `--carry`,
+`--borrow` and `--overflow` are not reproduced.
+The bitwise operators on signed operands and the `=` test stay built
+in.  A circuit the file defines itself shadows the
 library's under `--ops lib` as well, so a formula can carry its own
 `op_add`.  `varp_lib_tests:ops_lib_test_` checks that every model of
 a formula is the same whichever way the operators are built.

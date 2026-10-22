@@ -1850,6 +1850,8 @@ split_sections([{output,Name}|Sections], Map=#{ output:=Output0 },GOpts) ->
 split_sections([], Map, _GOpts) ->
     {ok, Map}.
 
+add_decls([{visible,D}|Ds], Decls, Bs) ->   %% at the top level all is visible
+    add_decls([D|Ds], Decls, Bs);
 add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
     Size = varp_formula:eval_meta(SExpr, Bs),
     add_decls_(Sym, {PType,length(Args),Size}, Ds, Decls, Bs);
@@ -1859,6 +1861,7 @@ add_decls([{p,Sym,Args}|Ds], Decls, Bs) ->
 add_decls([], Decls, _Bs) ->
     {ok,Decls}.
 
+decl_pexpr({visible,D}) -> decl_pexpr(D);
 decl_pexpr({P={p,_,_},_Type,_Size}) -> P;
 decl_pexpr(P={p,_,_}) -> P.
 
