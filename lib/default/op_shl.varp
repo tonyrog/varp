@@ -1,0 +1,7 @@
+// a << k, k a build time constant: n+k bits, zeros shifted in.  Pure
+// wiring, so it serves signed values as well.
+circuit op_shl(meta k; in a:n; return r:(n+k))
+{
+    [A i=0..(n+k-1), i<k]  r[i] = false;
+    [A i=0..(n+k-1), i>=k] r[i] = a[i-k];
+}

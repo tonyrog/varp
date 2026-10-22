@@ -1,0 +1,6 @@
+// a >> k, signed (arithmetic): the sign bit is shifted in
+circuit op_sar(meta k; in a:n/signed; return r:n/signed)
+{
+    [A i=0..(n-1), i+k<n]  r[i] = a[i+k];
+    [A i=0..(n-1), i+k>=n] r[i] = a[n-1];
+}

@@ -1,0 +1,10 @@
+// max(a, b), signed: the larger operand, sign extended to max(n,m) bits
+circuit op_smax(in a:n/signed, b:m/signed; return r:(max(n,m))/signed)
+{
+    declare A:(max(n,m)), B:(max(n,m));
+    [A i=0..(max(n,m)-1), i<n]  A[i] = a[i];
+    [A i=0..(max(n,m)-1), i>=n] A[i] = a[n-1];
+    [A i=0..(max(n,m)-1), i<m]  B[i] = b[i];
+    [A i=0..(max(n,m)-1), i>=m] B[i] = b[m-1];
+    r = op_slt(a, b) ? B : A;
+}

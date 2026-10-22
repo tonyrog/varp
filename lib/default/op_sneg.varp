@@ -1,0 +1,9 @@
+// -a, signed, n+1 bits so that the most negative value negates too:
+// sign extend by one bit, then op_neg
+circuit op_sneg(in a:n/signed; return r:(n+1)/signed)
+{
+    declare A:(n+1);
+    [A i=0..(n-1)] A[i] = a[i];
+    A[n] = a[n-1];
+    r = op_neg(A);
+}

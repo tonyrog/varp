@@ -249,6 +249,18 @@ compare_test() ->
     ?assert(sat("declare X:4,Y:4; (X==3) && (Y==5) && (X!=Y)")),
     ?assert(unsat("declare X:4,Y:4; (X==3) && (Y==5) && (X==Y)")).
 
+%% a comparison assigned to a boolean, including one of constants
+compare_assign_test() ->
+    ?assertEqual(true,  v("declare A:2,B:2,x; A = 1; B = 1; x = (A == B);", "x")),
+    ?assertEqual(false, v("declare A:2,B:2,x; A = 1; B = 2; x = (A == B);", "x")),
+    ?assertEqual(true,  v("declare A:2,B:2,x; A = 1; B = 2; x = (A < B);", "x")),
+    ?assertEqual(true,  v("declare A:2,B:2,x; A = 1; B = 2; x = (A <= B);", "x")),
+    ?assertEqual(false, v("declare A:2,B:2,x; A = 1; B = 2; x = (A > B);", "x")),
+    ?assertEqual(true,  v("declare A:2,B:2,x; A = 1; B = 2; x = (A != B);", "x")),
+    ?assertEqual(true,  v("declare x; x = (2 == 2);", "x")),
+    ?assertEqual(false, v("declare x; x = (2 < 1);", "x")),
+    ?assertEqual(1,     v("declare x:2; x = (3 == 3);", "x")).
+
 %% one signed operand makes + - * signed; the sum and difference need
 %% one more bit than the operands, the product n+m
 signed_test() ->

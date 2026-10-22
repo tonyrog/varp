@@ -1,0 +1,6 @@
+// a >> k, unsigned, k a build time constant: zeros shifted in (a bit
+// read past the end of a is false)
+circuit op_shr(meta k; in a:n; return r:n)
+{
+    [A i=0..(n-1)] r[i] = a[i+k];
+}

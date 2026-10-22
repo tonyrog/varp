@@ -251,6 +251,11 @@ is loaded the first time its name is used:
 | `op_slt op_slte op_sgt op_sgte op_seq op_sneq` | `< <= > >= == !=` signed | boolean |
 | `op_min op_max`           | `min max`        | `max(n,m)`            |
 | `op_band op_bor op_bxor op_bnot` | `& \| ^ ~`  | `max(n,m)`, `n`       |
+| `op_smin op_smax(a:n/signed, b:m/signed)` | `min max` signed | `max(n,m)` signed |
+| `op_sneg(a:n/signed)`     | `0 - a` signed   | `n+1` signed          |
+| `op_shl(meta k; a:n)`     | `a << k`         | `n+k`, wiring         |
+| `op_shr(meta k; a:n)`     | `a >> k`         | `n`, zeros in         |
+| `op_sar(meta k; a:n/signed)` | `a >> k` signed | `n` signed, sign in |
 
 Unsigned except the `op_s*` circuits; a narrower operand is zero
 extended.  The signed circuits sign extend their operands first:
@@ -283,6 +288,29 @@ without a statement, so `op_mul(X, Y)` just works; the statement is
 for files that want to say what they depend on.  A circuit the file
 defines itself shadows the library's.  Another encoding is another
 directory with the same names, `varp --lib lib/fast ...`.
+
+## The library in place of the operators
+
+`varp --ops lib ...` builds every arithmetic and comparison operator
+of the formula from the library instead of the encoders in
+`varp_arith.erl`: `X + Y` becomes `op_add(X, Y)`, and with a signed
+operand `op_sadd` with the unsigned operand widened by a zero sign
+bit, as the encoders do.  The table says which circuit serves which
+operator; `-` and unary `-` always take `op_ssub` and `op_sneg`,
+since the encoders give a signed result for those, `<<` and `>>` take
+`op_shl`, `op_shr` or `op_sar` with the constant shift count as the
+meta parameter, and `/` passes a fresh symbol of the caller for the
+remainder.  Division by zero gets the `--divz` status like the
+encoders; `--carry`, `--borrow` and `--overflow` are not reproduced.
+Rotation, the bitwise operators on signed operands and the `=` test
+stay built in.  A circuit the file defines itself shadows the
+library's under `--ops lib` as well, so a formula can carry its own
+`op_add`.  `varp_lib_tests:ops_lib_test_` checks that every model of
+a formula is the same whichever way the operators are built.
+
+The encoders stay as the reference implementation and the default.
+Another encoding is another library directory with the same circuit
+names: `varp --lib lib/fast --ops lib ...`.
 
 ## Errors
 

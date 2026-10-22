@@ -79,6 +79,10 @@
 	 P =:= <<"pow">> orelse P =:= <<"sin">> orelse P =:= <<"cos">> orelse
 	 P =:= <<"trunc">> orelse P =:= <<"round">>)).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit))).
+-define(is_compare_op(Op),
+	((Op) =:= 'lt' orelse (Op) =:= 'lte' orelse (Op) =:= 'gt' orelse
+	 (Op) =:= 'gte' orelse (Op) =:= 'eq' orelse (Op) =:= 'neq' orelse
+	 (Op) =:= '=')).
 
 
 new() ->
@@ -94,7 +98,14 @@ new(OptMap) when is_map(OptMap) ->
 		 use_phase  => maps:get(use_phase,OptMap),
 		 seed       => maps:get(seed,OptMap),
 		 decay      => float(maps:get(bump_decay,OptMap,0.95)),
-		 icase      => maps:get(icase,OptMap)
+		 icase      => maps:get(icase,OptMap),
+		 %% the status options the encoders read back with
+		 %% getopt (set_status): without these the command line
+		 %% --divz, --carry ... never reached the instance
+		 carry      => maps:get(carry,OptMap,ignore),
+		 borrow     => maps:get(borrow,OptMap,ignore),
+		 overflow   => maps:get(overflow,OptMap,ignore),
+		 divz       => maps:get(divz,OptMap,false)
 	       },
     Vp  = varp_nif:new(NewOpts),
     %% transfer some options to vp:setopt(Vp, ...)
@@ -978,11 +989,13 @@ bld(_X,{lop,'=',L,R}, Bs) ->
 bld(X,{lop,Op,A}, Bs) ->
     {Y,Bs1} = bld(A, Bs),
     operation1(Op, X, Y, Bs1);
-bld(X,{lop,Op,A,B}, Bs) ->
+bld(X,_Bld={lop,Op,A,B}, Bs) ->
+    ?dbg1("op = ~p\n", [_Bld]),
     {Y,Bs1} = bld(A, Bs),
     {Z,Bs2} = bld(B, Bs1),
     operation2(Op,X,Y,Z,Bs2);
-bld(X,{lop,ite,C,T,E}, Bs) ->
+bld(X,_Bld={lop,ite,C,T,E}, Bs) ->
+    ?dbg1("op = ~p\n", [_Bld]),
     {Cf,Bs1} = bld(C, Bs),
     {Tf,Bs2} = bld(T, Bs1),
     {Ef,Bs3} = bld(E, Bs2),
@@ -1103,12 +1116,20 @@ bld(X,{{'EVEN',Qs}, F}, Bs) ->
     Y = varp_circuit:even(Bs1#bs.vp,X,circuit_args(Xs)),
     {{bool,Y},Bs1};
 bld(X,{cop, Name, Args}, Bs) ->
+    {Value,Bs1} = call_circuit(Name, Args, Bs),
+    set(X, Value, Bs1).
+
+%% a circuit of the file, or of the library (imported now when the
+%% scanner never saw the name, as with --ops lib)
+call_circuit(Name, Args, Bs) ->
     case find_circuit_def(Name, Bs#bs.circuits, icase(Bs)) of
 	{ok, Circuit} ->
-	    {Value,Bs1} = build_circuit(Circuit, Args, Bs),
-	    set(X, Value, Bs1);
+	    build_circuit(Circuit, Args, Bs);
 	error ->
-	    error({circuit_undefined, Name})
+	    case varp_lib:circuit(Name) of
+		{ok, Circuit} -> build_circuit(Circuit, Args, Bs);
+		error -> error({circuit_undefined, Name})
+	    end
     end.
 
 %% build one or more arguments
@@ -2088,10 +2109,16 @@ join_vector([]) ->
 %%
 %% Unary operator
 %%
-operation1(Op, {bool,A}, Bs) when Op =:= 'not'; Op =:= 'bnot' ->
+operation1(Op, A, Bs) ->
+    case lib_op1(Op, A, Bs) of
+	builtin -> builtin1(Op, A, Bs);
+	Result -> Result
+    end.
+
+builtin1(Op, {bool,A}, Bs) when Op =:= 'not'; Op =:= 'bnot' ->
     B = varp_circuit:gate(Bs#bs.vp,'not',A),
     {{bool,B}, Bs};
-operation1(Op, A, Bs) ->
+builtin1(Op, A, Bs) ->
     X = case Op of
 	    'bnot' ->
 		varp_arith:bitwise_not(Bs#bs.vp,A);
@@ -2113,7 +2140,15 @@ operation1(Op, A, Bs) ->
     {X, Bs}.
 
 %% Operation with assignment to X
-operation1(Op, {bool,X}, {bool,A}, Bs) when
+operation1(Op, undefined, A, Bs) ->
+    operation1(Op, A, Bs);
+operation1(Op, X, A, Bs) ->
+    case lib_op1(Op, A, Bs) of
+	builtin -> builtin1(Op, X, A, Bs);
+	{V, Bs1} -> set(X, V, Bs1)
+    end.
+
+builtin1(Op, {bool,X}, {bool,A}, Bs) when
       Op =:= 'not'; Op =:= 'bnot'; Op =:= '=' ->
     X1 = case Op of
 	     '=' ->
@@ -2124,9 +2159,7 @@ operation1(Op, {bool,X}, {bool,A}, Bs) when
     {{bool,X1}, Bs};
 %% operation1(':=',X,Y={T,Size,Ys},Bs) when ?is_vec_type(T) ->
 %%     {Y, alias_vector(Bs,T,X,Size,Ys)};
-operation1(Op, undefined, A, Bs) ->
-    operation1(Op, A, Bs);
-operation1(Op, X, A, Bs) ->
+builtin1(Op, X, A, Bs) ->
     X1 = case Op of
 	    '=' ->
 		varp_arith:set(Bs#bs.vp,X,A);
@@ -2153,7 +2186,13 @@ operation1(Op, X, A, Bs) ->
 %%
 %% Binary operator
 %%
-operation2(Op,{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
+operation2(Op,A,B,Bs) ->
+    case lib_op2(Op, A, B, Bs) of
+	builtin -> builtin2(Op, A, B, Bs);
+	Result -> Result
+    end.
+
+builtin2(Op,{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
     X = case Op of
 	    'and' -> varp_circuit:and_gate(Bs#bs.vp, Y, Z);
 	    'band' -> varp_circuit:and_gate(Bs#bs.vp, Y, Z);
@@ -2178,7 +2217,7 @@ operation2(Op,{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
 %%     {X, alias_vector(Bs,T,V,Size,Xs)};
 %% operation2(':=',V,X={bool,Xb},Bs) ->
 %%     {X, alias(V,Xb,Bs)};
-operation2(Op,A,B,Bs) ->
+builtin2(Op,A,B,Bs) ->
     C = case Op of 
 	    'band' -> varp_arith:bitwise_and(Bs#bs.vp,A,B);
 	    'bor' -> varp_arith:bitwise_or(Bs#bs.vp,A,B);
@@ -2230,7 +2269,13 @@ operand_kind(Other)               -> Other.
 %% like operation2 but result is predetermined in X
 operation2(Op,undefined,Y,Z,Bs) ->
     operation2(Op,Y,Z,Bs);
-operation2(Op,{bool,X},{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
+operation2(Op,X,Y,Z,Bs) ->
+    case lib_op2(Op, Y, Z, Bs) of
+	builtin -> builtin2(Op, X, Y, Z, Bs);
+	{V, Bs1} -> set(X, V, Bs1)
+    end.
+
+builtin2(Op,{bool,X},{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
     %% X1 is "normally" equal to X
     X1 = case Op of
 	    'and' -> varp_circuit:and_gate(Bs#bs.vp, X, Y, Z);
@@ -2254,7 +2299,29 @@ operation2(Op,{bool,X},{bool,Y},{bool,Z}, Bs) when ?is_bool_op(Op) ->
     {{bool,X1},Bs};
 %% operation2(':=',X,Y={bool,Yb},Bs) ->
 %%     {Y, alias(X,Yb,Bs)};
-operation2(Op,X,Y,Z,Bs) ->
+%% a comparison into a boolean target is built into its literal; any
+%% other target (a vector, "declare x:2; x = (A == B);") gets the value
+builtin2(Op,X,Y,Z,Bs) when ?is_compare_op(Op) ->
+    case X of
+	{bool,Xl} ->
+	    Xb = case Op of
+		     'lt' -> varp_arith:lt(Bs#bs.vp,Xl,Y,Z);
+		     'lte' -> varp_arith:lte(Bs#bs.vp,Xl,Y,Z);
+		     'gt' -> varp_arith:gt(Bs#bs.vp,Xl,Y,Z);
+		     'gte' -> varp_arith:gte(Bs#bs.vp,Xl,Y,Z);
+		     'eq' -> varp_arith:eq(Bs#bs.vp,Xl,Y,Z);
+		     'neq' -> varp_arith:neq(Bs#bs.vp,Xl,Y,Z);
+		     %% operator '=' is kind of assignment but really a
+		     %% equality test and check of overflow bits
+		     %% FIXME: same as '==' but check overflow / truncate
+		     '=' -> varp_arith:eq(Bs#bs.vp,Xl,Y,Z)
+		 end,
+	    {{bool,Xb}, Bs};
+	_ ->
+	    {C,Bs1} = builtin2(Op,Y,Z,Bs),
+	    set(X,C,Bs1)
+    end;
+builtin2(Op,X,Y,Z,Bs) ->
     X1 = case Op of 
 	     'band' -> varp_arith:bitwise_and(Bs#bs.vp,X,Y,Z);
 	     'bor' -> varp_arith:bitwise_or(Bs#bs.vp,X,Y,Z);
@@ -2262,12 +2329,6 @@ operation2(Op,X,Y,Z,Bs) ->
 	     'imp' -> Yn = varp_arith:bitwise_not(Bs#bs.vp,Y),
 		     varp_arith:bitwise_or(Bs#bs.vp,X,Yn,Z);
 	     'equ' -> varp_arith:bitwise_equ(Bs#bs.vp,X,Y,Z);
-	     'lt' -> Xb = varp_arith:lt(Bs#bs.vp,X,Y,Z), {bool,Xb};
-	     'lte' -> Xb = varp_arith:lte(Bs#bs.vp,X,Y,Z), {bool,Xb};
-	     'gt' -> Xb = varp_arith:gt(Bs#bs.vp,X,Y,Z), {bool,Xb};
-	     'gte' -> Xb = varp_arith:gte(Bs#bs.vp,X,Y,Z), {bool,Xb};
-	     'eq' -> Xb = varp_arith:eq(Bs#bs.vp,X,Y,Z), {bool,Xb};
-	     'neq' -> Xb = varp_arith:neq(Bs#bs.vp,X,Y,Z),{bool,Xb};
 	     'shl' -> varp_arith:shl(Bs#bs.vp,X,Y,Z);
 	     'shr' -> varp_arith:shr(Bs#bs.vp,X,Y,Z);
 	     'rol' -> varp_arith:rol(Bs#bs.vp,X,Y,Z);
@@ -2278,13 +2339,105 @@ operation2(Op,X,Y,Z,Bs) ->
 	     'div' -> varp_arith:divide(Bs#bs.vp,X,Y,Z);
 	     'rem' -> varp_arith:reminder(Bs#bs.vp,X,Y,Z);
 	     'min' -> varp_arith:min(Bs#bs.vp,X,Y,Z);
-	     'max' -> varp_arith:max(Bs#bs.vp,X,Y,Z);
-	     %% operator '=' is kind of assignment but really a 
-	     %% equality test and check of overflow bits
-	     %% FIXME: same as '==' but check overflow / truncate 
-	     '=' -> Xb = varp_arith:eq(Bs#bs.vp,X,Y,Z), {bool,Xb}
+	     'max' -> varp_arith:max(Bs#bs.vp,X,Y,Z)
 	 end,
     {X1, Bs}.
+
+%%
+%% --ops lib: the operators built from the library circuits instead of
+%% the encoders in varp_arith, which stay as the reference.  Returns
+%% builtin when the built in encoder is to be used: the option is off,
+%% both operands are booleans (a gate, not arithmetic), or the library
+%% has no circuit for the case (rotation, bitwise on signed, the '='
+%% test).  A signed operand selects the op_s* circuit and the other
+%% operand is made signed first, like the encoders do; subtraction and
+%% negation are signed always, as the encoders give a signed result.
+%% Division by zero gets the --divz status the encoders set.
+%%
+lib_ops(Bs) ->
+    maps:get(ops, Bs#bs.option, builtin) =:= lib.
+
+lib_op1(Op, A, Bs) ->
+    case lib_ops(Bs) andalso element(1, A) =/= bool of
+	false -> builtin;
+	true ->
+	    case Op of
+		'neg' ->
+		    lib_call(<<"op_sneg">>, [{value,varp_arith:iarg(A)}], Bs);
+		'bnot' when element(1, A) =/= int ->
+		    lib_call(<<"op_bnot">>, [{value,A}], Bs);
+		_ -> builtin
+	    end
+    end.
+
+lib_op2(Op, A, B, Bs) ->
+    case lib_ops(Bs) andalso
+	not (element(1, A) =:= bool andalso element(1, B) =:= bool) of
+	false -> builtin;
+	true -> lib_op2_(Op, lib_type(A, B), A, B, Bs)
+    end.
+
+lib_type(A, B) ->
+    case varp_arith:mix_type(A, B) of
+	int -> int;
+	_ -> uint
+    end.
+
+lib_args(int, A, B) -> [{value,varp_arith:iarg(A)}, {value,varp_arith:iarg(B)}];
+lib_args(uint, A, B) -> [{value,varp_arith:varg(A)}, {value,varp_arith:varg(B)}].
+
+lib_name(uint, Base) -> <<"op_", Base/binary>>;
+lib_name(int, Base) -> <<"op_s", Base/binary>>.
+
+lib_op2_(Op, T, A, B, Bs) when Op =:= 'add'; Op =:= 'mul';
+			       Op =:= 'min'; Op =:= 'max';
+			       Op =:= 'lt'; Op =:= 'lte';
+			       Op =:= 'gt'; Op =:= 'gte';
+			       Op =:= 'eq'; Op =:= 'neq' ->
+    lib_call(lib_name(T, atom_to_binary(Op)), lib_args(T, A, B), Bs);
+lib_op2_('sub', _T, A, B, Bs) ->
+    lib_call(<<"op_ssub">>, lib_args(int, A, B), Bs);
+lib_op2_('rem', T, A, B, Bs) ->
+    Bs1 = lib_divz(B, Bs),
+    lib_call(lib_name(T, <<"rem">>), lib_args(T, A, B), Bs1);
+lib_op2_('div', T, A, B, Bs) ->
+    Bs1 = lib_divz(B, Bs),
+    Name = lib_name(T, <<"div">>),
+    %% the remainder is an out parameter: a fresh symbol of the caller
+    {Prefix, Bs2} = circuit_prefix(Name, Bs1),
+    lib_call(Name, lib_args(T, A, B) ++ [{p,<<Prefix/binary,"r">>,[]}], Bs2);
+lib_op2_(Op, uint, A, B, Bs) when Op =:= 'band'; Op =:= 'bor'; Op =:= 'bxor' ->
+    lib_call(lib_name(uint, atom_to_binary(Op)), lib_args(uint, A, B), Bs);
+lib_op2_(Op, T, A, K, Bs) when Op =:= 'shl'; Op =:= 'shr' ->
+    case varp_arith:vconst(K) of
+	false -> builtin;
+	N when Op =:= 'shl', N >= 0; Op =:= 'shr', N < 0 ->
+	    [Arg|_] = lib_args(T, A, A),
+	    {V, Bs1} = lib_call(<<"op_shl">>, [{const,abs(N)}, Arg], Bs),
+	    {lib_retag(T, V), Bs1};
+	N ->
+	    [Arg|_] = lib_args(T, A, A),
+	    case T of
+		int -> lib_call(<<"op_sar">>, [{const,abs(N)}, Arg], Bs);
+		uint -> lib_call(<<"op_shr">>, [{const,abs(N)}, Arg], Bs)
+	    end
+    end;
+lib_op2_(_Op, _T, _A, _B, _Bs) ->
+    builtin.
+
+%% op_shl is wiring, the same for both signs: the result keeps the type
+lib_retag(int, {uint,N,Bits}) -> {int,N,Bits};
+lib_retag(_T, V) -> V.
+
+%% B == 0 gets the --divz status (false by default: no model)
+lib_divz(B, Bs) ->
+    Vp = Bs#bs.vp,
+    Zero = varp_arith:eq(Vp, varp_arith:varg(B), {uint,1,[false]}),
+    varp_arith:set_status(Vp, Zero, varp_nif:getopt(Vp, divz)),
+    Bs.
+
+lib_call(Name, Args, Bs) ->
+    call_circuit(Name, Args, Bs).
 
 %%
 %% if-then-else circuit

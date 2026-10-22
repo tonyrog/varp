@@ -47,6 +47,7 @@
 -export([set_status/3]).
 -export([set_overflow/5]).
 -export([set/3]).
+-export([mix_type/2, iarg/1, varg/1, vconst/1]).
 
 -export([test/0]).
 

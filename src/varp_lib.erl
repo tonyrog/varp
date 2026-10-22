@@ -27,10 +27,12 @@
 -export([import/1, autoload/1, definitions/0]).
 -export([set_path/1, path/0, default_path/0, files/0]).
 -export([reset/0, pending_names/0]).
+-export([circuit/1]).
 
 -define(PATH, varp_lib_path).       %% [Dir]
 -define(LOADED, varp_lib_loaded).   %% #{ File => true }
 -define(DEFS, varp_lib_defs).       %% [{circuit,...}] not yet taken
+-define(ALL, '$varp_lib_all').   %% every circuit imported in this parse, by name
 -define(DEPTH, varp_lib_depth).     %% nesting of imports in progress
 
 -define(SYMBOL_TABLE, varp_symbol_table).
@@ -82,6 +84,7 @@ reset() ->
 	0 ->
 	    put(?LOADED, #{}),
 	    put(?DEFS, []),
+	    put(?ALL, #{}),
 	    %% the circuit names of the previous parse in this process
 	    %% would stop the scanner from importing them again
 	    put(circuit_defs, #{}),
@@ -112,6 +115,25 @@ get_defs() ->
     case get(?DEFS) of
 	undefined -> [];
 	Defs -> Defs
+    end.
+
+all_defs() ->
+    case get(?ALL) of
+	undefined -> #{};
+	M -> M
+    end.
+
+%% a library circuit by name at build time, imported now if it was not
+%% while scanning ("--ops lib" builds X + Y from op_add without the
+%% name ever passing the scanner) -> {ok, Def} | error
+circuit(Name) when is_binary(Name) ->
+    case maps:find(Name, all_defs()) of
+	{ok,C} -> {ok,C};
+	error ->
+	    case import(Name) of
+		ok -> maps:find(Name, all_defs());
+		{error,_} -> error
+	    end
     end.
 
 %% ------------------------------------------------------------------
@@ -187,6 +209,8 @@ import_file(File) ->
 		    %% the grammar with the file's own definitions
 		    lists:foreach(fun varp_formula:add_circuit_def/1, Defs),
 		    put(?DEFS, get_defs() ++ Defs),
+		    put(?ALL, maps:merge(all_defs(),
+					 maps:from_list([{N,D} || D={circuit,N,_,_} <- Defs]))),
 		    ok;
 		{error, Reason} ->
 		    io:format("~s: ~s\n", [File, format(Reason)]),

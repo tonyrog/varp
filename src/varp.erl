@@ -312,6 +312,16 @@ global_options() ->
 	 default => plain,
 	 description => "Specify style of adder to use."
        },
+      #{ long => "ops",
+	 key => ops,
+	 spec => {enum,
+		  [{"builtin",builtin},
+		   {"lib",lib}
+		  ]},
+	 default => builtin,
+	 description => "Build the arithmetic and comparison operators from "
+	     "the circuit library (lib) or the built in encoders (builtin)."
+       },
       #{ long  => "timeout",
 	 short => "t",
 	 key   => timeout,

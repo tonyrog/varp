@@ -120,6 +120,26 @@ scompare_test() ->
     ?assert(unsat("declare X:3/signed,Y:5/signed; (X==-1) && (Y==-1) && op_sneq(X,Y)")),
     ?assert(sat("declare X:3/signed,Y:5/signed; (X==-4) && (Y==15) && op_slt(X,Y)")).
 
+smin_smax_sneg_test() ->
+    D = "declare X:4/signed,Y:4/signed,Z:4/signed;",
+    ?assertEqual(-3, v(D ++ "(X==-3) && (Y==5) && (Z==op_smin(X,Y))", "Z")),
+    ?assertEqual(5,  v(D ++ "(X==-3) && (Y==5) && (Z==op_smax(X,Y))", "Z")),
+    ?assertEqual(-8, v(D ++ "(X==7) && (Y==-8) && (Z==op_smin(X,Y))", "Z")),
+    ?assertEqual(-4, v("declare X:3/signed,Y:5/signed,Z:5/signed;"
+                       "(X==-4) && (Y==15) && (Z==op_smin(X,Y))", "Z")),
+    ?assertEqual(3,  v("declare X:4/signed,Z:5/signed; (X==-3) && (Z==op_sneg(X))", "Z")),
+    %% -(-8) = 8 needs the extra bit
+    ?assertEqual(8,  v("declare X:4/signed,Z:5/signed; (X==-8) && (Z==op_sneg(X))", "Z")).
+
+%% shifts by a build time constant (a meta parameter)
+shift_test() ->
+    ?assertEqual(12, v("declare X:4,Z:6; (X==3) && (Z==op_shl(2,X))", "Z")),
+    ?assertEqual(3,  v("declare X:4,Z:4; (X==13) && (Z==op_shr(2,X))", "Z")),
+    ?assertEqual(0,  v("declare X:4,Z:4; (X==13) && (Z==op_shr(5,X))", "Z")),
+    ?assertEqual(-2, v("declare X:4/signed,Z:4/signed; (X==-8) && (Z==op_sar(2,X))", "Z")),
+    ?assertEqual(-1, v("declare X:4/signed,Z:4/signed; (X==-8) && (Z==op_sar(7,X))", "Z")),
+    ?assertEqual(1,  v("declare X:4/signed,Z:4/signed; (X==7) && (Z==op_sar(2,X))", "Z")).
+
 min_max_test() ->
     ?assertEqual(3, v("declare X:4,Y:4,Z:4; (X==3) && (Y==5) && (Z==op_min(X,Y))","Z")),
     ?assertEqual(5, v("declare X:4,Y:4,Z:4; (X==3) && (Y==5) && (Z==op_max(X,Y))","Z")).
@@ -172,6 +192,12 @@ proof_test_() ->
 	 {"op_sgte", "declare X:n/signed, Y:m/signed; op_sgte(X,Y) equ (X >= Y)"},
 	 {"op_seq",  "declare X:n/signed, Y:m/signed; op_seq(X,Y) equ (X == Y)"},
 	 {"op_sneq", "declare X:n/signed, Y:m/signed; op_sneq(X,Y) equ (X != Y)"},
+	 {"op_smin", "declare X:n/signed, Y:m/signed; op_smin(X,Y) == min(X,Y)"},
+	 {"op_smax", "declare X:n/signed, Y:m/signed; op_smax(X,Y) == max(X,Y)"},
+	 {"op_sneg", "declare X:n/signed; op_sneg(X) == -X"},
+	 {"op_shl",  "declare X:n; op_shl(m, X) == X << m"},
+	 {"op_shr",  "declare X:n; op_shr(m, X) == X >> m"},
+	 {"op_sar",  "declare X:n/signed; op_sar(m, X) == X >> m"},
 	 {"op_lt",   "declare X:n, Y:m; op_lt(X,Y) equ (X < Y)"},
 	 {"op_lte",  "declare X:n, Y:m; op_lte(X,Y) equ (X <= Y)"},
 	 {"op_gt",   "declare X:n, Y:m; op_gt(X,Y) equ (X > Y)"},
@@ -187,3 +213,64 @@ proof_test_() ->
     [{Name ++ " n=" ++ integer_to_list(N) ++ " m=" ++ integer_to_list(M),
       {timeout, 300, fun() -> ?assert(proof(Text, N, M)) end}}
      || {Name, Text} <- Cases, {N, M} <- widths()].
+
+%%%-------------------------------------------------------------------
+%%% --ops lib: the operators built from the library.  Every model of a
+%%% formula must be the same whichever way the operators are built,
+%%% the library locals (op_add#3.C ...) left out.
+%%%-------------------------------------------------------------------
+
+project(Ms) ->
+    [[KV || KV = {K,_} <- M, not lists:member($#, K)] || M <- Ms].
+
+same_models(Text) ->
+    Builtin = project(models(Text)),
+    Lib = project(varp_tc:models(Text, #{ops => lib})),
+    ?assertEqual(Builtin, Lib),
+    Builtin.
+
+ops_lib_test_() ->
+    U = "declare X:3, Y:3, Z:6; ",
+    S = "declare X:3/signed, Y:3/signed, Z:6/signed; ",
+    Mx = "declare X:3/signed, Y:2, Z:6/signed; ",
+    Cases =
+	[{"add", U ++ "Z == X + Y"}, {"sadd", S ++ "Z == X + Y"}, {"madd", Mx ++ "Z == X + Y"},
+	 {"sub", U ++ "Z == X - Y"}, {"ssub", S ++ "Z == X - Y"}, {"msub", Mx ++ "Z == X - Y"},
+	 {"mul", U ++ "Z == X * Y"}, {"smul", S ++ "Z == X * Y"}, {"mmul", Mx ++ "Z == X * Y"},
+	 {"div", U ++ "Y != 0 && Z == X / Y"}, {"sdiv", S ++ "Y != 0 && Z == X / Y"},
+	 {"mdiv", Mx ++ "Y != 0 && Z == X / Y"},
+	 {"rem", U ++ "Y != 0 && Z == X % Y"}, {"srem", S ++ "Y != 0 && Z == X % Y"},
+	 {"min", U ++ "Z == min(X,Y)"}, {"smin", S ++ "Z == min(X,Y)"},
+	 {"max", U ++ "Z == max(X,Y)"}, {"smax", S ++ "Z == max(X,Y)"},
+	 {"lt", U ++ "X < Y"}, {"slt", S ++ "X < Y"}, {"mlt", Mx ++ "X < Y"},
+	 {"lte", U ++ "X <= Y"}, {"slte", S ++ "X <= Y"},
+	 {"gt", U ++ "X > Y"}, {"sgt", S ++ "X > Y"},
+	 {"gte", U ++ "X >= Y"}, {"sgte", S ++ "X >= Y"},
+	 {"eq", U ++ "X == Y"}, {"seq", "declare X:3/signed, Y:5/signed; X == Y"},
+	 {"neq", U ++ "X != Y"}, {"sneq", "declare X:3/signed, Y:5/signed; X != Y"},
+	 {"band", U ++ "Z == (X & Y)"}, {"bor", U ++ "Z == (X | Y)"}, {"bxor", U ++ "Z == (X ^ Y)"},
+	 {"bnot", U ++ "Z == ~X"},
+	 {"shl", U ++ "Z == X << 2"}, {"sshl", S ++ "Z == X << 2"},
+	 {"shr", U ++ "Z == X >> 1"}, {"sar", S ++ "Z == X >> 1"},
+	 {"neg", U ++ "Z == -X"}, {"sneg", S ++ "Z == -X"},
+	 {"statement", "declare X:3, Y:3, Z:6; X = 5; Y = 3; Z = X * Y;"},
+	 {"signed statement", "declare X:3/signed, Y:3/signed, Z:4/signed; X = -4; Y = 3; Z = X - Y;"},
+	 {"compare statement", "declare X:3, Y:3, q; X = 5; Y = 3; q = (X < Y);"},
+	 {"nested", U ++ "Z == (X + Y) * (X - Y) + 1"},
+	 {"bool operand", "declare X:3, b, Z:4; Z == X + b"},
+	 {"factoring", "declare X:4,Y:4; (X*Y == 15) && (X>1) && (Y>1) && (X<=Y)"}],
+    [{Name, {timeout, 120, fun() -> same_models(Text) end}} || {Name, Text} <- Cases]
+    ++
+    [{"the library is in use", {timeout, 60,
+      fun() ->
+	      [M|_] = varp_tc:models("declare X:2,Y:2; X + Y == 3", #{ops => lib}),
+	      ?assert(lists:any(fun({K,_}) -> lists:prefix("op_add#", K) end, M))
+      end}},
+     {"a file circuit shadows the library under --ops lib", {timeout, 60,
+      fun() ->
+	      %% op_add defined as bitwise and: 5 + 4 becomes 4
+	      Text = "circuit op_add(in a:n, b:m; return s:n) { s = a & b; }\n"
+		  "declare X:4,Y:4,Z:4; X==5 && Y==4 && Z==X+Y",
+	      [M] = varp_tc:models(Text, #{ops => lib}),
+	      ?assertEqual(4, proplists:get_value("Z", M))
+      end}}].

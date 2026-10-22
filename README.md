@@ -155,6 +155,7 @@ search. Follow one with `bt` or `bj`:
 Encoding and search behaviour:
 
     --adder plain|fast                  style of adder            (plain)
+    --ops builtin|lib                   operators from the circuit library (builtin)
     --assoc left|right|balanced|none    how all/any are built     (none)
     --carry, --borrow, --overflow       true|false|ignore         (ignore)
     --divz true|false|ignore            divide by zero            (false)
@@ -167,6 +168,14 @@ default, a division by zero has no model.  `+`, `-` and `*` are signed
 in the same way as soon as one operand is; the statement form
 `Z = X * Y;` keeps the width of `Z`, the low bits of a wide product or
 the product sign extended.
+
+`--ops lib` builds the arithmetic and comparison operators (`+ - * / %
+min max < <= > >= == != & | ^ ~ << >>`) from the circuits in the
+library instead of the built in encoders, `op_add` for `X + Y`, the
+`op_s*` circuits when an operand is signed, so that another encoding
+is a matter of another `--lib` directory; `doc/CIRCUIT.md` has the
+details.  The built in encoders stay the reference: `--carry`,
+`--borrow` and `--overflow` are theirs only, `--divz` holds in both.
     --phase true|false|undefined        initial phase             (true)
     --bump-decay <f>           VSIDS activity decay per conflict; 0 keeps
                                the old order-list bump             (0.95)
