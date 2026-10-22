@@ -158,6 +158,15 @@ Encoding and search behaviour:
     --assoc left|right|balanced|none    how all/any are built     (none)
     --carry, --borrow, --overflow       true|false|ignore         (ignore)
     --divz true|false|ignore            divide by zero            (false)
+
+`/` and `%` are unsigned when both operands are unsigned, otherwise
+signed with truncation toward zero as in C: `-13 / 4 == -3` and
+`-13 % 4 == -1`, so `X == (X / Y) * Y + X % Y` always holds and the
+remainder has the sign of the dividend.  With `--divz false`, the
+default, a division by zero has no model.  `+`, `-` and `*` are signed
+in the same way as soon as one operand is; the statement form
+`Z = X * Y;` keeps the width of `Z`, the low bits of a wide product or
+the product sign extended.
     --phase true|false|undefined        initial phase             (true)
     --bump-decay <f>           VSIDS activity decay per conflict; 0 keeps
                                the old order-list bump             (0.95)

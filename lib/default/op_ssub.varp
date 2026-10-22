@@ -1,0 +1,13 @@
+// a - b, signed: both operands sign extended to max(n,m)+1 bits, then
+// a + ~b + 1.  The result holds every difference, so there is no
+// borrow bit; the top bit is the sign.
+circuit op_ssub(in a:n/signed, b:m/signed; return d:(max(n,m)+1)/signed)
+{
+    declare A:(max(n,m)+1), B:(max(n,m)+1), C:(max(n,m)+2);
+    [A i=0..max(n,m), i<n]  A[i] = a[i];
+    [A i=0..max(n,m), i>=n] A[i] = a[n-1];
+    [A i=0..max(n,m), i<m]  B[i] = b[i];
+    [A i=0..max(n,m), i>=m] B[i] = b[m-1];
+    C[0] = true;
+    [A i=0..max(n,m)] d[i] = op_full_adder(A[i], !B[i], C[i], C[i+1]);
+}

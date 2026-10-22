@@ -708,7 +708,10 @@ one(_Vp, []) -> false;
 one(_Vp, [Y]) -> Y;
 one(Vp, Ys) -> one(Vp, var(Vp), Ys).
 
-one(Vp, undefined, Ys) -> one(Vp, var(Vp), Ys);
+one(Vp, undefined, Ys) -> 
+    one(Vp, var(Vp), Ys);
+%% one(_Vp, _X, []) ->
+%%    false;
 one(Vp, X, [Y0,Y1|Ys]) ->
     {Z0,Z1} = comparator(Vp, Y0, Y1),
     eq1_(Vp, X, Ys, Z1, [Z0]).
@@ -869,7 +872,6 @@ test_gate_2x(Gate, Match) ->
     B = var(Vp, <<"b">>),
     X = var(Vp, <<"x">>),
     _C = gate(Vp,Gate,X,A,B),
-    %% varp_nif:bind(Vp, C),
     bt_match(Vp, Match).
 
 test_gate(Gate, Match) ->

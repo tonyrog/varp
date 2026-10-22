@@ -193,51 +193,75 @@ multiply(Vp,A,B) ->
     Cn = length(Cx),
     normalize(Ct,Cn,Cx).
 
-%% FIXME: (sign)extend X if |X| > |A*B|
+%% X = A * B: the product at full width, then cut or extended to the
+%% width of X by set (two's complement, so a narrow X keeps the low bits
+%% and a wide signed X is sign extended).
 multiply(Vp,undefined,A,B) -> multiply(Vp,A,B);
-multiply(Vp,X,A,B) ->
-    {Xt,Xn,Xx} = varg(X),
-    {At,An,Ax} = xarg(Xt,A),
-    {Bt,Bn,Bx} = xarg(Xt,B),
-    if Xt =:= int ->
-	    Ax1 = vextend(At,Ax,An,Xn),
-	    Bx1 = vextend(Bt,Bx,Bn,Xn),
-	    vsmul(Vp,Xx,Ax1,Bx1);
-       An < Bn ->
-	    vmul(Vp,Xx,Ax,Bx);
-       true ->
-	    vmul(Vp,Xx,Bx,Ax)
-    end,
-    X.
+multiply(Vp,X,A,B) -> set(Vp, X, multiply(Vp,A,B)).
 
-divide(Vp,Y,{uint,Zm,Zs}) ->
-    {Yt,Yn,Ys} = abs(Vp,Y), %% varg(Y),
-    K = erlang:max(Yn,Zm),
-    Ys1 = vextend(Yt,Ys,Yn,K),
-    Zs1 = vextend(uint,Zs,Zm,K),
-    {Qs,_Rs,DivZero} = vdivrem(Vp,Ys1,Zs1),
-    DivZ = varp_nif:getopt(Vp, divz),
-    set_status(Vp,DivZero,DivZ),
-%%    normalize(Yt,K,Qs).
-    normalize(Yt,Qs).
+%% Division and remainder.  Unsigned when both operands are unsigned,
+%% otherwise signed with truncation toward zero (C99, Erlang `div'/`rem'):
+%% the quotient is negative when the signs differ and the remainder takes
+%% the sign of the dividend, so  Y == (Y / Z) * Z + Y % Z  always holds
+%% and |Y % Z| < |Z|.  The magnitudes go through the unsigned restoring
+%% divider; abs/2 widens a signed operand by one bit, so the most
+%% negative value divides correctly.  Division by zero is handled by the
+%% `divz' option through set_status.
+divide(Vp, Y, Z) ->
+    {Q, _R} = divrem(Vp, Y, Z),
+    Q.
 
-%% FIXME int
-divide(Vp,undefined,Y,Z) ->
-    divide(Vp,Y,Z).
+divide(Vp, undefined, Y, Z) -> divide(Vp, Y, Z);
+divide(Vp, X, Y, Z) ->
+    set(Vp, X, divide(Vp, Y, Z)).
 
+reminder(Vp, Y, Z) ->
+    {_Q, R} = divrem(Vp, Y, Z),
+    R.
 
-%% FIXME int
-reminder(Vp, {uint,N,Ys},{uint,M,Zs}) ->
-    K = erlang:max(N,M),
-    Ys1 = vextend(uint,Ys,N,K),
-    Zs1 = vextend(uint,Zs,M,K),
-    {_Qs,Rs,DivZero} = vdivrem(Vp,Ys1,Zs1), %% fixme vrem! 
-    DivZ = varp_nif:getopt(Vp, divz),
-    set_status(Vp,DivZero,DivZ),
-    {uint,K,Rs}.
+reminder(Vp, undefined, Y, Z) -> reminder(Vp, Y, Z);
+reminder(Vp, X, Y, Z) ->
+    set(Vp, X, reminder(Vp, Y, Z)).
 
-reminder(Vp,undefined,Y,Z) ->
-    reminder(Vp,Y,Z).
+divrem(Vp, Y, Z) ->
+    case mix_type(Y, Z) of
+	int -> sdivrem(Vp, Y, Z);
+	_ -> udivrem(Vp, Y, Z)
+    end.
+
+udivrem(Vp, Y, Z) ->
+    {uint,Yn,Ys} = uarg(Y),
+    {uint,Zn,Zs} = uarg(Z),
+    {Qs, Rs} = vdivrem_status(Vp, Ys, Yn, Zs, Zn),
+    {normalize(uint,Qs), normalize(uint,Rs)}.
+
+sdivrem(Vp, Y, Z) ->
+    Yi = iarg(Y),
+    Zi = iarg(Z),
+    Sy = sign(Vp, Yi),
+    Sz = sign(Vp, Zi),
+    {uint,Yn,Ys} = abs(Vp, Yi),
+    {uint,Zn,Zs} = abs(Vp, Zi),
+    {Qs, Rs} = vdivrem_status(Vp, Ys, Yn, Zs, Zn),
+    Sq = varp_circuit:xor_gate(Vp, Sy, Sz),
+    {apply_sign(Vp, Sq, Qs), apply_sign(Vp, Sy, Rs)}.
+
+%% widen to a common width, divide, and report division by zero
+vdivrem_status(Vp, Ys, Yn, Zs, Zn) ->
+    K = erlang:max(Yn, Zn),
+    Ys1 = vextend(uint, Ys, Yn, K),
+    Zs1 = vextend(uint, Zs, Zn, K),
+    {Qs, Rs, DivZero} = vdivrem(Vp, Ys1, Zs1),
+    set_status(Vp, DivZero, varp_nif:getopt(Vp, divz)),
+    {Qs, Rs}.
+
+%% S ? -Us : Us as a signed vector, Us is an unsigned magnitude
+apply_sign(Vp, S, Us) ->
+    K = length(Us),
+    Ax = Us ++ [false],
+    {int,Bn,Bx} = negate(Vp, {int,K+1,Ax}),
+    Ax1 = vextend(int, Ax, K+1, Bn),
+    normalize(int, Bn, vite(Vp, S, Bx, Ax1)).
 
 min(Vp,{bool,Y},{bool,Z}) ->
     varp_circuit:and_gate(Vp,Y,Z);
@@ -663,23 +687,6 @@ vmul_(_Vp,[],_Zs,_I,Xs) ->
     Xs.
 
 
-vmul(Vp,Xs,[Y|Ys],Zs) ->
-    As = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
-    vmul_(Vp, Xs, Ys, Zs, 1, As++[false]).
-
-vmul_(Vp, Xs, [Y], Zs, I, As) ->
-    YZs = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
-    YZs1 = lists:duplicate(I,false)++YZs,
-    {[_Co|_],As1} = vadd(Vp,Xs,As,YZs1),
-    As1;
-vmul_(Vp, Xs, [Y|Ys], Zs, I, As) ->
-    YZs = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
-    YZs1 = lists:duplicate(I,false)++YZs,
-    {[Co|_],As1} = vadd(Vp,As,YZs1),
-    vmul_(Vp,Xs,Ys,Zs,I+1,As1++[Co]);
-vmul_(_Vp,_Xs,[],_Zs,_I,As) ->
-    As.
-
 %% Signed multiply Y*Z
 vsmul(Vp,[Y|Ys],Zs) ->
     YZs = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
@@ -700,26 +707,6 @@ vsmul_(Vp,[Y|Ys],Zs,I,Xs) ->
 vsmul_(_Vp,[],_Zs,_I,Xs) ->
     Xs.
 
-
-%% Signed multiply X=Y*Z
-vsmul(Vp,Xs,[Y|Ys],Zs) ->
-    YZs = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
-    As1 = vsnot(YZs)++[true],
-    vsmul_(Vp,Xs,Ys,Zs,1,As1).
-
-vsmul_(Vp,Xs,[Y],Zs,I,As) ->
-    YZs = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
-    YZs1 = lists:duplicate(I,false)++
-	vsnot(vnot(Vp,YZs))++[true],
-    {[_Co|_],As1} = vadd(Vp,Xs,As++[false],YZs1),
-    As1;
-vsmul_(Vp,Xs,[Y|Ys],Zs,I,As) ->
-    YZs = varp_bitvec:bitwise2(Vp,'and',Zs,Y),
-    YZs1 = lists:duplicate(I,false)++vsnot(YZs),
-    {[Co|_],As1} = vadd(Vp,As,YZs1),
-    vsmul_(Vp,Xs,Ys,Zs,I+1,As1++[Co]);
-vsmul_(_Vp,_Xs,[],_Zs,_I,As) ->
-    As.
 
 %%
 %% Divider/Reminder circuit  (X/Y)
@@ -1197,9 +1184,9 @@ test() ->
     true = test_umult(3),
     true = test_imult(3),
     true = test_udiv(4),
-    %% true = test_idiv(4),
+    true = test_idiv(4),
     true = test_urem(4),
-    %% true = test_irem(4),
+    true = test_irem(4),
 
     %% test constant evaluation on bcp should result in model!
     
@@ -1242,7 +1229,6 @@ eval_uu(Fun, N) ->
       end, [], [{Y,Z} || Y <- U, Z <- U]).
 
 %% unsigned range
--ifdef(not_used).
 eval_iu(Fun, N) ->
     Mi = (1 bsl (N-1)), I = lists:seq(-Mi,Mi-1),
     Mu = (1 bsl N), U = lists:seq(0,Mu-1),
@@ -1255,7 +1241,6 @@ eval_iu(Fun, N) ->
 		      Acc
 	      end
       end, [], [{Y,Z} || Y <- I, Z <- U]).
--endif.
 
 %% integer range
 eval_ii(Fun, N) ->
@@ -1332,7 +1317,6 @@ test_ii(N, Opts, Arith, Eval) ->
     add_symbol(Vp, X, ?name(x)),
     varp_circuit:bt_match(Vp, eval_ii(Eval, N)).
 
--ifdef(not_used).
 test_iu(N, Opts, Arith, Eval) ->
     Vp = varp_nif:new(Opts),
     Y = ivar(Vp, N),
@@ -1342,7 +1326,6 @@ test_iu(N, Opts, Arith, Eval) ->
     X = Arith(Vp, Y, Z),
     add_symbol(Vp, X, ?name(x)),
     varp_circuit:bt_match(Vp, eval_iu(Eval, N)).
--endif.
 
 test_u(N, Opts, Arith, Eval) ->
     Vp = varp_nif:new(Opts),
@@ -1440,23 +1423,19 @@ test_udiv(N) ->
     io:format("udiv ~w\n", [N]),
     test_uu(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2).
 
--ifdef(not_used).
-%% FIXME!!
 test_idiv(N) ->
     io:format("idiv ~w\n", [N]),
-    test_iu(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2).
--endif.
+    true = test_iu(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2),
+    test_ii(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2).
 
 test_urem(N) ->
     io:format("urem ~w\n", [N]),
     test_uu(N, #{divz=>false}, fun reminder/3, fun erlang:'rem'/2).
 
--ifdef(not_used).
-%% FIXME!!
 test_irem(N) ->
     io:format("irem ~w\n", [N]),
-    test_iu(N, [{divz,false}], fun reminder/3, fun erlang:'rem'/2).
--endif.
+    true = test_iu(N, #{divz=>false}, fun reminder/3, fun erlang:'rem'/2),
+    test_ii(N, #{divz=>false}, fun reminder/3, fun erlang:'rem'/2).
 
 test_umin(N) ->
     io:format("umin ~w\n", [N]),

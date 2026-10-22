@@ -1,0 +1,13 @@
+// a * b, signed, n+m bits: two's complement multiplication is the
+// unsigned multiplication of the sign extended operands modulo 2^(n+m),
+// so extend both to n+m bits, multiply with op_mul and keep the low
+// n+m bits (the assignment to p cuts the product to its width).
+circuit op_smul(in a:n/signed, b:m/signed; return p:(n+m)/signed)
+{
+    declare A:(n+m), B:(n+m);
+    [A i=0..(n+m-1), i<n]  A[i] = a[i];
+    [A i=0..(n+m-1), i>=n] A[i] = a[n-1];
+    [A i=0..(n+m-1), i<m]  B[i] = b[i];
+    [A i=0..(n+m-1), i>=m] B[i] = b[m-1];
+    p = op_mul(A, B);
+}

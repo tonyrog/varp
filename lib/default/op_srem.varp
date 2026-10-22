@@ -1,0 +1,6 @@
+// a % b, signed, see op_sdiv
+circuit op_srem(in a:n/signed, b:m/signed; return r:m/signed)
+{
+    declare q:(n+1)/signed;
+    q = op_sdiv(a, b, r);
+}

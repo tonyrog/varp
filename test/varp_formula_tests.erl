@@ -178,9 +178,65 @@ sub_test() ->
 mul_test() ->
     ?assertEqual(12, v("declare X:4,Y:4,Z:8; (X==3) && (Y==4) && (Z==X*Y)","Z")).
 
+%% the statement form keeps the width of the target: the low bits of a
+%% wide product, sign extension into a wider signed target
+mul_assign_test() ->
+    ?assertEqual(105, v("declare X:4,Y:4,Z:8; X = 7; Y = 15; Z = X * Y;","Z")),
+    ?assertEqual(41,  v("declare X:4,Y:4,Z:6; X = 7; Y = 15; Z = X * Y;","Z")),
+    ?assertEqual(21,  v("declare X:4,Y:2,Z:10; X = 7; Y = 3; Z = X * Y;","Z")),
+    ?assertEqual(56,  v("declare X:4/signed,Y:4/signed,Z:8/signed;"
+                        "X = -7; Y = -8; Z = X * Y;","Z")),
+    ?assertEqual(56,  v("declare X:4/signed,Y:4/signed,Z:10/signed;"
+                        "X = -7; Y = -8; Z = X * Y;","Z")),
+    ?assertEqual(-8,  v("declare X:4/signed,Y:4/signed,Z:5/signed;"
+                        "X = -7; Y = -8; Z = X * Y;","Z")),
+    ?assertEqual(-105, v("declare X:4/signed,Y:4,Z:9/signed;"
+                         "X = -7; Y = 15; Z = X * Y;","Z")).
+
 div_rem_test() ->
     ?assertEqual(3, v("declare X:8,Y:8,Z:8; (X==13) && (Y==4) && (Z==X/Y)","Z")),
     ?assertEqual(1, v("declare X:8,Y:8,Z:8; (X==13) && (Y==4) && (Z==X%Y)","Z")).
+
+%% signed division truncates toward zero, the remainder has the sign of
+%% the dividend (C, Erlang div/rem); a signed operand makes it signed
+signed_div_rem_test() ->
+    D = "declare X:6/signed,Y:6/signed,Q:6/signed,R:6/signed;",
+    ?assertEqual(-3, v(D ++ "(X==-13) && (Y==4) && (Q==X/Y)", "Q")),
+    ?assertEqual(-1, v(D ++ "(X==-13) && (Y==4) && (R==X%Y)", "R")),
+    ?assertEqual(-3, v(D ++ "(X==13) && (Y==-4) && (Q==X/Y)", "Q")),
+    ?assertEqual(1,  v(D ++ "(X==13) && (Y==-4) && (R==X%Y)", "R")),
+    ?assertEqual(3,  v(D ++ "(X==-13) && (Y==-4) && (Q==X/Y)", "Q")),
+    ?assertEqual(-1, v(D ++ "(X==-13) && (Y==-4) && (R==X%Y)", "R")),
+    ?assertEqual(0,  v(D ++ "(X==-13) && (Y==20) && (Q==X/Y)", "Q")),
+    ?assertEqual(-13, v(D ++ "(X==-13) && (Y==20) && (R==X%Y)", "R")),
+    %% mixed: the unsigned operand is widened with a zero sign bit
+    ?assertEqual(-3, v("declare X:6/signed,Y:6,Q:6/signed; (X==-13) && (Y==4) && (Q==X/Y)", "Q")),
+    ?assertEqual(-3, v("declare X:6,Y:6/signed,Q:6/signed; (X==13) && (Y==-4) && (Q==X/Y)", "Q")),
+    %% the most negative value: -8 / -1 = 8 needs a fifth bit
+    ?assertEqual(8, v("declare X:4/signed,Y:4/signed,Q:5/signed; (X==-8) && (Y==-1) && (Q==X/Y)", "Q")),
+    ?assert(unsat("declare X:4/signed,Y:4/signed,Q:4/signed; (X==-8) && (Y==-1) && (Q==X/Y)")),
+    %% division by zero has no model unless --divz says otherwise
+    ?assert(unsat(D ++ "(X==-13) && (Y==0) && (Q==X/Y)")),
+    %% the statement form
+    ?assertEqual([{"Q",-3},{"R",-1},{"X",-13},{"Y",4}],
+		 lists:sort(hd(models(D ++ "Q = X / Y; R = X % Y; (X==-13) && (Y==4)")))).
+
+%% X == (X / Y) * Y + X % Y, |X % Y| < |Y| and the remainder has the sign
+%% of X, for every signed X and Y of the given widths
+signed_div_rem_law_test_() ->
+    Law = "declare X:n/signed, Y:m/signed; (Y != 0) implies"
+	  " ((X == (X / Y) * Y + X % Y) && (abs(X % Y) < abs(Y))"
+	  "  && ((X % Y == 0) || ((X % Y < 0) equ (X < 0))))",
+    Mixed = "declare X:n/signed, Y:m; (Y != 0) implies"
+	  " ((X == (X / Y) * Y + X % Y) && (abs(X % Y) < Y))",
+    [{lists:flatten(io_lib:format("~s n=~w m=~w", [Name, N, M])),
+      {timeout, 300,
+       fun() ->
+	       ?assert(varp_tc:is_tautology(
+			 Text, #{meta => #{<<"n">> => N, <<"m">> => M}}))
+       end}}
+     || {Name, Text} <- [{"law", Law}, {"mixed", Mixed}],
+	{N, M} <- [{2,2},{3,3},{4,4},{3,5},{5,3}]].
 
 shift_test() ->
     ?assertEqual(12, v("declare X:8,Z:8; (X==3) && (Z==X<<2)","Z")),
@@ -193,9 +249,21 @@ compare_test() ->
     ?assert(sat("declare X:4,Y:4; (X==3) && (Y==5) && (X!=Y)")),
     ?assert(unsat("declare X:4,Y:4; (X==3) && (Y==5) && (X==Y)")).
 
+%% one signed operand makes + - * signed; the sum and difference need
+%% one more bit than the operands, the product n+m
 signed_test() ->
     ?assertEqual(-2, v("declare X:4/signed,Y:4/signed,Z:4/signed;"
-		       "(X==1) && (Y==3) && (Z==X-Y)","Z")).
+		       "(X==1) && (Y==3) && (Z==X-Y)","Z")),
+    ?assertEqual(-15, v("declare X:4/signed,Y:4/signed,Z:5/signed;"
+			"(X==-7) && (Y==-8) && (Z==X+Y)","Z")),
+    ?assertEqual(-15, v("declare X:4/signed,Y:4/signed,Z:5/signed;"
+			"(X==-8) && (Y==7) && (Z==X-Y)","Z")),
+    ?assertEqual(56, v("declare X:4/signed,Y:4/signed,Z:8/signed;"
+		       "(X==-7) && (Y==-8) && (Z==X*Y)","Z")),
+    ?assertEqual(-105, v("declare X:4/signed,Y:4,Z:9/signed;"
+			 "(X==-7) && (Y==15) && (Z==X*Y)","Z")),
+    ?assertEqual(8, v("declare X:4/signed,Y:4,Z:6/signed;"
+		      "(X==-7) && (Y==15) && (Z==X+Y)","Z")).
 
 factoring_test() ->
     %% 15 = 3*5, the only factorisation with 1 < x <= y

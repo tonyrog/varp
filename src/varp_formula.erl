@@ -1966,7 +1966,6 @@ prod_([Y|Ys], Bs) ->
     {Yn,Bs1} = prod(Ys,Bs),
     operation2('mul', Y, Yn, Bs1).
 
-
 eqk(K,X,Ys,Bs) ->
     X1 = varp_circuit:eqk(Bs#bs.vp,K,qtarget(X),circuit_args(Ys)),
     {{bool,X1},Bs}.

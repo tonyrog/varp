@@ -69,6 +69,33 @@ div_rem_test() ->
     ?assertEqual(1, v("declare X:8,Y:8,Z:8,R:8; (X==13) && (Y==4) && (Z==op_div(X,Y,R))","R")),
     ?assertEqual(1, v("declare X:8,Y:8,Z:8; (X==13) && (Y==4) && (Z==op_rem(X,Y))","Z")).
 
+sdiv_srem_test() ->
+    D = "declare X:6/signed,Y:6/signed,Q:7/signed,R:6/signed;",
+    ?assertEqual(-3, v(D ++ "(X==-13) && (Y==4) && (Q==op_sdiv(X,Y,R))", "Q")),
+    ?assertEqual(-1, v(D ++ "(X==-13) && (Y==4) && (Q==op_sdiv(X,Y,R))", "R")),
+    ?assertEqual(-3, v(D ++ "(X==13) && (Y==-4) && (Q==op_sdiv(X,Y,R))", "Q")),
+    ?assertEqual(1,  v(D ++ "(X==13) && (Y==-4) && (Q==op_sdiv(X,Y,R))", "R")),
+    ?assertEqual(3,  v(D ++ "(X==-13) && (Y==-4) && (Q==op_sdiv(X,Y,R))", "Q")),
+    ?assertEqual(-1, v(D ++ "(X==-13) && (Y==4) && (R==op_srem(X,Y))", "R")),
+    %% -8 / -1 = 8: the quotient has one bit more than the dividend
+    ?assertEqual(8, v("declare X:4/signed,Y:4/signed,Q:5/signed,R:4/signed;"
+		      "(X==-8) && (Y==-1) && (Q==op_sdiv(X,Y,R))", "Q")).
+
+sadd_ssub_smul_test() ->
+    D = "declare X:4/signed,Y:4/signed,S:5/signed,P:8/signed;",
+    ?assertEqual(-15, v(D ++ "(X==-7) && (Y==-8) && (S==op_sadd(X,Y))", "S")),
+    ?assertEqual(1,   v(D ++ "(X==-7) && (Y==-8) && (S==op_ssub(X,Y))", "S")),
+    ?assertEqual(-15, v(D ++ "(X==-8) && (Y==7) && (S==op_ssub(X,Y))", "S")),
+    ?assertEqual(56,  v(D ++ "(X==-7) && (Y==-8) && (P==op_smul(X,Y))", "P")),
+    ?assertEqual(-56, v(D ++ "(X==7) && (Y==-8) && (P==op_smul(X,Y))", "P")),
+    %% -8 * -8 = 64 needs all n+m bits
+    ?assertEqual(64,  v(D ++ "(X==-8) && (Y==-8) && (P==op_smul(X,Y))", "P")),
+    %% mixed widths: the narrower operand is sign extended
+    ?assertEqual(11,  v("declare X:3/signed,Y:5/signed,S:6/signed;"
+                        "(X==-4) && (Y==15) && (S==op_sadd(X,Y))", "S")),
+    ?assertEqual(-60, v("declare X:3/signed,Y:5/signed,P:8/signed;"
+                        "(X==-4) && (Y==15) && (P==op_smul(X,Y))", "P")).
+
 compare_test() ->
     ?assert(sat("declare X:4,Y:4; (X==3) && (Y==5) && op_lt(X,Y)")),
     ?assert(unsat("declare X:4,Y:4; (X==3) && (Y==5) && op_gt(X,Y)")),
@@ -116,6 +143,13 @@ proof_test_() ->
 	 {"op_div", "declare X:n, Y:m, R:m;"
 	          "(Y != 0) implies ((op_div(X,Y,R) == X / Y) && (R == X % Y))"},
 	 {"op_rem", "declare X:n, Y:m; (Y != 0) implies (op_rem(X,Y) == X % Y)"},
+	 {"op_sdiv", "declare X:n/signed, Y:m/signed, R:m/signed;"
+	           "(Y != 0) implies ((op_sdiv(X,Y,R) == X / Y) && (R == X % Y))"},
+	 {"op_srem", "declare X:n/signed, Y:m/signed;"
+	           "(Y != 0) implies (op_srem(X,Y) == X % Y)"},
+	 {"op_sadd", "declare X:n/signed, Y:m/signed; op_sadd(X,Y) == X + Y"},
+	 {"op_ssub", "declare X:n/signed, Y:m/signed; op_ssub(X,Y) == X - Y"},
+	 {"op_smul", "declare X:n/signed, Y:m/signed; op_smul(X,Y) == X * Y"},
 	 {"op_lt",   "declare X:n, Y:m; op_lt(X,Y) equ (X < Y)"},
 	 {"op_lte",  "declare X:n, Y:m; op_lte(X,Y) equ (X <= Y)"},
 	 {"op_gt",   "declare X:n, Y:m; op_gt(X,Y) equ (X > Y)"},

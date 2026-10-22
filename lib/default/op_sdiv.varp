@@ -1,0 +1,24 @@
+// a / b and a % b, signed, truncating toward zero like C: the quotient
+// is negative when the signs differ and the remainder takes the sign of
+// a, so a == q * b + r and |r| < |b|.  The magnitudes go through op_div;
+// the magnitude of the most negative value is its own two's complement
+// read unsigned, so no bit is lost.  The quotient needs n+1 bits
+// (-2^(n-1) / -1).  b == 0 gives the op_div result with the signs applied.
+circuit op_sdiv(in a:n/signed, b:m/signed; return q:(n+1)/signed; out r:m/signed)
+{
+    declare SA, SB, SQ;
+    declare NA:n, NB:m, A:n, B:m, Q:n, R:m, QX:(n+1), NQ:(n+1), NR:m;
+    SA = a[n-1];
+    SB = b[m-1];
+    SQ = SA ^ SB;
+    NA = op_neg(a);
+    NB = op_neg(b);
+    [A i=0..(n-1)] A[i] = SA ? NA[i] : a[i];
+    [A i=0..(m-1)] B[i] = SB ? NB[i] : b[i];
+    Q = op_div(A, B, R);
+    [A i=0..n] QX[i] = Q[i];
+    NQ = op_neg(QX);
+    NR = op_neg(R);
+    [A i=0..n]     q[i] = SQ ? NQ[i] : QX[i];
+    [A i=0..(m-1)] r[i] = SA ? NR[i] : R[i];
+}
