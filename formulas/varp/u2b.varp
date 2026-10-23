@@ -12,5 +12,10 @@ circuit u2b(in a:n; return s:(ilog2(n)+1))
 
 // test case: every 10 bit value with three bits set, 120 of them
 declare A:10;
+declare X1,X2,X3,X4,X5,X6;
+declare Y:5;
 
-u2b(A) == 3
+(u2b(A) < 4) &&
+(u2b({X1,X2,X3,X4,X5,X6}) == Y) &&
+(Y <= 3)
+
