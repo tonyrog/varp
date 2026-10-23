@@ -1223,9 +1223,13 @@ build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
     {Bnd,Bs1} = circuit_bind(Name, Ins++Outs, Args, Bs0_1, Meta0),
     {Prefix,Bs2} = circuit_prefix(Name, Bs1),
     {RetName,Bs3} = circuit_return(Return, Prefix, Bs2),
-    %% a local of the body (declare, define) shadows a meta variable
-    %% of the same name, like a declared symbol does at the top level
-    Meta = maps:without(circuit_locals(Defs), Bs3#bs.meta),
+    %% a local of the body (declare, define) or a parameter shadows a
+    %% meta variable of the same name, like a declared symbol does at
+    %% the top level: "[A s=1..n] ... X + Y" must not turn the s of
+    %% op_add(...; return s) into the caller's step number
+    Formals = [N || #{name := N} <- Ins ++ Outs ++ [R || R <- [Return],
+							 R =/= undefined]],
+    Meta = maps:without(circuit_locals(Defs) ++ Formals, Bs3#bs.meta),
     Body = circuit_rename(Defs, maps:from_list(Bnd), Prefix, Bs3#bs.defs,
                           Meta),
     Bs4 = build_circuit_body(Body, Bs3),

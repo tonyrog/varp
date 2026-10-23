@@ -567,7 +567,17 @@ size_as_value_test_() ->
      {"shadowed by a local define", {timeout, 60,
       fun() -> ?assertEqual(7, V(C ++ "define k 7; x = k;" ++ Call, K)) end}},
      {"a quantifier variable still shadows", {timeout, 60,
-      fun() -> ?assertEqual(6, V(C ++ "[A n=1..2] x[n] = true; x[0] = false;" ++ Call, #{})) end}}].
+      fun() -> ?assertEqual(6, V(C ++ "[A n=1..2] x[n] = true; x[0] = false;" ++ Call, #{})) end}},
+     %% the caller's quantifier variable must not reach a parameter of
+     %% the same name: op_add's return s under "[A s=1..n]" (die_hard)
+     {"a parameter shadows the caller's quantifier variable", {timeout, 60,
+      fun() ->
+	      T = "circuit c(in a:n; return x:n) { [A i=0..(n-1)] x[i] = !a[i]; }\n"
+		  "declare A(i):2, X(i):2; A(0) == 2 && A(1) == 1 && "
+		  "[A x=0..1] (X(x) == c(A(x)))",
+	      [M] = varp_tc:models(T, #{}),
+	      ?assertEqual([1, 2], [proplists:get_value(Key, M) || Key <- ["X(0)", "X(1)"]])
+      end}}].
 
 %% A circuit may call itself: the name is known inside its own body,
 %% the arguments are built in the caller's size bindings, and a ?:
