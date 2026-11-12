@@ -710,8 +710,10 @@ one(Vp, Ys) -> one(Vp, var(Vp), Ys).
 
 one(Vp, undefined, Ys) -> 
     one(Vp, var(Vp), Ys);
-%% one(_Vp, _X, []) ->
-%%    false;
+one(_Vp, _X, []) ->
+    false;
+one(Vp, X, [Y]) ->
+    set(Vp, X, Y);
 one(Vp, X, [Y0,Y1|Ys]) ->
     {Z0,Z1} = comparator(Vp, Y0, Y1),
     eq1_(Vp, X, Ys, Z1, [Z0]).

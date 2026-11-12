@@ -83,6 +83,24 @@ any_quantifier_test() ->
     ?assertEqual(15, count("[E i=1..4] P(i)")),
     ?assertEqual(3,  count("[ANY](A,B)")).
 
+%% a single argument is not a list in the parse tree; it used to crash
+%% bld_args with a case_clause
+single_argument_test() ->
+    ?assertEqual(1, count("[ANY](A)")),
+    ?assertEqual(1, count("[ONE](A)")),
+    ?assertEqual(1, count("[ALL](A)")),
+    ?assertEqual(1, count("[NONE](A)")),
+    ?assertEqual(2, count("[LTE 1](A)")),
+    ?assertEqual(1, count("[EQ 1](A)")),
+    ?assertEqual(0, count("[EQ 2](A)")),
+    ?assertEqual(1, count("[GT 0](A)")),
+    ?assertEqual(1, count("[GTE 1](A)")),
+    ?assertEqual(1, count("[LT 1](A)")),
+    ?assertEqual(1, count("[LTE 0](A)")),
+    ?assertEqual(1, count("[NEQ 1](A)")),
+    ?assertEqual(4, count("[A i=1..2] ([ONE](P(i)) equ P(i))")),
+    ?assertEqual(1, count("declare X:3; [ANY](X) && X < 2")).
+
 one_quantifier_test() ->
     ?assertEqual(4, count("[E! i=1..4] P(i)")),
     ?assertEqual(4, count("[ONE i=1..4] P(i)")).

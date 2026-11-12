@@ -1164,11 +1164,14 @@ call_circuit(Name, Args, Bs) ->
 	    end
     end.
 
-%% build one or more arguments
+%% build one or more arguments: a list of them, a vector whose bits
+%% are the arguments, or a single boolean ("[ANY](A)", the grammar
+%% gives one lexpr without a list around it)
 bld_args(Fs,Bs) when is_list(Fs) ->
     bld_list(Fs, Bs);
 bld_args(F,Bs) ->
     case bld(F, Bs) of
+	{{bool,X}, Bs1} -> {[{bool,X}],Bs1};
 	{{uint,_N,Xs}, Bs1} -> {[{bool,X}||X<-Xs],Bs1};
 	{{int,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1};
 	{{bit,_N,Xs}, Bs1}  -> {[{bool,X}||X<-Xs],Bs1}
