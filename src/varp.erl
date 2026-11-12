@@ -12,6 +12,7 @@
 -export([test/0]).
 -export([main/1]).
 -export([do_run/3, do_run/4]).
+-export([load/2]).   %% sources -> {ok,Assignments,Formula,GOpts}, used by pento_epx
 -export([strip_properties/2]).   %% --no-properties, also used by bmc
 
 -export([tokens/1, tokens/2]).
