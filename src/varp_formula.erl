@@ -34,7 +34,7 @@
 -export([intersect_bindings/3]).
 -export([install_bindings/3]).
 -export([each_unbound/2]).
--export([decl_type/2, nif_type/1]).   %% fixed point declarations
+-export([decl_type/2, decl_type/3, nif_type/1]).   %% fixed point and float declarations
 -export([each_variable/2]).
 -export([fold_unbound/3]).
 -export([eval_meta/2]).
@@ -83,8 +83,12 @@
 %% a two's complement integer scaled by 2^F (see the fixpoint section)
 -define(is_fix(T), (is_tuple(T) andalso tuple_size(T) =:= 2
 		    andalso element(1,(T)) =:= fix)).
+%% an IEEE 754 vector is tagged {float,E,M}: a sign bit, E exponent bits
+%% and M fraction bits (see the float754 section)
+-define(is_float(T), (is_tuple(T) andalso tuple_size(T) =:= 3
+		      andalso element(1,(T)) =:= float)).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit)
-			 orelse ?is_fix(T))).
+			 orelse ?is_fix(T) orelse ?is_float(T))).
 -define(is_compare_op(Op),
 	((Op) =:= 'lt' orelse (Op) =:= 'lte' orelse (Op) =:= 'gt' orelse
 	 (Op) =:= 'gte' orelse (Op) =:= 'eq' orelse (Op) =:= 'neq' orelse
@@ -631,6 +635,15 @@ is_circuit_def_(UName, I) ->
     end.
 
 set(undefined, Y, Bs) -> {Y, Bs};
+set(X={{float,_,_},_,_}, Y, Bs) ->
+    float_set(X, Y, Bs);
+set(X={{fix,F},N,_}, Y={{float,_,_},_,_}, Bs) ->
+    %% a float into a fixed point variable: truncated toward zero
+    {Fx, Bs1} = float_to_fix(Y, F, false, N, Bs),
+    fix_set(X, Fx, Bs1);
+set(X, {{float,_,_},_,_}, _Bs) when is_tuple(X) ->
+    error({float754_to_integer, operand_kind(X),
+	   "use floor, ceil, round or trunc"});
 set(X, Y, Bs) ->
     case fix_set(X, Y, Bs) of
 	false -> operation1('=',X,Y,Bs);
@@ -898,7 +911,7 @@ bld(_X, V={p,P,Args}, Bs) ->
 	    var_vector(PType,V,Size,Bs)
     end;
 bld(_X,{PType0,SExpr,PExpr},Bs) when ?is_vec_type(PType0) ->
-    PType = decl_type(PType0, Bs),
+    PType = decl_type(PType0, SExpr, Bs),
     if is_atom(PExpr) ->
 	    Vn = atom_to_list(PExpr),
 	    case maps:find(Vn,Bs#bs.meta) of
@@ -1230,7 +1243,8 @@ build_circuit({circuit,Name,Params,Defs}, Args, Bs0) ->
     {Ins0,Outs0,Return0} = circuit_params(Name, Params),
     %% a:32/fixpoint parameters: the fraction width settled now
     Fx = fun(undefined) -> undefined;
-	    (F=#{type := T}) -> F#{ type => decl_type(T, Bs0) }
+	    (F=#{type := T}) ->
+		 F#{ type => decl_type(T, maps:get(size, F, undefined), Bs0) }
 	 end,
     {Ins,Outs,Return} = {[Fx(F) || F <- Ins0], [Fx(F) || F <- Outs0], Fx(Return0)},
     %% the size variables of the parameters (a:n) are local to this
@@ -1457,7 +1471,8 @@ circuit_rename({p,P,As}, Env, Prefix, Defs, Meta) ->
 	{ok,_} ->
 	    error({circuit_parameter_arity, P});
 	error ->
-	    case maps:is_key({P,length(As1)}, Defs) of
+	    case maps:is_key({P,length(As1)}, Defs) orelse
+		builtin_function(P, length(As1)) of
 		true  -> {p,P,As1};
 		false ->
 		    %% a size parameter of this instance (a:n) or a meta
@@ -1482,6 +1497,16 @@ circuit_rename([H|T], Env, Prefix, Defs, Meta) ->
      circuit_rename(T, Env, Prefix, Defs, Meta)];
 circuit_rename(X, _Env, _Prefix, _Defs, _Meta) ->
     X.
+
+%% the arithmetic functions bld/3 knows: not locals of a circuit body
+builtin_function(<<"abs">>, 1) -> true;
+builtin_function(<<"min">>, 2) -> true;
+builtin_function(<<"max">>, 2) -> true;
+builtin_function(<<"floor">>, 1) -> true;
+builtin_function(<<"ceil">>, 1) -> true;
+builtin_function(<<"round">>, 1) -> true;
+builtin_function(<<"trunc">>, 1) -> true;
+builtin_function(_, _) -> false.
 
 build_circuit_body([{define,{p,Name,Ps},Def}|Body], Bs) ->
     %% a macro of the instance; its body was renamed with the rest
@@ -1928,7 +1953,7 @@ next([_Aj], _Acc) -> [].
     
 
 lookup_or_add_decl({p,P,Ps},PType0,Size,Bs) ->
-    PType = decl_type(PType0, Bs),
+    PType = decl_type(PType0, Size, Bs),
     Arity = length(Ps),
     case varp:find_decl(P,Bs#bs.decls,icase(Bs)) of
 	{ok,Type={PType,Arity,Size}} ->
@@ -1985,7 +2010,8 @@ const_vector(Type,Value) when is_integer(Value) ->
 	    uint -> varp_math:unsigned_size(Value);
 	    bit  -> varp_math:unsigned_size(Value);
 	    int -> varp_math:signed_size(Value);
-	    {fix,_} -> varp_math:signed_size(Value)
+	    {fix,_} -> varp_math:signed_size(Value);
+	    {float,E,M} -> 1+E+M
 	end,
     const_vector_(N-1,Type,N,[],Value).
 
@@ -2030,14 +2056,33 @@ var_vector(Type,V,N,Bs) ->
 
 %% the type atom the symbol table and the model see
 nif_type({fix,F}) -> list_to_atom("fix" ++ integer_to_list(F));
+nif_type({float,E,M}) -> varp_float:type_atom(E, M);
 nif_type(T) -> T.
 
-%% a declared type as the parser left it: the fraction width of a bare
-%% /fixpoint is --fixpoint, that of /fixpoint(f) a meta expression
-decl_type({fix,default}, Bs) -> {fix, fix_frac(Bs)};
-decl_type({fix,F}, _Bs) when is_integer(F) -> {fix,F};
-decl_type({fix,E}, Bs) -> {fix, eval_meta(E, Bs)};
-decl_type(T, _Bs) -> T.
+%% A declared type as the parser left it.  The fraction width of a
+%% bare /fixpoint is --fixpoint, that of /fixpoint(f) a meta expression;
+%% a bare /float754 is the standard format of the size, /float754(e)
+%% takes e exponent bits of the size, /float754(e,m) is explicit.
+decl_type(T, Bs) ->
+    decl_type(T, undefined, Bs).
+
+decl_type({fix,default}, _Size, Bs) -> {fix, fix_frac(Bs)};
+decl_type({fix,F}, _Size, Bs) -> {fix, meta_int(F, Bs)};
+decl_type({float,default,default}, Size, Bs) ->
+    {E,M} = varp_float:standard(decl_size(Size, Bs)),
+    {float,E,M};
+decl_type({float,E0,default}, Size, Bs) ->
+    E = meta_int(E0, Bs),
+    {float,E,decl_size(Size, Bs)-1-E};
+decl_type({float,E0,M0}, _Size, Bs) ->
+    {float, meta_int(E0, Bs), meta_int(M0, Bs)};
+decl_type(T, _Size, _Bs) -> T.
+
+meta_int(I, _Bs) when is_integer(I) -> I;
+meta_int(E, Bs) -> eval_meta(E, Bs).
+
+decl_size(undefined, _Bs) -> error(float754_size_unknown);
+decl_size(S, Bs) -> meta_int(S, Bs).
 
 %%
 %%var_vector_(Size,Size,Type,Xs,_V,Bs) -> 
@@ -2120,6 +2165,7 @@ vconst({uint,_,Xs}) -> vunsigned(Xs);
 vconst({int,_,Xs}) -> vsigned(Xs);
 vconst({bit,_,Xs}) -> vunsigned(Xs);
 vconst({{fix,_},_,Xs}) -> vsigned(Xs);   %% the raw, scaled integer
+vconst({{float,_,_},_,Xs}) -> vunsigned(Xs);   %% the raw bits
 vconst({bool,X}) -> vunsigned([X]).
 
 bit({uint,1,[X]}) -> X;
@@ -2195,12 +2241,25 @@ join_vector([]) ->
 %% Unary operator
 %%
 operation1(Op, A, Bs) ->
-    case fix_op1(Op, A, Bs) of
+    case special_op1(Op, A, Bs) of
 	false ->
 	    case lib_op1(Op, A, Bs) of
 		builtin -> builtin1(Op, A, Bs);
 		Result -> Result
 	    end;
+	Result -> Result
+    end.
+
+%% the float and fixed point layers, before the integer encoders
+special_op1(Op, A, Bs) ->
+    case float_op1(Op, A, Bs) of
+	false -> fix_op1(Op, A, Bs);
+	Result -> Result
+    end.
+
+special_op2(Op, A, B, Bs) ->
+    case float_op2(Op, A, B, Bs) of
+	false -> fix_op2(Op, A, B, Bs);
 	Result -> Result
     end.
 
@@ -2232,7 +2291,7 @@ builtin1(Op, A, Bs) ->
 operation1(Op, undefined, A, Bs) ->
     operation1(Op, A, Bs);
 operation1(Op, X, A, Bs) ->
-    case fix_op1(Op, A, Bs) of
+    case special_op1(Op, A, Bs) of
 	false ->
 	    case lib_op1(Op, A, Bs) of
 		builtin -> builtin1(Op, X, A, Bs);
@@ -2280,7 +2339,7 @@ builtin1(Op, X, A, Bs) ->
 %% Binary operator
 %%
 operation2(Op,A,B,Bs) ->
-    case fix_op2(Op, A, B, Bs) of
+    case special_op2(Op, A, B, Bs) of
 	false ->
 	    case fold2(Op, A, B, Bs) of
 		false ->
@@ -2410,7 +2469,7 @@ operand_kind(Other)               -> Other.
 operation2(Op,undefined,Y,Z,Bs) ->
     operation2(Op,Y,Z,Bs);
 operation2(Op,X,Y,Z,Bs) ->
-    case fix_op2(Op, Y, Z, Bs) of
+    case special_op2(Op, Y, Z, Bs) of
 	false ->
 	    case lib_op2(Op, Y, Z, Bs) of
 		builtin -> builtin2(Op, X, Y, Z, Bs);
@@ -2638,6 +2697,9 @@ to_raw({{fix,F0},N,Xs}, F, Bs) ->   %% F0 > F: precision goes
 to_raw({flo,V}, F, Bs) ->
     R = round(V * (1 bsl F)),
     {const_vector(int, R, varp_math:signed_size(R)), Bs};
+to_raw(V={{float,_,_},_,_}, F, Bs) ->
+    {{_,N,Xs}, Bs1} = float_to_fix(V, F, false, 64, Bs),
+    {{int,N,Xs}, Bs1};
 to_raw({bool,X}, F, Bs) ->
     to_raw({uint,1,[X]}, F, Bs);
 to_raw(V, F, Bs) ->
@@ -2758,6 +2820,22 @@ fix_op2_(Op, A, B, Bs) ->
 %% the branches of ?: as two {fix,F} values when one of them is fixed
 %% point or a float literal; false when there is nothing to do
 fix_align(T, E, Bs) when is_tuple(T), is_tuple(E) ->
+    case is_floatish(T) orelse is_floatish(E) of
+	true ->
+	    Ty = float_type(T, E),
+	    case {T, E} of
+		{{Ty,_,_},{Ty,_,_}} -> false;
+		_ ->
+		    {T1, Bs1} = to_float(T, Ty, Bs),
+		    {E1, Bs2} = to_float(E, Ty, Bs1),
+		    {T1, E1, Bs2}
+	    end;
+	false -> fix_align_(T, E, Bs)
+    end;
+fix_align(_T, _E, _Bs) ->
+    false.
+
+fix_align_(T, E, Bs) ->
     case is_fixish(T) orelse is_fixish(E) of
 	false -> false;
 	true ->
@@ -2769,9 +2847,7 @@ fix_align(T, E, Bs) when is_tuple(T), is_tuple(E) ->
 		    {Er, Bs2} = to_raw(E, F, Bs1),
 		    {fix_result(F, Tr), fix_result(F, Er), Bs2}
 	    end
-    end;
-fix_align(_T, _E, _Bs) ->
-    false.
+    end.
 
 %% X = Y with a fixed point side
 fix_set(X={{fix,F},N,Xs}, Y, Bs) ->
@@ -2796,6 +2872,15 @@ fix_to_int(Fun, {flo,V}, Bs) ->
 	    trunc -> erlang:trunc(V)
 	end,
     bld({const,R}, Bs);
+fix_to_int(Fun, V={{float,_,_},_,_}, Bs) ->
+    %% through a fixed point value: none for trunc, two fraction bits
+    %% with a sticky bit for the others (enough for floor, ceil and
+    %% round half up to be exact)
+    {F, Sticky} = case Fun of trunc -> {0,false}; _ -> {2,true} end,
+    {Fx, Bs1} = float_to_fix(V, F, Sticky, 64, Bs),
+    fix_to_int(Fun, Fx, Bs1);
+fix_to_int(_Fun, {{fix,0},N,Xs}, Bs) ->
+    {{int,N,Xs}, Bs};
 fix_to_int(Fun, {{fix,F},N,Xs}, Bs) ->
     Raw = {int,N,Xs},
     case Fun of
@@ -2820,6 +2905,300 @@ fix_to_int(Fun, {{fix,F},N,Xs}, Bs) ->
     end;
 fix_to_int(_Fun, V, Bs) ->
     {V, Bs}.   %% already an integer
+
+%%
+%% IEEE 754 light, {float,E,M}: a sign bit, E exponent bits and M
+%% fraction bits, the bits in the order fraction, exponent, sign (LSB
+%% first like every vector).  Normal numbers and zero only: no NaN, no
+%% infinity, nothing subnormal (such a result is flushed to zero, an
+%% exponent overflow is not caught).  The pure part, encoding a number
+%% with round to nearest even and printing, is varp_float.
+%%
+%% This step has the type, the literals, comparison, negation, abs,
+%% min and max, and the conversions: an integer or fixed point operand
+%% that meets a float becomes a float (round to nearest even), a float
+%% assigned to a fixed point variable is truncated toward zero, and
+%% floor/ceil/round/trunc give an integer.  + - * / come next.
+%%
+is_floatish({T,_,_}) -> ?is_float(T);
+is_floatish(_) -> false.
+
+%% the format two operands share
+float_type(A, B) ->
+    case lists:usort([T || {T,_,_} <- [A,B], ?is_float(T)]) of
+	[T] -> T;
+	Ts -> error({float754_mixed, Ts})
+    end.
+
+fsplit({{float,E,M},_N,Xs}) ->
+    {Man,Rest} = lists:split(M, Xs),
+    {Exp,[S]} = lists:split(E, Rest),
+    {S, {uint,E,Exp}, {uint,M,Man}}.
+
+%% exponent and fraction as one unsigned: the order of the magnitudes
+fmag({{float,E,M},_N,Xs}) -> {uint,E+M,lists:sublist(Xs, E+M)}.
+fsign({{float,_,_},_N,Xs}) -> lists:last(Xs).
+fbits({{float,_,_},N,Xs}) -> {uint,N,Xs};
+fbits(V) -> V.
+
+fmake(T={float,E,M}, {_,_,MagXs}, S) ->
+    {T,1+E+M, vfit(MagXs, E+M) ++ [S]}.
+
+%% cut or zero extend a bit list to K bits
+vfit(Xs, K) when length(Xs) >= K -> lists:sublist(Xs, K);
+vfit(Xs, K) -> Xs ++ lists:duplicate(K - length(Xs), false).
+
+zeros(K) -> lists:duplicate(K, false).
+
+const_int(C) when C < 0 -> const_vector(int, C, varp_math:signed_size(C));
+const_int(C) -> const_vector(uint, C, varp_math:unsigned_size(C)).
+
+float_const(V, T={float,E,M}, Bs) ->
+    case varp_float:encode(V, E, M) of
+	{ok,Bits} -> {const_vector(T, Bits, 1+E+M), Bs};
+	{error,Reason} -> error(Reason)
+    end.
+
+%% an operand as a float of format T
+to_float(V={{float,E,M},_,_}, {float,E,M}, Bs) ->
+    {V, Bs};
+to_float({T0,_,_}, T, _Bs) when ?is_float(T0) ->
+    error({float754_mixed, [T0,T]});
+to_float({flo,X}, T, Bs) ->
+    float_const(X, T, Bs);
+to_float({bool,X}, T, Bs) ->
+    to_float({uint,1,[X]}, T, Bs);
+to_float(V, T={float,E,M}, Bs) ->
+    {F, Raw} = case V of
+		   {{fix,F0},N,Xs} -> {F0, {int,N,Xs}};
+		   _ -> {0, varp_arith:iarg(V)}
+	       end,
+    case vconst(Raw) of
+	R when is_integer(R) ->
+	    case varp_float:encode_scaled(R, -F, E, M) of
+		{ok,Bits} -> {const_vector(T, Bits, 1+E+M), Bs};
+		{error,Reason} -> error(Reason)
+	    end;
+	false ->
+	    int_to_float(Raw, F, T, Bs)
+    end.
+
+%% a two's complement integer (scaled by 2^F) to a float: magnitude,
+%% normalise with a leading zero count, round to nearest even
+int_to_float(Raw={int,_W,Xs}, F, T={float,E,M}, Bs) ->
+    S = lists:last(Xs),
+    {A0, Bs1} = operation1('abs', Raw, Bs),
+    A = {uint,Wa,_} = varp_arith:varg(A0),
+    {{uint,Wa,NXs}, LZ, Bs2} = lz_norm(A, Bs1),
+    K0 = Wa - 1 + varp_float:bias(E) - F,
+    {ExpI, Bs3} = operation2('sub', const_int(K0), LZ, Bs2),
+    FracXs = lists:sublist(NXs, Wa-1),            %% below the leading one
+    {ManXs, Up, Bs4} =
+	if Wa-1 =< M ->
+		%% the fraction sits at the top of the mantissa
+		{zeros(M-(Wa-1)) ++ FracXs, ?F, Bs3};
+	   true ->
+		Drop = Wa-1-M,
+		Man0 = lists:nthtail(Drop, FracXs),
+		Guard = lists:nth(Drop, FracXs),
+		{Sticky, Bs3a} = any_bits(lists:sublist(FracXs, Drop-1), Bs3),
+		{{bool,Up0}, Bs3b} = round_up(Guard, Sticky, hd(Man0), Bs3a),
+		{Man0, Up0, Bs3b}
+	end,
+    ExpXs = vfit(element(3, ExpI), E),
+    {R0, Bs5} = operation2('add', {uint,E+M,ManXs ++ ExpXs}, {uint,1,[Up]}, Bs4),
+    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
+    {Z1, Bs6} = operation2('eq', A, {uint,1,[false]}, Bs5),
+    {Z2, Bs7} = operation2('lte', ExpI, {uint,1,[false]}, Bs6),
+    {Zero, Bs8} = operation2('or', Z1, Z2, Bs7),
+    {Mag, Bs9} = ite(undefined, Zero, {uint,E+M,zeros(E+M)}, Rounded, Bs8),
+    {fmake(T, varp_arith:varg(Mag), S), Bs9}.
+
+any_bits([], Bs) -> {{bool,?F}, Bs};
+any_bits(Xs, Bs) -> operation2('neq', {uint,length(Xs),Xs}, {uint,1,[false]}, Bs).
+
+%% round to nearest even: up when the guard bit is set and either a
+%% lower bit is set or the result would be odd
+round_up(Guard, Sticky, Lsb, Bs) ->
+    {T1, Bs1} = operation2('or', Sticky, {bool,Lsb}, Bs),
+    operation2('and', {bool,Guard}, T1, Bs1).
+
+%% shift the leading one of an unsigned vector to the top, and count
+%% the steps: a conditional shift by every power of two, top down
+lz_norm(A={uint,1,_}, Bs) ->
+    {A, {uint,1,[false]}, Bs};
+lz_norm(A={uint,W,_}, Bs) ->
+    Ks = [1 bsl K || K <- lists:seq(varp_math:ilog2(W-1), 0, -1)],
+    {Cur, Zs, Bs1} =
+	lists:foldl(
+	  fun(K, {C={uint,W1,CXs}, Acc, B}) ->
+		  Top = {uint,K,lists:nthtail(W1-K, CXs)},
+		  {Z, B1} = operation2('eq', Top, {uint,1,[false]}, B),
+		  Shifted = {uint,W1,zeros(K) ++ lists:sublist(CXs, W1-K)},
+		  {C1, B2} = ite(undefined, Z, Shifted, C, B1),
+		  {{uint,W1,vfit(element(3, varp_arith:varg(C1)), W1)},
+		   [{K,Z}|Acc], B2}
+	  end, {A,[],Bs}, Ks),
+    LZ = {uint,length(Ks),[L || {_K,{bool,L}} <- lists:keysort(1, Zs)]},
+    {Cur, LZ, Bs1}.
+
+%% a float as a fixed point value with F fraction bits, the magnitude
+%% truncated; Sticky ors the lost bits into the lowest bit (for the
+%% rounding functions); Width bounds the shift to the left
+float_to_fix(V={{float,E,M},_,_}, F, Sticky, Width, Bs) ->
+    {S, Exp, {uint,M,ManXs}} = fsplit(V),
+    {{bool,H}, Bs1} = operation2('neq', Exp, {uint,1,[false]}, Bs),
+    Sig = {uint,M+1,ManXs ++ [H]},             %% the hidden one
+    C = varp_float:bias(E) + M - F,             %% shift left by Exp - C
+    MaxL = max(0, min((1 bsl E) - 1 - C, Width)),
+    MaxR = M + 2,                               %% beyond: all sticky
+    {Dl, Bs2} = operation2('sub', Exp, const_int(C), Bs1),
+    {Left, Bs3} = barrel_left(Sig, Dl, MaxL, Bs2),
+    {Dr, Bs4} = operation2('sub', const_int(C), Exp, Bs3),
+    {Right0, StR0, Bs5} = barrel_right(Sig, Dr, MaxR, Bs4),
+    {Big, Bs6} = operation2('gte', Dr, const_int(MaxR), Bs5),
+    {NZ, Bs7} = operation2('neq', Sig, {uint,1,[false]}, Bs6),
+    {Right1, Bs8} = ite(undefined, Big, {uint,M+1,zeros(M+1)}, Right0, Bs7),
+    {StBig, Bs9} = operation2('and', Big, NZ, Bs8),
+    {StR, Bs10} = operation2('or', StBig, StR0, Bs9),
+    {Ge, Bs11} = operation2('gte', Exp, const_int(C), Bs10),
+    Wm = M+1+MaxL,
+    LeftW = {uint,Wm,vfit(element(3, varp_arith:varg(Left)), Wm)},
+    RightW = {uint,Wm,vfit(element(3, varp_arith:varg(Right1)), Wm)},
+    {Mag0, Bs12} = ite(undefined, Ge, LeftW, RightW, Bs11),
+    {Mag, Bs13} =
+	case Sticky of
+	    true ->
+		{St, Bs12a} = operation2('and', negate(Ge), StR, Bs12),
+		{bool,StL} = St,
+		operation2('bor', Mag0, {uint,1,[StL]}, Bs12a);
+	    false ->
+		{Mag0, Bs12}
+	end,
+    Int = varp_arith:iarg(varp_arith:varg(Mag)),
+    {Neg, Bs14} = operation1('neg', Int, Bs13),
+    {Raw, Bs15} = ite(undefined, {bool,S}, Neg, Int, Bs14),
+    {fix_result(F, Raw), Bs15}.
+
+%% V << Amount, the amount up to Max (an integer vector, its low bits
+%% count), W+Max bits out
+barrel_left(V={uint,_W,_}, _Amount, 0, Bs) ->
+    {V, Bs};
+barrel_left({uint,W,Xs}, Amount, Max, Bs) ->
+    Wout = W + Max,
+    NB = varp_math:unsigned_size(Max),
+    AmtXs = vfit(element(3, Amount), NB),
+    lists:foldl(
+      fun(K, {C={uint,_,CXs}, B}) ->
+	      Sh = 1 bsl K,
+	      Shifted = {uint,Wout,zeros(Sh) ++ lists:sublist(CXs, Wout-Sh)},
+	      {C1, B1} = ite(undefined, {bool,lists:nth(K+1, AmtXs)}, Shifted, C, B),
+	      {{uint,Wout,vfit(element(3, varp_arith:varg(C1)), Wout)}, B1}
+      end, {{uint,Wout,Xs ++ zeros(Max)}, Bs}, lists:seq(0, NB-1)).
+
+%% V >> Amount, zeros in, and a sticky bit: were any ones shifted out
+barrel_right({uint,W,Xs}, Amount, Max, Bs) ->
+    NB = varp_math:unsigned_size(Max),
+    AmtXs = vfit(element(3, Amount), NB),
+    lists:foldl(
+      fun(K, {C={uint,_,CXs}, St, B}) ->
+	      Sh = min(1 bsl K, W),
+	      Bit = {bool,lists:nth(K+1, AmtXs)},
+	      Shifted = {uint,W,lists:nthtail(Sh, CXs) ++ zeros(Sh)},
+	      {AnyLow, B1} = any_bits(lists:sublist(CXs, Sh), B),
+	      {StK, B2} = operation2('and', Bit, AnyLow, B1),
+	      {St1, B3} = operation2('or', St, StK, B2),
+	      {C1, B4} = ite(undefined, Bit, Shifted, C, B3),
+	      {{uint,W,vfit(element(3, varp_arith:varg(C1)), W)}, St1, B4}
+      end, {{uint,W,Xs}, {bool,?F}, Bs}, lists:seq(0, NB-1)).
+
+float_op1(Op, V={{float,E,M},N,Xs}, Bs) ->
+    case Op of
+	'neg' -> {{{float,E,M},N,lists:droplast(Xs) ++ [neg_lit(fsign(V))]}, Bs};
+	'abs' -> {{{float,E,M},N,lists:droplast(Xs) ++ [?F]}, Bs};
+	'not' -> operation2('neq', fmag(V), {uint,1,[false]}, Bs);
+	_ -> error({float754_operator, Op})
+    end;
+float_op1(_Op, _V, _Bs) ->
+    false.
+
+float_op2(Op, A, B, Bs) when is_tuple(A), is_tuple(B) ->
+    case is_floatish(A) orelse is_floatish(B) of
+	true -> float_op2_(Op, A, B, Bs);
+	false -> false
+    end;
+float_op2(_Op, _A, _B, _Bs) ->
+    false.
+
+float_op2_(Op, A, B, Bs) when Op =:= 'band'; Op =:= 'bor';
+			     Op =:= 'bxor'; Op =:= 'equ' ->
+    %% bit by bit on the raw bits (the mux of ?:)
+    T = float_type(A, B),
+    {R, Bs1} = operation2(Op, fbits(A), fbits(B), Bs),
+    {{_,N,Xs}, _} = {varp_arith:varg(R), ok},
+    {{T,N,Xs}, Bs1};
+float_op2_(Op, A, B, Bs) when Op =:= 'lt'; Op =:= 'lte'; Op =:= 'gt';
+			     Op =:= 'gte'; Op =:= 'eq'; Op =:= 'neq' ->
+    T = float_type(A, B),
+    {Af, Bs1} = to_float(A, T, Bs),
+    {Bf, Bs2} = to_float(B, T, Bs1),
+    float_compare(Op, Af, Bf, Bs2);
+float_op2_(Op, A, B, Bs) when Op =:= 'min'; Op =:= 'max' ->
+    T = float_type(A, B),
+    {Af, Bs1} = to_float(A, T, Bs),
+    {Bf, Bs2} = to_float(B, T, Bs1),
+    {Lt, Bs3} = float_compare('lt', Af, Bf, Bs2),
+    case Op of
+	'min' -> ite(undefined, Lt, Af, Bf, Bs3);
+	'max' -> ite(undefined, Lt, Bf, Af, Bs3)
+    end;
+float_op2_(Op, _A, _B, _Bs) ->
+    error({float754_operator, Op, "not yet: + - * / come in the next step"}).
+
+%% sign and magnitude: equal magnitudes are equal numbers when the
+%% signs agree or both are zero; a negative is below a positive unless
+%% both are zero, two negatives compare the other way round
+float_compare(Op, Af, Bf, Bs) ->
+    Sa = {bool,fsign(Af)}, Sb = {bool,fsign(Bf)},
+    Ma = fmag(Af), Mb = fmag(Bf),
+    Zv = {uint,1,[false]},
+    {Eqm, Bs1} = operation2('eq', Ma, Mb, Bs),
+    {Za, Bs2} = operation2('eq', Ma, Zv, Bs1),
+    {Zb, Bs3} = operation2('eq', Mb, Zv, Bs2),
+    {Both0, Bs4} = operation2('and', Za, Zb, Bs3),
+    {SameS, Bs5} = operation2('equ', Sa, Sb, Bs4),
+    {EqS, Bs6} = operation2('or', SameS, Both0, Bs5),
+    {Eq, Bs7} = operation2('and', Eqm, EqS, Bs6),
+    case Op of
+	'eq' -> {Eq, Bs7};
+	'neq' -> {negate(Eq), Bs7};
+	'lt' -> float_lt(Sa, Sb, Ma, Mb, Both0, Bs7);
+	'gt' -> float_lt(Sb, Sa, Mb, Ma, Both0, Bs7);
+	'lte' ->
+	    {Lt, Bs8} = float_lt(Sa, Sb, Ma, Mb, Both0, Bs7),
+	    operation2('or', Lt, Eq, Bs8);
+	'gte' ->
+	    {Gt, Bs8} = float_lt(Sb, Sa, Mb, Ma, Both0, Bs7),
+	    operation2('or', Gt, Eq, Bs8)
+    end.
+
+float_lt(Sa, Sb, Ma, Mb, Both0, Bs) ->
+    {Ltm, Bs1} = operation2('lt', Ma, Mb, Bs),
+    {Gtm, Bs2} = operation2('lt', Mb, Ma, Bs1),
+    {NegPos, Bs3} = operation2('and', Sa, negate(Sb), Bs2),        %% a < 0 <= b
+    {BothPos, Bs4} = operation2('and', negate(Sa), negate(Sb), Bs3),
+    {PP, Bs5} = operation2('and', BothPos, Ltm, Bs4),
+    {BothNeg, Bs6} = operation2('and', Sa, Sb, Bs5),
+    {NN, Bs7} = operation2('and', BothNeg, Gtm, Bs6),
+    {Or1, Bs8} = operation2('or', NegPos, PP, Bs7),
+    {Or2, Bs9} = operation2('or', Or1, NN, Bs8),
+    operation2('and', negate(Both0), Or2, Bs9).
+
+%% X = Y with a float target
+float_set(X={T,N,Xs}, Y, Bs) ->
+    {Yf, Bs1} = to_float(Y, T, Bs),
+    {_, Bs2} = operation1('=', {uint,N,Xs}, fbits(Yf), Bs1),
+    {X, Bs2}.
 
 %%
 %% if-then-else circuit

@@ -514,14 +514,19 @@ visible({symbol,Ln,Other}, _Decl) ->
 %% /fixpoint is settled when the declaration is built (--fixpoint)
 qualifier({symbol,_Ln,<<"visible">>}, Decl) -> {visible, Decl};
 qualifier({symbol,_Ln,<<"fixpoint">>}, {P,uint,Size}) -> {P,{fix,default},Size};
+%% X:32/float754: the standard format of the size, (8,23) for 32
+qualifier({symbol,_Ln,<<"float754">>}, {P,uint,Size}) -> {P,{float,default,default},Size};
 qualifier({symbol,Ln,Other}, _Decl) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s, "
-				   "expected /signed, /unsigned, /fixpoint "
-				   "or /visible", [Other])).
+				   "expected /signed, /unsigned, /fixpoint, "
+				   "/float754 or /visible", [Other])).
 
-%% X:16/fixpoint(4): the size is given, 4 bits of it are fraction
+%% X:16/fixpoint(4): the size is given, 4 bits of it are fraction;
+%% X:16/float754(8): 8 exponent bits, the rest but the sign fraction
 qualifier_size({symbol,_Ln,<<"fixpoint">>}, [F], {P,uint,Size}) ->
     {P,{fix,F},Size};
+qualifier_size({symbol,_Ln,<<"float754">>}, [E], {P,uint,Size}) ->
+    {P,{float,E,default},Size};
 qualifier_size({symbol,Ln,Other}, Args, _Decl) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s/~w",
 				   [Other, length(Args)])).
@@ -539,6 +544,13 @@ qualifier_args({symbol,_Ln,<<"fixpoint">>}, [I,F], P) ->
 	       _ -> {op,'add',I,F}
 	   end,
     {P,{fix,F},Size};
+%% X/float754(8,23): 8 exponent bits and 23 fraction bits, plus the sign
+qualifier_args({symbol,_Ln,<<"float754">>}, [E,M], P) ->
+    Size = case {E,M} of
+	       {{const,Ev},{const,Mv}} -> 1+Ev+Mv;
+	       _ -> {op,'add',{const,1},{op,'add',E,M}}
+	   end,
+    {P,{float,E,M},Size};
 qualifier_args({symbol,Ln,Other}, Args, _P) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s/~w",
 				   [Other, length(Args)])).

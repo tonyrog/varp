@@ -199,6 +199,27 @@ does the same (`formulas/varp/tank_system.varp`).  Everything is built
 from the integer operators, so `--ops lib` (`op_fixmul`, `op_fixdiv`
 over `op_smul`/`op_sdiv`) and `--overflow` apply as for integers.
 
+### Floating point, IEEE 754 light
+
+    declare X:32/float754;        # binary32: 8 exponent bits, 23 fraction bits
+    declare Y:16/float754;        # binary16 (5,10); 64 is binary64 (11,52)
+    declare B:16/float754(8);     # bfloat16: 8 exponent bits of 16
+    declare Z/float754(8,23);     # explicit, 1+8+23 bits
+
+Light means normal numbers and zero: a result below the normal range is
+flushed to zero, a literal above it is an error, there is no NaN and no
+infinity (a pattern with every exponent bit set is read as a number).
+Rounding is to nearest even.  This step has the type, the literals, the
+comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:` and the
+conversions: an integer or fixed point operand that meets a float
+becomes a float, `floor ceil round trunc` give an integer, a float
+assigned to a fixed point variable is truncated toward zero, and
+assigning one to an integer variable is an error.  `+ - * /` are the
+next step.  Two float formats do not mix.  A model prints the shortest
+decimal that reads back as the same number (`X=0.1`, `Y=-1.5e-30`),
+`--hex` the raw bits.  Like fixed point everything is built from the
+integer operators, so `--ops lib` applies.
+
 `--ops lib` builds the arithmetic and comparison operators (`+ - * / %
 min max < <= > >= == != & | ^ ~ << >>`) from the circuits in the
 library instead of the built in encoders, `op_add` for `X + Y`, the

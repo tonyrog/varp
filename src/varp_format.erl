@@ -99,8 +99,8 @@ format_binding({Var,Value}) ->
 	{bit,Vec} -> [VarFmt,"=",format_bit(Vec)];
 	{equ,Rep} -> [VarFmt,"=",format_rep(Rep)];    %% substituted
 	{nequ,Rep} -> [VarFmt,"=!",format_rep(Rep)];
-	{Fix,Vec} when is_atom(Fix) ->   %% fix16: fixed point, 16 fraction bits
-	    [VarFmt,"=",format_fix(Vec, fix_frac(Fix))]
+	{T,Vec} when is_atom(T) ->   %% fix16, f8_23: fixed point, float
+	    [VarFmt,"=",format_vec(T, Vec)]
     end.
 
 %% the representative of a substituted variable
@@ -147,13 +147,25 @@ format_bit(Tuple) when is_tuple(Tuple) ->
 format_vec(uint, Vec) -> format_uint(Vec);
 format_vec(int, Vec) -> format_int(Vec);
 format_vec(bit, Vec) -> format_bit(Vec);
-format_vec(Fix, Vec) when is_atom(Fix) -> format_fix(Vec, fix_frac(Fix)).
+format_vec(T, Vec) when is_atom(T) ->
+    case varp_float:type_of_atom(T) of
+	{fix,F} -> format_fix(Vec, F);
+	{float,E,M} -> format_float(Vec, E, M);
+	undefined -> error({symbol_type, T})
+    end.
 
-%% the fraction width of a fixed point symbol type, fix16 -> 16
-fix_frac(Type) when is_atom(Type) ->
-    case atom_to_list(Type) of
-	"fix" ++ Ds -> list_to_integer(Ds);
-	_ -> error({symbol_type, Type})
+%% an IEEE 754 vector as a decimal number, --hex shows the raw bits
+format_float(Tuple, E, M) when is_tuple(Tuple) ->
+    List = tuple_to_list(Tuple),
+    try list_to_integer(List, 2) of
+	Bits ->
+	    case get(print_hex) of
+		true -> format_uint(Tuple);
+		_ -> varp_float:format(Bits, E, M)
+	    end
+    catch
+	error:_ ->
+	    "0b"++List
     end.
 
 %% a fixed point vector as a decimal number, exact: 2^F divides 10^F.

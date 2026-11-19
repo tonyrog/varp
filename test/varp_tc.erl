@@ -161,11 +161,13 @@ sym_value(undefined) -> undefined;
 sym_value({uint,Vec}) -> vec_value(Vec, false);
 sym_value({int,Vec})  -> vec_value(Vec, true);
 sym_value({bit,Vec})  -> tuple_to_list(Vec);
-%% fix16: a fixed point value as a float, exact for dyadic fractions
+%% fix16: a fixed point value as a float, exact for dyadic fractions;
+%% f8_23: an IEEE 754 value as an Erlang float
 sym_value({T,Vec}) when is_atom(T) ->
-    case atom_to_list(T) of
-	"fix" ++ Ds -> vec_value(Vec, true) / (1 bsl list_to_integer(Ds));
-	_ -> {T,Vec}
+    case varp_float:type_of_atom(T) of
+	{fix,F} -> vec_value(Vec, true) / (1 bsl F);
+	{float,E,M} -> varp_float:to_float(vec_value(Vec, false), E, M);
+	undefined -> {T,Vec}
     end;
 sym_value(V) -> V.
 

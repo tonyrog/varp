@@ -1861,7 +1861,7 @@ add_decls([{visible,D}|Ds], Decls, Bs) ->   %% at the top level all is visible
     add_decls([D|Ds], Decls, Bs);
 add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
     Size = varp_formula:eval_meta(SExpr, Bs),
-    Type = varp_formula:decl_type(PType, Bs),   %% {fix,default} -> {fix,16}
+    Type = varp_formula:decl_type(PType, Size, Bs),   %% {fix,default} -> {fix,16}
     add_decls_(Sym, {Type,length(Args),Size}, Ds, Decls, Bs);
 %% untyped declaration: "declare X;" is a boolean (1 bit) symbol
 add_decls([{p,Sym,Args}|Ds], Decls, Bs) ->
