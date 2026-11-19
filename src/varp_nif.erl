@@ -114,7 +114,9 @@
 -type unsigned() :: non_neg_integer().
 -type literal() :: integer() | boolean().
 -type symbol() :: {Name::iolist(),[Index::term()]}.
--type symbol_type() :: bool | int | uint | bit.
+%% bool | int | uint | bit, or fix<F> for a fixed point vector with F
+%% fraction bits (varp_formula:nif_type/1); the nif keeps the atom as is
+-type symbol_type() :: atom().
 -type sort_key() :: atom() | string().
 -type sort_value() :: integer().
 -type binding() :: literal() | {literal(),literal()}.

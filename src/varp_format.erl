@@ -14,6 +14,7 @@
 -export([format_lit/2, format_lit/3]).
 -export([format_var/2, format_var/3]).
 -export([format_binding/1]).
+-export([format_vec/2]).   %% a model vector by its symbol type
 -export([format_symbol/1]).
 -export([format_meta/1]).
 -export([format_internal_symbol/1]).
@@ -97,7 +98,9 @@ format_binding({Var,Value}) ->
 	{int,Vec} -> [VarFmt,"=",format_int(Vec)];
 	{bit,Vec} -> [VarFmt,"=",format_bit(Vec)];
 	{equ,Rep} -> [VarFmt,"=",format_rep(Rep)];    %% substituted
-	{nequ,Rep} -> [VarFmt,"=!",format_rep(Rep)]
+	{nequ,Rep} -> [VarFmt,"=!",format_rep(Rep)];
+	{Fix,Vec} when is_atom(Fix) ->   %% fix16: fixed point, 16 fraction bits
+	    [VarFmt,"=",format_fix(Vec, fix_frac(Fix))]
     end.
 
 %% the representative of a substituted variable
@@ -139,6 +142,53 @@ format_int(Tuple) when is_tuple(Tuple) ->
 
 format_bit(Tuple) when is_tuple(Tuple) ->
     "{"++tuple_to_list(Tuple)++"}".
+
+%% a model vector {$0|$1|$*,...} by the type the symbol table gave it
+format_vec(uint, Vec) -> format_uint(Vec);
+format_vec(int, Vec) -> format_int(Vec);
+format_vec(bit, Vec) -> format_bit(Vec);
+format_vec(Fix, Vec) when is_atom(Fix) -> format_fix(Vec, fix_frac(Fix)).
+
+%% the fraction width of a fixed point symbol type, fix16 -> 16
+fix_frac(Type) when is_atom(Type) ->
+    case atom_to_list(Type) of
+	"fix" ++ Ds -> list_to_integer(Ds);
+	_ -> error({symbol_type, Type})
+    end.
+
+%% a fixed point vector as a decimal number, exact: 2^F divides 10^F.
+%% --hex shows the raw bits.
+format_fix(Tuple, F) when is_tuple(Tuple) ->
+    List = tuple_to_list(Tuple),
+    try list_to_integer(List, 2) of
+	UInt ->
+	    case get(print_hex) of
+		true -> format_uint(Tuple);
+		_ ->
+		    N = tuple_size(Tuple),
+		    R = if element(1,Tuple) =:= $1 -> UInt - (1 bsl N);
+			   true -> UInt
+			end,
+		    fix_decimal(R, F)
+	    end
+    catch
+	error:_ ->
+	    "0b"++List
+    end.
+
+fix_decimal(R, F) ->
+    Scale = 1 bsl F,
+    A = erlang:abs(R),
+    Int = A div Scale,
+    Frac = A rem Scale,
+    Digits = if Frac =:= 0 -> "0";
+		true ->
+		    %% F decimal digits, the trailing zeros dropped
+		    D = Frac * varp_math:pow(10, F) div Scale,
+		    Ds = lists:flatten(io_lib:format("~*..0w", [F, D])),
+		    string:trim(Ds, trailing, "0")
+	     end,
+    [if R < 0 -> "-"; true -> "" end, integer_to_list(Int), ".", Digits].
 
 format_p(Name) when is_binary(Name) -> Name;
 format_p({p,V,[]}) when is_binary(V) -> [V];

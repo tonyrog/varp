@@ -105,16 +105,16 @@ max                 : {token,{'max',TokenLine}}.
 
 
 0[xX]{H}+{IS}?      : {token,{hexnum,TokenLine,TokenChars}}.
+%% a float literal is a fixed point constant, see /fixpoint; a digit is
+%% required on both sides of the point so that 1..4 stays a range
+{D}+\.{D}+({E})?    : {token,{flonum,TokenLine,TokenChars}}.
+{D}+{E}             : {token,{flonum,TokenLine,TokenChars}}.
 0[b]{B}+{IS}?       : {token,{binnum,TokenLine,TokenChars}}.
 0{D}+{IS}?          : {token,{octnum,TokenLine,TokenChars}}.
 {D}+{IS}?           : {token,{decnum,TokenLine,TokenChars}}.
 
 '		    : {token,{'\'',TokenLine}}.
 
-%% floating point not yet supported!
-%% {D}+{E}{FS}?	      : {token,{flonum,TokenLine,TokenChars}}.
-%% {D}*\.{D}+({E})?{FS}? : {token,{flonum,TokenLine,TokenChars}}.
-%% {D}+\.{D}*({E})?{FS}? : {token,{flonum,TokenLine,TokenChars}}.
 
 %% Varp operators
 <->                 : {token,{'<->',TokenLine}}.

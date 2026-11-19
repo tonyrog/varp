@@ -160,6 +160,8 @@ Encoding and search behaviour:
     --assoc left|right|balanced|none    how all/any are built     (none)
     --carry, --borrow, --overflow       true|false|ignore         (ignore)
     --divz true|false|ignore            divide by zero            (false)
+    --fixpoint <bits>                   fraction bits of a bare /fixpoint
+                                        and of a float literal         (16)
 
 `/` and `%` are unsigned when both operands are unsigned, otherwise
 signed with truncation toward zero as in C: `-13 / 4 == -3` and
@@ -169,6 +171,33 @@ default, a division by zero has no model.  `+`, `-` and `*` are signed
 in the same way as soon as one operand is; the statement form
 `Z = X * Y;` keeps the width of `Z`, the low bits of a wide product or
 the product sign extended.
+
+### Fixed point
+
+A fixed point variable is a two's complement integer read as
+`value / 2^F`:
+
+    declare X:32/fixpoint;        # Q16.16: 16 integer bits, 16 fraction bits
+    declare Y:16/fixpoint(4);     # 16 bits of which 4 are fraction
+    declare Z/fixpoint(8,8);      # 8 integer bits and 8 fraction bits
+    X == 1.5 && Y < X / 3 && Z == floor(X) + 0.25
+
+The fraction width of a bare `/fixpoint` is `--fixpoint`, 16 by default.
+A float literal (`1.5`, `2.5e3`, `1e2`) is a fixed point constant with
+the fraction width of the operand it meets, or `--fixpoint` when it
+meets an integer, so `X * 1.0 / Y` divides two integers in Q16.16.  An
+integer operand is converted exactly, two fixed point operands of
+different widths meet at the wider fraction.  `+ - min max % < == ...`
+work on the scaled integers, `*` drops the low F bits of the product
+(floor), `/` is `(a << F) / b` truncating toward zero like the signed
+integer division, and `& | ^ << >>` act on the raw bits.  `floor(X)`,
+`ceil(X)`, `round(X)` (half up) and `trunc(X)` (toward zero) give an
+integer; assigning a fixed point value to an integer variable without
+one of them is an error.  A model prints the value as a decimal number,
+exact (`X=-1.5`, `Y=0.0625`), `--hex` the raw bits; the trace of `bmc`
+does the same (`formulas/varp/tank_system.varp`).  Everything is built
+from the integer operators, so `--ops lib` (`op_fixmul`, `op_fixdiv`
+over `op_smul`/`op_sdiv`) and `--overflow` apply as for integers.
 
 `--ops lib` builds the arithmetic and comparison operators (`+ - * / %
 min max < <= > >= == != & | ^ ~ << >>`) from the circuits in the

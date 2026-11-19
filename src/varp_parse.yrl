@@ -153,6 +153,10 @@ cpdecl -> pexpr ':' sexpr '/' 'signed'   : {'$1',int,'$3'}.
 cpdecl -> pexpr ':' sexpr '/' 'unsigned' : {'$1',uint,'$3'}.
 cpdecl -> pexpr ':' sexpr                : {'$1',uint,'$3'}.
 cpdecl -> pexpr                          : '$1'.
+%% a:32/fixpoint, a:16/fixpoint(4), a/fixpoint(8,8)
+cpdecl -> pexpr ':' sexpr '/' symbol                  : qualifier('$5', {'$1',uint,'$3'}).
+cpdecl -> pexpr ':' sexpr '/' symbol '(' expr ')'     : qualifier_size('$5', comma_list('$7'), {'$1',uint,'$3'}).
+cpdecl -> pexpr '/' symbol '(' expr ')'               : qualifier_args('$3', comma_list('$5'), '$1').
 
 circuit_defs -> circuit_def : ['$1'].
 circuit_defs -> circuit_defs circuit_def : '$1' ++ ['$2'].
@@ -311,8 +315,13 @@ pdecl -> pexpr                          : '$1'.
 %% symbol table and shows in models
 pdecl -> pexpr ':' sexpr '/' 'signed' '/' symbol   : visible('$7', {'$1',int,'$3'}).
 pdecl -> pexpr ':' sexpr '/' 'unsigned' '/' symbol : visible('$7', {'$1',uint,'$3'}).
-pdecl -> pexpr ':' sexpr '/' symbol                : visible('$5', {'$1',uint,'$3'}).
+pdecl -> pexpr ':' sexpr '/' symbol                : qualifier('$5', {'$1',uint,'$3'}).
 pdecl -> pexpr '/' symbol                          : visible('$3', '$1').
+%% fixed point: "X:32/fixpoint" (half the bits are fraction, see
+%% --fixpoint), "X:16/fixpoint(4)" (4 fraction bits), "X/fixpoint(8,8)"
+%% (8 integer and 8 fraction bits)
+pdecl -> pexpr ':' sexpr '/' symbol '(' expr ')'   : qualifier_size('$5', comma_list('$7'), {'$1',uint,'$3'}).
+pdecl -> pexpr '/' symbol '(' expr ')'             : qualifier_args('$3', comma_list('$5'), '$1').
 
 pdecls -> pdecl : ['$1'].
 pdecls -> pdecls ',' pdecl : '$1'++['$3'].
@@ -350,6 +359,10 @@ oexpr -> pexpr '[' expr ':' expr ':' expr ']'  :
 	     { bitrange, '$1', '$3', '$5', '$7'}.
 oexpr -> pexpr ':' sexpr '/' 'signed'   : {int,'$3','$1'}.
 oexpr -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
+%% "X:32/fixpoint = ...", "X:16/fixpoint(4) = ...".  Not "X/fixpoint(8,8)
+%% = ...": a formula may start with "X / f(1)", that form is declare only
+oexpr -> pexpr ':' sexpr '/' symbol               : oqualifier(qualifier('$5', {'$1',uint,'$3'})).
+oexpr -> pexpr ':' sexpr '/' symbol '(' expr ')'  : oqualifier(qualifier_size('$5', comma_list('$7'), {'$1',uint,'$3'})).
 oexpr -> '!' pexpr                      : {'!', '$2'}.
 
 %%
@@ -357,6 +370,7 @@ oexpr -> '!' pexpr                      : {'!', '$2'}.
 %%
 
 lexpr0 -> integer                   : constant(value('$1')).
+lexpr0 -> flonum                    : flo('$1').   %% a fixed point constant
 lexpr0 -> true                      : true.
 lexpr0 -> false                     : false.
 lexpr0 -> '-' lexpr0                : {lop,'neg', '$2'}.
@@ -482,12 +496,52 @@ oct({octnum,_Line,Val}) -> {const,list_to_integer(Val,8)}.
 hex({hexnum,_Line,"0x"++Val}) -> {const,list_to_integer(Val,16)};
 hex({hexnum,_Line,"0X"++Val}) -> {const,list_to_integer(Val,16)}.
 dec({decnum,_Line,Val}) -> {const,list_to_integer(Val)}.
-flo({flonum,_Line,Val}) ->  {const,list_to_float(Val)}.
+%% 1.5, 2.5e3 and 1e5 (list_to_float wants a point)
+flo({flonum,_Line,Val}) ->
+    case lists:member($., Val) of
+	true -> {const,list_to_float(Val)};
+	false ->
+	    [Mant,Exp] = string:split(Val, "e"),
+	    {const,list_to_float(Mant ++ ".0e" ++ Exp)}
+    end.
 
 visible({symbol,_Ln,<<"visible">>}, Decl) -> {visible, Decl};
 visible({symbol,Ln,Other}, _Decl) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s, "
 				   "expected /signed, /unsigned or /visible", [Other])).
+
+%% /visible or /fixpoint after a size: the fraction width of a bare
+%% /fixpoint is settled when the declaration is built (--fixpoint)
+qualifier({symbol,_Ln,<<"visible">>}, Decl) -> {visible, Decl};
+qualifier({symbol,_Ln,<<"fixpoint">>}, {P,uint,Size}) -> {P,{fix,default},Size};
+qualifier({symbol,Ln,Other}, _Decl) ->
+    return_error(Ln, io_lib:format("unknown declaration qualifier /~s, "
+				   "expected /signed, /unsigned, /fixpoint "
+				   "or /visible", [Other])).
+
+%% X:16/fixpoint(4): the size is given, 4 bits of it are fraction
+qualifier_size({symbol,_Ln,<<"fixpoint">>}, [F], {P,uint,Size}) ->
+    {P,{fix,F},Size};
+qualifier_size({symbol,Ln,Other}, Args, _Decl) ->
+    return_error(Ln, io_lib:format("unknown declaration qualifier /~s/~w",
+				   [Other, length(Args)])).
+
+%% a declaration {P,Type,Size} as the typed left hand side {Type,Size,P}
+%% of an assignment; /visible has no meaning there
+oqualifier({P,Type,Size}) -> {Type,Size,P};
+oqualifier({visible,{{p,_,_},_,_}}) ->
+    return_error(0, "/visible is for declare, not an assignment").
+
+%% X/fixpoint(8,8): 8 integer bits and 8 fraction bits
+qualifier_args({symbol,_Ln,<<"fixpoint">>}, [I,F], P) ->
+    Size = case {I,F} of
+	       {{const,Iv},{const,Fv}} -> Iv+Fv;
+	       _ -> {op,'add',I,F}
+	   end,
+    {P,{fix,F},Size};
+qualifier_args({symbol,Ln,Other}, Args, _P) ->
+    return_error(Ln, io_lib:format("unknown declaration qualifier /~s/~w",
+				   [Other, length(Args)])).
 
 circuit_head(Name, Params) ->
     varp_formula:add_circuit_def({circuit, Name, Params, []}),

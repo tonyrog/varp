@@ -1,0 +1,8 @@
+// a * b in fixed point with f fraction bits, signed: the full product
+// has 2f fraction bits, the low f are dropped (floor), n+m-f bits stay
+circuit op_fixmul(meta f; in a:n/signed, b:m/signed; return r:(n+m-f)/signed)
+{
+    declare p:(n+m)/signed;
+    p = op_smul(a, b);
+    [A i=0..(n+m-f-1)] r[i] = p[i+f];
+}

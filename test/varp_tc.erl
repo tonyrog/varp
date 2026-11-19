@@ -161,6 +161,12 @@ sym_value(undefined) -> undefined;
 sym_value({uint,Vec}) -> vec_value(Vec, false);
 sym_value({int,Vec})  -> vec_value(Vec, true);
 sym_value({bit,Vec})  -> tuple_to_list(Vec);
+%% fix16: a fixed point value as a float, exact for dyadic fractions
+sym_value({T,Vec}) when is_atom(T) ->
+    case atom_to_list(T) of
+	"fix" ++ Ds -> vec_value(Vec, true) / (1 bsl list_to_integer(Ds));
+	_ -> {T,Vec}
+    end;
 sym_value(V) -> V.
 
 %% bit tuples are ascii $0/$1/$* MSB first

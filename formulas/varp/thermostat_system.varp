@@ -1,0 +1,18 @@
+// A thermostat in Q12.4 fixed point, see doc/MODEL_CHECKING.md.
+//
+// With the heater on the temperature rises 0.5 a step, off it falls
+// 0.25; it is kept between 15 and 25.  From 18, 20.25 needs five
+// steps of heating and one of cooling (2a - b = 9): found at k=6.
+//
+//     varp bmc formulas/varp/thermostat_system.varp
+
+system thermostat {
+    state T(time):16/fixpoint(4);
+    input heat;
+
+    init   T == 18;
+    next   'T == T + (heat ? 0.5 : -0.25);
+    assume T >= 15 and T <= 25;
+
+    reach  T == 20.25;
+}

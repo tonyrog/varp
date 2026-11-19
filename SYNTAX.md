@@ -41,6 +41,18 @@ Integer variables may also be declared like:
 Integer variables are infact boolean variable vectors and integer values
 are boolean constant vectors and may be used as such.
 
+# Fixed point
+
+A fixed point variable is a signed integer read as value / 2^F:
+
+    declare X:32/fixpoint;        Q16.16, F is --fixpoint (16)
+    declare Y:16/fixpoint(4);     16 bits, 4 of them fraction
+    declare Z/fixpoint(8,8);      8 integer bits, 8 fraction bits
+
+Float literals (1.5, 2.5e3, 1e2) are fixed point constants.  The
+integer operators and comparisons apply; * and / rescale; floor(X),
+ceil(X), round(X) and trunc(X) give an integer.  See README.md.
+
 # Integer operators
 
 	*    integer multiplication

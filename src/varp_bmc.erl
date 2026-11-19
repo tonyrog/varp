@@ -662,14 +662,15 @@ constants(Model, Times) ->
 	  maps:get(Name, Times, undefined) =:= constant,
 	  Args =/= [] orelse true].
 
-value({_Var, {_Type, Bits}}) -> bits_to_string(Bits);
+%% a vector by its type: signed as signed, fixed point as a decimal
+value({_Var, {Type, Bits}}) -> bits_to_string(Type, Bits);
 value(false) -> "-".
 
-bits_to_string(Bits) ->
+bits_to_string(Type, Bits) ->
     L = tuple_to_list(Bits),
     case lists:member($*, L) of
 	true -> L;
-	false -> integer_to_list(list_to_integer(L, 2))
+	false -> lists:flatten(varp_format:format_vec(Type, Bits))
     end.
 
 var_name({p,Name,[]}) -> binary_to_list(Name);
@@ -694,7 +695,7 @@ format_trace(Model, Times, Inputs) ->
     [Header0 | format_rows(Vectors, Rows)].
 
 value_suffix(true) -> "";
-value_suffix({_T,Bits}) -> "=" ++ bits_to_string(Bits);
+value_suffix({T,Bits}) -> "=" ++ bits_to_string(T, Bits);
 value_suffix(_) -> "".
 
 format_rows(Vectors, Rows) ->

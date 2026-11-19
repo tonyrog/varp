@@ -1,0 +1,20 @@
+// A leaky tank in fixed point (Q16.16), see doc/MODEL_CHECKING.md.
+//
+// Half the water runs out every step and a fill adds 3 litres, so the
+// level climbs 0, 3, 4.5, 5.25, 5.625, ... toward 6 without reaching
+// it: the invariant holds for every bound, the reach is found at k=6.
+//
+//     varp bmc formulas/varp/tank_system.varp
+//     varp bmc --property tank_reach formulas/varp/tank_system.varp
+
+system tank {
+    state L(time):32/fixpoint;
+    input fill;
+
+    init  L == 0;
+
+    next  'L == (fill ? L * 0.5 + 3.0 : L * 0.5);
+
+    invariant L < 6.0;
+    reach L > 5.9;
+}

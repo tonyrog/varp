@@ -1,0 +1,10 @@
+// a / b in fixed point with f fraction bits, signed: (a << f) / b with
+// the signed division, truncating toward zero; r is the remainder of
+// that division, in raw units.  b == 0 as in op_sdiv.
+circuit op_fixdiv(meta f; in a:n/signed, b:m/signed; return q:(n+f+1)/signed; out r:m/signed)
+{
+    declare A:(n+f)/signed;
+    [A i=0..(n+f-1), i<f]  A[i] = false;
+    [A i=0..(n+f-1), i>=f] A[i] = a[i-f];
+    q = op_sdiv(A, b, r);
+}
