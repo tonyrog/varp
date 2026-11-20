@@ -180,7 +180,10 @@ Encoding and search behaviour:
 `X << K` and `X >> K` with a constant `K` widen or narrow the vector;
 with a variable `K` they are a barrel shifter that keeps the width of
 `X` (the bits that leave are gone, an amount of the width or more gives
-zero, or the sign for a signed `>>`), and `K` is read as unsigned.
+zero, or the sign for a signed `>>`), and `K` is read as unsigned.  A
+constant has only the bits its value needs, so `1 << K` gets the bits
+`K` can reach, at most 64, and `Z = X << K;` widens `X` to `Z` first,
+as C promotes before it shifts.
 
 `/` and `%` are unsigned when both operands are unsigned, otherwise
 signed with truncation toward zero as in C: `-13 / 4 == -3` and

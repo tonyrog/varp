@@ -391,7 +391,8 @@ shl(Vp,A,B) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
-		  vshift_var(Vp,left,At,An,Ax,varg(B));
+		  {An1,Ax0} = vshift_room(At,An,Ax,vconst(A),varg(B),0),
+		  vshift_var(Vp,left,At,An1,Ax0,varg(B));
 	     K >=0 ->
 		  vshift_left(K,Ax);
 	     At =:= int ->
@@ -401,13 +402,25 @@ shl(Vp,A,B) ->
 	  end,
     normalize(At,Ax1).
 
+%% the width of a variable left shift: a vector keeps its width (C),
+%% but a constant has only the bits its value needs, so "1 << Y" gets
+%% the bits the amount can reach, at most 64; a target (Z = X << Y)
+%% widens the vector to its own width first, as C promotes
+vshift_room(At,An,Ax,Const,{_Bt,Bn,_Bx},Xn) ->
+    Reach = if is_integer(Const) -> erlang:min(An + (1 bsl Bn) - 1, 64);
+	       true -> 0
+	    end,
+    An1 = lists:max([An, Reach, Xn]),
+    {An1, vextend(At,Ax,An,An1)}.
+
 shl(Vp,undefined,A,B) -> shl(Vp,A,B);
 shl(Vp,X,A,B) ->
     {Xt,Xn,_Xx} = varg(X),
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
-		  vshift_var(Vp,left,At,An,Ax,varg(B));
+		  {An1,Ax0} = vshift_room(At,An,Ax,vconst(A),varg(B),Xn),
+		  vshift_var(Vp,left,At,An1,Ax0,varg(B));
 	     K >=0 ->
 		  vshift_left(K,Ax);
 	     At =:= int ->

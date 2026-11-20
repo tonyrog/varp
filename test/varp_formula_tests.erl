@@ -224,7 +224,16 @@ variable_shift_test() ->
     ?assertEqual(0,  v("declare X:8, K:4, Z:8; X == 0xff && K == 9 && Z == X << K", "Z")),
     ?assertEqual(-1, v("declare X:8/signed, K:4, Z:8/signed; X == -1 && K == 12 && Z == X >> K", "Z")),
     ?assertEqual(3,  v("declare X:8, K:3; (X << K) == 40 && X < 10 && K > 0", "K")),
-    ?assertEqual(640, v("declare X:8, Z:16; X == 5 && Z == X << 7", "Z")).
+    ?assertEqual(640, v("declare X:8, Z:16; X == 5 && Z == X << 7", "Z")),
+    %% a constant gets the bits the amount can reach, a target widens first
+    ?assertEqual(128, v("declare Y:16, Z:32; Y == 7 && Z == (1 << Y)", "Z")),
+    ?assertEqual(8, varp_tc:count("declare Y:16, Z:32; (Y < 8) && (Z == (1 << Y)) && (Z <= 256)")),
+    ?assertEqual(128, v("declare Y:16, Z:32; Z = 1 << Y; Y == 7", "Z")),
+    ?assertEqual(640, v("declare X:8, K:4, Z:16; Z = X << K; X == 5 && K == 7", "Z")),
+    ?assertEqual(128, v("declare X:8, K:4, Z:8; X == 5 && K == 7 && Z == X << K", "Z")),   %% 640 in 8 bits
+    ?assertEqual(-128, v("declare Y:3, Z:8/signed; Y == 7 && Z == (-1 << Y)", "Z")),
+    ?assertEqual(1, varp_tc:count("declare Y:8, Z:64; Y == 63 && Z == (1 << Y)")),
+    ?assertEqual(0, varp_tc:count("declare Y:8, Z:64; Y == 64 && Z == (1 << Y) && Z != 0")).
 
 %% signed division truncates toward zero, the remainder has the sign of
 %% the dividend (C, Erlang div/rem); a signed operand makes it signed
