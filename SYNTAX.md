@@ -50,8 +50,9 @@ A fixed point variable is a signed integer read as value / 2^F:
     declare Z/fixpoint(8,8);      8 integer bits, 8 fraction bits
 
 Float literals (1.5, 2.5e3, 1e2) are fixed point constants.  The
-integer operators and comparisons apply; * and / rescale; floor(X),
-ceil(X), round(X) and trunc(X) give an integer.  See README.md.
+integer operators and comparisons apply; * and / rescale; sqrt(X)
+rounds down; floor(X), ceil(X), round(X) and trunc(X) give an integer.
+See README.md.
 
 # Floating point
 
@@ -63,7 +64,7 @@ IEEE 754 with inf, NaN and subnormals (--ftz flushes tiny results):
     declare W:32/float, V/float;  fixed or floating point as --float says
 
 Literals (and inf), comparisons (NaN is unordered), -X, abs, min, max,
-?:, + - * /, isnan(X), isinf(X) and the conversions to and from integers
+?:, + - * /, sqrt(X), fma(A, B, C), isnan(X), isinf(X) and the conversions to and from integers
 and fixed point; --inf, --nan, --underflow and --fdivz say whether inf,
 NaN, a tiny inexact result and a division by zero may arise.  See
 README.md.

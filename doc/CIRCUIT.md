@@ -263,6 +263,9 @@ is loaded the first time its name is used:
 | `op_fmul(meta e, m, z; a, b:(1+e+m); out over, under, nan)` | `a * b` float754 | `1+e+m` |
 | `op_fadd(meta e, m, z; a, b:(1+e+m); out over, under, nan)` | `a + b`, `a - b` float754 | `1+e+m` |
 | `op_fdiv(meta e, m, z; a, b:(1+e+m); out over, under, nan, divz)` | `a / b` float754 | `1+e+m` |
+| `op_fsqrt(meta e, m; a:(1+e+m); out nan)` | `sqrt(a)` float754 | `1+e+m` |
+| `op_ffma(meta e, m, z; a, b, c:(1+e+m); out over, under, nan)` | `fma(a, b, c)` float754 | `1+e+m` |
+| `op_isqrt(meta k; a:(2k); out r:(k+3))` | `sqrt(a)` integer, fixed point | `k`, floor, remainder in `r` |
 
 The float754 circuits are IEEE 754 with round to nearest even and
 subnormals; `z` is `--ftz`, the out flags carry `--inf`, `--underflow`,

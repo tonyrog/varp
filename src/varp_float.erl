@@ -18,6 +18,7 @@
 -export([mul_bits/4, add_bits/4, div_bits/4, inf_bits/3, nan_bits/2]).
 -export([mul_bits/5, add_bits/5, div_bits/5]).
 -export([mul_fold/5, add_fold/5, div_fold/5]).
+-export([sqrt_bits/3, fma_bits/5, fma_bits/6, fma_fold/6]).
 
 -type mode() :: ieee | ftz.
 
@@ -276,6 +277,69 @@ div_fold(A, B, E, M, Mode) ->
 		      end,
 	    I = if S =:= 1 -> -Q; true -> Q end,
 	    fold_result(encode_status(I, Sha - Shb - K1, E, M, Mode), S, E, M)
+    end.
+
+%% sqrt(a) on a bit pattern: IEEE for NaN, inf and zero (-0 is -0, a
+%% negative number is NaN), the exact root rounded otherwise: the
+%% exponent is made even, the integer root is taken with enough bits
+%% and a nonzero remainder is the sticky bit.  The result is never
+%% tiny or above the range, so there is no mode.
+sqrt_bits(A, E, M) ->
+    case value(A, E, M) of
+	nan -> nan_bits(E, M);
+	{zero,S} -> S bsl (E+M);
+	{inf,0} -> inf_bits(0, E, M);
+	{inf,1} -> nan_bits(E, M);
+	{1,_,_} -> nan_bits(E, M);
+	{0,I,Sh} ->
+	    {I1,Sh1} = if Sh rem 2 =/= 0 -> {I bsl 1, Sh-1};
+			  true -> {I, Sh}
+		       end,
+	    K = M + 4 + bit_length(I1),
+	    N = I1 bsl (2*K),
+	    Q = varp_math:isqrt(N),
+	    {Q1,Sh2} = if Q*Q =:= N -> {Q, Sh1 div 2 - K};
+			  true -> {(Q bsl 1) bor 1, Sh1 div 2 - K - 1}
+		       end,
+	    {ok,Bits} = encode_scaled(Q1, Sh2, E, M),
+	    Bits
+    end.
+
+%% a * b + c with one rounding: IEEE for NaN, inf and zero, the exact
+%% value rounded otherwise (subnormal or zero below the range as Mode
+%% says, inf_bits above).  An exact zero sum is +0 unless both the
+%% product and c are zeros of the same sign.
+fma_bits(A, B, C, E, M) -> fma_bits(A, B, C, E, M, ieee).
+fma_bits(A, B, C, E, M, Mode) -> element(1, fma_fold(A, B, C, E, M, Mode)).
+
+fma_fold(A, B, C, E, M, Mode) ->
+    Va = value(A, E, M), Vb = value(B, E, M), Vc = value(C, E, M),
+    Sp = sign_of(Va) bxor sign_of(Vb),
+    NaN = {nan_bits(E, M), false},
+    case {Va, Vb, Vc} of
+	{nan,_,_} -> NaN;
+	{_,nan,_} -> NaN;
+	{_,_,nan} -> NaN;
+	{{inf,_},{zero,_},_} -> NaN;
+	{{zero,_},{inf,_},_} -> NaN;
+	{{inf,_},_,{inf,Sc}} when Sc =/= Sp -> NaN;
+	{_,{inf,_},{inf,Sc}} when Sc =/= Sp -> NaN;
+	{{inf,_},_,_} -> {inf_bits(Sp, E, M), false};
+	{_,{inf,_},_} -> {inf_bits(Sp, E, M), false};
+	{_,_,{inf,Sc}} -> {inf_bits(Sc, E, M), false};
+	{{zero,_},_,{zero,Sc}} -> {(Sp band Sc) bsl (E+M), false};
+	{_,{zero,_},{zero,Sc}} -> {(Sp band Sc) bsl (E+M), false};
+	_ ->
+	    {Ia,Sha} = signed_scaled(Va),
+	    {Ib,Shb} = signed_scaled(Vb),
+	    {Ic,Shc} = signed_scaled(Vc),
+	    Sh = erlang:min(Sha+Shb, Shc),
+	    I = ((Ia*Ib) bsl (Sha+Shb-Sh)) + (Ic bsl (Shc-Sh)),
+	    if I =:= 0 -> {0, false};
+	       true ->
+		    fold_result(encode_status(I, Sh, E, M, Mode),
+				if I < 0 -> 1; true -> 0 end, E, M)
+	    end
     end.
 
 signed_scaled({zero,_}) -> {0, 0};

@@ -524,6 +524,110 @@ underflow_test_() ->
 	?assertEqual(1, counts(D ++ "Z = X * Y; X == 1.5 && Y == 2.5", F#{underflow => false}))
       end}}].
 
+%% sqrt: every float754(3,2) pattern against varp_float:sqrt_bits,
+%% builtin and library, binary32 against math:sqrt (exact for it:
+%% 53 >= 2*24+2), the special values and the literal
+sqrt_test_() ->
+    D = "declare X:32/float754, Y:32/float754; ",
+    Exh = fun(Opts) ->
+		  {_, Ms, _} = varp_tc:run("declare X/float754(3,2), Y/float754(3,2); Y = sqrt(X); true",
+					   [{satisfy,[]},{backjump,[{max,0}]}], Opts),
+		  {length(Ms), [{A,Y} || M <- Ms, A <- [bits(M, <<"X">>)], Y <- [bits(M, <<"Y">>)],
+				      Y =/= varp_float:sqrt_bits(A, 3, 2)]}
+	  end,
+    [{"exhaustive", {timeout, 300, fun() ->
+	?assertEqual({64, []}, Exh(#{})),
+	?assertEqual({64, []}, Exh(#{ops => lib})) end}},
+     {"binary32 against math:sqrt", {timeout, 600, fun() ->
+	[begin
+	     Want = f32(math:sqrt(f32(V))),
+	     ?assertEqual({V,Want}, {V,vbj(D ++ "Y = sqrt(X); X == " ++ float_to_list(V, [short]), "Y", #{})}),
+	     <<B:32>> = <<V:32/float>>,
+	     ?assertEqual({V,Want}, {V,varp_float:to_float(varp_float:sqrt_bits(B, 8, 23), 8, 23)})
+	 end || V <- [2.0, 2.25, 0.1, 123456.789, 1.0e-30, 3.0e38, 1.0000001, 0.5,
+		      1.0e-40, 7.0e-46, 1.1754944e-38]],
+	?assertEqual(f32(math:sqrt(2.0)), vbj(D ++ "Y = sqrt(X); X == 2", "Y", #{ops => lib})) end}},
+     {"special values and the literal", {timeout, 300, fun() ->
+	?assertEqual(1, counts(D ++ "Y = sqrt(X); X == -1 && isnan(Y)")),
+	?assertEqual(0, counts(D ++ "Y = sqrt(X); X == -1", #{nan => false})),
+	?assertEqual(-0.0, vbj(D ++ "Y = sqrt(X); X == -0.0 && Y <= 0", "Y", #{})),
+	?assertEqual(1, counts(D ++ "Y = sqrt(X); X == inf && isinf(Y)")),
+	?assertEqual(1, counts(D ++ "Y = sqrt(X); X == -inf && isnan(Y)")),
+	%% a meta argument is the meta function, a literal
+	?assertEqual(4.0, v("declare X:32/float754; X == sqrt(16)", "X")),
+	?assertEqual(f32(math:sqrt(2)), v("declare X:32/float754; X == sqrt(2)", "X")),
+	?assertEqual(f32(math:sqrt(2)), v("declare X:32/float754; X == sqrt(2.0)", "X")),
+	?assertError({sqrt_negative,_}, varp_tc:models("declare X:32/float754; X == sqrt(-2.0)")) end}}].
+
+%% fma: every triple of float754(2,1) against varp_float:fma_fold,
+%% builtin and library in both modes, a sample of float754(3,2)
+%% triples, binary32 cases (the rounding error of a product is exact)
+%% and the special values
+fma_test_() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754, R:32/float754; ",
+    Exh = fun(Opts) ->
+		  {_, Ms, _} = varp_tc:run("declare X/float754(2,1), Y/float754(2,1), Z/float754(2,1), R/float754(2,1); R = fma(X, Y, Z); true",
+					   [{satisfy,[]},{backjump,[{max,0}]}], Opts),
+		  Mode = case maps:get(ftz, Opts, false) of true -> ftz; false -> ieee end,
+		  {length(Ms), [{A,B,C,R} || M <- Ms, A <- [bits(M, <<"X">>)], B <- [bits(M, <<"Y">>)],
+					  C <- [bits(M, <<"Z">>)], R <- [bits(M, <<"R">>)],
+					  R =/= varp_float:fma_bits(A, B, C, 2, 1, Mode)]}
+	  end,
+    [{"exhaustive float754(2,1)", {timeout, 900, fun() ->
+	?assertEqual({4096, []}, Exh(#{})),
+	?assertEqual({4096, []}, Exh(#{ftz => true})),
+	?assertEqual({4096, []}, Exh(#{ops => lib})),
+	?assertEqual({4096, []}, Exh(#{ops => lib, ftz => true})) end}},
+     {"a sample of float754(3,2) triples", {timeout, 900, fun() ->
+	rand:seed(exsss, {3, 2, 1}),
+	%% finite patterns only, as decimal literals (exact for (3,2))
+	Fin = [B || B <- lists:seq(0, 63), (B band 16#1c) =/= 16#1c],
+	Lit = fun(B) -> varp_float:format(B, 3, 2) end,
+	[begin
+	     A = lists:nth(rand:uniform(length(Fin)), Fin),
+	     B = lists:nth(rand:uniform(length(Fin)), Fin),
+	     C = lists:nth(rand:uniform(length(Fin)), Fin),
+	     T = "declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2), R/float754(3,2); "
+		 "X = " ++ Lit(A) ++ "; Y = " ++ Lit(B) ++ "; Z = " ++ Lit(C) ++ "; R = fma(X, Y, Z); true",
+	     {_, [M|_], _} = varp_tc:run(T, [{satisfy,[]},{backjump,[]}]),
+	     ?assertEqual({A,B,C,varp_float:fma_bits(A, B, C, 3, 2)}, {A,B,C,bits(M, <<"R">>)})
+	 end || _ <- lists:seq(1, 120)] end}},
+     {"binary32", {timeout, 600, fun() ->
+	?assertEqual(4.0, vbj(D ++ "R = fma(X, Y, Z); X == 1.5 && Y == 2.5 && Z == 0.25", "R", #{})),
+	%% the rounding error of a product, exactly: (1+2^-23)^2 - (1+2^-22)
+	Err = math:pow(2, -46),
+	?assertEqual(Err, vbj(D ++ "R = fma(X, Y, -Z); X == 1.0000001 && Y == 1.0000001 && Z == X * Y", "R", #{})),
+	?assertEqual(Err, vbj(D ++ "R = fma(X, Y, -Z); X == 1.0000001 && Y == 1.0000001 && Z == X * Y", "R", #{ops => lib})),
+	%% a single rounding: 1 * 1 + 1e30 is 1e30, the product only sticky
+	?assertEqual(f32(1.0e30), vbj(D ++ "R = fma(X, Y, Z); X == 1 && Y == 1 && Z == 1.0e30", "R", #{})),
+	%% a tiny product survives into the sum, a subnormal result
+	?assertEqual(f32(1.0e-40), vbj(D ++ "R = fma(X, Y, Z); X == 1.0e-20 && Y == 1.0e-20 && Z == 0", "R", #{})),
+	?assertEqual(f32(f32(1.0e-39) + f32(1.0e-40)), vbj(D ++ "R = fma(X, Y, Z); X == 1.0e-20 && Y == 1.0e-20 && Z == 1.0e-39", "R", #{})),
+	%% an exact zero difference is +0, a zero product keeps its sign with a zero addend
+	?assertEqual(0.0, vbj(D ++ "R = fma(X, Y, Z); X == 2 && Y == 3 && Z == -6 && R >= 0", "R", #{})),
+	?assertEqual(-0.0, vbj(D ++ "R = fma(X, Y, Z); X = -0.0; Y = 2.0; Z = -0.0; R <= 0", "R", #{})),
+	?assertEqual(0.0, vbj(D ++ "R = fma(X, Y, Z); X = -0.0; Y = 2.0; Z = 0.0; R >= 0", "R", #{})),
+	%% the flags
+	?assertEqual(1, counts(D ++ "R = fma(X, Y, Z); X == 1.0e20 && Y == 1.0e20 && Z == -1 && R == inf")),
+	?assertEqual(0, counts(D ++ "R = fma(X, Y, Z); X == 1.0e20 && Y == 1.0e20 && Z == -1", #{inf => false})),
+	?assertEqual(0, counts(D ++ "R = fma(X, Y, Z); X == 1.0e-20 && Y == 1.0e-20 && Z == 0", #{underflow => false})),
+	?assertEqual(0.0, vbj(D ++ "R = fma(X, Y, Z); X == 1.0e-20 && Y == 1.0e-20 && Z == 0", "R", #{ftz => true})) end}},
+     {"special values", {timeout, 600, fun() ->
+	?assertEqual(1, counts(D ++ "Y = 0.0; R = fma(X, Y, Z); X == inf && Z == 1 && isnan(R)")),
+	?assertEqual(1, counts(D ++ "R = fma(X, Y, Z); X == inf && Y == 1 && Z == -inf && isnan(R)")),
+	?assertEqual(1, counts(D ++ "R = fma(X, Y, Z); X == inf && Y == 1 && Z == inf && R == inf")),
+	?assertEqual(1, counts(D ++ "R = fma(X, Y, Z); X == inf && Y == -1 && Z == 1 && R == -inf")),
+	?assertEqual(1, counts(D ++ "R = fma(X, Y, Z); X == 1 && Y == 1 && Z == -inf && R == -inf")),
+	?assertEqual(0, counts(D ++ "Y = 0.0; R = fma(X, Y, Z); X == inf && Z == 1", #{nan => false})),
+	%% (one model: every NaN pattern is one, do not enumerate them)
+	{0, Out1} = varp_tc:cli(["--print","model","-f", D ++ "Z = X * X; R = fma(X, X, -Z); isnan(X)", "sat","bj"]),
+	?assertNotEqual(nomatch, string:find(Out1, "R=nan")),
+	%% an operator or a call in an argument builds now
+	{0, Out2} = varp_tc:cli(["--print","model","-f", "declare Z:32/float754; isnan(min(Z, Z))", "sat","bj"]),
+	?assertNotEqual(nomatch, string:find(Out2, "Z=nan")),
+	?assertEqual(0, counts("declare Z:32/float754; isnan(min(Z, Z)) && Z == 1")),
+	?assertEqual(f32(1.0e30), vbj(D ++ "R = fma(X + 1, Y, Z); X == 0 && Y == 1 && Z == 1.0e30", "R", #{})) end}}].
+
 %% the circuit library: op_fmul, op_fadd and op_fdiv over op_fnorm,
 %% op_fpack, op_fresult and op_fclass, every pair of float754(3,2) in
 %% both modes against the references, and the flags

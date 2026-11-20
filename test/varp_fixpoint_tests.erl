@@ -117,6 +117,31 @@ lib_test_() ->
      {"add and compare", {timeout, 120, fun() ->
 	?assertEqual(3.75, v(D ++ "X == 1.5 && Y == 2.25 && Z == X + Y && Z > X", "Z", L)) end}}].
 
+%% sqrt in fixed point: floor(sqrt(v)) with the same fraction width,
+%% a negative operand has no model, an integer operand is --fixpoint
+sqrt_test_() ->
+    D = "declare Q:32/fixpoint, R:32/fixpoint; ",
+    [{"values", {timeout, 300, fun() ->
+	?assertEqual(1.5, v(D ++ "R = sqrt(Q); Q == 2.25", "R")),
+	?assertEqual(92681/65536, v(D ++ "R = sqrt(Q); Q == 2", "R")),
+	?assertEqual(92681/65536, v(D ++ "R = sqrt(Q); Q == 2", "R", #{ops => lib})),
+	?assertEqual(92681/65536, v("declare N:8, R:32/fixpoint; R = sqrt(N); N == 2", "R")),
+	?assertEqual(0, varp_tc:count(D ++ "R = sqrt(Q); Q == -2")),
+	?assertError({sqrt_negative,_}, varp_tc:models(D ++ "R == sqrt(-2.25)")),
+	%% every Q4.2 value, builtin and library
+	Want = [{Q, varp_math:isqrt(Q bsl 2)} || Q <- lists:seq(0, 31)],
+	Got = fun(Opts) ->
+		      {_, Ms, _} = varp_tc:run("declare Q:6/fixpoint(2), R:6/fixpoint(2); R = sqrt(Q); true",
+					       [{satisfy,[]},{backjump,[{max,0}]}], Opts),
+		      lists:sort([{raw(M, <<"Q">>), raw(M, <<"R">>)} || M <- Ms])
+	      end,
+	?assertEqual(Want, Got(#{})),
+	?assertEqual(Want, Got(#{ops => lib})) end}}].
+
+raw(M, Name) ->
+    {_,{_,Vec}} = lists:keyfind({p,Name,[]}, 1, M),
+    list_to_integer(tuple_to_list(Vec), 2).
+
 %% a circuit parameter can be fixed point
 circuit_test() ->
     T = "circuit half(in a:32/fixpoint; return r:32/fixpoint) { r = a / 2; }\n"

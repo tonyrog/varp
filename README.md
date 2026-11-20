@@ -215,7 +215,10 @@ work on the scaled integers, `*` drops the low F bits of the product
 integer division, and `& | ^ << >>` act on the raw bits.  `floor(X)`,
 `ceil(X)`, `round(X)` (half up) and `trunc(X)` (toward zero) give an
 integer; assigning a fixed point value to an integer variable without
-one of them is an error.  A model prints the value as a decimal number,
+one of them is an error.  `sqrt(X)` is the root rounded down with the
+same fraction width (an integer operand gets `--fixpoint`), a negative
+operand has no model; `sqrt(2)` of a constant is the meta function, a
+literal.  A model prints the value as a decimal number,
 exact (`X=-1.5`, `Y=0.0625`), `--hex` the raw bits; the trace of `bmc`
 does the same (`formulas/varp/tank_system.varp`).  Everything is built
 from the integer operators, so `--ops lib` (`op_fixmul`, `op_fixdiv`
@@ -241,7 +244,10 @@ range is rounded to a subnormal (gradual underflow) and a literal above
 the range is an error.
 Rounding is to nearest even.  There are the type, the literals, the
 comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:`, `+ - * /`,
-and the conversions: an integer or fixed point operand that meets a float
+`sqrt(X)` (correctly rounded; `-0.0` stays, a negative number is NaN),
+`fma(A, B, C)` (`A * B + C` with one rounding, so `fma(X, Y, -Z)` with
+`Z == X * Y` is the exact rounding error of the product), and the
+conversions: an integer or fixed point operand that meets a float
 becomes a float, `floor ceil round trunc` give an integer, a float
 assigned to a fixed point variable is truncated toward zero, and
 assigning one to an integer variable is an error.  A result that
@@ -301,9 +307,9 @@ binary32 cannot hold it exactly.  `--ftz true` is flush to zero, what
 many DSPs and NEON in its default mode do: a tiny result, literal or
 converted value becomes zero (with its sign), and every tiny nonzero
 result is then an underflow.  Operands are still read as IEEE does.
-Under `--ops lib` the three operations are the library circuits
-`op_fmul`, `op_fadd` and `op_fdiv` (`doc/CIRCUIT.md`), with the flags as
-out parameters; `varp_float754_tests:float_lib_test_` checks them
+Under `--ops lib` the operations are the library circuits `op_fmul`,
+`op_fadd`, `op_fdiv`, `op_fsqrt` and `op_ffma` (`doc/CIRCUIT.md`), with
+the flags as out parameters; `varp_float754_tests:float_lib_test_` checks them
 against the same references, every pair of `float754(3,2)`.
 
 ### /float: one declaration, either format

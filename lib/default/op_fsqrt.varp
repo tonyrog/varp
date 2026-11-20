@@ -1,0 +1,44 @@
+// sqrt(a) in float754 (e, m), round to nearest even: the significand
+// normalised, the unbiased exponent made even by doubling the
+// significand and halved for the result, the integer root of the
+// significand scaled by 2^(m+2) gives lead, fraction and guard, a
+// nonzero remainder is the sticky bit (a root is never a tie).  The
+// result is never tiny or above the range.  -0 is -0; a negative
+// number, -inf and NaN give NaN (nan feeds --nan), +inf gives inf.
+circuit op_fsqrt(meta e, m; in a:(1+e+m); return r:(1+e+m); out nan)
+{
+    declare S, H, EX0:e, SIG:(m+1), SIGN:(m+1), LZ:(ilog2(m)+1), E1:e;
+    declare EU:(e+2)/signed, ISODD, ODDB:1, EH0:(e+2)/signed, EH:(e+2)/signed, EB:(e+3)/signed;
+    declare N2:(m+2), N:(2*m+4), Q:(m+2), REM:(m+5), RNZ, UP, UPV:1, MX:(e+m), R0:(e+m+1);
+    declare ZA, IA, NA, NEG0, MAG:(e+m);
+    S = a[e+m];
+    [A i=0..(e-1)] EX0[i] = a[m+i];
+    H = (EX0 != 0);
+    [A i=0..(m-1)] SIG[i] = a[i];
+    SIG[m] = H;
+    SIGN = op_fnorm(m+1, SIG, LZ);
+    E1[0] = EX0[0] | !H;
+    [A i=1..(e-1)] E1[i] = EX0[i];
+    EU = E1 - LZ - ((1<<(e-1))-1);
+    ISODD = EU[0];
+    ODDB[0] = ISODD;
+    EH0 = EU - ODDB;
+    [A i=0..e] EH[i] = EH0[i+1];
+    EH[e+1] = EH0[e+1];
+    EB = EH + ((1<<(e-1))-1);
+    [A i=0..(m+1)] N2[i] = ISODD ? SIGN[i-1] : SIGN[i];
+    [A i=0..(m+1)] N[i] = false;
+    [A i=0..(m+1)] N[m+2+i] = N2[i];
+    Q = op_isqrt(m+2, N, REM);
+    RNZ = (REM != 0);
+    UP = Q[0] & (RNZ | Q[1]);
+    [A i=0..(m-1)] MX[i] = Q[i+1];
+    [A i=0..(e-1)] MX[m+i] = EB[i];
+    UPV[0] = UP;
+    R0 = MX + UPV;
+    [A i=0..(e+m-1)] MAG[i] = R0[i];
+    NA = op_fclass(e, m, a, ZA, IA);
+    NEG0 = S & !ZA;
+    nan = NA | NEG0;
+    r = op_fresult(e, m, MAG, ZA, IA, nan, S);
+}

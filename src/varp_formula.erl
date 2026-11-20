@@ -824,6 +824,14 @@ bld(X,false,Bs) -> set(X,{bool,?F},Bs);
 bld(X,{literal,Y}, Bs) when is_integer(Y) -> set(X,{bool,Y},Bs); %% FIXME???
 %% The clauses below produce a value of their own and ignore the
 %% assignment target, build_assign/3 ties the two together.
+%% a function argument is parsed as a meta expression: an operator or
+%% a call in one builds like the formula form, fma(X, Y, -Z)
+bld(X,{op,Op,A,B}, Bs) when is_atom(Op), Op =/= ',' ->
+    bld(X,{lop,Op,A,B}, Bs);
+bld(X,{op,Op,A}, Bs) when is_atom(Op) ->
+    bld(X,{lop,Op,A}, Bs);
+bld(X,{call,F,As}, Bs) when is_binary(F) ->
+    bld(X,{p,F,As}, Bs);
 bld(_X,V,Bs) when is_binary(V) -> %% variable (and meta)
     Arity = 0,
     case varp:find_decl(V,Bs#bs.decls,icase(Bs)) of
@@ -880,6 +888,33 @@ bld(X,{p,F,[A]}, Bs) when F =:= <<"isnan">>; F =:= <<"isinf">> ->
 		  _ -> {{bool,?F}, Bs1}
 	      end,
     set(X, V, Bs2);
+%% sqrt(X): the meta function when the argument is a meta expression
+%% (sqrt(2) is a literal), else the float754 or fixed point root
+bld(X,{p,<<"sqrt">>,[A]}, Bs) ->
+    try eval_meta(A, Bs) of
+	V when is_number(V), V >= 0 -> bld(X, {const,math:sqrt(V)}, Bs);
+	V when is_number(V) -> error({sqrt_negative, V});
+	V -> error({sqrt_argument, V})
+    catch
+	error:{unbound,_} ->   %% a variable: the circuit
+	    {Y,Bs1} = bld(A, Bs),
+	    {V1,Bs2} = sqrt_op(Y, Bs1),
+	    set(X, V1, Bs2)
+    end;
+%% fma(A, B, C): a*b + c in float754 with one rounding
+bld(X,{p,<<"fma">>,[A,B,C]}, Bs) ->
+    {Ya,Bs1} = bld(A, Bs),
+    {Yb,Bs2} = bld(B, Bs1),
+    {Yc,Bs3} = bld(C, Bs2),
+    T = case [V || V={{float,_,_},_,_} <- [Ya,Yb,Yc]] of
+	    [] -> error({fma_float754_only, [Ya,Yb,Yc]});
+	    [V1|_] -> float_type(V1, V1)
+	end,
+    {Af,Bs4} = to_float(Ya, T, Bs3),
+    {Bf,Bs5} = to_float(Yb, T, Bs4),
+    {Cf,Bs6} = to_float(Yc, T, Bs5),
+    {V,Bs7} = float_fma(Af, Bf, Cf, T, Bs6),
+    set(X, V, Bs7);
 %% fixed point to integer
 bld(X,{p,F,[A]}, Bs) when F =:= <<"floor">>; F =:= <<"ceil">>;
 			  F =:= <<"round">>; F =:= <<"trunc">> ->
@@ -1527,6 +1562,8 @@ circuit_rename(X, _Env, _Prefix, _Defs, _Meta) ->
 
 %% the arithmetic functions bld/3 knows: not locals of a circuit body
 builtin_function(<<"abs">>, 1) -> true;
+builtin_function(<<"sqrt">>, 1) -> true;
+builtin_function(<<"fma">>, 3) -> true;
 builtin_function(<<"min">>, 2) -> true;
 builtin_function(<<"max">>, 2) -> true;
 builtin_function(<<"floor">>, 1) -> true;
@@ -3582,6 +3619,257 @@ float_div(Af, Bf, T={float,E,M}, Bs) ->
     end.
 
 fneg(V={T,N,Xs}) -> {T,N,lists:droplast(Xs) ++ [neg_lit(fsign(V))]}.
+
+%% sqrt of a float, a fixed point value, an integer (fixed point with
+%% --fixpoint fraction bits, like a float literal that meets one) or a
+%% literal
+sqrt_op({flo,V}, Bs) when is_number(V), V >= 0 ->
+    {{flo,math:sqrt(V)}, Bs};
+sqrt_op({flo,inf}, Bs) ->
+    {{flo,inf}, Bs};
+sqrt_op({flo,V}, _Bs) ->
+    error({sqrt_negative, V});
+sqrt_op(V={{float,_,_},_,_}, Bs) ->
+    float_sqrt(V, float_type(V, V), Bs);
+sqrt_op(V, Bs) when is_tuple(V) ->
+    F = case V of
+	    {{fix,F0},_,_} -> F0;
+	    _ -> fix_frac(Bs)
+	end,
+    {Raw, Bs1} = to_raw(V, F, Bs),
+    fix_sqrt(Raw, F, Bs1).
+
+%% floor(sqrt(v)) in fixed point: isqrt(raw << F) has F fraction bits
+%% again.  A negative operand has no model (a constant is an error).
+fix_sqrt(Raw, F, Bs) ->
+    case vconst(Raw) of
+	R when is_integer(R), R < 0 ->
+	    error({sqrt_negative, R / (1 bsl F)});
+	R when is_integer(R) ->
+	    {fix_result(F, const_int(varp_math:isqrt(R bsl F))), Bs};
+	false ->
+	    {int,N,Xs} = varp_arith:iarg(Raw),
+	    varp_arith:set_status(Bs#bs.vp, lists:last(Xs), false),
+	    Mag = {uint,N-1+F,zeros(F) ++ lists:droplast(Xs)},
+	    {Q, Bs1} = isqrt(Mag, Bs),
+	    {fix_result(F, Q), Bs1}
+    end.
+
+%% floor(sqrt(a)) of an unsigned vector, and whether a remainder is
+%% left; --ops lib takes op_isqrt
+isqrt(A={uint,W0,Xs0}, Bs) ->
+    {Q, _Rnz, Bs1} = isqrt_rem(A, Bs),
+    _ = {W0, Xs0},
+    {Q, Bs1}.
+
+isqrt_rem({uint,W0,Xs0}, Bs) ->
+    {W, Xs} = if W0 rem 2 =:= 1 -> {W0+1, Xs0 ++ [false]};
+		 true -> {W0, Xs0}
+	      end,
+    K = W div 2,
+    case lib_ops(Bs) of
+	true ->
+	    {Prefix, Bs1} = circuit_prefix(<<"op_isqrt">>, Bs),
+	    Rp = {p,<<Prefix/binary,"r">>,[]},
+	    {Q, Bs2} = lib_call(<<"op_isqrt">>, [{const,K},{value,{uint,W,Xs}},Rp], Bs1),
+	    {R, Bs3} = bld(Rp, Bs2),
+	    {Rnz, Bs4} = operation2('neq', R, {uint,1,[false]}, Bs3),
+	    {{uint,K,vfit(element(3, varp_arith:varg(Q)), K)}, Rnz, Bs4};
+	false ->
+	    isqrt_circuit(K, Xs, Bs)
+    end.
+
+%% restoring square root, two bits of a per step from the top: the
+%% partial remainder shifted with the next pair, the root bit says
+%% whether 4q+1 fits, the remainder follows
+isqrt_circuit(K, Xs, Bs) ->
+    Wr = K+3,
+    Pairs = [{lists:nth(2*I+1, Xs), lists:nth(2*I+2, Xs)} || I <- lists:seq(K-1, 0, -1)],
+    {R, Q, Bs1} =
+	lists:foldl(
+	  fun({B0,B1}, {{uint,_,RXs}, {uint,_,QXs}, B}) ->
+		  R1 = {uint,Wr,vfit([B0,B1|RXs], Wr)},
+		  Tv = {uint,Wr,vfit([true,false|QXs], Wr)},
+		  {Ge={bool,GeL}, Ba} = operation2('gte', R1, Tv, B),
+		  {D, Bb} = operation2('sub', R1, Tv, Ba),
+		  Dv = {uint,Wr,vfit(element(3, varp_arith:varg(D)), Wr)},
+		  {R2, Bc} = ite(undefined, Ge, Dv, R1, Bb),
+		  {{uint,Wr,vfit(element(3, varp_arith:varg(R2)), Wr)},
+		   {uint,K,vfit([GeL|QXs], K)}, Bc}
+	  end, {{uint,Wr,zeros(Wr)}, {uint,K,zeros(K)}, Bs}, Pairs),
+    {Rnz, Bs2} = operation2('neq', R, {uint,1,[false]}, Bs1),
+    {Q, Rnz, Bs2}.
+
+%% sqrt(a) in float754: the significand normalised (a subnormal has
+%% leading zeros), the unbiased exponent made even by doubling the
+%% significand, halved for the result; the integer root of the
+%% significand scaled by 2^(M+2) has M+2 bits (lead, fraction, guard),
+%% a nonzero remainder is the sticky bit (a root is never a tie).  The
+%% result is never tiny or above the range.  -0 is -0, a negative
+%% number, -inf and NaN give NaN (--nan), +inf gives inf.
+float_sqrt(Af, T={float,E,M}, Bs) ->
+    case vconst(Af) of
+	Ab when is_integer(Ab) ->
+	    Bits = varp_float:sqrt_bits(Ab, E, M),
+	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
+	false ->
+	    case lib_ops(Bs) of
+		true -> lib_float_sqrt(Af, T, Bs);
+		false -> float_sqrt_(Af, T, Bs)
+	    end
+    end.
+
+float_sqrt_(Af, T={float,E,M}, Bs) ->
+    Zv = {uint,1,[false]},
+    {S, Ex0, {uint,M,MaXs}} = fsplit(Af),
+    {{bool,H}, Bs1} = operation2('neq', Ex0, Zv, Bs),
+    Sig = {uint,M+1,MaXs ++ [H]},
+    {{uint,_,SnXs}, LZ, Bs2} = lz_norm(Sig, Bs1),
+    {E1, Bs3} = operation2('bor', Ex0, {uint,1,[neg_lit(H)]}, Bs2),
+    %% the unbiased exponent of the leading one, made even
+    {Eu0, Bs4} = operation2('sub', E1, LZ, Bs3),
+    {Eu, Bs5} = operation2('sub', Eu0, const_int(varp_float:bias(E)), Bs4),
+    {int,_,EuXs} = varp_arith:iarg(Eu),
+    Odd = hd(EuXs),
+    {Eh0, Bs6} = operation2('sub', Eu, {uint,1,[Odd]}, Bs5),
+    {int,We,EhXs} = varp_arith:iarg(Eh0),
+    Eh = {int,We,tl(EhXs) ++ [lists:last(EhXs)]},        %% exact, it is even
+    {Eb, Bs7} = operation2('add', Eh, const_int(varp_float:bias(E)), Bs6),
+    %% the significand, doubled for an odd exponent, scaled by 2^(M+2)
+    {N2, Bs8} = ite(undefined, {bool,Odd}, {uint,M+2,[false|SnXs]},
+		    {uint,M+2,SnXs ++ [false]}, Bs7),
+    N2Xs = vfit(element(3, varp_arith:varg(N2)), M+2),
+    {{uint,_,QXs}, Rnz, Bs9} = isqrt_circuit(M+2, zeros(M+2) ++ N2Xs, Bs8),
+    Guard = hd(QXs),
+    ManXs = lists:sublist(QXs, 2, M),
+    {{bool,Up}, Bs10} = round_up(Guard, Rnz, lists:nth(2, QXs), Bs9),
+    EbXs = vfit(element(3, varp_arith:varg(Eb)), E),
+    {R0, Bs11} = operation2('add', {uint,E+M,ManXs ++ EbXs}, {uint,1,[Up]}, Bs10),
+    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
+    {{Z,I,Nn}, Bs12} = fclass(Af, Bs11),
+    {Neg0, Bs13} = operation2('and', {bool,S}, negate(Z), Bs12),
+    {NaNc, Bs14} = operation2('or', Nn, Neg0, Bs13),
+    special_result(NaNc, I, Z, Rounded, {bool,S}, T, Bs14).
+
+%% a * b + c with one rounding.  The exact product (2M+2 bits) sits
+%% in a window of W = 3M+8 bits at bit 3; the addend's significand
+%% starts at the top of the window (its lsb at 2M+7, two bits clear of
+%% the product, which is then only sticky) and is shifted right by
+%% r = M+4 + Ea + Eb - Ec - bias with what falls off as a sticky bit in
+%% bit 0; r < 0 leaves it at the top and raises the window's base by
+%% -r instead.  Signs equal: add; else the smaller magnitude is taken
+%% from the larger and the sign follows the larger (an exact zero
+%% difference is +0).  Normalise, then fpack as the other operations.
+float_fma(Af, Bf, Cf, T={float,E,M}, Bs) ->
+    case {vconst(Af), vconst(Bf), vconst(Cf)} of
+	{Ab, Bb, Cb} when is_integer(Ab), is_integer(Bb), is_integer(Cb) ->
+	    fold_status(varp_float:fma_fold(Ab, Bb, Cb, E, M, float_mode(Bs)), T, Bs);
+	_ ->
+	    case lib_ops(Bs) of
+		true -> lib_float_fma(Af, Bf, Cf, T, Bs);
+		false -> float_fma_(Af, Bf, Cf, T, Bs)
+	    end
+    end.
+
+float_fma_(Af, Bf, Cf, T={float,E,M}, Bs) ->
+    Zv = {uint,1,[false]},
+    W = 3*M+8,
+    {Sa, Ea0, {uint,M,MaXs}} = fsplit(Af),
+    {Sb, Eb0, {uint,M,MbXs}} = fsplit(Bf),
+    {Sc, Ec0, {uint,M,McXs}} = fsplit(Cf),
+    {{bool,Ha}, Bs1} = operation2('neq', Ea0, Zv, Bs),
+    {{bool,Hb}, Bs2} = operation2('neq', Eb0, Zv, Bs1),
+    {{bool,Hc}, Bs3} = operation2('neq', Ec0, Zv, Bs2),
+    {Ea1, Bs4} = operation2('bor', Ea0, {uint,1,[neg_lit(Ha)]}, Bs3),
+    {Eb1, Bs5} = operation2('bor', Eb0, {uint,1,[neg_lit(Hb)]}, Bs4),
+    {Ec1, Bs6} = operation2('bor', Ec0, {uint,1,[neg_lit(Hc)]}, Bs5),
+    {{bool,Sp}, Bs7} = operation2('xor', {bool,Sa}, {bool,Sb}, Bs6),
+    {P0, Bs8} = operation2('mul', {uint,M+1,MaXs ++ [Ha]}, {uint,M+1,MbXs ++ [Hb]}, Bs7),
+    PXs = vfit(element(3, varp_arith:varg(P0)), 2*M+2),
+    Pw = {uint,W,zeros(3) ++ PXs ++ zeros(W-3-(2*M+2))},
+    %% the addend: r = M+4 + Ea + Eb - Ec - bias, clamped to [0, W]
+    {R1, Bs9} = operation2('add', Ea1, Eb1, Bs8),
+    {R2, Bs10} = operation2('sub', R1, Ec1, Bs9),
+    {Rr, Bs11} = operation2('add', R2, const_int(M+4-varp_float:bias(E)), Bs10),
+    {{bool,RNeg}, Bs12} = operation2('lt', Rr, Zv, Bs11),
+    {{bool,RBig}, Bs13} = operation2('gte', Rr, const_int(W), Bs12),
+    NB = varp_math:unsigned_size(W),
+    Ru = {uint,NB,vfit(element(3, varp_arith:varg(Rr)), NB)},
+    {A1, Bs14} = operation2('bor', Ru, {uint,NB,lists:duplicate(NB, RBig)}, Bs13),
+    {A2, Bs15} = operation2('band', A1, {uint,NB,lists:duplicate(NB, neg_lit(RNeg))}, Bs14),
+    Amt = {uint,NB,vfit(element(3, varp_arith:varg(A2)), NB)},
+    Ctop = {uint,W,zeros(2*M+7) ++ McXs ++ [Hc]},
+    {{uint,W,CsXs}, StC, Bs16} = barrel_right(Ctop, Amt, W, Bs15),
+    {{bool,C0}, Bs17} = operation2('or', {bool,hd(CsXs)}, StC, Bs16),
+    Cw = {uint,W,[C0|tl(CsXs)]},
+    %% add, or subtract the smaller from the larger
+    {Sub={bool,SubL}, Bs18} = operation2('xor', {bool,Sp}, {bool,Sc}, Bs17),
+    {Sum, Bs19} = operation2('add', Pw, Cw, Bs18),
+    {PgeC, Bs20} = operation2('gte', Pw, Cw, Bs19),
+    {D1, Bs21} = operation2('sub', Pw, Cw, Bs20),
+    {D2, Bs22} = operation2('sub', Cw, Pw, Bs21),
+    D1w = {uint,W,vfit(element(3, varp_arith:varg(D1)), W)},
+    D2w = {uint,W,vfit(element(3, varp_arith:varg(D2)), W)},
+    {Dif, Bs23} = ite(undefined, PgeC, D1w, D2w, Bs22),
+    DifW1 = {uint,W+1,vfit(element(3, varp_arith:varg(Dif)), W+1)},
+    SumW1 = {uint,W+1,vfit(element(3, varp_arith:varg(Sum)), W+1)},
+    {R, Bs24} = ite(undefined, Sub, DifW1, SumW1, Bs23),
+    RW = {uint,W+1,vfit(element(3, varp_arith:varg(R)), W+1)},
+    {Z1, Bs25} = operation2('eq', RW, Zv, Bs24),
+    {Rn, LZ, Bs26} = lz_norm(RW, Bs25),
+    %% the biased exponent of the lead: Ea + Eb - bias + M + 5 + max(0,-r) - LZ
+    {NegR, Bs27} = operation2('sub', Zv, Rr, Bs26),
+    {int,Wn,NegRXs} = varp_arith:iarg(NegR),
+    {Extra, Bs28} = ite(undefined, {bool,RNeg}, {int,Wn,NegRXs}, {int,Wn,zeros(Wn)}, Bs27),
+    {X1, Bs29} = operation2('add', R1, const_int(M+5-varp_float:bias(E)), Bs28),
+    {X2, Bs30} = operation2('add', X1, Extra, Bs29),
+    {Ex, Bs31} = operation2('sub', X2, LZ, Bs30),
+    %% the sign: the leading operand's, +0 for an exact difference
+    {S0, Bs32} = ite(undefined, PgeC, {bool,Sp}, {bool,Sc}, Bs31),
+    {S1, Bs33} = ite(undefined, Sub, S0, {bool,Sp}, Bs32),
+    {ZeroSub, Bs34} = operation2('and', Z1, Sub, Bs33),
+    {S2, Bs35} = operation2('and', S1, negate(ZeroSub), Bs34),
+    %% the special operands
+    {{Za,Ia,Na}, Bs36} = fclass(Af, Bs35),
+    {{Zb,Ib,Nb}, Bs37} = fclass(Bf, Bs36),
+    {{_Zc,Ic,Nc}, Bs38} = fclass(Cf, Bs37),
+    {Ip, Bs39} = operation2('or', Ia, Ib, Bs38),
+    {N1, Bs40} = operation2('or', Na, Nb, Bs39),
+    {N2, Bs41} = operation2('or', N1, Nc, Bs40),
+    {N3, Bs42} = operation2('and', Ia, Zb, Bs41),
+    {N4, Bs43} = operation2('and', Ib, Za, Bs42),
+    {N5, Bs44} = operation2('and', Ip, Ic, Bs43),
+    {N6, Bs45} = operation2('and', N5, {bool,SubL}, Bs44),
+    {N7, Bs46} = operation2('or', N2, N3, Bs45),
+    {N8, Bs47} = operation2('or', N7, N4, Bs46),
+    {NaNc, Bs48} = operation2('or', N8, N6, Bs47),
+    {InfC0, Bs49} = operation2('or', Ip, Ic, Bs48),
+    {Masked, Bs50} = operation2('or', NaNc, InfC0, Bs49),
+    {SInf, Bs51} = ite(undefined, Ip, {bool,Sp}, {bool,Sc}, Bs50),
+    {S, Bs52} = ite(undefined, InfC0, SInf, S2, Bs51),
+    {Rounded, Zero, Over, Bs53} = fpack(Rn, {bool,?F}, Ex, Z1, Masked, T, Bs52),
+    Bs54 = inf_status(Over, Bs53),
+    {InfC, Bs55} = operation2('or', Over, InfC0, Bs54),
+    special_result(NaNc, InfC, Zero, Rounded, S, T, Bs55).
+
+lib_float_fma(Af, Bf, Cf, T={float,E,M}, Bs) ->
+    Z = case float_mode(Bs) of ftz -> 1; ieee -> 0 end,
+    {Prefix, Bs1} = circuit_prefix(<<"op_ffma">>, Bs),
+    Flag = fun(F) -> {p,<<Prefix/binary,F/binary>>,[]} end,
+    Outs = [Flag(<<"over">>), Flag(<<"under">>), Flag(<<"nan">>)],
+    {R, Bs2} = lib_call(<<"op_ffma">>, [{const,E},{const,M},{const,Z},
+				{value,fbits(Af)},{value,fbits(Bf)},{value,fbits(Cf)}] ++ Outs, Bs1),
+    {[Over,Under,NaN], Bs3} = lists:mapfoldl(fun(P, B) -> bld(P, B) end, Bs2, Outs),
+    Bs4 = inf_status(Over, Bs3),
+    Bs5 = underflow_status(Under, Bs4),
+    {retag(T, R), nan_status(NaN, Bs5)}.
+
+lib_float_sqrt(Af, T={float,E,M}, Bs) ->
+    {Prefix, Bs1} = circuit_prefix(<<"op_fsqrt">>, Bs),
+    NaNp = {p,<<Prefix/binary,"nan">>,[]},
+    {R, Bs2} = lib_call(<<"op_fsqrt">>, [{const,E},{const,M},{value,fbits(Af)},NaNp], Bs1),
+    {NaN, Bs3} = bld(NaNp, Bs2),
+    {retag(T, R), nan_status(NaN, Bs3)}.
 
 %% any vector's bits as a float of format T
 retag(T={float,E,M}, {_,_,Xs}) -> {T,1+E+M,vfit(Xs, 1+E+M)}.
