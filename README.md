@@ -162,6 +162,9 @@ Encoding and search behaviour:
     --divz true|false|ignore            divide by zero            (false)
     --fixpoint <bits>                   fraction bits of a bare /fixpoint
                                         and of a float literal         (16)
+    --inf true|false|ignore             a float754 result that overflows (ignore)
+    --nan true|false|ignore             a float754 result that is NaN  (ignore)
+    --fdivz true|false|ignore           float754 division by zero       (false)
 
 `X << K` and `X >> K` with a constant `K` widen or narrow the vector;
 with a variable `K` they are a barrel shifter that keeps the width of
@@ -212,21 +215,30 @@ over `op_smul`/`op_sdiv`) and `--overflow` apply as for integers.
     declare Z/float754(8,23);     # explicit, 1+8+23 bits
 
 Light means flush to zero: an operand is read as IEEE does (a subnormal
-pattern is its small value), but a result below the normal range, after
-rounding, is zero; a literal above the range is an error, there is no
-NaN and no infinity (a pattern with every exponent bit set is read as a
-number).
+pattern is its small value, inf and NaN are what they are), but a
+result below the normal range, after rounding, is zero, and a literal
+above the range is an error.
 Rounding is to nearest even.  There are the type, the literals, the
-comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:`, `+ - *`,
+comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:`, `+ - * /`,
 and the conversions: an integer or fixed point operand that meets a float
 becomes a float, `floor ceil round trunc` give an integer, a float
 assigned to a fixed point variable is truncated toward zero, and
 assigning one to an integer variable is an error.  A result that
-overflows is the pattern with every exponent bit set, printed `inf`
-and compared as a large number; a difference that cancels is `+0.0`.
-`/` is the next step.  Two float formats do not mix.  Note that
-`Z == X + Y` leaves the sign of a zero result open (`-0.0 == 0.0`), the
-statement `Z = X + Y;` pins the bits.  A model prints the shortest
+overflows is `inf`, with `inf` as a literal too (`X != inf`, `-inf`);
+`--inf false` makes an overflow a contradiction instead, `--inf true`
+demands one.  `inf - inf`, `0 * inf`, `0 / 0`, `inf / inf` and any
+operation on a NaN give the quiet NaN pattern, printed `nan`, and
+`--nan` says whether that may, may not or must happen; a NaN compares
+unordered (`X != X` is its signature, every other comparison is false)
+so `Z == X / Y` cannot bind a NaN, the statement `Z = X / Y;` can, and
+`isnan(X)`, `isinf(X)` test a value.  Division by a zero of a nonzero
+is `--fdivz`, the `--divz` of floats: no model by default, `ignore`
+gives `inf` with the sign of the quotient.  A difference that cancels
+is `+0.0`.  Two
+literals fold as floats, `1.5 / 2.0` is `0.75` whatever meets it; a
+literal above the range is an error.  Two float formats do not mix.
+Note that `Z == X + Y` leaves the sign of a zero result open (`-0.0 ==
+0.0`), the statement `Z = X + Y;` pins the bits.  A model prints the shortest
 decimal that reads back as the same number (`X=0.1`, `Y=-1.5e-30`),
 `--hex` the raw bits.  Like fixed point everything is built from the
 integer operators, so `--ops lib` applies.

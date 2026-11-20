@@ -361,6 +361,24 @@ global_options() ->
 	 default => false,
 	 description => "How to handle divide by zero."
        },
+      #{ long => "inf",
+	 key => inf,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => ignore,
+	 description => "A float754 result that overflows: ignore gives the inf pattern, false has no model, true requires one."
+       },
+      #{ long => "nan",
+	 key => nan,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => ignore,
+	 description => "A float754 result that is not a number (0/0, inf-inf, 0*inf, inf/inf, a NaN operand): ignore gives the NaN pattern, false has no model, true requires one."
+       },
+      #{ long => "fdivz",
+	 key => fdivz,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => false,
+	 description => "A float754 division by zero: false has no model, ignore gives inf, true requires one."
+       },
       #{ long => "fixpoint",
 	 key => fixpoint,
 	 spec => unsigned,

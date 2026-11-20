@@ -55,14 +55,16 @@ ceil(X), round(X) and trunc(X) give an integer.  See README.md.
 
 # Floating point
 
-IEEE 754 without NaN, infinity and subnormals (light):
+IEEE 754 with inf and NaN but without subnormal results (light):
 
     declare X:32/float754;        binary32, (8,23)
     declare Y:16/float754(8);     bfloat16: 8 exponent bits of 16
     declare Z/float754(8,23);     explicit exponent and fraction width
 
-Literals, comparisons, -X, abs, min, max, ?:, + - * and the conversions
-to and from integers and fixed point; / is not there yet.  See README.md.
+Literals (and inf), comparisons (NaN is unordered), -X, abs, min, max,
+?:, + - * /, isnan(X), isinf(X) and the conversions to and from integers
+and fixed point; --inf, --nan and --fdivz say whether inf, NaN and a
+division by zero may arise.  See README.md.
 
 # Integer operators
 

@@ -14,7 +14,7 @@
 -export([standard/1, bias/1, type_atom/2, type_of_atom/1]).
 -export([encode/3, encode_scaled/4]).
 -export([fields/3, value/3, light_value/3, to_float/3, format/3, exact_decimal/2]).
--export([mul_bits/4, add_bits/4, inf_bits/3]).
+-export([mul_bits/4, add_bits/4, div_bits/4, inf_bits/3, nan_bits/2]).
 
 %% the standard sizes
 standard(16) -> {5,10};
@@ -138,15 +138,32 @@ light_value(Bits, E, M) ->
 inf_bits(S, E, M) ->
     (S bsl (E+M)) bor (((1 bsl E) - 1) bsl M).
 
-%% a * b on bit patterns, light: zero when a factor is zero or the
-%% product is below the normal range (flush to zero), inf_bits above it
+%% the quiet NaN pattern: every exponent bit and the top fraction bit
+nan_bits(E, M) ->
+    (((1 bsl E) - 1) bsl M) bor (1 bsl (M-1)).
+
+%% the sign of an IEEE value (a NaN has none that matters)
+sign_of({zero,S}) -> S;
+sign_of({inf,S}) -> S;
+sign_of(nan) -> 0;
+sign_of({S,_,_}) -> S.
+
+%% a * b on bit patterns: IEEE for NaN, inf and zero, the exact product
+%% rounded otherwise, flushed to zero below the normal range and
+%% inf_bits above it
 mul_bits(A, B, E, M) ->
-    case {light_value(A, E, M), light_value(B, E, M)} of
-	{{zero,Sa},{_,_,_}=Vb} -> (Sa bxor element(1, Vb)) bsl (E+M);
-	{{_,_,_}=Va,{zero,Sb}} -> (element(1, Va) bxor Sb) bsl (E+M);
-	{{zero,Sa},{zero,Sb}} -> (Sa bxor Sb) bsl (E+M);
-	{{Sa,Ia,Sha},{Sb,Ib,Shb}} ->
-	    S = Sa bxor Sb,
+    Va = value(A, E, M), Vb = value(B, E, M),
+    S = sign_of(Va) bxor sign_of(Vb),
+    case {Va, Vb} of
+	{nan,_} -> nan_bits(E, M);
+	{_,nan} -> nan_bits(E, M);
+	{{inf,_},{zero,_}} -> nan_bits(E, M);
+	{{zero,_},{inf,_}} -> nan_bits(E, M);
+	{{inf,_},_} -> inf_bits(S, E, M);
+	{_,{inf,_}} -> inf_bits(S, E, M);
+	{{zero,_},_} -> S bsl (E+M);
+	{_,{zero,_}} -> S bsl (E+M);
+	{{_,Ia,Sha},{_,Ib,Shb}} ->
 	    I = if S =:= 1 -> -(Ia*Ib); true -> Ia*Ib end,
 	    case encode_scaled(I, Sha+Shb, E, M) of
 		{ok,Bits} -> Bits;
@@ -154,13 +171,19 @@ mul_bits(A, B, E, M) ->
 	    end
     end.
 
-%% a + b on bit patterns, light: the exact sum rounded, flushed to
-%% zero below the normal range, inf_bits above it.  A zero sum is -0
-%% only when both terms are -0.
+%% a + b on bit patterns: IEEE for NaN, inf and zero, the exact sum
+%% rounded otherwise, flushed to zero below the normal range, inf_bits
+%% above it.  A zero sum is -0 only when both terms are -0.
 add_bits(A, B, E, M) ->
-    Va = light_value(A, E, M),
-    Vb = light_value(B, E, M),
+    Va = value(A, E, M),
+    Vb = value(B, E, M),
     case {Va, Vb} of
+	{nan,_} -> nan_bits(E, M);
+	{_,nan} -> nan_bits(E, M);
+	{{inf,S},{inf,S}} -> inf_bits(S, E, M);
+	{{inf,_},{inf,_}} -> nan_bits(E, M);
+	{{inf,S},_} -> inf_bits(S, E, M);
+	{_,{inf,S}} -> inf_bits(S, E, M);
 	{{zero,Sa},{zero,Sb}} -> (Sa band Sb) bsl (E+M);
 	_ ->
 	    {Ia,Sha} = signed_scaled(Va),
@@ -173,6 +196,35 @@ add_bits(A, B, E, M) ->
 			{ok,Bits} -> Bits;
 			{error,_} -> inf_bits(if I < 0 -> 1; true -> 0 end, E, M)
 		    end
+	    end
+    end.
+
+%% a / b on bit patterns: IEEE for NaN, inf and zero (x/0 is inf, as
+%% --fdivz ignore gives it), the exact quotient rounded otherwise: it
+%% is taken with enough bits, a nonzero remainder becomes a sticky bit
+div_bits(A, B, E, M) ->
+    Va = value(A, E, M), Vb = value(B, E, M),
+    S = sign_of(Va) bxor sign_of(Vb),
+    case {Va, Vb} of
+	{nan,_} -> nan_bits(E, M);
+	{_,nan} -> nan_bits(E, M);
+	{{zero,_},{zero,_}} -> nan_bits(E, M);
+	{{inf,_},{inf,_}} -> nan_bits(E, M);
+	{{inf,_},_} -> inf_bits(S, E, M);
+	{_,{inf,_}} -> S bsl (E+M);
+	{_,{zero,_}} -> inf_bits(S, E, M);
+	{{zero,_},_} -> S bsl (E+M);
+	{{_,Ia,Sha},{_,Ib,Shb}} ->
+	    K = M + 3 + bit_length(Ib),
+	    Q0 = (Ia bsl K) div Ib,
+	    {Q, K1} = case (Ia bsl K) rem Ib of
+			  0 -> {Q0, K};
+			  _ -> {(Q0 bsl 1) bor 1, K+1}
+		      end,
+	    I = if S =:= 1 -> -Q; true -> Q end,
+	    case encode_scaled(I, Sha - Shb - K1, E, M) of
+		{ok,Bits} -> Bits;
+		{error,_} -> inf_bits(S, E, M)
 	    end
     end.
 

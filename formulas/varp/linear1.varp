@@ -1,0 +1,22 @@
+//
+// 50x + 24y <= 40(60) machine A time
+// 30x + 33y <= 35(60) machine B time
+// x >= 75 - 30
+// i.e. x >= 45 so production of X >= demand (75) - initial stock (30), which ensures we meet demand
+// y >= 95 - 90
+// i.e. y >= 5 so production of Y >= demand (95) - initial stock (90), which ensures we meet demand
+// The objective is: maximise (x+30-75) + (y+90-95) = (x+y-50)
+//
+
+declare X:32/float754(23);
+declare Y:32/float754(23);
+declare V:32/float754(23);
+
+(50*X + 25*Y <= 2400) &&
+(30*X + 33*Y <= 2100) &&
+(X >= 45) &&
+(Y >= 5) &&
+// Maximize
+(V == (X+Y-50)) &&
+(V >= limit)
+

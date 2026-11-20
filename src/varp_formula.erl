@@ -860,6 +860,20 @@ bld(_X,{const,W}, Bs) when is_integer(W) ->
 %% not known until it meets an operand, see fix_op2/4
 bld(_X,{const,W}, Bs) when is_float(W) ->
     {{flo,W},Bs};
+%% float754 classification: a boolean, false for anything but a float
+bld(X,{p,F,[A]}, Bs) when F =:= <<"isnan">>; F =:= <<"isinf">> ->
+    {Y,Bs1} = bld(A, Bs),
+    {V,Bs2} = case Y of
+		  {T,_,_} when ?is_float(T) ->
+		      {{Z,I,N}, Bs1a} = fclass(Y, Bs1),
+		      _ = Z,
+		      case F of
+			  <<"isnan">> -> {N, Bs1a};
+			  <<"isinf">> -> {I, Bs1a}
+		      end;
+		  _ -> {{bool,?F}, Bs1}
+	      end,
+    set(X, V, Bs2);
 %% fixed point to integer
 bld(X,{p,F,[A]}, Bs) when F =:= <<"floor">>; F =:= <<"ceil">>;
 			  F =:= <<"round">>; F =:= <<"trunc">> ->
@@ -881,6 +895,12 @@ bld(X,{p,<<"max">>,[A,B]}, Bs) ->
 bld(_X, V={p,P,Args}, Bs) ->
     Arity = length(Args),
     case varp:find_decl(P,Bs#bs.decls,icase(Bs)) of
+	error when P =:= <<"inf">>, Args =:= [] ->
+	    %% the float754 infinity, unless the user has an inf of their own
+	    case is_definition(P, Bs) of
+		true -> variable(V, Bs);
+		false -> {{flo,inf}, Bs}
+	    end;
 	error ->
 	    %% a name with a definition is a macro, not a variable.
 	    %% declaring it as a boolean here would fix its arity and
@@ -1506,6 +1526,8 @@ builtin_function(<<"floor">>, 1) -> true;
 builtin_function(<<"ceil">>, 1) -> true;
 builtin_function(<<"round">>, 1) -> true;
 builtin_function(<<"trunc">>, 1) -> true;
+builtin_function(<<"isnan">>, 1) -> true;
+builtin_function(<<"isinf">>, 1) -> true;
 builtin_function(_, _) -> false.
 
 build_circuit_body([{define,{p,Name,Ps},Def}|Body], Bs) ->
@@ -2676,6 +2698,9 @@ lib_call(Name, Args, Bs) ->
 fix_frac(Bs) ->
     maps:get(fixpoint, Bs#bs.option, 16).
 
+lit(true) -> ?T;
+lit(false) -> ?F.
+
 is_fixish({flo,_}) -> true;
 is_fixish({T,_,_}) -> ?is_fix(T);
 is_fixish(_) -> false.
@@ -2694,6 +2719,8 @@ to_raw({{fix,F0},N,Xs}, F, Bs) when F0 < F ->
     {shift_up({int,N,Xs}, F-F0), Bs};
 to_raw({{fix,F0},N,Xs}, F, Bs) ->   %% F0 > F: precision goes
     {shift_down({int,N,Xs}, F0-F), Bs};
+to_raw({flo,V}, _F, _Bs) when is_atom(V) ->   %% inf, '-inf'
+    error({fixpoint_infinity, V});
 to_raw({flo,V}, F, Bs) ->
     R = round(V * (1 bsl F)),
     {const_vector(int, R, varp_math:signed_size(R)), Bs};
@@ -2730,6 +2757,18 @@ fix_result(F, R) ->
     {int,N,Xs} = varp_arith:iarg(R),
     {{fix,F},N,Xs}.
 
+fix_op1(Op, {flo,inf}, Bs) ->
+    case Op of
+	'neg' -> {{flo,'-inf'}, Bs};
+	'abs' -> {{flo,inf}, Bs};
+	_ -> error({fixpoint_infinity, inf})
+    end;
+fix_op1(Op, {flo,'-inf'}, Bs) ->
+    case Op of
+	'neg' -> {{flo,inf}, Bs};
+	'abs' -> {{flo,inf}, Bs};
+	_ -> error({fixpoint_infinity, '-inf'})
+    end;
 fix_op1(Op, {flo,V}, Bs) ->
     case Op of
 	'neg' -> {{flo,-V}, Bs};
@@ -2746,6 +2785,25 @@ fix_op1(Op, {{fix,F},N,Xs}, Bs) ->
 fix_op1(_Op, _A, _Bs) ->
     false.
 
+fix_op2(Op, {flo,X}, {flo,Y}, Bs) when is_number(X), is_number(Y) ->
+    %% two literals stay a literal, the format is settled when it
+    %% meets an operand: 3.0e38 * 10 is not a Q16.16 product
+    case Op of
+	'add' -> {{flo,X+Y}, Bs};
+	'sub' -> {{flo,X-Y}, Bs};
+	'mul' -> {{flo,X*Y}, Bs};
+	'div' when Y == 0 -> error({float_literal_division_by_zero, X, Y});
+	'div' -> {{flo,X/Y}, Bs};
+	'min' -> {{flo,erlang:min(X,Y)}, Bs};
+	'max' -> {{flo,erlang:max(X,Y)}, Bs};
+	'lt' -> {{bool,lit(X < Y)}, Bs};
+	'lte' -> {{bool,lit(X =< Y)}, Bs};
+	'gt' -> {{bool,lit(X > Y)}, Bs};
+	'gte' -> {{bool,lit(X >= Y)}, Bs};
+	'eq' -> {{bool,lit(X == Y)}, Bs};
+	'neq' -> {{bool,lit(X /= Y)}, Bs};
+	_ -> fix_op2_(Op, {flo,X}, {flo,Y}, Bs)
+    end;
 fix_op2(Op, A, B, Bs) when is_tuple(A), is_tuple(B) ->
     case is_fixish(A) orelse is_fixish(B) of
 	true -> fix_op2_(Op, A, B, Bs);
@@ -2918,10 +2976,13 @@ fix_to_int(_Fun, V, Bs) ->
 %% and max, the conversions (an integer or fixed point operand that
 %% meets a float becomes a float, round to nearest even; a float
 %% assigned to a fixed point variable is truncated toward zero;
-%% floor/ceil/round/trunc give an integer), multiplication, addition
-%% and subtraction.  An exponent overflow gives the pattern with every
-%% exponent bit set, which prints as inf and compares as a large
-%% number.  Division comes next.
+%% floor/ceil/round/trunc give an integer) and + - * /.  inf and NaN
+%% are read and produced as IEEE says (inf - inf, 0 * inf, 0/0 and
+%% inf/inf are NaN, a NaN operand gives NaN, NaN compares unordered),
+%% only subnormal results are flushed to zero.  --inf and --nan say
+%% whether such a result may, may not or must arise, --fdivz is the
+%% --divz of the float division, the name inf is the literal ("X !=
+%% inf") and isnan(X), isinf(X) test a value.
 %%
 is_floatish({T,_,_}) -> ?is_float(T);
 is_floatish(_) -> false.
@@ -2967,6 +3028,10 @@ to_float(V={{float,E,M},_,_}, {float,E,M}, Bs) ->
     {V, Bs};
 to_float({T0,_,_}, T, _Bs) when ?is_float(T0) ->
     error({float754_mixed, [T0,T]});
+to_float({flo,inf}, T={float,E,M}, Bs) ->
+    {const_vector(T, varp_float:inf_bits(0, E, M), 1+E+M), Bs};
+to_float({flo,'-inf'}, T={float,E,M}, Bs) ->
+    {const_vector(T, varp_float:inf_bits(1, E, M), 1+E+M), Bs};
 to_float({flo,X}, T, Bs) ->
     float_const(X, T, Bs);
 to_float({bool,X}, T, Bs) ->
@@ -3149,14 +3214,20 @@ float_op2_(Op, A, B, Bs) when Op =:= 'lt'; Op =:= 'lte'; Op =:= 'gt';
     {Bf, Bs2} = to_float(B, T, Bs1),
     float_compare(Op, Af, Bf, Bs2);
 float_op2_(Op, A, B, Bs) when Op =:= 'min'; Op =:= 'max' ->
+    %% minNum/maxNum of IEEE 754-2008: a NaN loses to a number
     T = float_type(A, B),
     {Af, Bs1} = to_float(A, T, Bs),
     {Bf, Bs2} = to_float(B, T, Bs1),
     {Lt, Bs3} = float_compare('lt', Af, Bf, Bs2),
-    case Op of
-	'min' -> ite(undefined, Lt, Af, Bf, Bs3);
-	'max' -> ite(undefined, Lt, Bf, Af, Bs3)
-    end;
+    {R0, Bs4} = case Op of
+		    'min' -> ite(undefined, Lt, Af, Bf, Bs3);
+		    'max' -> ite(undefined, Lt, Bf, Af, Bs3)
+		end,
+    {{_,_,Na}, Bs5} = fclass(Af, Bs4),
+    {{_,_,Nb}, Bs6} = fclass(Bf, Bs5),
+    {R1, Bs7} = ite(undefined, Nb, Af, retag(T, R0), Bs6),
+    {R2, Bs8} = ite(undefined, Na, Bf, retag(T, R1), Bs7),
+    {retag(T, R2), Bs8};
 float_op2_('mul', A, B, Bs) ->
     T = float_type(A, B),
     {Af, Bs1} = to_float(A, T, Bs),
@@ -3169,12 +3240,154 @@ float_op2_(Op, A, B, Bs) when Op =:= 'add'; Op =:= 'sub' ->
     %% a - b is a + (-b)
     Bf = case Op of 'sub' -> fneg(Bf0); 'add' -> Bf0 end,
     float_add(Af, Bf, T, Bs2);
+float_op2_('div', A, B, Bs) ->
+    T = float_type(A, B),
+    {Af, Bs1} = to_float(A, T, Bs),
+    {Bf, Bs2} = to_float(B, T, Bs1),
+    float_div(Af, Bf, T, Bs2);
 float_op2_(Op, _A, _B, _Bs) ->
-    error({float754_operator, Op, "not yet: / comes in the next step"}).
+    error({float754_operator, Op}).
+
+%% --inf: an overflowing result is allowed, forbidden or required
+inf_status({bool,Over}, Bs) ->
+    varp_arith:set_status(Bs#bs.vp, Over, maps:get(inf, Bs#bs.option, ignore)),
+    Bs.
+
+%% a folded constant that overflowed or is NaN, under --inf and --nan
+inf_folded(Bits, {float,E,M}, Bs) ->
+    case varp_float:fields(Bits, E, M) of
+	{_, Eb, 0} when Eb =:= (1 bsl E) - 1 -> inf_status({bool,true}, Bs);
+	{_, Eb, _} when Eb =:= (1 bsl E) - 1 -> nan_status({bool,true}, Bs);
+	_ -> Bs
+    end.
+
+%% --nan: a NaN result is allowed, forbidden or required
+nan_status({bool,N}, Bs) ->
+    varp_arith:set_status(Bs#bs.vp, N, maps:get(nan, Bs#bs.option, ignore)),
+    Bs.
+
+%% zero, inf and NaN of a float: {{bool,Z},{bool,I},{bool,N}}
+fclass(V={{float,E,_M},_,_}, Bs) ->
+    {_, Exp, Man} = fsplit(V),
+    {ExpAll, Bs1} = operation2('eq', Exp, {uint,E,ones(E)}, Bs),
+    {ManZ, Bs2} = operation2('eq', Man, {uint,1,[false]}, Bs1),
+    {Z, Bs3} = operation2('eq', fmag(V), {uint,1,[false]}, Bs2),
+    {I, Bs4} = operation2('and', ExpAll, ManZ, Bs3),
+    {N, Bs5} = operation2('and', ExpAll, negate(ManZ), Bs4),
+    {{Z,I,N}, Bs5}.
+
+nan_pattern(E, M) -> {uint,E+M,zeros(M-1) ++ [true] ++ ones(E)}.
+
+%% the special operands of a two operand operation: the result is NaN
+%% (NaNc), the result is inf with the sign S (InfC), or the result is
+%% zero (ZeroC); Finite is the ordinary magnitude.  The sign of a NaN is
+%% zero.
+special_result(NaNc, InfC, ZeroC, Finite, S, T={float,E,M}, Bs) ->
+    Bs1 = nan_status(NaNc, Bs),
+    Inf = {uint,E+M,zeros(M) ++ ones(E)},
+    {M1, Bs2} = ite(undefined, ZeroC, {uint,E+M,zeros(E+M)}, Finite, Bs1),
+    {M2, Bs3} = ite(undefined, InfC, Inf, M1, Bs2),
+    {M3, Bs4} = ite(undefined, NaNc, nan_pattern(E, M), M2, Bs3),
+    {{bool,S1}, Bs5} = operation2('and', S, negate(NaNc), Bs4),
+    {fmake(T, varp_arith:varg(M3), S1), Bs5}.
+
+%% a / b: both significands normalised (a subnormal pattern has leading
+%% zeros), the quotient of a << (M+2) by b has M+3 bits with the
+%% leading one at the top or one below, a nonzero remainder is the
+%% sticky bit.  Division by zero is --fdivz and gives inf.
+float_div(Af, Bf, T={float,E,M}, Bs) ->
+    Const = case {vconst(Af), vconst(Bf)} of
+		{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
+		    %% a zero divisor is left to the circuit and --fdivz
+		    element(1, varp_float:light_value(Bb, E, M)) =/= zero;
+		_ -> false
+	    end,
+    case Const of
+	true ->
+	    Bits = varp_float:div_bits(vconst(Af), vconst(Bf), E, M),
+	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
+	false ->
+	    Zv = {uint,1,[false]},
+	    {Sa, Ea0, {uint,M,MaXs}} = fsplit(Af),
+	    {Sb, Eb0, {uint,M,MbXs}} = fsplit(Bf),
+	    {{bool,S}, Bs1} = operation2('xor', {bool,Sa}, {bool,Sb}, Bs),
+	    {{bool,Ha}, Bs2} = operation2('neq', Ea0, Zv, Bs1),
+	    {{bool,Hb}, Bs3} = operation2('neq', Eb0, Zv, Bs2),
+	    {Ea, Bs4} = operation2('bor', Ea0, {uint,1,[neg_lit(Ha)]}, Bs3),
+	    {Eb, Bs5} = operation2('bor', Eb0, {uint,1,[neg_lit(Hb)]}, Bs4),
+	    SigA = {uint,M+1,MaXs ++ [Ha]},
+	    SigB = {uint,M+1,MbXs ++ [Hb]},
+	    {SigAn, LZa, Bs6} = lz_norm(SigA, Bs5),
+	    {SigBn, LZb, Bs7} = lz_norm(SigB, Bs6),
+	    {Azero, Bs8} = operation2('eq', SigA, Zv, Bs7),
+	    {Bzero={bool,BzL}, Bs8a} = operation2('eq', SigB, Zv, Bs8),
+	    %% x/0 is --fdivz; 0/0 is not a number, that is --nan
+	    {{bool,DivZ}, Bs9} = operation2('and', Bzero, negate(Azero), Bs8a),
+	    varp_arith:set_status(Bs9#bs.vp, DivZ, maps:get(fdivz, Bs9#bs.option, false)),
+	    {uint,_,AnXs} = SigAn,
+	    Num = {uint,2*M+3,zeros(M+2) ++ AnXs},
+	    %% the integer divider's own --divz status fires on the same
+	    %% condition: keep it out of the way with a one in the divisor
+	    {Den, Bs10} = operation2('bor', SigBn, {uint,1,[BzL]}, Bs9),
+	    {Q0, Rnz, Bs11} =
+		case lib_ops(Bs10) of
+		    true ->
+			{Q1, B1} = operation2('div', Num, Den, Bs10),
+			{P1, B2} = operation2('mul', Q1, Den, B1),
+			{R1, B3} = operation2('neq', P1, Num, B2),
+			{Q1, R1, B3};
+		    false ->
+			{Q1, R1} = varp_arith:divrem(Bs10#bs.vp, Num, Den),
+			{R2, B1} = operation2('neq', R1, Zv, Bs10),
+			{Q1, R2, B1}
+		end,
+	    W = M+3,
+	    Qw = {uint,W,vfit(element(3, varp_arith:varg(Q0)), W)},
+	    {{uint,W,NXs}, LZ, Bs12} = lz_norm(Qw, Bs11),
+	    ManXs = lists:sublist(NXs, 3, M),
+	    Lsb = lists:nth(3, NXs),
+	    Guard = lists:nth(2, NXs),
+	    {Sticky, Bs13} = operation2('or', {bool,hd(NXs)}, Rnz, Bs12),
+	    {{bool,Up}, Bs14} = round_up(Guard, Sticky, Lsb, Bs13),
+	    %% Ea - Eb + (LZb - LZa) + bias - LZ
+	    {E1, Bs15} = operation2('sub', Ea, Eb, Bs14),
+	    {E2, Bs16} = operation2('add', E1, LZb, Bs15),
+	    {E3, Bs17} = operation2('sub', E2, LZa, Bs16),
+	    {E4, Bs18} = operation2('add', E3, const_int(varp_float:bias(E)), Bs17),
+	    {Ex, Bs19} = operation2('sub', E4, LZ, Bs18),
+	    ExXs = vfit(element(3, Ex), E),
+	    {R0, Bs20} = operation2('add', {uint,E+M,ManXs ++ ExXs}, {uint,1,[Up]}, Bs19),
+	    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
+	    {Neg, Bs21} = operation2('lt', Ex, Zv, Bs20),
+	    {Ex0b, Bs22} = operation2('eq', Ex, Zv, Bs21),
+	    {AllOnes, Bs23} = operation2('eq', {uint,M,ManXs}, {uint,M,ones(M)}, Bs22),
+	    {Carry, Bs24} = operation2('and', {bool,Up}, AllOnes, Bs23),
+	    {Tiny0, Bs25} = operation2('and', Ex0b, negate(Carry), Bs24),
+	    {Tiny, Bs26} = operation2('or', Neg, Tiny0, Bs25),
+	    {{_,Ia,Na}, Bs26a} = fclass(Af, Bs26),
+	    {{_,Ib,Nb}, Bs26b} = fclass(Bf, Bs26a),
+	    %% 0/0, inf/inf and a NaN operand: NaN; inf/x: inf; x/inf: 0
+	    {N1, Bs26c} = operation2('or', Na, Nb, Bs26b),
+	    {N2, Bs26d} = operation2('and', Azero, Bzero, Bs26c),
+	    {N3, Bs26e} = operation2('and', Ia, Ib, Bs26d),
+	    {N4, Bs26f} = operation2('or', N1, N2, Bs26e),
+	    {NaNc, Bs26g} = operation2('or', N4, N3, Bs26f),
+	    {Zero0, Bs27} = operation2('or', Azero, Tiny, Bs26g),
+	    {Zero, Bs27a} = operation2('or', Zero0, Ib, Bs27),
+	    {Over0, Bs28} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs27a),
+	    {Over1, Bs29} = operation2('and', Over0, negate(Zero), Bs28),
+	    {Over2, Bs29a} = operation2('and', Over1, negate(Bzero), Bs29),
+	    {Over, Bs30} = operation2('and', Over2, negate(Ia), Bs29a),
+	    Bs31 = inf_status(Over, Bs30),
+	    {InfC0, Bs32} = operation2('or', Over, Bzero, Bs31),
+	    {InfC, Bs33} = operation2('or', InfC0, Ia, Bs32),
+	    special_result(NaNc, InfC, Zero, Rounded, {bool,S}, T, Bs33)
+    end.
 
 fneg(V={T,N,Xs}) -> {T,N,lists:droplast(Xs) ++ [neg_lit(fsign(V))]}.
 
-retag(T={float,E,M}, V) -> {T,1+E+M,vfit(element(3, varp_arith:varg(V)), 1+E+M)}.
+%% any vector's bits as a float of format T
+retag(T={float,E,M}, {_,_,Xs}) -> {T,1+E+M,vfit(Xs, 1+E+M)}.
 
 %% a + b: the operand with the larger magnitude leads; the other one's
 %% significand is shifted right by the exponent difference, with three
@@ -3187,7 +3400,8 @@ retag(T={float,E,M}, V) -> {T,1+E+M,vfit(element(3, varp_arith:varg(V)), 1+E+M)}
 float_add(Af, Bf, T={float,E,M}, Bs) ->
     case {vconst(Af), vconst(Bf)} of
 	{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
-	    {const_vector(T, varp_float:add_bits(Ab, Bb, E, M), 1+E+M), Bs};
+	    Bits = varp_float:add_bits(Ab, Bb, E, M),
+	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
 	_ ->
 	    Zv = {uint,1,[false]},
 	    {Lt, Bs1} = operation2('lt', fmag(Af), fmag(Bf), Bs),
@@ -3243,15 +3457,24 @@ float_add(Af, Bf, T={float,E,M}, Bs) ->
 	    {Tiny0, Bs31} = operation2('and', Ex0b, negate(Carry), Bs30),
 	    {Z2, Bs32} = operation2('or', Neg, Tiny0, Bs31),
 	    {Zero, Bs33} = operation2('or', Z1, Z2, Bs32),
-	    {Over, Bs34} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs33),
-	    Inf = {uint,E+M,zeros(M) ++ ones(E)},
-	    {Mag1, Bs35} = ite(undefined, Over, Inf, Rounded, Bs34),
-	    {Mag, Bs36} = ite(undefined, Zero, {uint,E+M,zeros(E+M)}, Mag1, Bs35),
+	    {{_,Ia,Na}, Bs33a} = fclass(Af, Bs33),
+	    {{_,Ib,Nb}, Bs33b} = fclass(Bf, Bs33a),
+	    %% inf - inf and a NaN operand: NaN; inf + x: inf
+	    {N1, Bs33c} = operation2('or', Na, Nb, Bs33b),
+	    {BothInf, Bs33d} = operation2('and', Ia, Ib, Bs33c),
+	    {N2, Bs33e} = operation2('and', BothInf, Sub, Bs33d),
+	    {NaNc, Bs33f} = operation2('or', N1, N2, Bs33e),
+	    {AnyInf, Bs33g} = operation2('or', Ia, Ib, Bs33f),
+	    {Over0, Bs34a} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs33g),
+	    {Over1, Bs34b} = operation2('and', Over0, negate(Zero), Bs34a),
+	    {Over, Bs34c} = operation2('and', Over1, negate(AnyInf), Bs34b),
+	    Bs34 = inf_status(Over, Bs34c),
+	    {InfC, Bs35} = operation2('or', Over, AnyInf, Bs34),
 	    %% the sign: the leading operand's, +0 when a difference cancels
 	    %% exactly (a flushed difference keeps its sign)
-	    {ZeroSub, Bs37} = operation2('and', Z1, Sub, Bs36),
-	    {{bool,S}, Bs38} = operation2('and', {bool,Sb}, negate(ZeroSub), Bs37),
-	    {fmake(T, varp_arith:varg(Mag), S), Bs38}
+	    {ZeroSub, Bs36} = operation2('and', Z1, Sub, Bs35),
+	    {S, Bs37} = operation2('and', {bool,Sb}, negate(ZeroSub), Bs36),
+	    special_result(NaNc, InfC, Zero, Rounded, S, T, Bs37)
     end.
 
 ones(K) -> lists:duplicate(K, true).
@@ -3267,7 +3490,8 @@ ones(K) -> lists:duplicate(K, true).
 float_mul(Af, Bf, T={float,E,M}, Bs) ->
     case {vconst(Af), vconst(Bf)} of
 	{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
-	    {const_vector(T, varp_float:mul_bits(Ab, Bb, E, M), 1+E+M), Bs};
+	    Bits = varp_float:mul_bits(Ab, Bb, E, M),
+	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
 	_ ->
 	    Zv = {uint,1,[false]},
 	    {Sa, Ea, {uint,M,MaXs}} = fsplit(Af),
@@ -3305,11 +3529,21 @@ float_mul(Af, Bf, T={float,E,M}, Bs) ->
 	    {Tiny0, Bs12e} = operation2('and', Ex0, negate(Carry), Bs12d),
 	    {Z2, Bs13} = operation2('or', Neg, Tiny0, Bs12e),
 	    {Zero, Bs14} = operation2('or', Z1, Z2, Bs13),
-	    {Over, Bs15} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs14),
-	    Inf = {uint,E+M,zeros(M) ++ ones(E)},
-	    {Mag1, Bs16} = ite(undefined, Over, Inf, Rounded, Bs15),
-	    {Mag, Bs17} = ite(undefined, Zero, {uint,E+M,zeros(E+M)}, Mag1, Bs16),
-	    {fmake(T, varp_arith:varg(Mag), S), Bs17}
+	    {{Za,Ia,Na}, Bs14a} = fclass(Af, Bs14),
+	    {{Zb,Ib,Nb}, Bs14b} = fclass(Bf, Bs14a),
+	    %% inf * 0 and a NaN operand: NaN; inf * x: inf
+	    {N1, Bs14c} = operation2('or', Na, Nb, Bs14b),
+	    {N2, Bs14d} = operation2('and', Ia, Zb, Bs14c),
+	    {N3, Bs14e} = operation2('and', Ib, Za, Bs14d),
+	    {N4, Bs14f} = operation2('or', N1, N2, Bs14e),
+	    {NaNc, Bs14g} = operation2('or', N4, N3, Bs14f),
+	    {AnyInf, Bs14h} = operation2('or', Ia, Ib, Bs14g),
+	    {Over0, Bs15} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs14h),
+	    {Over1, Bs15a} = operation2('and', Over0, negate(Zero), Bs15),
+	    {Over, Bs15b} = operation2('and', Over1, negate(AnyInf), Bs15a),
+	    Bs15c = inf_status(Over, Bs15b),
+	    {InfC, Bs15d} = operation2('or', Over, AnyInf, Bs15c),
+	    special_result(NaNc, InfC, Zero, Rounded, {bool,S}, T, Bs15d)
     end.
 
 %% sign and magnitude (the IEEE order): two zeros are equal, otherwise
@@ -3327,17 +3561,28 @@ float_compare(Op, Af, Bf, Bs) ->
     {SameS, Bs5} = operation2('equ', Sa, Sb, Bs4),
     {EqN, Bs6} = operation2('and', Eqm, SameS, Bs5),
     {Eq, Bs7} = operation2('or', EqN, Both0, Bs6),
+    %% a NaN on either side is unordered: everything false but !=
+    {{_,_,Na}, Bs7a} = fclass(Af, Bs7),
+    {{_,_,Nb}, Bs7b} = fclass(Bf, Bs7a),
+    {Unord, Bs7c} = operation2('or', Na, Nb, Bs7b),
+    Ordered = fun(R, B) -> operation2('and', R, negate(Unord), B) end,
     case Op of
-	'eq' -> {Eq, Bs7};
-	'neq' -> {negate(Eq), Bs7};
-	'lt' -> float_lt(Sa, Sb, Ma, Mb, Both0, Bs7);
-	'gt' -> float_lt(Sb, Sa, Mb, Ma, Both0, Bs7);
+	'eq' -> Ordered(Eq, Bs7c);
+	'neq' -> operation2('or', negate(Eq), Unord, Bs7c);
+	'lt' ->
+	    {Lt, Bs8} = float_lt(Sa, Sb, Ma, Mb, Both0, Bs7c),
+	    Ordered(Lt, Bs8);
+	'gt' ->
+	    {Gt, Bs8} = float_lt(Sb, Sa, Mb, Ma, Both0, Bs7c),
+	    Ordered(Gt, Bs8);
 	'lte' ->
-	    {Lt, Bs8} = float_lt(Sa, Sb, Ma, Mb, Both0, Bs7),
-	    operation2('or', Lt, Eq, Bs8);
+	    {Lt, Bs8} = float_lt(Sa, Sb, Ma, Mb, Both0, Bs7c),
+	    {R, Bs9} = operation2('or', Lt, Eq, Bs8),
+	    Ordered(R, Bs9);
 	'gte' ->
-	    {Gt, Bs8} = float_lt(Sb, Sa, Mb, Ma, Both0, Bs7),
-	    operation2('or', Gt, Eq, Bs8)
+	    {Gt, Bs8} = float_lt(Sb, Sa, Mb, Ma, Both0, Bs7c),
+	    {R, Bs9} = operation2('or', Gt, Eq, Bs8),
+	    Ordered(R, Bs9)
     end.
 
 float_lt(Sa, Sb, Ma, Mb, Both0, Bs) ->

@@ -22,6 +22,7 @@
 -export([rol/3, rol/4]).
 -export([ror/3, ror/4]).
 -export([divide/3, divide/4]).
+-export([divrem/3]).   %% {Quotient, Remainder} from one divider
 -export([reminder/3, reminder/4]).
 -export([min/3, min/4]).
 -export([max/3, max/4]).

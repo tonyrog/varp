@@ -102,12 +102,16 @@ forms_test() ->
 %% every pattern of a tiny format against the sign/magnitude order
 compare_test_() ->
     {timeout, 300, fun() ->
-	%% float754(2,1): 16 patterns, two of them zero
+	%% float754(2,1): 16 patterns, two of them zero, two of them NaN
+	%% (exponent 3, fraction 1), which are unordered
 	Vals = [{B bsr 3, B band 7} || B <- lists:seq(0, 15)],
-	Num = fun({S,Mag}) -> case Mag of 0 -> 0; _ -> if S =:= 1 -> -Mag; true -> Mag end end end,
+	Num = fun({_,7}) -> nan;
+		 ({S,Mag}) -> case Mag of 0 -> 0; _ -> if S =:= 1 -> -Mag; true -> Mag end end
+	      end,
 	Pairs = [{Num(A), Num(B)} || A <- Vals, B <- Vals],
-	Lt = length([1 || {A,B} <- Pairs, A < B]),
-	Eq = length([1 || {A,B} <- Pairs, A == B]),
+	Ord = fun(A, B) -> A =/= nan andalso B =/= nan end,
+	Lt = length([1 || {A,B} <- Pairs, Ord(A, B), A < B]),
+	Eq = length([1 || {A,B} <- Pairs, Ord(A, B), A == B]),
 	D = "declare X/float754(2,1), Y/float754(2,1); ",
 	?assertEqual(Lt, count(D ++ "X < Y")),
 	?assertEqual(Lt, count(D ++ "X > Y")),
@@ -245,6 +249,144 @@ add_lib_test_() ->
 	?assertEqual(f32(f32(0.1)-f32(0.3)), v(D ++ "X == 0.1 && Y == 0.3 && Z == X - Y", "Z", L))
      end}.
 
+%%% ---- division -------------------------------------------------------
+
+bits32(V) -> <<B:32>> = <<V:32/float>>, B.
+
+div_test_() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+    Ref = fun(A, B) -> varp_float:to_float(varp_float:div_bits(bits32(A), bits32(B), 8, 23), 8, 23) end,
+    [{"binary32 against the exact quotient", {timeout, 600, fun() ->
+	rand:seed(exsss, {29,31,37}),
+	Rnd = [{(rand:uniform() - 0.5) * math:pow(10, rand:uniform(20) - 10),
+		(rand:uniform() - 0.5) * math:pow(10, rand:uniform(20) - 10)} || _ <- lists:seq(1, 12)],
+	Vals = [{3.0,4.0}, {1.0,3.0}, {-1.0,3.0}, {1.0,10.0}, {2.0,3.0}, {1.0e30,1.0e-8},
+		{7.0,7.0}, {1.0,1.0000001}, {0.1,0.3}, {-123.456,0.0078125}] ++ Rnd,
+	[begin
+	     A = f32(A0), B = f32(B0),
+	     T = D ++ lists:flatten(io_lib:format("Z = X / Y; X == ~w && Y == ~w", [A, B])),
+	     M = model_bj(T),
+	     ?assertEqual({A,B,Ref(A,B)}, {A,B,proplists:get_value("Z", M)})
+	 end || {A0,B0} <- Vals] end}},
+     {"known quotients", fun() ->
+	?assertEqual(0.75, v(D ++ "X == 3 && Y == 4 && Z == X / Y", "Z")),
+	?assertEqual(f32(1/3), v(D ++ "X == 1 && Y == 3 && Z == X / Y", "Z")),
+	?assertEqual(f32(0.1), v(D ++ "X == 1 && Y == 10 && Z == X / Y", "Z")),
+	%% two literals fold as a float, an integer divisor converts
+	?assertEqual(0.75, v(D ++ "Z == 1.5 / 2.0", "Z")),
+	?assertEqual(1.25, v("declare N:4, X:32/float754, Z:32/float754; N == 2 && X == 2.5 && Z == X / N", "Z"))
+      end}].
+
+%% every pair of float754(3,2) against varp_float:div_bits; a zero
+%% divisor has no model by default (--fdivz false), inf with ignore
+div_exhaustive_test_() ->
+    {timeout, 900, fun() ->
+	Bits = fun(M, Name) ->
+		       {_,{_,Vec}} = lists:keyfind({p,Name,[]}, 1, M),
+		       list_to_integer(tuple_to_list(Vec), 2)
+	       end,
+	T = "declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X / Y; true",
+	{_, Ms, _} = varp_tc:run(T, [{satisfy,[]},{backjump,[{max,0}]}]),
+	%% x/0 has no model, 0/0 is NaN and allowed by --nan ignore
+	?assertEqual(4096 - 2*62, length(Ms)),
+	Bad = [{A,B,Z} || M <- Ms, A <- [Bits(M, <<"X">>)], B <- [Bits(M, <<"Y">>)],
+			  Z <- [Bits(M, <<"Z">>)], Z =/= varp_float:div_bits(A, B, 3, 2)],
+	?assertEqual([], Bad),
+	{_, Ms2, _} = varp_tc:run(T, [{satisfy,[]},{backjump,[{max,0}]}], #{fdivz => ignore}),
+	?assertEqual(4096, length(Ms2)),
+	Bad2 = [{A,B,Z} || M <- Ms2, A <- [Bits(M, <<"X">>)], B <- [Bits(M, <<"Y">>)],
+			   Z <- [Bits(M, <<"Z">>)], Z =/= varp_float:div_bits(A, B, 3, 2)],
+	?assertEqual([], Bad2)
+     end}.
+
+%% inf: the literal, --inf and --fdivz
+inf_test_() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+    [{"the literal", {timeout, 120, fun() ->
+	?assertEqual(1, counts("declare X:32/float754; X == inf")),
+	?assertEqual(1, counts("declare X:32/float754; X == -inf")),
+	?assertEqual(6.0, v(D ++ "X == 2.0 * 3.0 && X != inf", "X")),
+	%% only the largest finite number lies above the second largest
+	?assertEqual(1, counts("declare X:32/float754; X > 3.4028233e38 && X != inf")),
+	?assertError({fixpoint_infinity,_}, varp_tc:models("declare Q:32/fixpoint; Q == inf"))
+      end}},
+     {"--inf", {timeout, 120, fun() ->
+	?assertEqual(0, counts(D ++ "X == 3.0e38 && Z == X * 10", #{inf => false})),
+	?assertEqual(0, counts(D ++ "X == 3.0e38 && Z == X + X", #{inf => false})),
+	?assertEqual(0, counts(D ++ "X == 3.0e38 && Y == 1.0e-10 && Z == X / Y", #{inf => false})),
+	?assertEqual(1, counts(D ++ "X == 3.0e38 && Z == X * 10 && Z == inf", #{inf => ignore})),
+	?assertEqual(1, counts(D ++ "X == 3.0e38 && Z == X * 10 && Z == inf", #{inf => true})),
+	?assertEqual(0, counts(D ++ "X == 3.0 && Z == X * 10", #{inf => true})),
+	%% a literal above the range is an error, whatever the flag
+	?assertError({float754_range,_,_}, varp_tc:models(D ++ "Z == 3.0e38 * 10"))
+      end}},
+     {"--fdivz", {timeout, 120, fun() ->
+	?assertEqual(0, counts(D ++ "Y = 0.0; Z = X / Y; X == -1")),
+	?assertEqual(-inf_f32(), v(D ++ "Y = 0.0; Z = X / Y; X == -1", "Z", #{fdivz => ignore})),
+	?assertEqual(inf_f32(), v(D ++ "Y = -0.0; Z = X / Y; X == -1", "Z", #{fdivz => ignore})),
+	?assertEqual(1, counts(D ++ "X = 0.0; Y = 0.0; Z = X / Y; isnan(Z)", #{fdivz => ignore})),
+	%% 0/0 is not a division by zero but not a number
+	?assertEqual(1, counts(D ++ "X = 0.0; Y = 0.0; Z = X / Y; isnan(Z)")),
+	%% the integer rule is separate
+	?assertEqual(0, counts("declare N:4, M:4; N == 3 && M == 0 && N / M == 2", #{fdivz => ignore}))
+      end}}].
+
+inf_f32() -> varp_float:to_float(varp_float:inf_bits(0, 8, 23), 8, 23).
+
+%% NaN: the invalid operations, propagation, unordered comparison,
+%% isnan/isinf and --nan
+nan_test_() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754, W:32/float754; ",
+    %% (a zero is pinned by a statement: Y == 0.0 has two models)
+    [{"invalid operations give NaN", {timeout, 300, fun() ->
+	?assertEqual(1, counts(D ++ "Z = X + Y; X == inf && Y == -inf && isnan(Z)")),
+	?assertEqual(1, counts(D ++ "Z = X - Y; X == inf && Y == inf && isnan(Z)")),
+	?assertEqual(1, counts(D ++ "Y = 0.0; Z = X * Y; X == inf && isnan(Z)")),
+	?assertEqual(1, counts(D ++ "Z = X / Y; X == inf && Y == -inf && isnan(Z)")),
+	?assertEqual(1, counts(D ++ "X = 0.0; Y = -0.0; Z = X / Y; isnan(Z)")),
+	%% inf stays inf, x / inf is zero
+	?assertEqual(1, counts(D ++ "Z = X - Y; X == inf && Y == 2.5 && isinf(Z) && Z > 0")),
+	?assertEqual(1, counts(D ++ "Z = X + Y; X == -inf && Y == -inf && Z == -inf")),
+	?assertEqual(1, counts(D ++ "Z = X * Y; X == inf && Y == -0.5 && Z == -inf")),
+	?assertEqual(1, counts(D ++ "Z = X / Y; X == 2.5 && Y == inf && Z == 0.0 && !isinf(Z)")),
+	%% a NaN operand propagates (six NaN patterns in float754(3,2)),
+	%% the result is the quiet NaN
+	S = "declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); ",
+	?assertEqual(6, counts(S ++ "Z = X + Y; X == 1.5 && isnan(Y) && isnan(Z) && Z == Z == false")),
+	?assertEqual(6, counts(S ++ "Z = X * Y; isnan(X) && Y == 2.0 && isnan(Z) && Z >= 0 == false")),
+	?assertEqual(6, counts(S ++ "Z = X / Y; isnan(X) && Y == 2.0 && isnan(Z) && Z == Y == false"))
+      end}},
+     {"unordered", {timeout, 300, fun() ->
+	N = D ++ "X = 0.0; Y = 0.0; Z = X / Y; ",
+	?assertEqual(1, counts(N ++ "Z != Z")),
+	?assertEqual(0, counts(N ++ "Z == Z")),
+	?assertEqual(0, counts(N ++ "Z < 1")),
+	?assertEqual(0, counts(N ++ "Z >= 1")),
+	?assertEqual(0, counts(N ++ "Z == inf")),
+	?assertEqual(1, counts(N ++ "Z != 1.0 && Z != inf")),
+	%% minNum: the number wins, NaN only when both are
+	?assertEqual(1, counts(N ++ "min(Z, 1.0) == 1.0")),
+	?assertEqual(1, counts(N ++ "max(-2.0, Z) == -2.0")),
+	%% (a call inside a call is a meta expression, so W is assigned)
+	?assertEqual(1, counts(D ++ "X = 0.0; Y = 0.0; Z = X / Y; W = min(Z, Z); isnan(W)"))
+      end}},
+     {"isnan and isinf", fun() ->
+	?assertEqual(1, counts("declare X:32/float754; isinf(X) && X > 0")),
+	?assertEqual(1, counts("declare X:32/float754; isinf(X) && X < 0")),
+	%% three NaN patterns of each sign in float754(3,2)
+	?assertEqual(6, counts("declare X/float754(3,2); isnan(X)")),
+	?assertEqual(2, counts("declare X/float754(3,2); isinf(X)")),
+	?assertEqual(1, counts("declare N:4; N == 3 && !isnan(N) && !isinf(N)"))
+      end},
+     {"--nan", {timeout, 300, fun() ->
+	?assertEqual(0, counts(D ++ "Z = X + Y; X == inf && Y == -inf", #{nan => false})),
+	?assertEqual(0, counts(D ++ "X = 0.0; Y = 0.0; Z = X / Y; true", #{nan => false})),
+	%% a NaN operand is a NaN result, forbidden as well
+	?assertEqual(0, counts(D ++ "Z = X + 1.0; isnan(X)", #{nan => false})),
+	?assertEqual(1, counts(D ++ "X = 0.0; Y = 0.0; Z = X / Y; true", #{nan => true})),
+	?assertEqual(0, counts(D ++ "Z = X / Y; X == 1.0 && Y == 2.0", #{nan => true}))
+      end}}].
+
 %%% ---- multiplication -----------------------------------------------
 
 %% the product of two binary32 (binary16) numbers is exact as a double,
@@ -312,8 +454,8 @@ mul_lib_test_() ->
 
 errors_test() ->
     %% (two literals fold as fixed point, a variable does not)
-    ?assertError({float754_operator,'div',_},
-		 varp_tc:models("declare X:32/float754, Y:32/float754; X == Y / 2.0")),
+    ?assertError({float754_operator,'rem'},
+		 varp_tc:models("declare X:32/float754, Y:32/float754; X == Y % 2.0")),
     ?assertError({float754_to_integer,_,_},
 		 varp_tc:models("declare N:8, X:32/float754; N = X; X == 1.5")),
     ?assertError({float754_mixed,_},
