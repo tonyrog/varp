@@ -298,6 +298,10 @@ binary32 cannot hold it exactly.  `--ftz true` is flush to zero, what
 many DSPs and NEON in its default mode do: a tiny result, literal or
 converted value becomes zero (with its sign), and every tiny nonzero
 result is then an underflow.  Operands are still read as IEEE does.
+Under `--ops lib` the three operations are the library circuits
+`op_fmul`, `op_fadd` and `op_fdiv` (`doc/CIRCUIT.md`), with the flags as
+out parameters; `varp_float754_tests:float_lib_test_` checks them
+against the same references, every pair of `float754(3,2)`.
 
 ### /float: one declaration, either format
 

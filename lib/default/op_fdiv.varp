@@ -1,0 +1,51 @@
+// a / b in float754 (e, m), round to nearest even, IEEE with
+// subnormals (z flushes tiny results to zero, --ftz).  Both
+// significands are normalised, the quotient of a << (m+2) by b has
+// m+3 bits, a nonzero remainder is the sticky bit.  0/0, inf/inf and
+// a NaN operand give NaN, inf/x inf, x/inf 0; x/0 is inf and sets
+// divz (--fdivz).
+circuit op_fdiv(meta e, m, z; in a:(1+e+m), b:(1+e+m); return r:(1+e+m);
+                out over, under, nan, divz)
+{
+    declare S, HA, HB, EA0:e, EB0:e, EA:e, EB:e, SIGA:(m+1), SIGB:(m+1);
+    declare SIGAN:(m+1), SIGBN:(m+1), LZA:(ilog2(m)+1), LZB:(ilog2(m)+1);
+    declare AZERO, BZERO, NUM:(2*m+3), DEN:(m+1), Q:(2*m+3), REM:(m+1), RNZ;
+    declare QW:(m+3), QN:(m+3), LZ:(ilog2(m+2)+1), EX:(e+4)/signed;
+    declare ZA, IA, NA, ZB, IB, NB, MASKED, MAG:(e+m), ZERO0, ZERO, INFC;
+    S = a[e+m] ^ b[e+m];
+    [A i=0..(e-1)] EA0[i] = a[m+i];
+    [A i=0..(e-1)] EB0[i] = b[m+i];
+    HA = (EA0 != 0);
+    HB = (EB0 != 0);
+    EA[0] = EA0[0] | !HA;
+    [A i=1..(e-1)] EA[i] = EA0[i];
+    EB[0] = EB0[0] | !HB;
+    [A i=1..(e-1)] EB[i] = EB0[i];
+    [A i=0..(m-1)] SIGA[i] = a[i];
+    SIGA[m] = HA;
+    [A i=0..(m-1)] SIGB[i] = b[i];
+    SIGB[m] = HB;
+    SIGAN = op_fnorm(m+1, SIGA, LZA);
+    SIGBN = op_fnorm(m+1, SIGB, LZB);
+    AZERO = (SIGA == 0);
+    BZERO = (SIGB == 0);
+    divz = BZERO & !AZERO;
+    [A i=0..(m+1)] NUM[i] = false;
+    [A i=0..m] NUM[m+2+i] = SIGAN[i];
+    // a one in a zero divisor keeps op_div quiet, the result is inf anyway
+    DEN[0] = SIGBN[0] | BZERO;
+    [A i=1..m] DEN[i] = SIGBN[i];
+    Q = op_div(NUM, DEN, REM);
+    RNZ = (REM != 0);
+    [A i=0..(m+2)] QW[i] = Q[i];
+    QN = op_fnorm(m+3, QW, LZ);
+    EX = EA - EB + LZB - LZA + ((1<<(e-1)) - 1) - LZ;
+    NA = op_fclass(e, m, a, ZA, IA);
+    NB = op_fclass(e, m, b, ZB, IB);
+    nan = NA | NB | (AZERO & BZERO) | (IA & IB);
+    MASKED = nan | BZERO | IA | IB;
+    MAG = op_fpack(e, m, z, QN, RNZ, EX, AZERO, MASKED, ZERO0, over, under);
+    ZERO = ZERO0 | IB;
+    INFC = over | BZERO | IA;
+    r = op_fresult(e, m, MAG, ZERO, INFC, nan, S);
+}

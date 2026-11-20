@@ -1,0 +1,40 @@
+// a * b in float754 (e, m), round to nearest even, IEEE with
+// subnormals (z flushes tiny results to zero, --ftz).  The product of
+// the significands (a subnormal factor has the hidden bit 0 and the
+// exponent 1) is normalised, the exponent is Ea + Eb - bias + 1 - lz.
+// inf * 0 and a NaN factor give NaN, inf * x inf.  The flags over,
+// under and nan feed --inf, --underflow and --nan.
+circuit op_fmul(meta e, m, z; in a:(1+e+m), b:(1+e+m); return r:(1+e+m);
+                out over, under, nan)
+{
+    declare S, HA, HB, EA:e, EB:e, EA1:e, EB1:e, SIGA:(m+1), SIGB:(m+1);
+    declare P:(2*m+2), PN:(2*m+2), LZ:(ilog2(2*m+1)+1), ES:(e+1);
+    declare EX:(e+3)/signed, Z1, ZA, IA, NA, ZB, IB, NB, ANYINF, MASKED;
+    declare MAG:(e+m), ZERO, INFC;
+    S = a[e+m] ^ b[e+m];
+    [A i=0..(e-1)] EA[i] = a[m+i];
+    [A i=0..(e-1)] EB[i] = b[m+i];
+    HA = (EA != 0);
+    HB = (EB != 0);
+    [A i=0..(m-1)] SIGA[i] = a[i];
+    SIGA[m] = HA;
+    [A i=0..(m-1)] SIGB[i] = b[i];
+    SIGB[m] = HB;
+    EA1[0] = EA[0] | !HA;
+    [A i=1..(e-1)] EA1[i] = EA[i];
+    EB1[0] = EB[0] | !HB;
+    [A i=1..(e-1)] EB1[i] = EB[i];
+    P = SIGA * SIGB;
+    PN = op_fnorm(2*m+2, P, LZ);
+    ES = EA1 + EB1;
+    EX = ES - LZ - ((1<<(e-1)) - 2);
+    Z1 = (P == 0);
+    NA = op_fclass(e, m, a, ZA, IA);
+    NB = op_fclass(e, m, b, ZB, IB);
+    nan = NA | NB | (IA & ZB) | (IB & ZA);
+    ANYINF = IA | IB;
+    MASKED = nan | ANYINF;
+    MAG = op_fpack(e, m, z, PN, false, EX, Z1, MASKED, ZERO, over, under);
+    INFC = over | ANYINF;
+    r = op_fresult(e, m, MAG, ZERO, INFC, nan, S);
+}

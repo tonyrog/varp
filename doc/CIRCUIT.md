@@ -258,6 +258,21 @@ is loaded the first time its name is used:
 | `op_shr(meta k; a:n)`     | `a >> k`         | `n`, zeros in         |
 | `op_sar(meta k; a:n/signed)` | `a >> k` signed | `n` signed, sign in |
 | `op_rol op_ror(meta k; a:n)` | `a <<< k`, `a >>> k` | `n`, wiring        |
+| `op_fixmul(meta f; a:n/signed, b:m/signed)` | `a * b` fixed point | `n+m-f` signed |
+| `op_fixdiv(meta f; a:n/signed, b:m/signed; out r:m/signed)` | `a / b` fixed point | `n+f+1` signed |
+| `op_fmul(meta e, m, z; a, b:(1+e+m); out over, under, nan)` | `a * b` float754 | `1+e+m` |
+| `op_fadd(meta e, m, z; a, b:(1+e+m); out over, under, nan)` | `a + b`, `a - b` float754 | `1+e+m` |
+| `op_fdiv(meta e, m, z; a, b:(1+e+m); out over, under, nan, divz)` | `a / b` float754 | `1+e+m` |
+
+The float754 circuits are IEEE 754 with round to nearest even and
+subnormals; `z` is `--ftz`, the out flags carry `--inf`, `--underflow`,
+`--nan` and `--fdivz`.  They share `op_fnorm(meta w; a:w; out lz)`
+(the leading one to the top, `lz` the count), `op_fpack(meta e, m, z;
+n:w, xs, ex:k/signed, exact0, masked; out zero, over, under)` (the
+denormalising shift, the rounding and the flags, see `fpack` in
+`varp_formula`), `op_fresult(meta e, m; mag, zero, infc, nan, s)` (the
+special cases in order of precedence) and `op_fclass(meta e, m; a; out
+zero, inf)` (returns NaN).
 
 Unsigned except the `op_s*` circuits; a narrower operand is zero
 extended.  The signed circuits sign extend their operands first:

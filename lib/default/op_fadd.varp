@@ -1,0 +1,61 @@
+// a + b in float754 (e, m), round to nearest even, IEEE with
+// subnormals (z flushes tiny results to zero, --ftz).  The operand
+// with the larger magnitude leads, the other one's significand is
+// shifted right by the exponent difference with a sticky bit, and is
+// added or subtracted as the signs agree or not; the result is
+// normalised.  inf - inf and a NaN term give NaN, inf + x inf; a
+// difference that cancels exactly is +0.  a - b is a + (-b).
+circuit op_fadd(meta e, m, z; in a:(1+e+m), b:(1+e+m); return r:(1+e+m);
+                out over, under, nan)
+{
+    declare MAGA:(e+m), MAGB:(e+m), LESS, BIG:(1+e+m), SMALL:(1+e+m);
+    declare SB, SS, HB, HS, EB0:e, ES0:e, EB:e, ES:e, SIGB:(m+4), SIGS:(m+4);
+    declare D:e, SH0:(m+4), ST0, ALIGNED:(m+4), SUB, TOT:(m+5), DIF:(m+4), R:(m+5);
+    declare RN:(m+5), LZ:(ilog2(m+4)+1), EX:(e+3)/signed, Z1;
+    declare ZA, IA, NA, ZB, IB, NB, ANYINF, MASKED, MAG:(e+m), ZERO, INFC, ZEROSUB, S;
+    [A i=0..(e+m-1)] MAGA[i] = a[i];
+    [A i=0..(e+m-1)] MAGB[i] = b[i];
+    LESS = (MAGA < MAGB);
+    BIG = LESS ? b : a;
+    SMALL = LESS ? a : b;
+    SB = BIG[e+m];
+    SS = SMALL[e+m];
+    [A i=0..(e-1)] EB0[i] = BIG[m+i];
+    [A i=0..(e-1)] ES0[i] = SMALL[m+i];
+    HB = (EB0 != 0);
+    HS = (ES0 != 0);
+    EB[0] = EB0[0] | !HB;
+    [A i=1..(e-1)] EB[i] = EB0[i];
+    ES[0] = ES0[0] | !HS;
+    [A i=1..(e-1)] ES[i] = ES0[i];
+    // the significands with three bits below: guard, round, sticky
+    [A i=0..2] SIGB[i] = false;
+    [A i=0..(m-1)] SIGB[i+3] = BIG[i];
+    SIGB[m+3] = HB;
+    [A i=0..2] SIGS[i] = false;
+    [A i=0..(m-1)] SIGS[i+3] = SMALL[i];
+    SIGS[m+3] = HS;
+    // align the small one; what falls off is the sticky bit
+    D = EB - ES;
+    SH0 = SIGS >> D;
+    ST0 = ((SH0 << D) != SIGS);
+    ALIGNED[0] = SH0[0] | ST0;
+    [A i=1..(m+3)] ALIGNED[i] = SH0[i];
+    SUB = SB ^ SS;
+    TOT = SIGB + ALIGNED;
+    DIF = SIGB - ALIGNED;
+    [A i=0..(m+4)] R[i] = SUB ? DIF[i] : TOT[i];
+    RN = op_fnorm(m+5, R, LZ);
+    EX = EB + 1 - LZ;
+    Z1 = (R == 0);
+    NA = op_fclass(e, m, a, ZA, IA);
+    NB = op_fclass(e, m, b, ZB, IB);
+    nan = NA | NB | (IA & IB & SUB);
+    ANYINF = IA | IB;
+    MASKED = nan | ANYINF;
+    MAG = op_fpack(e, m, z, RN, false, EX, Z1, MASKED, ZERO, over, under);
+    INFC = over | ANYINF;
+    ZEROSUB = Z1 & SUB;
+    S = SB & !ZEROSUB;
+    r = op_fresult(e, m, MAG, ZERO, INFC, nan, S);
+}

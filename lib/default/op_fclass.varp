@@ -1,0 +1,11 @@
+// the class of a float754 (e, m): zero, inf, NaN; the sign is a[e+m]
+circuit op_fclass(meta e, m; in a:(1+e+m); return nan; out zero, inf)
+{
+    declare EXPALL, MANZ, EXPZ;
+    EXPALL = [A i=0..(e-1)] a[m+i];
+    EXPZ = [A i=0..(e-1)] !a[m+i];
+    MANZ = [A i=0..(m-1)] !a[i];
+    zero = EXPZ & MANZ;
+    inf = EXPALL & MANZ;
+    nan = EXPALL & !MANZ;
+}

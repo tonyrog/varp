@@ -3415,6 +3415,35 @@ underflow_status({bool,U}, Bs) ->
     varp_arith:set_status(Bs#bs.vp, U, maps:get(underflow, Bs#bs.option, ignore)),
     Bs.
 
+%% --ops lib: the whole operation is the library circuit op_fmul,
+%% op_fadd or op_fdiv (over op_fnorm, op_fpack, op_fresult and
+%% op_fclass), with e, m and the --ftz flag as meta parameters and the
+%% flags for --inf, --underflow, --nan (and --fdivz) as out parameters,
+%% fresh symbols of the caller
+lib_float_op(Name, Af, Bf, T={float,E,M}, Bs) ->
+    Z = case float_mode(Bs) of ftz -> 1; ieee -> 0 end,
+    {Prefix, Bs1} = circuit_prefix(Name, Bs),
+    Flag = fun(F) -> {p,<<Prefix/binary,F/binary>>,[]} end,
+    Outs = [Flag(<<"over">>), Flag(<<"under">>), Flag(<<"nan">>)] ++
+	case Name of
+	    <<"op_fdiv">> -> [Flag(<<"divz">>)];
+	    _ -> []
+	end,
+    {R, Bs2} = lib_call(Name, [{const,E},{const,M},{const,Z},
+			       {value,fbits(Af)},{value,fbits(Bf)}] ++ Outs, Bs1),
+    {[Over,Under,NaN|Rest], Bs3} =
+	lists:mapfoldl(fun(P, B) -> bld(P, B) end, Bs2, Outs),
+    Bs4 = inf_status(Over, Bs3),
+    Bs5 = underflow_status(Under, Bs4),
+    Bs6 = nan_status(NaN, Bs5),
+    Bs7 = case Rest of
+	      [{bool,DivZ}] ->
+		  varp_arith:set_status(Bs6#bs.vp, DivZ, maps:get(fdivz, Bs6#bs.option, false)),
+		  Bs6;
+	      [] -> Bs6
+	  end,
+    {retag(T, R), Bs7}.
+
 %% --ftz: ieee (gradual underflow, subnormal results) or ftz (light,
 %% flush to zero)
 float_mode(Bs) ->
@@ -3486,6 +3515,9 @@ float_div(Af, Bf, T={float,E,M}, Bs) ->
 	true ->
 	    fold_status(varp_float:div_fold(vconst(Af), vconst(Bf), E, M, float_mode(Bs)), T, Bs);
 	false ->
+	  case lib_ops(Bs) of
+	    true -> lib_float_op(<<"op_fdiv">>, Af, Bf, T, Bs);
+	    false ->
 	    Zv = {uint,1,[false]},
 	    {Sa, Ea0, {uint,M,MaXs}} = fsplit(Af),
 	    {Sb, Eb0, {uint,M,MbXs}} = fsplit(Bf),
@@ -3546,6 +3578,7 @@ float_div(Af, Bf, T={float,E,M}, Bs) ->
 	    {InfC0, Bs32} = operation2('or', Over, Bzero, Bs31),
 	    {InfC, Bs33} = operation2('or', InfC0, Ia, Bs32),
 	    special_result(NaNc, InfC, Zero, Rounded, {bool,S}, T, Bs33)
+	  end
     end.
 
 fneg(V={T,N,Xs}) -> {T,N,lists:droplast(Xs) ++ [neg_lit(fsign(V))]}.
@@ -3567,6 +3600,9 @@ float_add(Af, Bf, T={float,E,M}, Bs) ->
 	{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
 	    fold_status(varp_float:add_fold(Ab, Bb, E, M, float_mode(Bs)), T, Bs);
 	_ ->
+	  case lib_ops(Bs) of
+	    true -> lib_float_op(<<"op_fadd">>, Af, Bf, T, Bs);
+	    false ->
 	    Zv = {uint,1,[false]},
 	    {Lt, Bs1} = operation2('lt', fmag(Af), fmag(Bf), Bs),
 	    {Big0, Bs2} = ite(undefined, Lt, fbits(Bf), fbits(Af), Bs1),
@@ -3623,6 +3659,7 @@ float_add(Af, Bf, T={float,E,M}, Bs) ->
 	    {ZeroSub, Bs36} = operation2('and', Z1, Sub, Bs35),
 	    {S, Bs37} = operation2('and', {bool,Sb}, negate(ZeroSub), Bs36),
 	    special_result(NaNc, InfC, Zero, Rounded, S, T, Bs37)
+	  end
     end.
 
 ones(K) -> lists:duplicate(K, true).
@@ -3640,6 +3677,9 @@ float_mul(Af, Bf, T={float,E,M}, Bs) ->
 	{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
 	    fold_status(varp_float:mul_fold(Ab, Bb, E, M, float_mode(Bs)), T, Bs);
 	_ ->
+	  case lib_ops(Bs) of
+	    true -> lib_float_op(<<"op_fmul">>, Af, Bf, T, Bs);
+	    false ->
 	    Zv = {uint,1,[false]},
 	    {Sa, Ea, {uint,M,MaXs}} = fsplit(Af),
 	    {Sb, Eb, {uint,M,MbXs}} = fsplit(Bf),
@@ -3673,6 +3713,7 @@ float_mul(Af, Bf, T={float,E,M}, Bs) ->
 	    Bs15c = inf_status(Over, Bs15b),
 	    {InfC, Bs15d} = operation2('or', Over, AnyInf, Bs15c),
 	    special_result(NaNc, InfC, Zero, Rounded, {bool,S}, T, Bs15d)
+	  end
     end.
 
 %% sign and magnitude (the IEEE order): two zeros are equal, otherwise

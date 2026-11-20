@@ -1,0 +1,14 @@
+// a float754 (e, m) from its magnitude and the special cases, in
+// order of precedence: nan (the quiet pattern, sign 0), infc (inf with
+// the sign s), zero (with the sign s), else mag with the sign s
+circuit op_fresult(meta e, m; in mag:(e+m), zero, infc, nan, s; return r:(1+e+m))
+{
+    declare M1:(e+m), M2:(e+m);
+    [A i=0..(e+m-1)] M1[i] = !zero & mag[i];
+    [A i=0..(m-1)]   M2[i] = !infc & M1[i];
+    [A i=m..(e+m-1)] M2[i] = infc | M1[i];
+    [A i=0..(m-2)]   r[i] = !nan & M2[i];
+    r[m-1] = nan | M2[m-1];
+    [A i=m..(e+m-1)] r[i] = nan | M2[i];
+    r[e+m] = s & !nan;
+}

@@ -1,0 +1,58 @@
+// the finite result of a float754 (e, m) operation, see fpack in
+// varp_formula.  n holds the normalised magnitude with its leading one
+// at the top (bit w-1), the fraction, the guard bit and sticky bits
+// below (w >= m+3, xs ors into the sticky bit); ex is the biased
+// exponent of the leading one, signed.  Below the normal range (ex <= 0)
+// the significand is shifted right 1-ex steps into a subnormal with a
+// sticky bit, or with z (--ftz) left alone and flushed to zero.  Round
+// to nearest even, the carry running into the exponent field.  exact0
+// says the exact result is zero, masked that an operand is special and
+// the finite path is noise.  under is a tiny and inexact result (any
+// tiny nonzero one with z), zero the flag for op_fresult, over the
+// overflow (masked).
+circuit op_fpack(meta e, m, z; in n:w, xs, ex:k/signed, exact0, masked;
+                 return mag:(e+m); out zero, over, under)
+{
+    declare ST0, STL, TINY, BIG, UP, INEX, REAL, NEG, EX0, ALL1, CARRY, TINYR, FLUSHED;
+    declare D0:(k+1)/signed, AMT:(usize(m+2)), STSH;
+    declare SIG:(m+3), SH:(m+3), SIG1:(m+3), EXF:e, MX:(e+m), UPV:1, R:(e+m+1);
+    // the m+3 bits that matter: sticky, guard, fraction, lead
+    ST0 = [E j=0..(w-m-3)] n[j];
+    STL = ST0 | xs;
+    SIG[0] = STL;
+    SIG[1] = n[w-m-2];
+    [A i=2..(m+2)] SIG[i] = n[w-m-3+i];
+    TINY = (ex <= 0);
+    // the denormalising shift: 1-ex when tiny, at most m+2
+    [A q=0..0, z==0] D0 = 1 - ex;
+    [A q=0..0, z==0] BIG = (D0 >= m+2);
+    [A i=0..(usize(m+2)-1), z==0] AMT[i] = TINY & (BIG | D0[i]);
+    [A q=0..0, z==0] SH = SIG >> AMT;
+    [A q=0..0, z==0] STSH = ((SH << AMT) != SIG);
+    [A q=0..0, z==0] SIG1[0] = SH[0] | STSH;
+    [A i=1..(m+2), z==0] SIG1[i] = SH[i];
+    [A i=0..(m+2), z!=0] SIG1[i] = SIG[i];
+    // round to nearest even
+    UP = SIG1[1] & (SIG1[0] | SIG1[2]);
+    [A i=0..(e-1), z==0] EXF[i] = !TINY & ex[i];
+    [A i=0..(e-1), z!=0] EXF[i] = ex[i];
+    [A i=0..(m-1)] MX[i] = SIG1[i+2];
+    [A i=0..(e-1)] MX[m+i] = EXF[i];
+    UPV[0] = UP;
+    R = MX + UPV;
+    [A i=0..(e+m-1)] mag[i] = R[i];
+    // the flags
+    INEX = SIG1[1] | SIG1[0];
+    REAL = !exact0 & !masked;
+    NEG = (ex < 0);
+    EX0 = (ex == 0);
+    ALL1 = [A i=0..(m-1)] SIG1[i+2];
+    CARRY = UP & ALL1;
+    TINYR = NEG | (EX0 & !CARRY);
+    FLUSHED = TINYR & REAL;
+    [A q=0..0, z==0] zero = exact0;
+    [A q=0..0, z==0] under = TINY & INEX & REAL;
+    [A q=0..0, z!=0] zero = exact0 | FLUSHED;
+    [A q=0..0, z!=0] under = FLUSHED;
+    over = ((ex >= (1<<e)-1) | ([A i=0..(e-1)] R[m+i])) & !zero & REAL;
+}

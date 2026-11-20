@@ -524,6 +524,47 @@ underflow_test_() ->
 	?assertEqual(1, counts(D ++ "Z = X * Y; X == 1.5 && Y == 2.5", F#{underflow => false}))
       end}}].
 
+%% the circuit library: op_fmul, op_fadd and op_fdiv over op_fnorm,
+%% op_fpack, op_fresult and op_fclass, every pair of float754(3,2) in
+%% both modes against the references, and the flags
+float_lib_test_() ->
+    L = #{ops => lib},
+    Exh = fun(Op, Ref, Opts) ->
+		  T = "declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X " ++ Op ++ " Y; true",
+		  {_, Ms, _} = varp_tc:run(T, [{satisfy,[]},{backjump,[{max,0}]}], Opts),
+		  Mode = case maps:get(ftz, Opts, false) of true -> ftz; false -> ieee end,
+		  Bad = [{A,B,Z} || M <- Ms, A <- [bits(M, <<"X">>)], B <- [bits(M, <<"Y">>)],
+				    Z <- [bits(M, <<"Z">>)], Z =/= varp_float:Ref(A, B, 3, 2, Mode)],
+		  {length(Ms), Bad}
+	  end,
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+    [{"mul exhaustive", {timeout, 600, fun() ->
+	?assertEqual({4096, []}, Exh("*", mul_bits, L)),
+	?assertEqual({4096, []}, Exh("*", mul_bits, L#{ftz => true})) end}},
+     {"add exhaustive", {timeout, 600, fun() ->
+	?assertEqual({4096, []}, Exh("+", add_bits, L)),
+	?assertEqual({4096, []}, Exh("+", add_bits, L#{ftz => true})) end}},
+     {"div exhaustive", {timeout, 900, fun() ->
+	?assertEqual({4096, []}, Exh("/", div_bits, L#{fdivz => ignore})),
+	?assertEqual({4096, []}, Exh("/", div_bits, L#{fdivz => ignore, ftz => true})),
+	%% x/0 has no model by default
+	?assertEqual({4096 - 2*62, []}, Exh("/", div_bits, L)) end}},
+     {"binary32 and the flags", {timeout, 600, fun() ->
+	?assertEqual(f32(1.0e-40), vbj(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", "Z", L)),
+	?assertEqual(f32(1.0e-40), vbj(D ++ "Z = X / Y; X == 1.0e-20 && Y == 1.0e20", "Z", L)),
+	?assertEqual(f32(2.0e-39), vbj(D ++ "Z = X + Y; X == 1.0e-39 && Y == 1.0e-39", "Z", L)),
+	?assertEqual(0.0, vbj(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", "Z", L#{ftz => true})),
+	?assertEqual(0, counts(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", L#{underflow => false})),
+	?assertEqual(1, counts(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", L#{underflow => true})),
+	?assertEqual(0, counts(D ++ "X == 3.0e38 && Z == X * 10", L#{inf => false})),
+	?assertEqual(1, counts(D ++ "X == 3.0e38 && Z == X * 10 && Z == inf", L)),
+	?assertEqual(0, counts(D ++ "Z = X + Y; X == inf && Y == -inf", L#{nan => false})),
+	?assertEqual(1, counts(D ++ "Z = X + Y; X == inf && Y == -inf && isnan(Z)", L)),
+	?assertEqual(0, counts(D ++ "Y = 0.0; Z = X / Y; X == -1", L)),
+	?assertEqual(-inf_f32(), vbj(D ++ "Y = 0.0; Z = X / Y; X == -1", "Z", L#{fdivz => ignore})),
+	?assertEqual(1, counts(D ++ "X = 0.0; Y = 0.0; Z = X / Y; isnan(Z)", L))
+      end}}].
+
 %% NaN: the invalid operations, propagation, unordered comparison,
 %% isnan/isinf and --nan
 nan_test_() ->

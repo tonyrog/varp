@@ -1,0 +1,14 @@
+// the leading one of a to the top: a conditional shift by every power
+// of two from the largest down, lz counts the steps (the leading zero
+// count; a == 0 shifts all the way).  w >= 2.
+circuit op_fnorm(meta w; in a:w; return r:w; out lz:(ilog2(w-1)+1))
+{
+    declare N(k):w, Z(k);
+    N(ilog2(w-1)+1) = a;
+    [A k=0..ilog2(w-1)]
+        Z(k) = [A j=0..((1<<k)-1), j<w] !N(k+1)[w-1-j];
+    [A k=0..ilog2(w-1)] [A i=0..(w-1)]
+        N(k)[i] = Z(k) ? N(k+1)[i-(1<<k)] : N(k+1)[i];
+    r = N(0);
+    [A k=0..ilog2(w-1)] lz[k] = Z(k);
+}
