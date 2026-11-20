@@ -81,7 +81,10 @@ declaration_test() ->
     ?assertEqual(1.5, v("declare X:64/float754; X == 1.5", "X")),
     ?assertEqual(1.5, v("declare X/float754(8,23); X == 1.5", "X")),
     %% bfloat16: 8 exponent bits of 16
-    ?assertEqual(1.5, v("declare X:16/float754(8); X == 1.5", "X")),
+    %% one argument is the fraction width: bfloat16 is (8,7)
+    ?assertEqual(1.5, v("declare X:16/float754(7); X == 1.5", "X")),
+    ?assert(abs(v("declare X:16/float754(7); X == 3.0e38", "X") - 3.0e38) < 3.0e36),
+    ?assertEqual(3, counts("declare X:32/float754(23); X > 1.0 && X < 1.0000005")),
     ?assertEqual(f32(0.1), v("declare X:32/float754; X == 0.1", "X")),
     ?assertEqual(0.1, v("declare X:64/float754; X == 0.1", "X")),
     ?assertEqual(f16(0.1), v("declare X:16/float754; X == 0.1", "X")),
@@ -239,6 +242,77 @@ add_edge_test() ->
     {0, Out} = varp_tc:cli(["--print","model","-f", D ++ "X == 3.0e38 && Z == X + X", "sat","bj"]),
     ?assertNotEqual(nomatch, string:find(Out, "Z=inf")),
     ?assertEqual(1, counts("declare X:32/float754, Y:32/float754; X == 1.0 && Y == 2.0 && X + Y == 3.0")).
+
+%% /float is fixed or floating point as --float says
+float_type_test() ->
+    F = "declare X:32/float, Y:32/float, Z:32/float; Z = X / Y; X == 1 && Y == 3",
+    Third = f32(1/3),
+    ?assertEqual(Third, v(F, "Z")),
+    ?assertEqual(Third, v(F, "Z", #{float => "float754"})),
+    ?assertEqual(Third, v(F, "Z", #{float => "32/float754(23)"})),
+    ?assertEqual(21845/65536, v(F, "Z", #{float => "fixpoint"})),
+    ?assertEqual(0.3125, v(F, "Z", #{float => "32/fixpoint(4)"})),
+    %% the bare form takes its width from the option
+    B = "declare X/float, Y/float; Y = X * 2; X == 1.5",
+    ?assertEqual(3.0, v(B, "Y", #{float => "float754(8,23)"})),
+    ?assertEqual(3.0, v(B, "Y", #{float => "fixpoint(16,16)"})),
+    ?assertEqual(3.0, v(B, "Y", #{float => "16/float754"})),
+    ?assertEqual(3.0, v(B, "Y", #{float => "16/fixpoint(4)"})),
+    %% a circuit parameter and a typed left hand side
+    C = "circuit c(in a/float; return r) { r = (a == 1.5); } declare X/float; c(X)",
+    ?assertEqual(1.5, v(C, "X", #{float => "fixpoint(16,16)"})),
+    ?assertEqual(1.5, v(C, "X", #{float => "float754(8,23)"})),
+    L = "declare X:8/float754(3); Y:8/float = 1.5; Y == X",
+    ?assertEqual(1.5, v(L, "X", #{float => "float754(4,3)"})),
+    %% the option and the declaration must agree
+    ?assertError({parse_failed,{error,{float_size_mismatch,16,_}}},
+		 v("declare X:16/float; X == 1", "X", #{float => "fixpoint(16,16)"})),
+    ?assertError({parse_failed,{error,{float_size_unknown,_}}},
+		 v("declare X/float; X == 1", "X")),
+    ?assertError({parse_failed,{error,{float_option,_}}},
+		 v("declare X/float; X == 1", "X", #{float => "banan"})),
+    %% the spec parser
+    ?assertEqual({{float,default,default},undefined}, varp_formula:float_spec("float754")),
+    ?assertEqual({{float,default,23},32}, varp_formula:float_spec("32/float754(23)")),
+    ?assertEqual({{float,8,23},32}, varp_formula:float_spec("float754(8,23)")),
+    ?assertEqual({{fix,16},32}, varp_formula:float_spec("fixpoint(16,16)")),
+    ?assertEqual({{fix,default},16}, varp_formula:float_spec(" 16/fixpoint ")),
+    ?assertEqual(error, varp_formula:float_spec("32/float754(8,23)")),
+    %% and from the command line
+    {0, Out} = varp_tc:cli(["--float","fixpoint(8,8)","--print","model","--hex",
+			     "-f","declare X/float; X == 1.5","sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out, "X=0x0180")).
+
+%% a width that is not a machine word is most likely a slip
+odd_width_test() ->
+    {0, Out1} = varp_tc:cli(["--print","model","-f","declare X/float754(8,8); X == 1",
+			      "sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out1, "warning: X is 17 bits, a /float754")),
+    {0, Out2} = varp_tc:cli(["--print","model","-f","declare Q:12/fixpoint(4); Q == 1",
+			      "sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out2, "warning: Q is 12 bits, a /fixpoint")),
+    {0, Out3} = varp_tc:cli(["--print","model","-f","declare X/float754(8,7), Q:32/fixpoint, N:12; X == 1 && Q == 1 && N == 1",
+			      "sat","bj"]),
+    ?assertEqual(nomatch, string:find(Out3, "warning")).
+
+%% a float meta variable from the command line, limit=4.0
+meta_test() ->
+    ?assertEqual(4.0, varp_option:meta_value("4.0")),
+    ?assertEqual(100000.0, varp_option:meta_value("1e5")),
+    ?assertEqual(-0.0025, varp_option:meta_value("-2.5e-3")),
+    ?assertEqual(7, varp_option:meta_value("7")),
+    ?assertEqual("abc", varp_option:meta_value("abc")),
+    Opts = #{meta => #{<<"limit">> => 1.5}},
+    ?assertEqual(1.5, v("declare X:32/float754; X == limit", "X", Opts)),
+    ?assertEqual(2.5, v("declare Q:32/fixpoint; Q == limit + 1", "Q", Opts)),
+    ?assertEqual(1, counts("declare X:32/float754; X >= limit && X < 1.5000001", Opts)),
+    %% through both command line paths: before and after the plugin
+    {0, Out1} = varp_tc:cli(["--print","model","-f","declare X:32/float754; X == limit",
+			      "limit=2.5","sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out1, "X=2.5")),
+    {0, Out2} = varp_tc:cli(["--print","model","-f","declare X:32/float754; X == limit",
+			      "sat","bj","limit=2.5e0"]),
+    ?assertNotEqual(nomatch, string:find(Out2, "X=2.5")).
 
 add_lib_test_() ->
     {timeout, 300, fun() ->

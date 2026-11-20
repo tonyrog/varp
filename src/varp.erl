@@ -385,6 +385,12 @@ global_options() ->
 	 default => 16,
 	 description => "Fraction bits of a bare /fixpoint declaration and of a float literal without a fixed point operand (Q16.16)."
        },
+      #{ long => "float",
+	 key => float,
+	 spec => string,
+	 default => "float754",
+	 description => "The format of a /float declaration: float754, 32/float754, 32/float754(23), float754(8,23), fixpoint, 32/fixpoint(8) or fixpoint(16,16)."
+       },
       #{ long => "log",
 	 key => log,
 	 spec => {enum,
@@ -1047,6 +1053,16 @@ format_error(Err) ->
 	{unbound,Var} ->
 	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ", VarName, " is unbound\n"];
+	{float_option,Str} ->
+	    io_lib:format("--float ~s: expected float754, 32/float754, "
+			  "32/float754(23), float754(8,23), fixpoint, "
+			  "32/fixpoint(8) or fixpoint(16,16)\n", [Str]);
+	{float_size_unknown,Str} ->
+	    io_lib:format("X/float needs a width, declare X:32/float or "
+			  "put it in --float (~s has none)\n", [Str]);
+	{float_size_mismatch,Size,Str} ->
+	    io_lib:format("a /float declaration of ~w bits does not fit "
+			  "--float ~s\n", [Size, Str]);
 	{var_out_of_range,Var} ->
 	    VarName = varp_format:format_symbol(Var),
 	    ["Variable ",VarName," is out of range\n"];
@@ -1650,10 +1666,9 @@ process_args([Arg|As], Plugins, Do, Files, GOptSpec, GOpts, Bound) ->
 	    case string:split(Arg, "=") of
 		[Var,Value] ->
 		    MetaValue =
-			try list_to_integer(Value) of
-			    IValue -> IValue
-			catch error:_ ->
-				list_to_binary(Value)
+			case varp_option:meta_value(Value) of
+			    N when is_number(N) -> N;
+			    S -> list_to_binary(S)
 			end,
 		    process_args(As, Plugins, Do, Files,
 				 GOptSpec, GOpts, [{list_to_binary(Var),
@@ -1806,7 +1821,8 @@ parse(Filename, String, GOpts) ->
     case varp_parse:parse_and_scan({Scan, one_token, []}) of
 	{ok,{Sections,Assignments,Formula}} ->
 	    Syms = varp_parse:symbol_table(),
-	    case split_sections(Sections,GOpts) of
+	    %% the declare pass warns with file and line
+	    case split_sections(Sections,GOpts#{ syms => Syms, file => Filename }) of
 		{ok, SectionMap} ->
 		    {ok,{SectionMap#{ syms => Syms, file => Filename },
 			 Assignments,Formula}};
@@ -1831,7 +1847,8 @@ split_sections(Sections,GOpts) ->
     split_sections(Sections,empty_sections(),GOpts).
 
 split_sections([{declare,DeclList}|Sections], Map=#{ decls:=Decl0 },GOpts) ->
-    Bs = #bs { meta = maps:get(meta,GOpts,#{}) },  %% dummy bs
+    %% a dummy bs: the options settle /fixpoint and /float declarations
+    Bs = #bs { option = GOpts, meta = maps:get(meta,GOpts,#{}) },
     case add_decls(DeclList, Decl0, Bs) of
 	{ok,Decls1} ->
 	    %% "declare P(a, time)": the position of the time parameter
@@ -1878,14 +1895,37 @@ split_sections([], Map, _GOpts) ->
 add_decls([{visible,D}|Ds], Decls, Bs) ->   %% at the top level all is visible
     add_decls([D|Ds], Decls, Bs);
 add_decls([{{p,Sym,Args},PType,SExpr}|Ds], Decls, Bs) ->
-    Size = varp_formula:eval_meta(SExpr, Bs),
+    Size = varp_formula:decl_width(PType, SExpr, Bs),
     Type = varp_formula:decl_type(PType, Size, Bs),   %% {fix,default} -> {fix,16}
+    warn_odd_width(Sym, Type, Size, Bs),
     add_decls_(Sym, {Type,length(Args),Size}, Ds, Decls, Bs);
 %% untyped declaration: "declare X;" is a boolean (1 bit) symbol
 add_decls([{p,Sym,Args}|Ds], Decls, Bs) ->
     add_decls_(Sym, {bool,length(Args),1}, Ds, Decls, Bs);
 add_decls([], Decls, _Bs) ->
     {ok,Decls}.
+
+%% a fixed or floating point number of 12 or 20 bits is most likely a
+%% slip ((8,7) is 16 bits, not 15): the machine formats are 8, 16, 32,
+%% 64 ...
+warn_odd_width(Sym, Type, Size, Bs) when is_tuple(Type), is_integer(Size) ->
+    case Size >= 8 andalso (Size band (Size-1)) =:= 0 of
+	true -> ok;
+	false ->
+	    Syms = maps:get(syms, Bs#bs.option, #{}),
+	    Line = case maps:find(Sym, Syms) of
+		       {ok,{_N,L}} -> L;
+		       error -> 0
+		   end,
+	    ?warn("~s:~w: warning: ~s is ~w bits, a ~s is usually 8, 16, 32 or 64\n",
+		  [maps:get(file, Bs#bs.option, "*internal*"), Line, Sym, Size,
+		   case Type of
+		       {fix,_} -> "/fixpoint";
+		       _ -> "/float754"
+		   end])
+    end;
+warn_odd_width(_Sym, _Type, _Size, _Bs) ->
+    ok.
 
 decl_pexpr({visible,D}) -> decl_pexpr(D);
 decl_pexpr({P={p,_,_},_Type,_Size}) -> P;

@@ -94,6 +94,9 @@ in quantifier domains, in declared sizes and as a predicate index:
 
     $ varp sat bj formulas/varp/die_hard.varp n=6
 
+The value is an integer, or a float (`limit=4.0`, `eps=1e-6`) that
+meets a fixed or floating point operand like a literal in the formula.
+
 ### Plugins
 
 A plugin is named by its long or its short name. They run in the order
@@ -162,6 +165,10 @@ Encoding and search behaviour:
     --divz true|false|ignore            divide by zero            (false)
     --fixpoint <bits>                   fraction bits of a bare /fixpoint
                                         and of a float literal         (16)
+    --float <format>                    what a /float declaration is:
+                                        float754, 32/float754, 32/float754(23),
+                                        float754(8,23), fixpoint, 32/fixpoint(8),
+                                        fixpoint(16,16)         (float754)
     --inf true|false|ignore             a float754 result that overflows (ignore)
     --nan true|false|ignore             a float754 result that is NaN  (ignore)
     --fdivz true|false|ignore           float754 division by zero       (false)
@@ -211,8 +218,14 @@ over `op_smul`/`op_sdiv`) and `--overflow` apply as for integers.
 
     declare X:32/float754;        # binary32: 8 exponent bits, 23 fraction bits
     declare Y:16/float754;        # binary16 (5,10); 64 is binary64 (11,52)
-    declare B:16/float754(8);     # bfloat16: 8 exponent bits of 16
+    declare B:16/float754(7);     # bfloat16: 7 fraction bits, 8 exponent, 1 sign
     declare Z/float754(8,23);     # explicit, 1+8+23 bits
+
+As with `/fixpoint(4)`, one argument is the fraction width; `(E,M)`
+names the exponent and fraction widths, the sign bit comes on top, so
+`X:32/float754`, `X:32/float754(23)` and `X/float754(8,23)` are the
+same thing.  A fixed or floating point declaration whose width is not
+8, 16, 32, 64 ... gets a warning, as `(8,8)` for bfloat16 would.
 
 Light means flush to zero: an operand is read as IEEE does (a subnormal
 pattern is its small value, inf and NaN are what they are), but a
@@ -271,6 +284,21 @@ plugin reads back:
 
     varp --proof-output binary --outdir /tmp sat bj file.varp
     varp validate -t binary -f /tmp/proof.out sat file.varp
+
+### /float: one declaration, either format
+
+    declare X:32/float, Y/float;
+    $ varp --float fixpoint sat bj f.varp          # X is Q16.16
+    $ varp --float float754(8,23) sat bj f.varp    # X and Y are binary32
+
+A `/float` declaration (also as a circuit parameter and as a typed left
+hand side `X:32/float = ...`) is fixed or floating point as `--float`
+says, so one formula runs in both: the format is what follows the slash
+of a declaration, with the width in front when the declaration has
+none (`32/float754`, `32/fixpoint(8)`; `float754(8,23)` and
+`fixpoint(16,16)` carry theirs).  A declared width must agree with the
+option, and a bare `X/float` needs the option to give one.  The default
+is `float754`, the standard format of the declared width.
 
 ### Plugin options
 

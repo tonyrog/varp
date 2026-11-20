@@ -157,6 +157,9 @@ cpdecl -> pexpr                          : '$1'.
 cpdecl -> pexpr ':' sexpr '/' symbol                  : qualifier('$5', {'$1',uint,'$3'}).
 cpdecl -> pexpr ':' sexpr '/' symbol '(' expr ')'     : qualifier_size('$5', comma_list('$7'), {'$1',uint,'$3'}).
 cpdecl -> pexpr '/' symbol '(' expr ')'               : qualifier_args('$3', comma_list('$5'), '$1').
+%% a/float, a:32/float: fixed or floating point as --float says
+cpdecl -> pexpr ':' sexpr '/' 'float'                 : {'$1',{float,default},'$3'}.
+cpdecl -> pexpr '/' 'float'                           : {'$1',{float,default},default}.
 
 circuit_defs -> circuit_def : ['$1'].
 circuit_defs -> circuit_defs circuit_def : '$1' ++ ['$2'].
@@ -322,6 +325,10 @@ pdecl -> pexpr '/' symbol                          : visible('$3', '$1').
 %% (8 integer and 8 fraction bits)
 pdecl -> pexpr ':' sexpr '/' symbol '(' expr ')'   : qualifier_size('$5', comma_list('$7'), {'$1',uint,'$3'}).
 pdecl -> pexpr '/' symbol '(' expr ')'             : qualifier_args('$3', comma_list('$5'), '$1').
+%% "X:32/float" and "X/float": fixed or floating point, --float says
+%% which (and the width of the bare form)
+pdecl -> pexpr ':' sexpr '/' 'float'               : {'$1',{float,default},'$3'}.
+pdecl -> pexpr '/' 'float'                         : {'$1',{float,default},default}.
 
 pdecls -> pdecl : ['$1'].
 pdecls -> pdecls ',' pdecl : '$1'++['$3'].
@@ -363,6 +370,7 @@ oexpr -> pexpr ':' sexpr '/' 'unsigned' : {uint,'$3','$1'}.
 %% = ...": a formula may start with "X / f(1)", that form is declare only
 oexpr -> pexpr ':' sexpr '/' symbol               : oqualifier(qualifier('$5', {'$1',uint,'$3'})).
 oexpr -> pexpr ':' sexpr '/' symbol '(' expr ')'  : oqualifier(qualifier_size('$5', comma_list('$7'), {'$1',uint,'$3'})).
+oexpr -> pexpr ':' sexpr '/' 'float'              : {{float,default},'$3','$1'}.
 oexpr -> '!' pexpr                      : {'!', '$2'}.
 
 %%
@@ -508,7 +516,8 @@ flo({flonum,_Line,Val}) ->
 visible({symbol,_Ln,<<"visible">>}, Decl) -> {visible, Decl};
 visible({symbol,Ln,Other}, _Decl) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s, "
-				   "expected /signed, /unsigned or /visible", [Other])).
+				   "expected /signed, /unsigned, /float "
+				   "or /visible", [Other])).
 
 %% /visible or /fixpoint after a size: the fraction width of a bare
 %% /fixpoint is settled when the declaration is built (--fixpoint)
@@ -519,14 +528,14 @@ qualifier({symbol,_Ln,<<"float754">>}, {P,uint,Size}) -> {P,{float,default,defau
 qualifier({symbol,Ln,Other}, _Decl) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s, "
 				   "expected /signed, /unsigned, /fixpoint, "
-				   "/float754 or /visible", [Other])).
+				   "/float754, /float or /visible", [Other])).
 
 %% X:16/fixpoint(4): the size is given, 4 bits of it are fraction;
-%% X:16/float754(8): 8 exponent bits, the rest but the sign fraction
+%% X:32/float754(23): 23 fraction bits, the rest but the sign exponent
 qualifier_size({symbol,_Ln,<<"fixpoint">>}, [F], {P,uint,Size}) ->
     {P,{fix,F},Size};
-qualifier_size({symbol,_Ln,<<"float754">>}, [E], {P,uint,Size}) ->
-    {P,{float,E,default},Size};
+qualifier_size({symbol,_Ln,<<"float754">>}, [M], {P,uint,Size}) ->
+    {P,{float,default,M},Size};
 qualifier_size({symbol,Ln,Other}, Args, _Decl) ->
     return_error(Ln, io_lib:format("unknown declaration qualifier /~s/~w",
 				   [Other, length(Args)])).

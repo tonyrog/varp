@@ -12,6 +12,15 @@ count(Text) -> varp_tc:count(Text).
 
 %% a bare /fixpoint is Q16.16 (--fixpoint), fixpoint(f) and
 %% fixpoint(i,f) say the width
+%% --fixpoint reaches the declarations too (it did not, the dummy
+%% binding state of the declare pass had no options)
+fixpoint_option_decl_test() ->
+    [M] = varp_tc:models("declare X:16/fixpoint; X == 1.5", #{fixpoint => 4}),
+    ?assertEqual(1.5, proplists:get_value("X", M)),
+    {0, Out} = varp_tc:cli(["--fixpoint","4","--hex","--print","model",
+			     "-f","declare X:16/fixpoint; X == 1.5","sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out, "X=0x0018")).
+
 declaration_test() ->
     ?assertEqual(1.5,  v("declare X:32/fixpoint; X == 1.5", "X")),
     ?assertEqual(2.25, v("declare X/fixpoint(8,8); X == 2.25", "X")),

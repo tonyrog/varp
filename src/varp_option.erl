@@ -11,6 +11,7 @@
 -export([usage/1, usage/2, usage/3]).
 
 -export([process_args/4]).
+-export([meta_value/1]).
 
 -export([default_opts/1]).
 -export([options_spec/1]).
@@ -148,13 +149,7 @@ process_args(["-"++OptName|As],Spec,Map,Bound) ->
     end;
 process_args([Var,"=",Value|As],Spec,Map,Bound) ->
     V = make_var(Var),
-    try list_to_integer(Value) of
-	N ->
-	    process_args(As,Spec,Map,[{V,N}|Bound])
-    catch
-	error:badarg ->
-	    process_args(As,Spec,Map,[{V,Value}|Bound])
-    end;
+    process_args(As,Spec,Map,[{V,meta_value(Value)}|Bound]);
 process_args([A|As],Spec,Map,Bound) ->
     case string:chr(A,$=) of
 	0 -> 
@@ -170,10 +165,7 @@ process_args([A|As],Spec,Map,Bound) ->
 		   true -> {Value0,As}
 		end,
 	    V = make_var(Var),
-	    case string:to_integer(Value) of
-		{N,""} -> process_args(As1,Spec,Map,[{V,N}|Bound]);
-		_ -> process_args(As1,Spec,Map,[{V,Value}|Bound])
-	    end
+	    process_args(As1,Spec,Map,[{V,meta_value(Value)}|Bound])
     end;
 process_args([], _Spec, Map, Bound) ->
     {[], Map, Bound}.
@@ -183,6 +175,27 @@ spec_has_true_value({enum,Es}) ->
 spec_has_true_value(_) ->
     false.
 
+
+%% the value of a command line binding name=value: an integer, a
+%% float (4.0, 2.5e-3, 1e5) or else the string as given
+meta_value(Value) ->
+    case string:to_integer(Value) of
+	{N,""} -> N;
+	_ ->
+	    case string:to_float(Value) of
+		{F,""} -> F;
+		_ ->
+		    %% 1e5 has no point, which string:to_float needs
+		    case re:run(Value, "^[-+]?[0-9]+[eE][-+]?[0-9]+$") of
+			{match,_} ->
+			    [Mant,Exp] = string:split(string:lowercase(Value), "e"),
+			    {F,""} = string:to_float(Mant ++ ".0e" ++ Exp),
+			    F;
+			nomatch ->
+			    Value
+		    end
+	    end
+    end.
 
 make_var(String) when is_list(String) ->
     list_to_binary(String);

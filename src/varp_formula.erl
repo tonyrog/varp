@@ -34,7 +34,7 @@
 -export([intersect_bindings/3]).
 -export([install_bindings/3]).
 -export([each_unbound/2]).
--export([decl_type/2, decl_type/3, nif_type/1]).   %% fixed point and float declarations
+-export([decl_type/2, decl_type/3, decl_width/3, float_spec/1, nif_type/1]).   %% fixed point and float declarations
 -export([each_variable/2]).
 -export([fold_unbound/3]).
 -export([eval_meta/2]).
@@ -87,8 +87,11 @@
 %% and M fraction bits (see the float754 section)
 -define(is_float(T), (is_tuple(T) andalso tuple_size(T) =:= 3
 		      andalso element(1,(T)) =:= float)).
+%% X/float before --float has said which of the two it is
+-define(is_meta_float(T), ((T) =:= {float,default})).
 -define(is_vec_type(T), (((T)=:=int) orelse ((T)=:=uint) orelse ((T)=:=bit)
-			 orelse ?is_fix(T) orelse ?is_float(T))).
+			 orelse ?is_fix(T) orelse ?is_float(T)
+			 orelse ?is_meta_float(T))).
 -define(is_compare_op(Op),
 	((Op) =:= 'lt' orelse (Op) =:= 'lte' orelse (Op) =:= 'gt' orelse
 	 (Op) =:= 'gte' orelse (Op) =:= 'eq' orelse (Op) =:= 'neq' orelse
@@ -848,6 +851,9 @@ bld(_X,W,Bs) when is_integer(W) ->
 	    N = varp_math:unsigned_size(W),
 	    const_vector(uint,W,N,Bs)
     end;
+%% a float meta variable, limit=4.0 on the command line
+bld(_X,W,Bs) when is_float(W) ->
+    {{flo,W},Bs};
 bld(_X,{const,W}, Bs) when is_integer(W) ->
     if W < 0 ->
 	    N = varp_math:signed_size(W),
@@ -930,7 +936,8 @@ bld(_X, V={p,P,Args}, Bs) ->
 	{ok,{PType,_Arity,Size}} ->
 	    var_vector(PType,V,Size,Bs)
     end;
-bld(_X,{PType0,SExpr,PExpr},Bs) when ?is_vec_type(PType0) ->
+bld(_X,{PType0,SExpr0,PExpr},Bs) when ?is_vec_type(PType0) ->
+    SExpr = decl_width(PType0, SExpr0, Bs),
     PType = decl_type(PType0, SExpr, Bs),
     if is_atom(PExpr) ->
 	    Vn = atom_to_list(PExpr),
@@ -1800,7 +1807,7 @@ eval_domain(Expr, Bs) ->
 	_ -> [D]
     end.
 
-eval_meta(I, _Bs) when is_integer(I) -> I;
+eval_meta(I, _Bs) when is_number(I) -> I;
 eval_meta({const,V}, _Bs) -> V;
 eval_meta({uint,_N,V}, _Bs) when is_integer(V) -> V;   %% a literal in a formula
 eval_meta({int,_N,V}, _Bs) when is_integer(V) -> V;
@@ -2093,11 +2100,15 @@ decl_type({fix,F}, _Size, Bs) -> {fix, meta_int(F, Bs)};
 decl_type({float,default,default}, Size, Bs) ->
     {E,M} = varp_float:standard(decl_size(Size, Bs)),
     {float,E,M};
-decl_type({float,E0,default}, Size, Bs) ->
-    E = meta_int(E0, Bs),
-    {float,E,decl_size(Size, Bs)-1-E};
+decl_type({float,default,M0}, Size, Bs) ->
+    M = meta_int(M0, Bs),
+    {float,decl_size(Size, Bs)-1-M,M};
 decl_type({float,E0,M0}, _Size, Bs) ->
     {float, meta_int(E0, Bs), meta_int(M0, Bs)};
+%% X/float, X:32/float: the format --float names
+decl_type({float,default}, Size, Bs) ->
+    {Spec, SpecSize} = float_option(Bs),
+    decl_type(Spec, float_width(Size, SpecSize, Bs), Bs);
 decl_type(T, _Size, _Bs) -> T.
 
 meta_int(I, _Bs) when is_integer(I) -> I;
@@ -2105,6 +2116,60 @@ meta_int(E, Bs) -> eval_meta(E, Bs).
 
 decl_size(undefined, _Bs) -> error(float754_size_unknown);
 decl_size(S, Bs) -> meta_int(S, Bs).
+
+%% the width of a declaration: its size expression, or for a bare
+%% X/float the width --float gives
+decl_width({float,default}, default, Bs) ->
+    case float_option(Bs) of
+	{_, undefined} -> error({float_size_unknown, float_option_string(Bs)});
+	{_, Size} -> Size
+    end;
+decl_width(_PType, SExpr, Bs) ->
+    eval_meta(SExpr, Bs).
+
+float_width(undefined, SpecSize, _Bs) -> SpecSize;
+float_width(default, SpecSize, _Bs) -> SpecSize;
+float_width(Size0, SpecSize, Bs) ->
+    Size = meta_int(Size0, Bs),
+    if SpecSize =:= undefined; SpecSize =:= Size -> Size;
+       true -> error({float_size_mismatch, Size, float_option_string(Bs)})
+    end.
+
+float_option_string(Bs) ->
+    maps:get(float, Bs#bs.option, "float754").
+
+%% --float as a declaration type and a width (undefined when the option
+%% leaves the width to the declaration)
+float_option(Bs) ->
+    Str = float_option_string(Bs),
+    case float_spec(Str) of
+	error -> error({float_option, Str});
+	Spec -> Spec
+    end.
+
+%% "float754", "32/float754", "32/float754(23)", "float754(8,23)",
+%% "fixpoint", "32/fixpoint(8)", "fixpoint(16,16)": what follows the
+%% slash of a declaration, with the size in front when it has one
+float_spec(Str) ->
+    RE = "^(?:([0-9]+)/)?(float754|fixpoint)(?:\\(([0-9]+)(?:,([0-9]+))?\\))?$",
+    case re:run(string:trim(Str), RE, [{capture,all_but_first,list}]) of
+	{match, Gs0} ->
+	    [W,Name,A,B] = Gs0 ++ lists:duplicate(4-length(Gs0), ""),
+	    float_spec_(Name, spec_int(W), spec_int(A), spec_int(B));
+	nomatch ->
+	    error
+    end.
+
+spec_int("") -> undefined;
+spec_int(S) -> list_to_integer(S).
+
+float_spec_("float754", W, undefined, undefined) -> {{float,default,default}, W};
+float_spec_("float754", W, M, undefined) -> {{float,default,M}, W};
+float_spec_("float754", undefined, E, M) -> {{float,E,M}, 1+E+M};
+float_spec_("fixpoint", W, undefined, undefined) -> {{fix,default}, W};
+float_spec_("fixpoint", W, F, undefined) -> {{fix,F}, W};
+float_spec_("fixpoint", undefined, I, F) -> {{fix,F}, I+F};
+float_spec_(_, _, _, _) -> error.
 
 %%
 %%var_vector_(Size,Size,Type,Xs,_V,Bs) -> 

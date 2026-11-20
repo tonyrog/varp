@@ -58,8 +58,9 @@ ceil(X), round(X) and trunc(X) give an integer.  See README.md.
 IEEE 754 with inf and NaN but without subnormal results (light):
 
     declare X:32/float754;        binary32, (8,23)
-    declare Y:16/float754(8);     bfloat16: 8 exponent bits of 16
+    declare Y:16/float754(7);     bfloat16: 7 fraction bits of 16 (sign, 8, 7)
     declare Z/float754(8,23);     explicit exponent and fraction width
+    declare W:32/float, V/float;  fixed or floating point as --float says
 
 Literals (and inf), comparisons (NaN is unordered), -X, abs, min, max,
 ?:, + - * /, isnan(X), isinf(X) and the conversions to and from integers
