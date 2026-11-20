@@ -50,8 +50,6 @@
 -export([set/3]).
 -export([mix_type/2, iarg/1, varg/1, vconst/1]).
 
--export([test/0]).
-
 -include("varp.hrl").
 
 neg(true) -> false;
@@ -266,7 +264,7 @@ apply_sign(Vp, S, Us) ->
     normalize(int, Bn, vite(Vp, S, Bx, Ax1)).
 
 min(Vp,{bool,Y},{bool,Z}) ->
-    varp_circuit:and_gate(Vp,Y,Z);
+    {bool,varp_circuit:and_gate(Vp,Y,Z)};
 min(Vp,{uint,Yn,Yx},{uint,Zn,Zx}) ->
     Cn = erlang:max(Yn,Zn),
     Yx1 = vextend(uint,Yx,Yn,Cn),
@@ -283,7 +281,7 @@ min(Vp,Y,Z) ->
     {Yx2,[Yk]} = lists:split(Cn-1,Yx1),
     {Zx2,[Zk]} = lists:split(Cn-1,Zx1),
     Q = varp_circuit:equ_gate(Vp,Yk,Zk),
-    Lt = vlt(Vp,Yx2,Zx2),
+    Lt = vlt_mag(Vp,Yx2,Zx2),
     Y1 = varp_circuit:and_gate(Vp,Q,Lt),
     L = varp_circuit:lt_gate(Vp,Zk,Yk),
     Cond = varp_circuit:or_gate(Vp, Y1, L),
@@ -293,13 +291,13 @@ min(Vp,Y,Z) ->
 
 min(Vp,undefined,Y,Z) -> min(Vp,Y,Z);
 min(Vp,{bool,X},{bool,Y},{bool,Z}) ->
-    varp_circuit:and_gate(Vp,X,Y,Z);
+    {bool,varp_circuit:and_gate(Vp,X,Y,Z)};
 min(Vp,X,{uint,Yn,Yx},{uint,Zn,Zx}) ->
     {_Xt,Xn,Xx1} = varg(X),
     Yx1 = vextend(uint,Yx,Yn,Xn),
     Zx1 = vextend(uint,Zx,Zn,Xn),
     Cond = vlt(Vp,Yx1,Zx1),
-    Cx = vite(Vp,Xx1,Cond,Yx1,Zx1),
+    Cx = vite(Vp,Cond,Xx1,Yx1,Zx1),
     case X of
 	{bool,_} -> {bool,hd(Cx)};
 	{Xt,_,_} -> {Xt,Xn,Cx}
@@ -313,7 +311,7 @@ min(Vp,X,Y,Z) ->
     {Yx2,[Yk]} = lists:split(Xn-1,Yx1),
     {Zx2,[Zk]} = lists:split(Xn-1,Zx1),
     Q = varp_circuit:equ_gate(Vp,Yk,Zk),
-    Lt = vlt(Vp,Yx2,Zx2),
+    Lt = vlt_mag(Vp,Yx2,Zx2),
     Y1 = varp_circuit:and_gate(Vp,Q,Lt),
     L = varp_circuit:lt_gate(Vp,Zk,Yk),
     Cond = varp_circuit:or_gate(Vp, Y1, L),
@@ -324,7 +322,7 @@ min(Vp,X,Y,Z) ->
     end.
 
 max(Vp,{bool,Y},{bool,Z}) ->
-    varp_circuit:or_gate(Vp,Y,Z);
+    {bool,varp_circuit:or_gate(Vp,Y,Z)};
 max(Vp,{uint,An,Ax},{uint,Bn,Bx}) ->
     Cn = erlang:max(An,Bn),
     Ax1 = vextend(uint,Ax,An,Cn),
@@ -341,7 +339,7 @@ max(Vp,A,B) ->
     {Ax2,[Ak]} = lists:split(Cn-1,Ax1),
     {Bx2,[Bk]} = lists:split(Cn-1,Bx1),
     Q = varp_circuit:equ_gate(Vp,Bk,Ak),
-    Lt = vlt(Vp,Bx2,Ax2),
+    Lt = vlt_mag(Vp,Bx2,Ax2),
     A1 = varp_circuit:and_gate(Vp,Q,Lt),
     L = varp_circuit:lt_gate(Vp,Ak,Bk),
     Cond = varp_circuit:or_gate(Vp,A1,L),
@@ -372,7 +370,7 @@ max(Vp,X,Y,Z) ->
     {Yx2,[Yk]} = lists:split(Xn-1,Yx1),
     {Zx2,[Zk]} = lists:split(Xn-1,Zx1),
     Q = varp_circuit:equ_gate(Vp,Zk,Yk),
-    Lt = vlt(Vp,Zx2,Yx2),
+    Lt = vlt_mag(Vp,Zx2,Yx2),
     Y1 = varp_circuit:and_gate(Vp,Q,Lt),
     L = varp_circuit:lt_gate(Vp,Yk,Zk),
     Cond = varp_circuit:or_gate(Vp,Y1,L),
@@ -994,7 +992,7 @@ vite(Vp,I,Xs,Ys,Zs) ->
     vite_(Vp,I,Xs,Ys,Zs,[]).
     
 vite_(Vp,I,[X|Xs],[Y|Ys],[Z|Zs],Acc) ->
-    X1 = varp_circuit:ite(Vp,I,X,Y,Z),
+    X1 = varp_circuit:ite(Vp,X,I,Y,Z),
     vite_(Vp,I,Xs,Ys,Zs,[X1|Acc]);
 vite_(_Vp,_I,[],[],[],Acc) ->
     lists:reverse(Acc).
@@ -1036,6 +1034,11 @@ vneq(Vp, X, Ys, Zs) ->
     %% io:format("~w = ~w equ ~w\n", [Xs, Ys, Zs]),
     %% varp_bitvec:fold_op(Vp,'or',X,false,Xs).
     varp_circuit:any(Vp,X,Xs).
+
+%% less over the magnitude part of a signed vector: a one bit vector has
+%% none, and two empty magnitudes are equal, never less
+vlt_mag(_Vp,[],[]) -> false;
+vlt_mag(Vp,Ys,Zs) -> vlt(Vp,Ys,Zs).
 
 %% Compare less
 vlt(Vp,Ys,Zs) -> 
@@ -1188,422 +1191,3 @@ u_norm(N,Cx) -> {uint,N,lists:reverse(Cx)}.
 
 i_norm(N,S,[S|Cx=[S|_]]) -> i_norm(N-1,S,Cx);
 i_norm(N,_S,Cx) -> {int,N,lists:reverse(Cx)}.
-
-%% TEST
-
-test() ->
-    true = test_abs(3),
-    true = test_negate(3),
-    true = test_uband(3),
-    true = test_iband(3),
-    true = test_ubor(3),
-    true = test_ibor(3),
-    true = test_ubxor(3),
-    true = test_ibxor(3),
-    true = test_ubnot(3),
-    true = test_ibnot(3),
-    true = test_veq(3),
-    true = test_vlt(3),
-    true = test_umin(3),
-    true = test_imin(3),
-    true = test_umax(3),
-    true = test_imax(3),
-    true = test_ult(3),
-    true = test_ulte(3),
-    true = test_ugt(3),
-    true = test_ugte(3),
-    true = test_ueq(3),
-    true = test_uneq(3),
-    true = test_clt(4, 2),
-    true = test_ilt(3),
-    true = test_ilte(3),
-    true = test_igt(3),
-    true = test_igte(3),
-    true = test_ieq(3),
-    true = test_ineq(3),
-
-    true = test_uadd(3),
-    true = test_iadd(3),
-    true = test_usub(3),
-    true = test_isub(3),
-    true = test_umult(3),
-    true = test_imult(3),
-    true = test_udiv(4),
-    true = test_idiv(4),
-    true = test_urem(4),
-    true = test_irem(4),
-
-    %% test constant evaluation on bcp should result in model!
-    
-    test_cadd(3, 5),
-    test_cadd(-3, 5),
-
-    test_csub(3, 5),
-    test_csub(-3, 5),
-
-    test_cmult(3, 5),
-    test_cmult(1, 5),
-    test_cmult(5, 0),
-
-    test_cmin(3, 5),
-    test_cmin(5, 3),
-    test_cmin(-3, 5),
-    test_cmin(-5, 3),
-
-    test_cmax(2, 4),
-    test_cmax(4, 2),
-    test_cmax(-2, 4),
-    test_cmax(-4, 2),
-
-    ok.
-
--define(name(Name), <<??Name>>).
--define(sym(Name), {<<??Name>>,[]}).
-
-%% unsigned range
-eval_uu(Fun, N) ->
-    Mu = (1 bsl N), U = lists:seq(0,Mu-1),
-    lists:foldl(
-      fun({Y,Z}, Acc) ->
-	      try Fun(Y,Z) of
-		  X -> [[{?sym(x),X},{?sym(y),Y},{?sym(z),Z}]|Acc]
-	      catch
-		  error:_ ->
-		      Acc
-	      end
-      end, [], [{Y,Z} || Y <- U, Z <- U]).
-
-%% unsigned range
-eval_iu(Fun, N) ->
-    Mi = (1 bsl (N-1)), I = lists:seq(-Mi,Mi-1),
-    Mu = (1 bsl N), U = lists:seq(0,Mu-1),
-    lists:foldl(
-      fun({Y,Z}, Acc) ->
-	      try Fun(Y,Z) of
-		  X -> [[{?sym(x),X},{?sym(y),Y},{?sym(z),Z}]|Acc]
-	      catch
-		  error:_ ->
-		      Acc
-	      end
-      end, [], [{Y,Z} || Y <- I, Z <- U]).
-
-%% integer range
-eval_ii(Fun, N) ->
-    Mi = (1 bsl (N-1)), I = lists:seq(-Mi,Mi-1),
-    lists:foldl(
-      fun({Y,Z}, Acc) ->
-	      try Fun(Y,Z) of
-		  X -> [[{?sym(x),X},{?sym(y),Y},{?sym(z),Z}]|Acc]
-	      catch
-		  error:_ ->
-		      Acc
-	      end
-      end, [], [{Y,Z} || Y <- I, Z <- I]).
-
-%% one integer range
-eval_i(Fun, N) ->
-    Mi = (1 bsl (N-1)), I = lists:seq(-Mi,Mi-1),
-    lists:foldl(
-      fun(Y, Acc) ->
-	      try Fun(Y) of
-		  X -> [[{?sym(x),X},{?sym(y),Y}]|Acc]
-	      catch
-		  error:_ ->
-		      Acc
-	      end
-      end, [], I).
-
-eval_u(Fun, N) ->
-    Mu = (1 bsl N), U = lists:seq(0,Mu-1),
-    lists:foldl(
-      fun(Y, Acc) ->
-	      try Fun(Y) of
-		  X -> [[{?sym(x),X},{?sym(y),Y}]|Acc]
-	      catch
-		  error:_ ->
-		      Acc
-	      end
-      end, [], U).
-
-%% model eval, only true values are returned
-meval_u(Fun, N) ->
-    Mu = (1 bsl N), U = lists:seq(0,Mu-1),
-    lists:foldl(
-      fun(Y, Acc) ->
-	      try Fun(Y) of
-		  true -> [[{?sym(x),true},{?sym(y),Y}]|Acc];
-		  false -> Acc
-	      catch
-		  error:_ ->
-		      Acc
-	      end
-      end, [], U).
-
-add_symbol(Vp, {Type,_,Xs}, Var) ->
-    varp_nif:add_symbol(Vp, {Var,[]}, Xs, Type);
-add_symbol(Vp, Xs, Var) ->
-    varp_nif:add_symbol(Vp, {Var,[]}, Xs, bool).
-
-test_i(N, Opts, Arith, Eval) ->
-    Vp = varp_nif:new(Opts),
-    Y = ivar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    X = Arith(Vp, Y),
-    add_symbol(Vp, X, ?name(x)),
-    varp_circuit:bt_match(Vp, eval_i(Eval, N)).
-
-test_ii(N, Opts, Arith, Eval) ->
-    Vp = varp_nif:new(Opts),
-    Y = ivar(Vp, N),
-    Z = ivar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    add_symbol(Vp, Z, ?name(z)),
-    X = Arith(Vp, Y, Z),
-    add_symbol(Vp, X, ?name(x)),
-    varp_circuit:bt_match(Vp, eval_ii(Eval, N)).
-
-test_iu(N, Opts, Arith, Eval) ->
-    Vp = varp_nif:new(Opts),
-    Y = ivar(Vp, N),
-    Z = uvar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    add_symbol(Vp, Z, ?name(z)),
-    X = Arith(Vp, Y, Z),
-    add_symbol(Vp, X, ?name(x)),
-    varp_circuit:bt_match(Vp, eval_iu(Eval, N)).
-
-test_u(N, Opts, Arith, Eval) ->
-    Vp = varp_nif:new(Opts),
-    Y = uvar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    X = Arith(Vp, Y),
-    add_symbol(Vp, X, ?name(x)),
-    varp_circuit:bt_match(Vp, eval_u(Eval, N)).
-
-test_uu(N, Opts, Arith, Eval) ->
-    Vp = varp_nif:new(Opts),
-    Y = uvar(Vp, N),
-    Z = uvar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    add_symbol(Vp, Z, ?name(z)),
-    X = Arith(Vp, Y, Z),
-    add_symbol(Vp, X, ?name(x)),
-    varp_circuit:bt_match(Vp, eval_uu(Eval, N)).
-
-test_cc(A, B, Opts, Arith, Eval) ->
-    Vp = varp_nif:new(Opts),
-    Y = iconst(A),
-    Z = iconst(B),
-    add_symbol(Vp, Y, ?name(y)),
-    add_symbol(Vp, Z, ?name(z)),
-    X = Arith(Vp, Y, Z),
-    add_symbol(Vp, X, ?name(x)),
-    varp_circuit:bcp_match(Vp, [{?name(x),Eval(A,B)},
-				{?name(y),A},{?name(z),B}]).
-
-
-test_vlt(N) ->
-    io:format("vlt ~w\n", [N]),
-    Vp = varp_nif:new(#{}),
-    Y = {_,_,Ys} = uvar(Vp, N),
-    Z = {_,_,Zs} = uvar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    add_symbol(Vp, Z, ?name(z)),
-    Lt = vlt(Vp, Ys, Zs),
-    add_symbol(Vp, Lt, ?name(x)),
-    varp_circuit:bt_match(Vp, eval_uu(fun erlang:'<'/2, N)).
-
-test_veq(N) ->
-    io:format("veq ~w\n", [N]),
-    Vp = varp_nif:new(#{}),
-    Y = {_,_,Ys} = uvar(Vp, N),
-    Z = {_,_,Zs} = uvar(Vp, N),
-    add_symbol(Vp, Y, ?name(y)),
-    add_symbol(Vp, Z, ?name(z)),
-    Eq = veq(Vp, Ys, Zs),
-    add_symbol(Vp, Eq, ?name(x)),
-    %% varp_nif_test:dump(Vp),
-    varp_circuit:bt_match(Vp, eval_uu(fun erlang:'=='/2, N)).
-
-test_uadd(N) ->
-    io:format("uadd ~w\n", [N]),
-    test_uu(N, #{carry=>false},   fun add/3, fun erlang:'+'/2).
-
-test_iadd(N) ->
-    io:format("iadd ~w\n", [N]),
-    test_ii(N, #{}, fun add/3, fun erlang:'+'/2).
-
-test_cadd(A, B) ->
-    io:format("cadd ~w, ~w\n", [A, B]),
-    test_cc(A, B, #{}, fun add/3, fun erlang:'+'/2).
-    
-test_usub(N) ->
-    io:format("usub ~w\n", [N]),
-    test_uu(N, #{borrow=>false}, 
-	    fun subtract/3, fun (A,B) when A>=B -> A-B end).
-
-test_isub(N) ->
-    io:format("isub ~w\n", [N]),
-    test_ii(N, #{}, fun subtract/3, fun erlang:'-'/2).
-
-test_csub(A, B) ->
-    io:format("csub ~w, ~w\n", [A, B]),
-    test_cc(A, B, #{}, fun subtract/3, fun erlang:'-'/2).
-
-test_umult(N) ->
-    io:format("umult ~w\n", [N]),
-    test_uu(N, #{carry=>false},
-	    fun multiply/3, fun erlang:'*'/2).
-
-test_imult(N) ->
-    io:format("imult ~w\n", [N]),
-    test_ii(N, #{carry=>false},
-	    fun multiply/3, fun erlang:'*'/2).
-
-test_cmult(A, B) ->
-    io:format("cmult ~w, ~w\n", [A, B]),
-    test_cc(A, B, #{}, fun multiply/3, fun erlang:'*'/2).
-
-test_udiv(N) ->
-    io:format("udiv ~w\n", [N]),
-    test_uu(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2).
-
-test_idiv(N) ->
-    io:format("idiv ~w\n", [N]),
-    true = test_iu(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2),
-    test_ii(N, #{divz=>false}, fun divide/3, fun erlang:'div'/2).
-
-test_urem(N) ->
-    io:format("urem ~w\n", [N]),
-    test_uu(N, #{divz=>false}, fun reminder/3, fun erlang:'rem'/2).
-
-test_irem(N) ->
-    io:format("irem ~w\n", [N]),
-    true = test_iu(N, #{divz=>false}, fun reminder/3, fun erlang:'rem'/2),
-    test_ii(N, #{divz=>false}, fun reminder/3, fun erlang:'rem'/2).
-
-test_umin(N) ->
-    io:format("umin ~w\n", [N]),
-    test_uu(N, #{}, fun min/3, fun erlang:min/2).
-
-test_imin(N) ->
-    io:format("imin ~w\n", [N]),
-    test_ii(N, #{}, fun min/3, fun erlang:min/2).
-
-test_cmin(A,B) ->
-    io:format("cmin ~w,~w\n", [A,B]),
-    test_cc(A, B, #{}, fun min/3, fun erlang:min/2).
-
-test_umax(N) ->
-    io:format("umax ~w\n", [N]),
-    test_uu(N, #{}, fun max/3, fun erlang:max/2).
-
-test_imax(N) ->
-    io:format("imax ~w\n", [N]),
-    test_ii(N, #{}, fun max/3, fun erlang:max/2).
-
-test_cmax(A,B) ->
-    io:format("cmax ~w,~w\n", [A, B]),
-    test_cc(A, B, #{}, fun max/3, fun erlang:max/2).
-
-test_abs(N) ->
-    io:format("abs ~w\n", [N]),
-    test_i(N, #{}, fun abs/2, fun erlang:abs/1).
-
-test_negate(N) ->
-    io:format("negate ~w\n", [N]),
-    test_i(N, #{}, fun negate/2, fun erlang:'-'/1).
-
-test_uband(N) ->
-    io:format("uband ~w\n", [N]),
-    test_uu(N, #{},   fun bitwise_and/3, fun erlang:'band'/2).
-
-test_iband(N) ->
-    io:format("iband ~w\n", [N]),
-    test_ii(N, #{}, fun bitwise_and/3, fun erlang:'band'/2).
-
-test_ubor(N) ->
-    io:format("ubor ~w\n", [N]),
-    test_uu(N, #{},   fun bitwise_or/3, fun erlang:'bor'/2).
-
-test_ibor(N) ->
-    io:format("ibor ~w\n", [N]),
-    test_ii(N, #{},   fun bitwise_or/3, fun erlang:'bor'/2).
-
-test_ubxor(N) ->
-    io:format("ubxor ~w\n", [N]),
-    test_uu(N, #{},   fun bitwise_xor/3, fun erlang:'bxor'/2).
-
-test_ibxor(N) ->
-    io:format("ibxor ~w\n", [N]),
-    test_ii(N, #{},   fun bitwise_xor/3, fun erlang:'bxor'/2).
-
-test_ubnot(N) ->
-    io:format("ubnot ~w\n", [N]),
-    Mask = (1 bsl N) - 1,
-    test_u(N, #{},   fun bitwise_not/2, 
-	   fun(X) -> (bnot X) band Mask end).
-
-test_ibnot(N) ->
-    io:format("ibnot ~w\n", [N]),
-    test_i(N, #{},   fun bitwise_not/2, fun erlang:'bnot'/1).
-
-%% Test Y:n < K
-test_clt(N, K) ->
-    io:format("lt:~w y < ~w\n", [N,K]),    
-    Vp = varp_nif:new(#{}),
-    Y = uvar(Vp, N),
-    C = iconst(K, N),
-    add_symbol(Vp, Y, ?name(y)),
-    Lt = lt(Vp, Y, C),
-    add_symbol(Vp, Lt, ?name(x)),
-    varp_nif:bind(Vp, Lt),
-    varp_circuit:bt_match(Vp, meval_u(fun (Yi) -> Yi < 2 end, N)).
-    
-test_ult(N) ->
-    io:format("ult ~w\n", [N]),
-    test_uu(N, #{}, fun lt/3, fun erlang:'<'/2).
-
-test_ulte(N) ->
-    io:format("ulte ~w\n", [N]),
-    test_uu(N, #{}, fun lte/3, fun erlang:'=<'/2).
-
-test_ugt(N) ->
-    io:format("ugt ~w\n", [N]),
-    test_uu(N, #{}, fun gt/3, fun erlang:'>'/2).
-
-test_ugte(N) ->
-    io:format("ugte ~w\n", [N]),
-    test_uu(N, #{}, fun gte/3, fun erlang:'>='/2).
-
-test_ueq(N) ->
-    io:format("ueq ~w\n", [N]),
-    test_uu(N, #{}, fun eq/3, fun erlang:'=='/2).
-
-test_uneq(N) ->
-    io:format("uneq ~w\n", [N]),
-    test_uu(N, #{}, fun neq/3, fun erlang:'=/='/2).
-
-test_ilt(N) ->
-    io:format("ilt ~w\n", [N]),
-    test_ii(N, #{}, fun lt/3, fun erlang:'<'/2).
-
-test_ilte(N) ->
-    io:format("ilte ~w\n", [N]),
-    test_ii(N, #{}, fun lte/3, fun erlang:'=<'/2).
-
-test_igt(N) ->
-    io:format("igt ~w\n", [N]),
-    test_ii(N, #{}, fun gt/3, fun erlang:'>'/2).
-
-test_igte(N) ->
-    io:format("igte ~w\n", [N]),
-    test_ii(N, #{}, fun gte/3, fun erlang:'>='/2).
-
-test_ieq(N) ->
-    io:format("ieq ~w\n", [N]),
-    test_ii(N, #{}, fun eq/3, fun erlang:'=='/2).
-
-test_ineq(N) ->
-    io:format("ineq ~w\n", [N]),
-    test_ii(N, #{}, fun neq/3, fun erlang:'=/='/2).

@@ -560,7 +560,7 @@ xref() ->
 test() ->
     varp_nif_test:all(),
     varp_circuit:test(),
-    varp_arith:test(),
+    %% the varp_arith self test lives in test/varp_arith_tests.erl
     varp_test:all().
 
 

@@ -21,7 +21,7 @@ To run a single suite:
 | `varp_parse_tests`     | `varp_parse.yrl`, ASTs, precedence, sections, circuits, and the `test/formulas/varp` corpus |
 | `varp_formula_tests`   | `varp_formula:build/2` - connectives, quantifiers, arithmetic, vectors, defines |
 | `varp_circuit_tests`   | `varp_circuit:test/0` plus the `circuit` language construct |
-| `varp_arith_tests`     | `varp_arith:test/0` and `varp_bitvec`/`varp_math`         |
+| `varp_arith_tests`     | every `varp_arith` encoder against an exhaustive enumeration, min/max over all operand types, `varp_bitvec`/`varp_math` |
 | `varp_nif_tests`       | `varp_nif_test:all/0` plus direct nif checks             |
 | `varp_sat_tests`       | satisfy/prove/falsify, backtrack vs backjump, timeouts, proof output, the other plugins |
 | `varp_backend_tests`   | DIMACS and SNF in and out, the cnf writer, formatting     |
