@@ -367,6 +367,18 @@ global_options() ->
 	 default => ignore,
 	 description => "A float754 result that overflows: ignore gives the inf pattern, false has no model, true requires one."
        },
+      #{ long => "underflow",
+	 key => underflow,
+	 spec => {enum,[?BOOL,{"ignore",ignore}]},
+	 default => ignore,
+	 description => "A float754 result that is tiny and inexact (any tiny one under --ftz): ignore allows it, false has no model, true requires one."
+       },
+      #{ long => "ftz",
+	 key => ftz,
+	 spec => {enum,[?BOOL]},
+	 default => false,
+	 description => "Flush a float754 result below the normal range to zero (light) instead of rounding it to a subnormal (IEEE)."
+       },
       #{ long => "nan",
 	 key => nan,
 	 spec => {enum,[?BOOL,{"ignore",ignore}]},

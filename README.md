@@ -171,6 +171,10 @@ Encoding and search behaviour:
                                         fixpoint(16,16)         (float754)
     --inf true|false|ignore             a float754 result that overflows (ignore)
     --nan true|false|ignore             a float754 result that is NaN  (ignore)
+    --underflow true|false|ignore       a float754 result that is tiny
+                                        and inexact                  (ignore)
+    --ftz <bool>                        flush a tiny float754 result to
+                                        zero instead of a subnormal  (false)
     --fdivz true|false|ignore           float754 division by zero       (false)
 
 `X << K` and `X >> K` with a constant `K` widen or narrow the vector;
@@ -214,10 +218,11 @@ does the same (`formulas/varp/tank_system.varp`).  Everything is built
 from the integer operators, so `--ops lib` (`op_fixmul`, `op_fixdiv`
 over `op_smul`/`op_sdiv`) and `--overflow` apply as for integers.
 
-### Floating point, IEEE 754 light
+### Floating point, IEEE 754
 
     declare X:32/float754;        # binary32: 8 exponent bits, 23 fraction bits
     declare Y:16/float754;        # binary16 (5,10); 64 is binary64 (11,52)
+    declare S:8/float754;         # E5M2 (5,2), the 8 bit format with IEEE rules
     declare B:16/float754(7);     # bfloat16: 7 fraction bits, 8 exponent, 1 sign
     declare Z/float754(8,23);     # explicit, 1+8+23 bits
 
@@ -227,10 +232,10 @@ names the exponent and fraction widths, the sign bit comes on top, so
 same thing.  A fixed or floating point declaration whose width is not
 8, 16, 32, 64 ... gets a warning, as `(8,8)` for bfloat16 would.
 
-Light means flush to zero: an operand is read as IEEE does (a subnormal
-pattern is its small value, inf and NaN are what they are), but a
-result below the normal range, after rounding, is zero, and a literal
-above the range is an error.
+Operands and results follow IEEE 754: a subnormal pattern is its
+small value, inf and NaN are what they are, a result below the normal
+range is rounded to a subnormal (gradual underflow) and a literal above
+the range is an error.
 Rounding is to nearest even.  There are the type, the literals, the
 comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:`, `+ - * /`,
 and the conversions: an integer or fixed point operand that meets a float
@@ -284,6 +289,15 @@ plugin reads back:
 
     varp --proof-output binary --outdir /tmp sat bj file.varp
     varp validate -t binary -f /tmp/proof.out sat file.varp
+
+Underflow is a result that is tiny, below the normal range before
+rounding, and inexact; an exact subnormal (`2^-100 * 2^-33`) is not
+one.  `--underflow false` makes it a contradiction, `true` demands it,
+and a literal counts: `X == 1.0e-39` has no model under `false`, since
+binary32 cannot hold it exactly.  `--ftz true` is flush to zero, what
+many DSPs and NEON in its default mode do: a tiny result, literal or
+converted value becomes zero (with its sign), and every tiny nonzero
+result is then an underflow.  Operands are still read as IEEE does.
 
 ### /float: one declaration, either format
 

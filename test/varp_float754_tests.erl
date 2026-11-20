@@ -1,4 +1,4 @@
-%%% IEEE 754 light: /float754 declarations, literals, comparison, the
+%%% IEEE 754: /float754 declarations, literals, comparison, the
 %%% conversions and the printing.  varp_float is checked against the
 %%% binary syntax of Erlang, which rounds to nearest even.
 -module(varp_float754_tests).
@@ -15,6 +15,12 @@ count(Text) -> varp_tc:count(Text).
 model_bj(Text) ->
     {_, [M|_], _} = varp_tc:run(Text, [{satisfy,[]},{backjump,[]}]),
     varp_tc:norm_model(M).
+
+%% a value from one model with backjumping (bt enumerating all models
+%% of a formula with a free binary32 can take hours)
+vbj(Text, Var, Opts) ->
+    {_, [M|_], _} = varp_tc:run(Text, [{satisfy,[]},{backjump,[]}], Opts),
+    proplists:get_value(Var, varp_tc:norm_model(M)).
 
 %% all models with backjumping: plain backtracking takes ages over a
 %% free binary32
@@ -40,7 +46,7 @@ encode_test() ->
 	 ?assertEqual({V,{ok,B32}}, {V,varp_float:encode(V, 8, 23)}),
 	 <<B64:64>> = <<V:64/float>>,
 	 ?assertEqual({V,{ok,B64}}, {V,varp_float:encode(V, 11, 52)})
-     end || V <- Vs, V >= 1.0e-37 orelse V =< -1.0e-37 orelse V == 0.0],
+     end || V <- Vs],
     %% binary16 for the values it holds
     [begin
 	 <<B16:16>> = <<V:16/float>>,
@@ -51,9 +57,20 @@ encode_test() ->
     ?assertEqual({ok, 16#4B800000}, varp_float:encode(16777217, 8, 23)),
     ?assertEqual({ok, 16#4B800002}, varp_float:encode(16777219, 8, 23)),
     ?assertEqual({ok, 16#4F000000}, varp_float:encode(16#7fffffff, 8, 23)),
-    %% below the normal range is zero, above it an error
-    ?assertEqual({ok, 0}, varp_float:encode(1.0e-39, 8, 23)),
-    ?assertEqual({ok, 1 bsl 31}, varp_float:encode(-1.0e-39, 8, 23)),
+    %% below the normal range a subnormal (zero in ftz), above it an error
+    <<Sub:32>> = <<1.0e-39:32/float>>,
+    ?assertEqual({ok, Sub}, varp_float:encode(1.0e-39, 8, 23)),
+    ?assertEqual({ok, Sub bor (1 bsl 31)}, varp_float:encode(-1.0e-39, 8, 23)),
+    ?assertEqual({ok, 0}, varp_float:encode(1.0e-39, 8, 23, ftz)),
+    ?assertEqual({ok, 1 bsl 31}, varp_float:encode(-1.0e-39, 8, 23, ftz)),
+    %% the status: tiny and inexact, half the smallest subnormal rounds to even
+    ?assertEqual({ok, 0, true}, varp_float:encode_status(1, -150, 8, 23, ieee)),
+    ?assertEqual({ok, 1, false}, varp_float:encode_status(1, -149, 8, 23, ieee)),
+    ?assertEqual({ok, 0, true}, varp_float:encode_status(1, -149, 8, 23, ftz)),
+    ?assertEqual({ok, 16#00800000, false}, varp_float:encode_status(1, -126, 8, 23, ieee)),
+    %% 8 bits is E5M2
+    ?assertEqual({5,2}, varp_float:standard(8)),
+    ?assertEqual({ok, 16#3e}, varp_float:encode(1.5, 5, 2)),
     ?assertMatch({error,{float754_range,_,_}}, varp_float:encode(1.0e39, 8, 23)),
     %% a scaled integer: 3/4 as Q16.16 raw 49152 with shift -16
     ?assertEqual({ok, 16#3F400000}, varp_float:encode_scaled(49152, -16, 8, 23)).
@@ -151,8 +168,9 @@ to_float_test() ->
     ?assertEqual(1.75, v("declare Q:32/fixpoint, X:32/float754; Q == 1.75 && X == Q", "X")),
     ?assertEqual(-0.5, v("declare Q:8/fixpoint(4), X:32/float754; Q == -0.5 && X == Q", "X")),
     ?assertEqual(1.52587890625e-5, v("declare Q:32/fixpoint, X:32/float754; Q == 1.52587890625e-5 && X == Q", "X")),
-    %% a small value in a small format is flushed to zero (either zero)
-    ?assertEqual(2, count("declare Q:32/fixpoint, X:16/float754; Q == 1.52587890625e-5 && X == Q")),
+    %% a small value in a small format is a subnormal, zero (either) in ftz
+    ?assertEqual(1.52587890625e-5, v("declare Q:32/fixpoint, X:16/float754; Q == 1.52587890625e-5 && X == Q", "X")),
+    ?assertEqual(2, varp_tc:count("declare Q:32/fixpoint, X:16/float754; Q == 1.52587890625e-5 && X == Q", #{ftz => true})),
     %% the comparison converts too
     ?assertEqual(1, count("declare N:4, X:32/float754; X == 2.5 && N > X && N < 4")).
 
@@ -225,6 +243,23 @@ add_exhaustive_test_() ->
 			  Z =/= varp_float:add_bits(A, B, 3, 2)],
 	?assertEqual([], Bad)
      end}.
+
+%% the same, flushed to zero
+add_exhaustive_ftz_test_() ->
+    {timeout, 900, fun() ->
+	{_, Ms2, _} = varp_tc:run("declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X + Y; true",
+				  [{satisfy,[]},{backjump,[{max,0}]}], #{ftz => true}),
+	?assertEqual(4096, length(Ms2)),
+	Bad2 = [{A,B,Z,varp_float:add_bits(A, B, 3, 2, ftz)} || M <- Ms2,
+			  A <- [bits(M, <<"X">>)], B <- [bits(M, <<"Y">>)], Z <- [bits(M, <<"Z">>)],
+			  Z =/= varp_float:add_bits(A, B, 3, 2, ftz)],
+	?assertEqual([], Bad2)
+     end}.
+
+%% a model vector as an integer
+bits(M, Name) ->
+    {_,{_,Vec}} = lists:keyfind({p,Name,[]}, 1, M),
+    list_to_integer(tuple_to_list(Vec), 2).
 
 %% the sign of a zero: a cancelled difference is +0, -0 + -0 is -0
 add_edge_test() ->
@@ -373,6 +408,17 @@ div_exhaustive_test_() ->
 	?assertEqual([], Bad2)
      end}.
 
+%% the same, flushed to zero
+div_exhaustive_ftz_test_() ->
+    {timeout, 900, fun() ->
+	T = "declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X / Y; true",
+	{_, Ms3, _} = varp_tc:run(T, [{satisfy,[]},{backjump,[{max,0}]}], #{fdivz => ignore, ftz => true}),
+	?assertEqual(4096, length(Ms3)),
+	Bad3 = [{A,B,Z} || M <- Ms3, A <- [bits(M, <<"X">>)], B <- [bits(M, <<"Y">>)],
+			   Z <- [bits(M, <<"Z">>)], Z =/= varp_float:div_bits(A, B, 3, 2, ftz)],
+	?assertEqual([], Bad3)
+     end}.
+
 %% inf: the literal, --inf and --fdivz
 inf_test_() ->
     D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
@@ -406,6 +452,77 @@ inf_test_() ->
       end}}].
 
 inf_f32() -> varp_float:to_float(varp_float:inf_bits(0, 8, 23), 8, 23).
+
+%% below the normal range: subnormal results, --underflow and --ftz
+underflow_test_() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+    %% 2^-100 * 2^-33 is an exact subnormal, no underflow
+    Ex = D ++ "Z = X * Y; X == 7.888609052210118e-31 && Y == 1.1641532182693481e-10",
+    [{"subnormal results", {timeout, 600, fun() ->
+	?assertEqual(f32(1.0e-40), v(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", "Z")),
+	?assertEqual(f32(1.0e-40), v(D ++ "Z = X / Y; X == 1.0e-20 && Y == 1.0e20", "Z")),
+	?assertEqual(f32(2.0e-39), v(D ++ "Z = X + Y; X == 1.0e-39 && Y == 1.0e-39", "Z")),
+	?assertEqual(f32(1.0e-39), v(D ++ "Z = X - Y; X == 2.0e-39 && Y == 1.0e-39", "Z")),
+	?assertEqual(f32(1.0e-39), v("declare X:32/float754; X == 1.0e-39", "X")),
+	?assertEqual(math:pow(2, -133), v(Ex, "Z")),
+	%% the smallest subnormal, and half of it rounds to even
+	?assertEqual(f32(1.4e-45), v(D ++ "Z = X * Y; X == 1.4e-45 && Y == 1.0", "Z")),
+	?assertEqual(0.0, v(D ++ "Z = X * Y; X == 1.4e-45 && Y == 0.5 && Z >= 0", "Z")),
+	?assertEqual(f32(1.4e-45), v(D ++ "Z = X * Y; X == 1.4e-45 && Y == 0.75", "Z")),
+	%% the largest subnormal plus the smallest is the smallest normal
+	?assertEqual(f32(1.17549435e-38), v(D ++ "Z = X + Y; X == 1.1754942e-38 && Y == 1.4e-45", "Z")),
+	%% rounding carries a subnormal product up to the smallest normal
+	?assertEqual(f32(f32(1.1754942e-38) * f32(1.0000001)),
+		     v(D ++ "Z = X * Y; X == 1.1754942e-38 && Y == 1.0000001", "Z")),
+	%% two literals fold, and so do two constants
+	?assertEqual(f32(1.0e-40), v(D ++ "Z == 1.0e-20 * 1.0e-20", "Z")),
+	?assertEqual(f32(1.0e-40), v(D ++ "X = 1.0e-20; Y = 1.0e-20; Z = X * Y; true", "Z")),
+	%% binary16 against Erlang
+	?assertEqual(f16(f16(1.0e-4) * f16(6.0e-4)),
+		     v("declare X:16/float754, Y:16/float754, Z:16/float754; Z = X * Y; X == 1.0e-4 && Y == 6.0e-4", "Z")),
+	?assertEqual(f16(f16(3.0e-5) + f16(2.0e-6)),
+		     v("declare X:16/float754, Y:16/float754, Z:16/float754; Z = X + Y; X == 3.0e-5 && Y == 2.0e-6", "Z")),
+	%% an integer that does not fit the format is inf, --inf applies
+	?assertEqual(1, counts("declare N:32, X:16/float754; N == 100000 && X == N && X == inf")),
+	?assertEqual(0, counts("declare N:32, X:16/float754; N == 100000 && X == N", #{inf => false})),
+	%% 8 bits is E5M2
+	?assertEqual(1.5, v("declare X:8/float754; X == 1.5", "X")),
+	%% 0.001 is 2^-10 in two fraction bits, times 0.75
+	?assertEqual(7.32421875e-4, v("declare X:8/float754, Y:8/float754, Z:8/float754; Z = X * Y; X == 0.001 && Y == 0.75", "Z"))
+      end}},
+     {"--underflow", {timeout, 600, fun() ->
+	T = D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20",
+	?assertEqual(1, counts(T)),
+	?assertEqual(0, counts(T, #{underflow => false})),
+	?assertEqual(1, counts(T, #{underflow => true})),
+	?assertEqual(0, counts(D ++ "Z = X * Y; X == 1.5 && Y == 2.5", #{underflow => true})),
+	%% exact subnormal results are no underflow
+	?assertEqual(1, counts(Ex, #{underflow => false})),
+	?assertEqual(0, counts(Ex, #{underflow => true})),
+	%% (1.0e-39 itself is inexact, 2^-130 is not)
+	?assertEqual(1, counts(D ++ "Z = X + Y; X == 7.346839692639297e-40 && Y == 7.346839692639297e-40", #{underflow => false})),
+	?assertEqual(0, counts(D ++ "Z = X + Y; X == 1.0e-39 && Y == 1.0e-39", #{underflow => false})),
+	%% a tiny inexact literal, a folded product, a division
+	?assertEqual(0, counts("declare X:32/float754; X == 1.0e-39", #{underflow => false})),
+	?assertEqual(1, counts("declare X:32/float754; X == 1.0e-39", #{underflow => true})),
+	?assertEqual(0, counts(D ++ "X = 1.0e-20; Y = 1.0e-20; Z = X * Y; true", #{underflow => false})),
+	?assertEqual(0, counts(D ++ "Z = X / Y; X == 1.0e-20 && Y == 1.0e20", #{underflow => false})),
+	%% lost below half the smallest subnormal as well
+	?assertEqual(0, counts(D ++ "Z = X * Y; X == 1.0e-23 && Y == 1.0e-23", #{underflow => false}))
+      end}},
+     {"--ftz", {timeout, 600, fun() ->
+	F = #{ftz => true},
+	?assertEqual(0.0, vbj(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", "Z", F)),
+	?assertEqual(0.0, vbj(D ++ "Z = X / Y; X == 1.0e-20 && Y == 1.0e20", "Z", F)),
+	?assertEqual(0.0, vbj(D ++ "Z = X * Y; X == 3.0e-39 && Y == 7.0", "Z", F)),
+	%% a literal below the range is zero, either zero
+	?assertEqual(2, counts("declare X:32/float754; X == 1.0e-39", F)),
+	%% and that is an underflow, an exact tiny result too
+	?assertEqual(0, counts(D ++ "Z = X * Y; X == 1.0e-20 && Y == 1.0e-20", F#{underflow => false})),
+	?assertEqual(0, counts(Ex, F#{underflow => false})),
+	?assertEqual(1, counts(Ex, F#{underflow => true})),
+	?assertEqual(1, counts(D ++ "Z = X * Y; X == 1.5 && Y == 2.5", F#{underflow => false}))
+      end}}].
 
 %% NaN: the invalid operations, propagation, unordered comparison,
 %% isnan/isinf and --nan
@@ -477,7 +594,9 @@ mul_oracle(Vals, Width, Round) ->
 
 mul_test_() ->
     Vals = [{1.5,2.5}, {-1.5,0.1}, {3.0,1.0e-3}, {123.456,-0.789}, {1.0e10,1.0e-10},
-	    {0.3,3.0}, {1.0000001,1.0000001}, {-7.25,-0.125}, {65536.0,0.5}],
+	    {0.3,3.0}, {1.0000001,1.0000001}, {-7.25,-0.125}, {65536.0,0.5},
+	    %% subnormal results, and a subnormal factor
+	    {1.0e-20,1.0e-20}, {-3.0e-39,0.5}, {1.1e-38,0.75}, {2.0e-45,0.75}, {3.0e-39,7.0}],
     [{"binary32 against the double product", {timeout, 600, fun() ->
 	rand:seed(exsss, {7,11,13}),
 	Rnd = [{(rand:uniform() - 0.5) * math:pow(10, rand:uniform(20) - 10),
@@ -502,13 +621,25 @@ mul_exhaustive_test_() ->
 	?assertEqual([], Bad)
      end}.
 
+%% the same, flushed to zero
+mul_exhaustive_ftz_test_() ->
+    {timeout, 900, fun() ->
+	{_, Ms2, _} = varp_tc:run("declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X * Y; true",
+				  [{satisfy,[]},{backjump,[{max,0}]}], #{ftz => true}),
+	?assertEqual(4096, length(Ms2)),
+	Bad2 = [{A,B,Z} || M <- Ms2,
+			   A <- [bits(M, <<"X">>)], B <- [bits(M, <<"Y">>)], Z <- [bits(M, <<"Z">>)],
+			   Z =/= varp_float:mul_bits(A, B, 3, 2, ftz)],
+	?assertEqual([], Bad2)
+     end}.
+
 %% zero, overflow, the sign of a zero (the statement form pins the bits)
 mul_edge_test() ->
     D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
     ?assertEqual(-0.0, v(D ++ "X = 0.0; Y = -2.5; Z = X * Y; Z <= 0", "Z")),
     ?assertEqual(-0.0, v(D ++ "X = -0.0; Y = 2.5; Z = X * Y; Z <= 0", "Z")),
-    ?assertEqual(0.0,  v(D ++ "X = 1.0e-30; Y = 1.0e-10; Z = X * Y; Z >= 0", "Z")),
-    ?assertEqual(-0.0, v(D ++ "X = -1.0e-30; Y = 1.0e-10; Z = X * Y; Z <= 0", "Z")),
+    ?assertEqual(0.0,  v(D ++ "X = 1.0e-30; Y = 1.0e-20; Z = X * Y; Z >= 0", "Z")),
+    ?assertEqual(-0.0, v(D ++ "X = -1.0e-30; Y = 1.0e-20; Z = X * Y; Z <= 0", "Z")),
     %% an integer factor, and a literal
     ?assertEqual(7.5, v("declare N:4, X:32/float754, Z:32/float754; N == 3 && X == 2.5 && Z == X * N", "Z")),
     ?assertEqual(-5.0, v(D ++ "X == 2.5 && Z == X * -2", "Z")),

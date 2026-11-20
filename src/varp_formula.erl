@@ -3082,10 +3082,29 @@ zeros(K) -> lists:duplicate(K, false).
 const_int(C) when C < 0 -> const_vector(int, C, varp_math:signed_size(C));
 const_int(C) -> const_vector(uint, C, varp_math:unsigned_size(C)).
 
-float_const(V, T={float,E,M}, Bs) ->
-    case varp_float:encode(V, E, M) of
-	{ok,Bits} -> {const_vector(T, Bits, 1+E+M), Bs};
-	{error,Reason} -> error(Reason)
+%% a literal: a tiny inexact one counts as an underflow too
+float_const(V, T, Bs) when is_integer(V) ->
+    float_scaled(V, 0, T, Bs);
+float_const(V, T={float,E,M}, Bs) when is_float(V) ->
+    <<S:1,Eb:11,Mb:52>> = <<V:64/float>>,
+    if Eb =:= 0, Mb =:= 0 ->
+	    {const_vector(T, S bsl (E+M), 1+E+M), Bs};
+       Eb =:= 2047 ->
+	    error({float754_not_a_number, V});
+       true ->
+	    {I, Sh} = if Eb =:= 0 -> {Mb, -1074};
+			 true -> {(1 bsl 52) bor Mb, Eb - 1075}
+		      end,
+	    float_scaled(if S =:= 1 -> -I; true -> I end, Sh, T, Bs)
+    end.
+
+%% I * 2^Shift as a constant of the format, under --underflow
+float_scaled(I, Shift, T={float,E,M}, Bs) ->
+    case varp_float:encode_status(I, Shift, E, M, float_mode(Bs)) of
+	{ok,Bits,Underflow} ->
+	    {const_vector(T, Bits, 1+E+M), underflow_folded(Underflow, Bs)};
+	{error,Reason} ->
+	    error(Reason)
     end.
 
 %% an operand as a float of format T
@@ -3101,51 +3120,123 @@ to_float({flo,X}, T, Bs) ->
     float_const(X, T, Bs);
 to_float({bool,X}, T, Bs) ->
     to_float({uint,1,[X]}, T, Bs);
-to_float(V, T={float,E,M}, Bs) ->
+to_float(V, T, Bs) ->
     {F, Raw} = case V of
 		   {{fix,F0},N,Xs} -> {F0, {int,N,Xs}};
 		   _ -> {0, varp_arith:iarg(V)}
 	       end,
     case vconst(Raw) of
 	R when is_integer(R) ->
-	    case varp_float:encode_scaled(R, -F, E, M) of
-		{ok,Bits} -> {const_vector(T, Bits, 1+E+M), Bs};
-		{error,Reason} -> error(Reason)
-	    end;
+	    float_scaled(R, -F, T, Bs);
 	false ->
 	    int_to_float(Raw, F, T, Bs)
     end.
 
 %% a two's complement integer (scaled by 2^F) to a float: magnitude,
 %% normalise with a leading zero count, round to nearest even
-int_to_float(Raw={int,_W,Xs}, F, T={float,E,M}, Bs) ->
+int_to_float(Raw={int,_W,Xs}, F, T={float,E,_M}, Bs) ->
     S = lists:last(Xs),
     {A0, Bs1} = operation1('abs', Raw, Bs),
     A = {uint,Wa,_} = varp_arith:varg(A0),
     {{uint,Wa,NXs}, LZ, Bs2} = lz_norm(A, Bs1),
     K0 = Wa - 1 + varp_float:bias(E) - F,
     {ExpI, Bs3} = operation2('sub', const_int(K0), LZ, Bs2),
-    FracXs = lists:sublist(NXs, Wa-1),            %% below the leading one
-    {ManXs, Up, Bs4} =
-	if Wa-1 =< M ->
-		%% the fraction sits at the top of the mantissa
-		{zeros(M-(Wa-1)) ++ FracXs, ?F, Bs3};
-	   true ->
-		Drop = Wa-1-M,
-		Man0 = lists:nthtail(Drop, FracXs),
-		Guard = lists:nth(Drop, FracXs),
-		{Sticky, Bs3a} = any_bits(lists:sublist(FracXs, Drop-1), Bs3),
-		{{bool,Up0}, Bs3b} = round_up(Guard, Sticky, hd(Man0), Bs3a),
-		{Man0, Up0, Bs3b}
+    {Z1, Bs4} = operation2('eq', A, {uint,1,[false]}, Bs3),
+    {Rounded, Zero, Over, Bs5} =
+	fpack({uint,Wa,NXs}, {bool,?F}, ExpI, Z1, {bool,?F}, T, Bs4),
+    Bs6 = inf_status(Over, Bs5),
+    special_result({bool,?F}, Over, Zero, Rounded, {bool,S}, T, Bs6).
+
+%% the finite result of an operation or a conversion.  NXs holds the
+%% normalised magnitude, its leading one at the top (bit W-1), below
+%% it the fraction, the guard bit and sticky bits (ExtraSticky ors
+%% in); Ex is the biased exponent of the leading one as a signed
+%% vector.  Below the normal range (Ex <= 0) the significand is
+%% shifted right into a subnormal, 1-Ex steps with a sticky bit, or
+%% under --ftz left alone and flushed to zero.  Round to nearest even:
+%% the carry of the rounding runs into the exponent field, which
+%% turns an all ones subnormal fraction into the smallest normal and
+%% lifts an exponent of zero.  Exact0 says the exact result is zero
+%% (NXs and Ex mean nothing then), Masked that an operand is special
+%% (inf, NaN, a zero) and the finite path is noise.  --underflow is a
+%% tiny and inexact result (tininess before rounding), in ftz any
+%% tiny nonzero one.  Returns {Mag, Zero, Over, Bs}: the E+M bit
+%% magnitude, the zero flag for special_result (exact, or flushed)
+%% and the overflow (for inf_status, already masked).
+fpack({uint,W,NXs0}, ExtraSticky, Ex, Exact0, Masked, {float,E,M}, Bs) ->
+    Zv = {uint,1,[false]},
+    Wm = M+3,
+    {Wn, NXs} = if W < Wm -> {Wm, zeros(Wm-W) ++ NXs0};
+		   true -> {W, NXs0}
+		end,
+    Top = lists:nthtail(Wn-(M+1), NXs),             %% fraction and lead
+    Guard0 = lists:nth(Wn-(M+1), NXs),
+    {St0, Bs1} = any_bits(lists:sublist(NXs, Wn-(M+2)), Bs),
+    {{bool,StL}, Bs2} = operation2('or', St0, ExtraSticky, Bs1),
+    Sig = {uint,Wm,[StL, Guard0 | Top]},
+    {Tiny={bool,TinyL}, Bs3} = operation2('lte', Ex, Zv, Bs2),
+    Ftz = maps:get(ftz, Bs#bs.option, false),
+    {{uint,Wm,[StF, GuardF | TopF]}, Bs4} =
+	case Ftz of
+	    true ->
+		{Sig, Bs3};
+	    false ->
+		%% the shift 1-Ex when tiny, at most M+2 (everything
+		%% into the sticky bit), nothing otherwise
+		NB = varp_math:unsigned_size(M+2),
+		{D0, B1} = operation2('sub', const_int(1), Ex, Bs3),
+		{{bool,BigL}, B2} = operation2('gte', D0, const_int(M+2), B1),
+		D0u = {uint,NB,vfit(element(3, varp_arith:varg(D0)), NB)},
+		{D1, B3} = operation2('bor', D0u, {uint,NB,lists:duplicate(NB, BigL)}, B2),
+		{D2, B4} = operation2('band', D1, {uint,NB,lists:duplicate(NB, TinyL)}, B3),
+		Amt = {uint,NB,vfit(element(3, varp_arith:varg(D2)), NB)},
+		{{uint,Wm,ShXs}, StSh, B5} = barrel_right(Sig, Amt, M+2, B4),
+		{{bool,StL2}, B6} = operation2('or', {bool,hd(ShXs)}, StSh, B5),
+		{{uint,Wm,[StL2|tl(ShXs)]}, B6}
 	end,
-    ExpXs = vfit(element(3, ExpI), E),
-    {R0, Bs5} = operation2('add', {uint,E+M,ManXs ++ ExpXs}, {uint,1,[Up]}, Bs4),
-    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
-    {Z1, Bs6} = operation2('eq', A, {uint,1,[false]}, Bs5),
-    {Z2, Bs7} = operation2('lte', ExpI, {uint,1,[false]}, Bs6),
-    {Zero, Bs8} = operation2('or', Z1, Z2, Bs7),
-    {Mag, Bs9} = ite(undefined, Zero, {uint,E+M,zeros(E+M)}, Rounded, Bs8),
-    {fmake(T, varp_arith:varg(Mag), S), Bs9}.
+    ManXs = lists:sublist(TopF, M),
+    Lsb = hd(TopF),
+    {{bool,Up}, Bs5} = round_up(GuardF, {bool,StF}, Lsb, Bs4),
+    ExXs = vfit(element(3, Ex), E),
+    {ExField, Bs6} =
+	case Ftz of
+	    true -> {{uint,E,ExXs}, Bs5};
+	    false -> ite(undefined, Tiny, {uint,E,zeros(E)}, {uint,E,ExXs}, Bs5)
+	end,
+    {uint,E,ExFXs} = ExField,
+    {R0, Bs7} = operation2('add', {uint,E+M,ManXs ++ ExFXs}, {uint,1,[Up]}, Bs6),
+    RXs = vfit(element(3, varp_arith:varg(R0)), E+M),
+    Rounded = {uint,E+M,RXs},
+    {Inexact, Bs8} = operation2('or', {bool,GuardF}, {bool,StF}, Bs7),
+    {Real, Bs9} = operation2('and', negate(Exact0), negate(Masked), Bs8),
+    %% tiny after rounding (ftz): a carry out of an all ones fraction
+    %% lifts an exponent of zero to one
+    {Neg, Bs10} = operation2('lt', Ex, Zv, Bs9),
+    {Ex0, Bs11} = operation2('eq', Ex, Zv, Bs10),
+    {AllOnes, Bs12} = operation2('eq', {uint,M,ManXs}, {uint,M,ones(M)}, Bs11),
+    {Carry, Bs13} = operation2('and', {bool,Up}, AllOnes, Bs12),
+    {Tiny0, Bs14} = operation2('and', Ex0, negate(Carry), Bs13),
+    {TinyR, Bs15} = operation2('or', Neg, Tiny0, Bs14),
+    {Zero, Under, Bs16} =
+	case Ftz of
+	    true ->
+		{Flushed, B7} = operation2('and', TinyR, Real, Bs15),
+		{Z, B8} = operation2('or', Exact0, Flushed, B7),
+		{Z, Flushed, B8};
+	    false ->
+		{U0, B7} = operation2('and', Tiny, Inexact, Bs15),
+		{U, B8} = operation2('and', U0, Real, B7),
+		{Exact0, U, B8}
+	end,
+    Bs17 = underflow_status(Under, Bs16),
+    %% above the range: the exponent at the top, or the rounding
+    %% carrying it there
+    {Over0, Bs18} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs17),
+    {Over1, Bs19} = operation2('eq', {uint,E,lists:nthtail(M, RXs)}, {uint,E,ones(E)}, Bs18),
+    {Over2, Bs20} = operation2('or', Over0, Over1, Bs19),
+    {Over3, Bs21} = operation2('and', Over2, negate(Zero), Bs20),
+    {Over, Bs22} = operation2('and', Over3, Real, Bs21),
+    {Rounded, Zero, Over, Bs22}.
 
 any_bits([], Bs) -> {{bool,?F}, Bs};
 any_bits(Xs, Bs) -> operation2('neq', {uint,length(Xs),Xs}, {uint,1,[false]}, Bs).
@@ -3318,6 +3409,30 @@ inf_status({bool,Over}, Bs) ->
     varp_arith:set_status(Bs#bs.vp, Over, maps:get(inf, Bs#bs.option, ignore)),
     Bs.
 
+%% --underflow: a tiny and inexact result is allowed, forbidden or
+%% required (in ftz every tiny nonzero result, it is lost)
+underflow_status({bool,U}, Bs) ->
+    varp_arith:set_status(Bs#bs.vp, U, maps:get(underflow, Bs#bs.option, ignore)),
+    Bs.
+
+%% --ftz: ieee (gradual underflow, subnormal results) or ftz (light,
+%% flush to zero)
+float_mode(Bs) ->
+    case maps:get(ftz, Bs#bs.option, false) of
+	true -> ftz;
+	false -> ieee
+    end.
+
+%% a folded operation: the bits and its underflow flag
+fold_status({Bits, Underflow}, T={float,E,M}, Bs) ->
+    Bs1 = inf_folded(Bits, T, Bs),
+    {const_vector(T, Bits, 1+E+M), underflow_folded(Underflow, Bs1)}.
+
+%% a folded value or a literal that underflowed (like inf_folded, a
+%% constant that did not says nothing, so --underflow true can hold)
+underflow_folded(true, Bs) -> underflow_status({bool,true}, Bs);
+underflow_folded(false, Bs) -> Bs.
+
 %% a folded constant that overflowed or is NaN, under --inf and --nan
 inf_folded(Bits, {float,E,M}, Bs) ->
     case varp_float:fields(Bits, E, M) of
@@ -3369,8 +3484,7 @@ float_div(Af, Bf, T={float,E,M}, Bs) ->
 	    end,
     case Const of
 	true ->
-	    Bits = varp_float:div_bits(vconst(Af), vconst(Bf), E, M),
-	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
+	    fold_status(varp_float:div_fold(vconst(Af), vconst(Bf), E, M, float_mode(Bs)), T, Bs);
 	false ->
 	    Zv = {uint,1,[false]},
 	    {Sa, Ea0, {uint,M,MaXs}} = fsplit(Af),
@@ -3408,28 +3522,14 @@ float_div(Af, Bf, T={float,E,M}, Bs) ->
 		end,
 	    W = M+3,
 	    Qw = {uint,W,vfit(element(3, varp_arith:varg(Q0)), W)},
-	    {{uint,W,NXs}, LZ, Bs12} = lz_norm(Qw, Bs11),
-	    ManXs = lists:sublist(NXs, 3, M),
-	    Lsb = lists:nth(3, NXs),
-	    Guard = lists:nth(2, NXs),
-	    {Sticky, Bs13} = operation2('or', {bool,hd(NXs)}, Rnz, Bs12),
-	    {{bool,Up}, Bs14} = round_up(Guard, Sticky, Lsb, Bs13),
+	    {Qn, LZ, Bs12} = lz_norm(Qw, Bs11),
 	    %% Ea - Eb + (LZb - LZa) + bias - LZ
-	    {E1, Bs15} = operation2('sub', Ea, Eb, Bs14),
+	    {E1, Bs15} = operation2('sub', Ea, Eb, Bs12),
 	    {E2, Bs16} = operation2('add', E1, LZb, Bs15),
 	    {E3, Bs17} = operation2('sub', E2, LZa, Bs16),
 	    {E4, Bs18} = operation2('add', E3, const_int(varp_float:bias(E)), Bs17),
 	    {Ex, Bs19} = operation2('sub', E4, LZ, Bs18),
-	    ExXs = vfit(element(3, Ex), E),
-	    {R0, Bs20} = operation2('add', {uint,E+M,ManXs ++ ExXs}, {uint,1,[Up]}, Bs19),
-	    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
-	    {Neg, Bs21} = operation2('lt', Ex, Zv, Bs20),
-	    {Ex0b, Bs22} = operation2('eq', Ex, Zv, Bs21),
-	    {AllOnes, Bs23} = operation2('eq', {uint,M,ManXs}, {uint,M,ones(M)}, Bs22),
-	    {Carry, Bs24} = operation2('and', {bool,Up}, AllOnes, Bs23),
-	    {Tiny0, Bs25} = operation2('and', Ex0b, negate(Carry), Bs24),
-	    {Tiny, Bs26} = operation2('or', Neg, Tiny0, Bs25),
-	    {{_,Ia,Na}, Bs26a} = fclass(Af, Bs26),
+	    {{_,Ia,Na}, Bs26a} = fclass(Af, Bs19),
 	    {{_,Ib,Nb}, Bs26b} = fclass(Bf, Bs26a),
 	    %% 0/0, inf/inf and a NaN operand: NaN; inf/x: inf; x/inf: 0
 	    {N1, Bs26c} = operation2('or', Na, Nb, Bs26b),
@@ -3437,13 +3537,12 @@ float_div(Af, Bf, T={float,E,M}, Bs) ->
 	    {N3, Bs26e} = operation2('and', Ia, Ib, Bs26d),
 	    {N4, Bs26f} = operation2('or', N1, N2, Bs26e),
 	    {NaNc, Bs26g} = operation2('or', N4, N3, Bs26f),
-	    {Zero0, Bs27} = operation2('or', Azero, Tiny, Bs26g),
+	    {M1, Bs26h} = operation2('or', NaNc, Bzero, Bs26g),
+	    {M2, Bs26i} = operation2('or', M1, Ia, Bs26h),
+	    {Masked, Bs26j} = operation2('or', M2, Ib, Bs26i),
+	    {Rounded, Zero0, Over, Bs27} = fpack(Qn, Rnz, Ex, Azero, Masked, T, Bs26j),
 	    {Zero, Bs27a} = operation2('or', Zero0, Ib, Bs27),
-	    {Over0, Bs28} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs27a),
-	    {Over1, Bs29} = operation2('and', Over0, negate(Zero), Bs28),
-	    {Over2, Bs29a} = operation2('and', Over1, negate(Bzero), Bs29),
-	    {Over, Bs30} = operation2('and', Over2, negate(Ia), Bs29a),
-	    Bs31 = inf_status(Over, Bs30),
+	    Bs31 = inf_status(Over, Bs27a),
 	    {InfC0, Bs32} = operation2('or', Over, Bzero, Bs31),
 	    {InfC, Bs33} = operation2('or', InfC0, Ia, Bs32),
 	    special_result(NaNc, InfC, Zero, Rounded, {bool,S}, T, Bs33)
@@ -3460,13 +3559,13 @@ retag(T={float,E,M}, {_,_,Xs}) -> {T,1+E+M,vfit(Xs, 1+E+M)}.
 %% falls off), and is added to or subtracted from the leading one as
 %% the signs agree or not.  The result is normalised (a carry moves it
 %% one up, a cancellation can move it far down), rounded to nearest
-%% even, flushed to zero below the normal range and made inf above it.
+%% even, a subnormal below the normal range (zero under --ftz) and inf
+%% above it.
 %% The sign is the leading operand's; a difference that cancels is +0.
 float_add(Af, Bf, T={float,E,M}, Bs) ->
     case {vconst(Af), vconst(Bf)} of
 	{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
-	    Bits = varp_float:add_bits(Ab, Bb, E, M),
-	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
+	    fold_status(varp_float:add_fold(Ab, Bb, E, M, float_mode(Bs)), T, Bs);
 	_ ->
 	    Zv = {uint,1,[false]},
 	    {Lt, Bs1} = operation2('lt', fmag(Af), fmag(Bf), Bs),
@@ -3503,26 +3602,11 @@ float_add(Af, Bf, T={float,E,M}, Bs) ->
 	    {R, Bs19} = ite(undefined, Sub, DifW, SumW, Bs18),
 	    RW = {uint,W,vfit(element(3, varp_arith:varg(R)), W)},
 	    %% normalise: the leading one to bit W-1, the exponent Eb+1
-	    {{uint,W,NXs}, LZ, Bs20} = lz_norm(RW, Bs19),
-	    ManXs = lists:sublist(NXs, W-M, M),
-	    Lsb = lists:nth(W-M, NXs),
-	    Guard = lists:nth(W-M-1, NXs),
-	    {Sticky, Bs21} = any_bits(lists:sublist(NXs, W-M-2), Bs20),
-	    {{bool,Up}, Bs22} = round_up(Guard, Sticky, Lsb, Bs21),
-	    {Ex0, Bs23} = operation2('add', Eb, {uint,1,[true]}, Bs22),
+	    {Rn, LZ, Bs20} = lz_norm(RW, Bs19),
+	    {Ex0, Bs23} = operation2('add', Eb, {uint,1,[true]}, Bs20),
 	    {Ex, Bs24} = operation2('sub', Ex0, LZ, Bs23),
-	    ExXs = vfit(element(3, Ex), E),
-	    {R0, Bs25} = operation2('add', {uint,E+M,ManXs ++ ExXs}, {uint,1,[Up]}, Bs24),
-	    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
-	    {Z1, Bs26} = operation2('eq', RW, Zv, Bs25),
-	    {Neg, Bs27} = operation2('lt', Ex, Zv, Bs26),
-	    {Ex0b, Bs28} = operation2('eq', Ex, Zv, Bs27),
-	    {AllOnes, Bs29} = operation2('eq', {uint,M,ManXs}, {uint,M,ones(M)}, Bs28),
-	    {Carry, Bs30} = operation2('and', {bool,Up}, AllOnes, Bs29),
-	    {Tiny0, Bs31} = operation2('and', Ex0b, negate(Carry), Bs30),
-	    {Z2, Bs32} = operation2('or', Neg, Tiny0, Bs31),
-	    {Zero, Bs33} = operation2('or', Z1, Z2, Bs32),
-	    {{_,Ia,Na}, Bs33a} = fclass(Af, Bs33),
+	    {Z1, Bs26} = operation2('eq', RW, Zv, Bs24),
+	    {{_,Ia,Na}, Bs33a} = fclass(Af, Bs26),
 	    {{_,Ib,Nb}, Bs33b} = fclass(Bf, Bs33a),
 	    %% inf - inf and a NaN operand: NaN; inf + x: inf
 	    {N1, Bs33c} = operation2('or', Na, Nb, Bs33b),
@@ -3530,11 +3614,10 @@ float_add(Af, Bf, T={float,E,M}, Bs) ->
 	    {N2, Bs33e} = operation2('and', BothInf, Sub, Bs33d),
 	    {NaNc, Bs33f} = operation2('or', N1, N2, Bs33e),
 	    {AnyInf, Bs33g} = operation2('or', Ia, Ib, Bs33f),
-	    {Over0, Bs34a} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs33g),
-	    {Over1, Bs34b} = operation2('and', Over0, negate(Zero), Bs34a),
-	    {Over, Bs34c} = operation2('and', Over1, negate(AnyInf), Bs34b),
-	    Bs34 = inf_status(Over, Bs34c),
-	    {InfC, Bs35} = operation2('or', Over, AnyInf, Bs34),
+	    {Masked, Bs33h} = operation2('or', NaNc, AnyInf, Bs33g),
+	    {Rounded, Zero, Over, Bs34} = fpack(Rn, {bool,?F}, Ex, Z1, Masked, T, Bs33h),
+	    Bs34c = inf_status(Over, Bs34),
+	    {InfC, Bs35} = operation2('or', Over, AnyInf, Bs34c),
 	    %% the sign: the leading operand's, +0 when a difference cancels
 	    %% exactly (a flushed difference keeps its sign)
 	    {ZeroSub, Bs36} = operation2('and', Z1, Sub, Bs35),
@@ -3555,8 +3638,7 @@ ones(K) -> lists:duplicate(K, true).
 float_mul(Af, Bf, T={float,E,M}, Bs) ->
     case {vconst(Af), vconst(Bf)} of
 	{Ab, Bb} when is_integer(Ab), is_integer(Bb) ->
-	    Bits = varp_float:mul_bits(Ab, Bb, E, M),
-	    {const_vector(T, Bits, 1+E+M), inf_folded(Bits, T, Bs)};
+	    fold_status(varp_float:mul_fold(Ab, Bb, E, M, float_mode(Bs)), T, Bs);
 	_ ->
 	    Zv = {uint,1,[false]},
 	    {Sa, Ea, {uint,M,MaXs}} = fsplit(Af),
@@ -3572,29 +3654,12 @@ float_mul(Af, Bf, T={float,E,M}, Bs) ->
 	    {P0, Bs4} = operation2('mul', SigA, SigB, Bs3b),
 	    W = 2*M+2,
 	    P = {uint,W,vfit(element(3, varp_arith:varg(P0)), W)},
-	    {{uint,W,ShXs}, LZ, Bs5} = lz_norm(P, Bs4),
-	    ManXs = lists:sublist(ShXs, M+2, M),            %% bits M+1 .. 2M
-	    Lsb = lists:nth(M+2, ShXs),
-	    Guard = lists:nth(M+1, ShXs),
-	    {Sticky, Bs6} = any_bits(lists:sublist(ShXs, M), Bs5),
-	    {{bool,Up}, Bs7} = round_up(Guard, Sticky, Lsb, Bs6),
-	    {Es, Bs8} = operation2('add', Ea1, Eb1, Bs7),
+	    {Pn, LZ, Bs5} = lz_norm(P, Bs4),
+	    {Es, Bs8} = operation2('add', Ea1, Eb1, Bs5),
 	    {Es1, Bs9} = operation2('sub', Es, LZ, Bs8),
 	    {Ex, Bs10} = operation2('sub', Es1, const_int(varp_float:bias(E) - 1), Bs9),
-	    ExXs = vfit(element(3, Ex), E),
-	    {R0, Bs11} = operation2('add', {uint,E+M,ManXs ++ ExXs}, {uint,1,[Up]}, Bs10),
-	    Rounded = {uint,E+M,vfit(element(3, varp_arith:varg(R0)), E+M)},
-	    {Z1, Bs12} = operation2('eq', P, Zv, Bs11),
-	    %% below the normal range after rounding: a carry out of an
-	    %% all ones fraction lifts an exponent of zero to one
-	    {Neg, Bs12a} = operation2('lt', Ex, Zv, Bs12),
-	    {Ex0, Bs12b} = operation2('eq', Ex, Zv, Bs12a),
-	    {AllOnes, Bs12c} = operation2('eq', {uint,M,ManXs}, {uint,M,ones(M)}, Bs12b),
-	    {Carry, Bs12d} = operation2('and', {bool,Up}, AllOnes, Bs12c),
-	    {Tiny0, Bs12e} = operation2('and', Ex0, negate(Carry), Bs12d),
-	    {Z2, Bs13} = operation2('or', Neg, Tiny0, Bs12e),
-	    {Zero, Bs14} = operation2('or', Z1, Z2, Bs13),
-	    {{Za,Ia,Na}, Bs14a} = fclass(Af, Bs14),
+	    {Z1, Bs12} = operation2('eq', P, Zv, Bs10),
+	    {{Za,Ia,Na}, Bs14a} = fclass(Af, Bs12),
 	    {{Zb,Ib,Nb}, Bs14b} = fclass(Bf, Bs14a),
 	    %% inf * 0 and a NaN operand: NaN; inf * x: inf
 	    {N1, Bs14c} = operation2('or', Na, Nb, Bs14b),
@@ -3603,9 +3668,8 @@ float_mul(Af, Bf, T={float,E,M}, Bs) ->
 	    {N4, Bs14f} = operation2('or', N1, N2, Bs14e),
 	    {NaNc, Bs14g} = operation2('or', N4, N3, Bs14f),
 	    {AnyInf, Bs14h} = operation2('or', Ia, Ib, Bs14g),
-	    {Over0, Bs15} = operation2('gte', Ex, const_int((1 bsl E)-1), Bs14h),
-	    {Over1, Bs15a} = operation2('and', Over0, negate(Zero), Bs15),
-	    {Over, Bs15b} = operation2('and', Over1, negate(AnyInf), Bs15a),
+	    {Masked, Bs14i} = operation2('or', NaNc, AnyInf, Bs14h),
+	    {Rounded, Zero, Over, Bs15b} = fpack(Pn, {bool,?F}, Ex, Z1, Masked, T, Bs14i),
 	    Bs15c = inf_status(Over, Bs15b),
 	    {InfC, Bs15d} = operation2('or', Over, AnyInf, Bs15c),
 	    special_result(NaNc, InfC, Zero, Rounded, {bool,S}, T, Bs15d)
