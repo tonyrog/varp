@@ -163,6 +163,11 @@ Encoding and search behaviour:
     --fixpoint <bits>                   fraction bits of a bare /fixpoint
                                         and of a float literal         (16)
 
+`X << K` and `X >> K` with a constant `K` widen or narrow the vector;
+with a variable `K` they are a barrel shifter that keeps the width of
+`X` (the bits that leave are gone, an amount of the width or more gives
+zero, or the sign for a signed `>>`), and `K` is read as unsigned.
+
 `/` and `%` are unsigned when both operands are unsigned, otherwise
 signed with truncation toward zero as in C: `-13 / 4 == -3` and
 `-13 % 4 == -1`, so `X == (X / Y) * Y + X % Y` always holds and the
@@ -206,16 +211,22 @@ over `op_smul`/`op_sdiv`) and `--overflow` apply as for integers.
     declare B:16/float754(8);     # bfloat16: 8 exponent bits of 16
     declare Z/float754(8,23);     # explicit, 1+8+23 bits
 
-Light means normal numbers and zero: a result below the normal range is
-flushed to zero, a literal above it is an error, there is no NaN and no
-infinity (a pattern with every exponent bit set is read as a number).
-Rounding is to nearest even.  This step has the type, the literals, the
-comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:` and the
-conversions: an integer or fixed point operand that meets a float
+Light means flush to zero: an operand is read as IEEE does (a subnormal
+pattern is its small value), but a result below the normal range, after
+rounding, is zero; a literal above the range is an error, there is no
+NaN and no infinity (a pattern with every exponent bit set is read as a
+number).
+Rounding is to nearest even.  There are the type, the literals, the
+comparisons (`-0.0 == 0.0`), `-X`, `abs`, `min`, `max`, `?:`, `+ - *`,
+and the conversions: an integer or fixed point operand that meets a float
 becomes a float, `floor ceil round trunc` give an integer, a float
 assigned to a fixed point variable is truncated toward zero, and
-assigning one to an integer variable is an error.  `+ - * /` are the
-next step.  Two float formats do not mix.  A model prints the shortest
+assigning one to an integer variable is an error.  A result that
+overflows is the pattern with every exponent bit set, printed `inf`
+and compared as a large number; a difference that cancels is `+0.0`.
+`/` is the next step.  Two float formats do not mix.  Note that
+`Z == X + Y` leaves the sign of a zero result open (`-0.0 == 0.0`), the
+statement `Z = X + Y;` pins the bits.  A model prints the shortest
 decimal that reads back as the same number (`X=0.1`, `Y=-1.5e-30`),
 `--hex` the raw bits.  Like fixed point everything is built from the
 integer operators, so `--ops lib` applies.

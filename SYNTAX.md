@@ -61,8 +61,8 @@ IEEE 754 without NaN, infinity and subnormals (light):
     declare Y:16/float754(8);     bfloat16: 8 exponent bits of 16
     declare Z/float754(8,23);     explicit exponent and fraction width
 
-Literals, comparisons, -X, abs, min, max, ?: and the conversions to and
-from integers and fixed point; + - * / are not there yet.  See README.md.
+Literals, comparisons, -X, abs, min, max, ?:, + - * and the conversions
+to and from integers and fixed point; / is not there yet.  See README.md.
 
 # Integer operators
 

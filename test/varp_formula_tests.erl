@@ -215,6 +215,17 @@ div_rem_test() ->
     ?assertEqual(3, v("declare X:8,Y:8,Z:8; (X==13) && (Y==4) && (Z==X/Y)","Z")),
     ?assertEqual(1, v("declare X:8,Y:8,Z:8; (X==13) && (Y==4) && (Z==X%Y)","Z")).
 
+%% a variable shift amount: a barrel shifter that keeps the width of
+%% the left operand; a constant amount still widens
+variable_shift_test() ->
+    ?assertEqual(40, v("declare X:8, K:3, Z:8; X == 5 && K == 3 && Z == X << K", "Z")),
+    ?assertEqual(10, v("declare X:8, K:3, Z:8; X == 0xA5 && K == 4 && Z == X >> K", "Z")),
+    ?assertEqual(-4, v("declare X:8/signed, K:3, Z:8/signed; X == -16 && K == 2 && Z == X >> K", "Z")),
+    ?assertEqual(0,  v("declare X:8, K:4, Z:8; X == 0xff && K == 9 && Z == X << K", "Z")),
+    ?assertEqual(-1, v("declare X:8/signed, K:4, Z:8/signed; X == -1 && K == 12 && Z == X >> K", "Z")),
+    ?assertEqual(3,  v("declare X:8, K:3; (X << K) == 40 && X < 10 && K > 0", "K")),
+    ?assertEqual(640, v("declare X:8, Z:16; X == 5 && Z == X << 7", "Z")).
+
 %% signed division truncates toward zero, the remainder has the sign of
 %% the dividend (C, Erlang div/rem); a signed operand makes it signed
 signed_div_rem_test() ->

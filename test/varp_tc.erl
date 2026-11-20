@@ -20,6 +20,7 @@
 %% building / solving
 -export([run/2, run/3]).
 -export([models/1, models/2]).
+-export([norm_model/1]).   %% a raw model as [{"Name", Value}], sorted
 -export([count/1, count/2]).
 -export([is_sat/1, is_sat/2]).
 -export([is_unsat/1, is_unsat/2]).

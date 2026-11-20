@@ -382,11 +382,15 @@ max(Vp,X,Y,Z) ->
     end.
 
 %% shift left
-shl(_Vp,A,B) ->
+%% A << B.  A constant B widens the vector by B bits (nothing is lost);
+%% a variable B keeps the width of A like hardware does, the bits that
+%% leave at the top are gone and an amount of the width or more gives
+%% zero.  The amount is read as unsigned.
+shl(Vp,A,B) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
-		  error({shift_not_constant, B});
+		  vshift_var(Vp,left,At,An,Ax,varg(B));
 	     K >=0 ->
 		  vshift_left(K,Ax);
 	     At =:= int ->
@@ -402,7 +406,7 @@ shl(Vp,X,A,B) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
-		  error({shift_not_constant, B});
+		  vshift_var(Vp,left,At,An,Ax,varg(B));
 	     K >=0 ->
 		  vshift_left(K,Ax);
 	     At =:= int ->
@@ -414,13 +418,39 @@ shl(Vp,X,A,B) ->
     Ax2 = vextend(Xt,Ax1,length(Ax1),Xn),
     set(Vp,X,{At,Xn,Ax2}).
 
+%% A barrel shifter: a conditional shift by every power of two, one
+%% stage per bit of the amount that matters; the higher bits of the
+%% amount, if any, make the result the fill (zero, or the sign of a
+%% signed vector shifted right).  Width preserving.
+vshift_var(Vp,Dir,At,An,Ax,{_Bt,Bn,Bx}) ->
+    Fill = if Dir =:= right, At =:= int -> lists:last(Ax);
+	      true -> false
+	   end,
+    NB = erlang:min(Bn, varp_math:unsigned_size(An)),  %% bits that can matter
+    {Low,High} = lists:split(NB, Bx),
+    Shifted =
+	lists:foldl(
+	  fun({K,Bit}, Cur) ->
+		  Sh = erlang:min(1 bsl K, An),
+		  Moved = case Dir of
+			      left -> lists:duplicate(Sh,false) ++ lists:sublist(Cur, An-Sh);
+			      right -> lists:nthtail(Sh, Cur) ++ lists:duplicate(Sh,Fill)
+			  end,
+		  vite(Vp, Bit, Moved, Cur)
+	  end, Ax, lists:zip(lists:seq(0, NB-1), Low)),
+    case High of
+	[] -> Shifted;
+	_ ->
+	    Over = varp_circuit:any(Vp, High),
+	    vite(Vp, Over, lists:duplicate(An,Fill), Shifted)
+    end.
 
 %% shift right
-shr(_Vp,A,B) ->
+shr(Vp,A,B) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
-		  error({shift_not_constant, B});
+		  vshift_var(Vp,right,At,An,Ax,varg(B));
 	     K >=0, At =:= int ->
 		  vshift_right(K,An,Ax);
 	     K >= 0 ->
@@ -436,7 +466,7 @@ shr(Vp,X,A,B) ->
     {At,An,Ax} = varg(A),
     K = vconst(B),
     Ax1 = if K =:= false ->
-		  error({shift_not_constant, B});
+		  vshift_var(Vp,right,At,An,Ax,varg(B));
 	     K >=0, At =:= int ->
 		  vshift_right(K,An,Ax);
 	     K >= 0 ->

@@ -13,7 +13,8 @@
 
 -export([standard/1, bias/1, type_atom/2, type_of_atom/1]).
 -export([encode/3, encode_scaled/4]).
--export([fields/3, value/3, to_float/3, format/3, exact_decimal/2]).
+-export([fields/3, value/3, light_value/3, to_float/3, format/3, exact_decimal/2]).
+-export([mul_bits/4, add_bits/4, inf_bits/3]).
 
 %% the standard sizes
 standard(16) -> {5,10};
@@ -124,14 +125,64 @@ value(Bits, E, M) ->
        true -> {S, (1 bsl M) bor Mb, Eb - bias(E) - M}
     end.
 
-%% as an Erlang float (the tests compare with it), light: a pattern
-%% with every exponent bit set is a number like any other
+%% the light reading: the IEEE value (a subnormal pattern is read as
+%% it is), except that every exponent bit set is a number like any
+%% other; {zero,S} or {S,Int,Shift}
+light_value(Bits, E, M) ->
+    {S, Eb, Mb} = fields(Bits, E, M),
+    if Eb =:= (1 bsl E) - 1 -> {S, (1 bsl M) bor Mb, Eb - bias(E) - M};
+       true -> value(Bits, E, M)
+    end.
+
+%% the overflow pattern: every exponent bit set, prints as inf
+inf_bits(S, E, M) ->
+    (S bsl (E+M)) bor (((1 bsl E) - 1) bsl M).
+
+%% a * b on bit patterns, light: zero when a factor is zero or the
+%% product is below the normal range (flush to zero), inf_bits above it
+mul_bits(A, B, E, M) ->
+    case {light_value(A, E, M), light_value(B, E, M)} of
+	{{zero,Sa},{_,_,_}=Vb} -> (Sa bxor element(1, Vb)) bsl (E+M);
+	{{_,_,_}=Va,{zero,Sb}} -> (element(1, Va) bxor Sb) bsl (E+M);
+	{{zero,Sa},{zero,Sb}} -> (Sa bxor Sb) bsl (E+M);
+	{{Sa,Ia,Sha},{Sb,Ib,Shb}} ->
+	    S = Sa bxor Sb,
+	    I = if S =:= 1 -> -(Ia*Ib); true -> Ia*Ib end,
+	    case encode_scaled(I, Sha+Shb, E, M) of
+		{ok,Bits} -> Bits;
+		{error,_} -> inf_bits(S, E, M)
+	    end
+    end.
+
+%% a + b on bit patterns, light: the exact sum rounded, flushed to
+%% zero below the normal range, inf_bits above it.  A zero sum is -0
+%% only when both terms are -0.
+add_bits(A, B, E, M) ->
+    Va = light_value(A, E, M),
+    Vb = light_value(B, E, M),
+    case {Va, Vb} of
+	{{zero,Sa},{zero,Sb}} -> (Sa band Sb) bsl (E+M);
+	_ ->
+	    {Ia,Sha} = signed_scaled(Va),
+	    {Ib,Shb} = signed_scaled(Vb),
+	    Sh = erlang:min(Sha, Shb),
+	    I = (Ia bsl (Sha-Sh)) + (Ib bsl (Shb-Sh)),
+	    if I =:= 0 -> 0;
+	       true ->
+		    case encode_scaled(I, Sh, E, M) of
+			{ok,Bits} -> Bits;
+			{error,_} -> inf_bits(if I < 0 -> 1; true -> 0 end, E, M)
+		    end
+	    end
+    end.
+
+signed_scaled({zero,_}) -> {0, 0};
+signed_scaled({1,I,Sh}) -> {-I, Sh};
+signed_scaled({0,I,Sh}) -> {I, Sh}.
+
+%% as an Erlang float (the tests compare with it)
 to_float(Bits, E, M) ->
-    {S0, Eb, Mb} = fields(Bits, E, M),
-    Light = if Eb =:= (1 bsl E) - 1 -> {S0, (1 bsl M) bor Mb, Eb - bias(E) - M};
-	       true -> value(Bits, E, M)
-	    end,
-    case Light of
+    case light_value(Bits, E, M) of
 	{zero,0} -> 0.0;
 	{zero,1} -> -0.0;
 	{S,I,Sh} ->

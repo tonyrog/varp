@@ -11,6 +11,11 @@ v(Text, Var, Opts) ->
 
 count(Text) -> varp_tc:count(Text).
 
+%% one model with backjumping, normalised like varp_tc:models/1
+model_bj(Text) ->
+    {_, [M|_], _} = varp_tc:run(Text, [{satisfy,[]},{backjump,[]}]),
+    varp_tc:norm_model(M).
+
 %% all models with backjumping: plain backtracking takes ages over a
 %% free binary32
 counts(Text) -> counts(Text, #{}).
@@ -168,10 +173,147 @@ to_fix_test() ->
     ?assertEqual(0.0, v(D ++ "Q = X; X == -1.0e-6", "Q")),   %% no -0.0 in fixed point
     ?assertEqual(0.5, v("declare X:16/float754, Q:8/fixpoint(4); Q = X; X == 0.5", "Q")).
 
+%%% ---- addition and subtraction ---------------------------------------
+
+%% the sum of two binary32 numbers whose exponents are at most 29 apart
+%% is exact as a double, so the rounded double sum is the answer
+add_oracle(Vals, Width, Round) ->
+    D = lists:flatten(io_lib:format("declare X:~w/float754, Y:~w/float754, Z:~w/float754; ",
+				    [Width, Width, Width])),
+    [begin
+	 A = Round(A0), B = Round(B0),
+	 %% the statement form pins the bits of a zero result
+	 T = D ++ lists:flatten(io_lib:format("Z = X + Y; W = X - Y; X == ~w && Y == ~w",
+					      [A, B])),
+	 %% backjump: plain backtracking thrashes over the adder's outputs
+	 M = model_bj("declare W:" ++ integer_to_list(Width) ++ "/float754; " ++ T),
+	 ?assertEqual({A,B,Round(A+B),Round(A-B)},
+		      {A,B,proplists:get_value("Z", M),proplists:get_value("W", M)})
+     end || {A0,B0} <- Vals].
+
+add_test_() ->
+    Vals = [{1.5,2.5}, {1.5,-1.5}, {-1.5,1.5}, {1.0000001,1.0}, {1.0,1.0000001},
+	    {1.0e38,-3.0e37}, {1.0e-3,1.0e3}, {0.1,0.2}, {-0.1,0.3},
+	    {16777216.0,1.0}, {16777216.0,3.0}, {1.0,-0.9999999}, {2.5,-0.0}, {0.0,-2.5}],
+    [{"binary32 against the double sum", {timeout, 900, fun() ->
+	rand:seed(exsss, {17,19,23}),
+	Rnd = [{(rand:uniform() - 0.5) * math:pow(10, rand:uniform(6) - 3),
+		(rand:uniform() - 0.5) * math:pow(10, rand:uniform(6) - 3)} || _ <- lists:seq(1, 12)],
+	add_oracle(Vals ++ Rnd, 32, fun f32/1) end}},
+     {"binary16 against the double sum", {timeout, 300, fun() ->
+	add_oracle([{1.5,2.5}, {1.5,-1.5}, {1.001,1.0}, {1000.0,-999.5}, {0.1,0.2}], 16, fun f16/1) end}}].
+
+%% every pair of float754(3,2) against varp_float:add_bits
+add_exhaustive_test_() ->
+    {timeout, 900, fun() ->
+	{_, Ms, _} = varp_tc:run("declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X + Y; true",
+				 [{satisfy,[]},{backjump,[{max,0}]}]),
+	?assertEqual(4096, length(Ms)),
+	Bits = fun(M, Name) ->
+		       {_,{_,Vec}} = lists:keyfind({p,Name,[]}, 1, M),
+		       list_to_integer(tuple_to_list(Vec), 2)
+	       end,
+	Bad = [{A,B,Z,varp_float:add_bits(A, B, 3, 2)} || M <- Ms,
+			  A <- [Bits(M, <<"X">>)], B <- [Bits(M, <<"Y">>)], Z <- [Bits(M, <<"Z">>)],
+			  Z =/= varp_float:add_bits(A, B, 3, 2)],
+	?assertEqual([], Bad)
+     end}.
+
+%% the sign of a zero: a cancelled difference is +0, -0 + -0 is -0
+add_edge_test() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+    ?assertEqual(0.0,  v(D ++ "X = 1.5; Y = -1.5; Z = X + Y; Z >= 0", "Z")),
+    ?assertEqual(0.0,  v(D ++ "X = 1.5; Y = 1.5; Z = X - Y; Z >= 0", "Z")),
+    ?assertEqual(-0.0, v(D ++ "X = -0.0; Y = -0.0; Z = X + Y; Z <= 0", "Z")),
+    ?assertEqual(0.0,  v(D ++ "X = -0.0; Y = 0.0; Z = X + Y; Z >= 0", "Z")),
+    ?assertEqual(-2.5, v(D ++ "X = -2.5; Y = 0.0; Z = X + Y; Z < 0", "Z")),
+    %% an integer term, a literal, two literals
+    ?assertEqual(5.5, v("declare N:4, X:32/float754, Z:32/float754; N == 3 && X == 2.5 && Z == X + N", "Z")),
+    ?assertEqual(0.5, v(D ++ "X == 2.5 && Z == X - 2", "Z")),
+    ?assertEqual(4.0, v(D ++ "Z == 1.5 + 2.5", "Z")),
+    %% overflow is inf, and the invariant form holds in a sum
+    {0, Out} = varp_tc:cli(["--print","model","-f", D ++ "X == 3.0e38 && Z == X + X", "sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out, "Z=inf")),
+    ?assertEqual(1, counts("declare X:32/float754, Y:32/float754; X == 1.0 && Y == 2.0 && X + Y == 3.0")).
+
+add_lib_test_() ->
+    {timeout, 300, fun() ->
+	L = #{ops => lib},
+	D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+	?assertEqual(4.0, v(D ++ "X == 1.5 && Y == 2.5 && Z == X + Y", "Z", L)),
+	%% from the rounded operands: f32(0.1) - f32(0.3) is a tie, even wins
+	?assertEqual(f32(f32(0.1)-f32(0.3)), v(D ++ "X == 0.1 && Y == 0.3 && Z == X - Y", "Z", L))
+     end}.
+
+%%% ---- multiplication -----------------------------------------------
+
+%% the product of two binary32 (binary16) numbers is exact as a double,
+%% so the double product rounded to the format is the correct answer
+mul_oracle(Vals, Width, Round) ->
+    D = lists:flatten(io_lib:format("declare X:~w/float754, Y:~w/float754, Z:~w/float754; ",
+				    [Width, Width, Width])),
+    [begin
+	 A = Round(A0), B = Round(B0),
+	 T = D ++ lists:flatten(io_lib:format("X == ~w && Y == ~w && Z == X * Y",
+					      [A, B])),
+	 ?assertEqual({A,B,Round(A*B)}, {A,B,v(T, "Z")})
+     end || {A0,B0} <- Vals].
+
+mul_test_() ->
+    Vals = [{1.5,2.5}, {-1.5,0.1}, {3.0,1.0e-3}, {123.456,-0.789}, {1.0e10,1.0e-10},
+	    {0.3,3.0}, {1.0000001,1.0000001}, {-7.25,-0.125}, {65536.0,0.5}],
+    [{"binary32 against the double product", {timeout, 600, fun() ->
+	rand:seed(exsss, {7,11,13}),
+	Rnd = [{(rand:uniform() - 0.5) * math:pow(10, rand:uniform(20) - 10),
+		(rand:uniform() - 0.5) * math:pow(10, rand:uniform(20) - 10)} || _ <- lists:seq(1, 12)],
+	mul_oracle(Vals ++ Rnd, 32, fun f32/1) end}},
+     {"binary16 against the double product", {timeout, 300, fun() ->
+	mul_oracle([{1.5,2.5}, {-1.5,0.125}, {3.0,0.001}, {12.3,-0.78}, {100.0,2.0}], 16, fun f16/1) end}}].
+
+%% every pair of float754(3,2) against varp_float:mul_bits
+mul_exhaustive_test_() ->
+    {timeout, 600, fun() ->
+	{_, Ms, _} = varp_tc:run("declare X/float754(3,2), Y/float754(3,2), Z/float754(3,2); Z = X * Y; true",
+				 [{satisfy,[]},{backjump,[{max,0}]}]),
+	?assertEqual(4096, length(Ms)),
+	Bits = fun(M, Name) ->
+		       {_,{_,Vec}} = lists:keyfind({p,Name,[]}, 1, M),
+		       list_to_integer(tuple_to_list(Vec), 2)
+	       end,
+	Bad = [{A,B,Z} || M <- Ms,
+			  A <- [Bits(M, <<"X">>)], B <- [Bits(M, <<"Y">>)], Z <- [Bits(M, <<"Z">>)],
+			  Z =/= varp_float:mul_bits(A, B, 3, 2)],
+	?assertEqual([], Bad)
+     end}.
+
+%% zero, overflow, the sign of a zero (the statement form pins the bits)
+mul_edge_test() ->
+    D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+    ?assertEqual(-0.0, v(D ++ "X = 0.0; Y = -2.5; Z = X * Y; Z <= 0", "Z")),
+    ?assertEqual(-0.0, v(D ++ "X = -0.0; Y = 2.5; Z = X * Y; Z <= 0", "Z")),
+    ?assertEqual(0.0,  v(D ++ "X = 1.0e-30; Y = 1.0e-10; Z = X * Y; Z >= 0", "Z")),
+    ?assertEqual(-0.0, v(D ++ "X = -1.0e-30; Y = 1.0e-10; Z = X * Y; Z <= 0", "Z")),
+    %% an integer factor, and a literal
+    ?assertEqual(7.5, v("declare N:4, X:32/float754, Z:32/float754; N == 3 && X == 2.5 && Z == X * N", "Z")),
+    ?assertEqual(-5.0, v(D ++ "X == 2.5 && Z == X * -2", "Z")),
+    %% two literals fold
+    ?assertEqual(3.75, v(D ++ "Z == 1.5 * 2.5", "Z")),
+    %% overflow is the inf pattern
+    {0, Out} = varp_tc:cli(["--print","model","-f", D ++ "X == 3.0e38 && Z == X * 10", "sat","bj"]),
+    ?assertNotEqual(nomatch, string:find(Out, "Z=inf")).
+
+mul_lib_test_() ->
+    {timeout, 300, fun() ->
+	L = #{ops => lib},
+	D = "declare X:32/float754, Y:32/float754, Z:32/float754; ",
+	?assertEqual(3.75, v(D ++ "X == 1.5 && Y == 2.5 && Z == X * Y", "Z", L)),
+	?assertEqual(f32(-1.5*0.1), v(D ++ "X == -1.5 && Y == 0.1 && Z == X * Y", "Z", L))
+     end}.
+
 errors_test() ->
     %% (two literals fold as fixed point, a variable does not)
-    ?assertError({float754_operator,'add',_},
-		 varp_tc:models("declare X:32/float754, Y:32/float754; X == Y + 1.0")),
+    ?assertError({float754_operator,'div',_},
+		 varp_tc:models("declare X:32/float754, Y:32/float754; X == Y / 2.0")),
     ?assertError({float754_to_integer,_,_},
 		 varp_tc:models("declare N:8, X:32/float754; N = X; X == 1.5")),
     ?assertError({float754_mixed,_},
