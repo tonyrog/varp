@@ -58,9 +58,12 @@ new(Vp,N) when is_integer(N), N > 0 ->
     {First,Last} = varp_nif:add_variables(Vp, N, _IsAtom=true),
     lists:seq(First, Last).
 
+%% Without a result vector the gates return their literal: a constant
+%% operand folds (x & 1 = x, x | 0 = x, x ^ 1 = ~x) and costs nothing.
+%% A result vector given up front would be tied to the folded literal
+%% with equality clauses instead, one new variable per bit.
 bitwise_not(Vp, Ys) ->
-    N = length(Ys),
-    bitwise1(Vp,'not',new(Vp,N),Ys).
+    bitwise1(Vp,'not',Ys).
 
 bitwise_not(Vp, Xs, Ys) ->
     bitwise1(Vp,'not',Xs,Ys).
@@ -69,38 +72,33 @@ bitwise_and(Vp, Ys, Zs) ->
     bitwise_and(Vp, undefined, Ys, Zs).
 
 bitwise_and(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
-    N = min(length(Ys), length(Zs)),
-    bitwise2(Vp,'and',new(Vp,N),Ys,Zs);
+    bitwise2(Vp,'and',Ys,Zs);
 bitwise_and(Vp, Xs, Ys, Zs) when is_list(Xs), is_list(Ys), is_list(Zs) ->
     bitwise2(Vp,'and',Xs,Ys,Zs).
 
 bitwise_or(Vp, Ys, Zs) ->
     bitwise_or(Vp, undefined, Ys, Zs).
 bitwise_or(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
-    N = min(length(Ys), length(Zs)),
-    bitwise2(Vp,'or',new(Vp,N),Ys,Zs);
+    bitwise2(Vp,'or',Ys,Zs);
 bitwise_or(Vp,Xs,Ys,Zs) ->
     bitwise2(Vp,'or',Xs,Ys,Zs).
 
 bitwise_xor(Vp, Ys, Zs) ->
     bitwise_xor(Vp, undefined, Ys, Zs).
 bitwise_xor(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
-    N = min(length(Ys), length(Zs)),
-    bitwise2(Vp,'xor',new(Vp,N),Ys,Zs);    
+    bitwise2(Vp,'xor',Ys,Zs);    
 bitwise_xor(Vp,Xs,Ys,Zs) ->
     bitwise2(Vp,'xor',Xs,Ys,Zs).
 
 bitwise_equ(Vp, Ys, Zs) ->
     bitwise_equ(Vp, undefined, Ys, Zs).
 bitwise_equ(Vp, undefined, Ys, Zs) when is_list(Ys), is_list(Zs) ->
-    N = min(length(Ys), length(Zs)),
-    bitwise2(Vp,'equ',new(Vp,N),Ys,Zs);    
+    bitwise2(Vp,'equ',Ys,Zs);    
 bitwise_equ(Vp,Xs,Ys,Zs) ->
     bitwise2(Vp,'equ',Xs,Ys,Zs).
 
 bitwise1(Vp,Op,Ys) when is_list(Ys) ->
-    N = length(Ys),
-    bitwise1(Vp,Op,new(Vp,N),Ys).
+    [varp_circuit:gate(Vp,Op,Y) || Y <- Ys].
 
 bitwise1(Vp,Op,Xs,Ys) when is_list(Xs), is_list(Ys) ->
     bitwise1_(Vp,Op,Xs,Ys,[]);
@@ -115,8 +113,7 @@ bitwise1_(_Vp,_Op,[],[],As) ->
 
 %% Apply same operator on two vectors
 bitwise2(Vp,Op,Ys,Zs) when is_list(Ys), is_list(Zs) ->
-    N = min(length(Ys), length(Zs)),
-    bitwise2(Vp,Op,new(Vp,N),Ys,Zs);
+    bitwise2_(Vp,Op,Ys,Zs,[]);
 bitwise2(Vp,Op,Ys,Z) when is_boolean(Z); is_integer(Z) ->
     bitwisez_(Vp,Op,Ys,Z,[]).
 
@@ -124,6 +121,12 @@ bitwise2(Vp,Op,Xs,Ys,Zs) when is_list(Xs), is_list(Ys), is_list(Zs) ->
     bitwise2_(Vp,Op,Xs,Ys,Zs,[]);
 bitwise2(Vp,Op,Xs,Ys,Z)  when is_boolean(Z); is_integer(Z) ->
     bitwisez_(Vp,Op,Xs,Ys,Z,[]).
+
+bitwise2_(Vp,Op,[Y|Ys],[Z|Zs],As) ->
+    A = varp_circuit:gate(Vp,Op,Y,Z),
+    bitwise2_(Vp,Op,Ys,Zs,[A|As]);
+bitwise2_(_Vp,_Op,[],[],As) ->
+    lists:reverse(As).
 
 bitwise2_(Vp,Op,[X|Xs],[Y|Ys],[Z|Zs],As) ->
     A = varp_circuit:gate(Vp,Op,X,Y,Z),

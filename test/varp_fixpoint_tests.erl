@@ -181,3 +181,102 @@ print_test_() ->
 				 "sat","bt"]),
 	?assertNotEqual(nomatch, string:find(Out2, "X=2.0"))
      end}.
+
+%%
+%% wrap(E) keeps the low raw bits as a C int32_t store does, fits(E, T)
+%% says whether the exact value would have fit.  Needed to model a
+%% runtime that wraps (candyspeak, 2026-11-28).
+%%
+wrap_test() ->
+    D = "declare X:32/fixpoint, Y:32/fixpoint; ",
+    ?assertEqual(-25536.0, v(D ++ "X == 20000.0 && Y == wrap(X + X)", "Y")),
+    ?assertEqual(-25536.0, v(D ++ "X == 20000.0 && Y == wrap(X + X, 32/fixpoint)", "Y")),
+    ?assertEqual(-25536.0, v(D ++ "X == 20000.0 && Y == wrap(X + X, 32/fixpoint(16))", "Y")),
+    ?assertEqual(-25536.0, v(D ++ "X == 20000.0 && Y == wrap(X + X, fixpoint(16,16))", "Y")),
+    ?assertEqual(-25536.0, v(D ++ "X == 200.0 && Y == wrap(X * X)", "Y")),
+    ?assertEqual(-25536.0, v(D ++ "Y = wrap(X + X); X == 20000.0", "Y")),
+    ?assertEqual(14464.0,  v(D ++ "X == -25536.0 && Y == wrap(X + X)", "Y")),
+    ?assertEqual(-5.0,     v(D ++ "X == 20000.0 && Y == wrap(X - 20005.0)", "Y")),
+    ?assertEqual(-32768.0, v(D ++ "X == 32767.0 && Y == wrap(X + 1.0)", "Y")),
+    %% a constant, and the raw bits of a mask
+    ?assertEqual(4464.5, v("declare Y:32/fixpoint; Y == wrap(70000.5, 32/fixpoint)", "Y")),
+    ?assertEqual(-25536.0, v(D ++ "X == 20000.0 && Y == wrap((X + X) & 0xFFFFFFFF)", "Y")),
+    ?assertEqual(7232.0,   v(D ++ "X == 20000.0 && Y == ((X + X) & 0x7FFFFFFF)", "Y")),
+    %% the mask alone is no wrap: 0x9C400000 in 33 bits is still +40000
+    ?assertEqual(0, count(D ++ "X == 20000.0 && Y == ((X + X) & 0xFFFFFFFF)")),
+    %% an integer is scaled first; a fixed point value into an integer
+    %% needs a rounding
+    ?assertEqual(-3.0, v("declare X:8/signed, Y:16/fixpoint(4); X == -3 && Y == wrap(X)", "Y")),
+    ?assertEqual(-3.0, v("declare X:8/signed, Y:16/fixpoint(4); X == -3 && Y == wrap(X, fixpoint(12,4))", "Y")),
+    ?assertEqual(1.0,  v("declare X:8/signed, Y:8/fixpoint(4); X == 17 && Y == wrap(X)", "Y")),
+    ?assertError({fixpoint_to_integer,_,_},
+		 varp_tc:models("declare X:16/fixpoint(4), Y:8/signed; X == 1.5 && Y == wrap(X)")),
+    %% a constant factor that is a power of two is a shift of the raw bits
+    ?assertEqual(3.0, v(D ++ "X == 1.5 && Y == X * 2.0", "Y")),
+    ?assertEqual(0.75, v(D ++ "X == 1.5 && Y == X * 0.5", "Y")),
+    ?assertEqual(1.5, v(D ++ "X == 1.5 && Y == X + 0.0", "Y")),
+    %% /float is what --float says
+    ?assertEqual(-25536.0, v(D ++ "X == 20000.0 && Y == wrap(X + X, 32/float)", "Y",
+			     #{float => "fixpoint"})).
+
+fits_test() ->
+    D = "declare X:32/fixpoint; ",
+    ?assertEqual(0, count(D ++ "X == 20000.0 && fits(X + X, 32/fixpoint)")),
+    ?assertEqual(1, count(D ++ "X == 16000.0 && fits(X + X, 32/fixpoint)")),
+    ?assertEqual(1, count(D ++ "X == 20000.0 && fits(X + X, fixpoint(17,16))")),
+    ?assertEqual(0, count(D ++ "X == 200.0 && fits(X * X, 32/fixpoint)")),
+    ?assertEqual(1, count(D ++ "X == 100.0 && fits(X * X, 32/fixpoint)")),
+    %% the edges: 32767.99998 is the largest, -32768.0 the smallest
+    ?assertEqual(1, count(D ++ "X == 32767.0 && fits(X + 0.5, 32/fixpoint)")),
+    ?assertEqual(0, count(D ++ "X == 32767.0 && fits(X + 1.0, 32/fixpoint)")),
+    ?assertEqual(1, count(D ++ "X == -32767.0 && fits(X - 1.0, 32/fixpoint)")),
+    ?assertEqual(0, count(D ++ "X == -32767.0 && fits(X - 1.5, 32/fixpoint)")),
+    %% an integer scaled into a narrow format
+    ?assertEqual(1, count("declare X:8/signed; X == 7 && fits(X, 8/fixpoint(4))")),
+    ?assertEqual(0, count("declare X:8/signed; X == 8 && fits(X, 8/fixpoint(4))")).
+
+%% the brief's system: without wrap the sum leaves 32 bits at step 1
+%% and the run ends, with wrap it goes on as the C program does
+system_wrap_test_() ->
+    Sys = fun(Next) ->
+	      "system ov2 {\n"
+	      "    state X:32/fixpoint, N:3;\n"
+	      "    init  X == 20000.0 and N == 0;\n"
+	      "    next  next(X) == " ++ Next ++ ";\n"
+	      "    next  next(N) == N + 1;\n"
+	      "    reach N == 2;\n"
+	      "}\n"
+	  end,
+    {timeout, 300, fun() ->
+	File = varp_tc:tmpfile("ov2_wrap.varp"),
+	ok = file:write_file(File, Sys("wrap(X + X)")),
+	{0, Out} = varp_tc:cli(["bmc","--property","ov2_reach","--k-max","4",File]),
+	?assertNotEqual(nomatch, string:find(Out, "counterexample at k=2")),
+	?assertNotEqual(nomatch, string:find(Out, "-25536.0")),
+	?assertNotEqual(nomatch, string:find(Out, "14464.0")),
+	ok = file:write_file(File, Sys("X + X")),
+	{0, Out2} = varp_tc:cli(["bmc","--property","ov2_reach","--k-max","4",File]),
+	?assertEqual(nomatch, string:find(Out2, "counterexample")),
+	%% & binds looser than ==: (next(X) == X + X) & M is a vector
+	%% where a formula is expected, an error that says so
+	ok = file:write_file(File, Sys("(X + X) & 0xFFFFFFFF")),
+	{_, Out3} = varp_tc:cli(["bmc","--property","ov2_reach","--k-max","3",File]),
+	?assertNotEqual(nomatch, string:find(Out3, "bind looser")),
+	%% doubling from 1000.0 wraps at step 6 (64000.0 is -1536.0);
+	%% fits as an assumption keeps only the runs that do not wrap
+	Sys2 = fun(Assume) ->
+	       "system ov3 {\n"
+	       "    state X:32/fixpoint;\n"
+	       "    init  X == 1000.0;\n"
+	       "    next  next(X) == wrap(X + X);\n" ++ Assume ++
+	       "    reach X < 0.0;\n"
+	       "}\n"
+	   end,
+	ok = file:write_file(File, Sys2("")),
+	{0, Out4} = varp_tc:cli(["bmc","--property","ov3_reach","--k-max","8",File]),
+	?assertNotEqual(nomatch, string:find(Out4, "counterexample at k=6")),
+	?assertNotEqual(nomatch, string:find(Out4, "-1536.0")),
+	ok = file:write_file(File, Sys2("    assume fits(X + X, 32/fixpoint);\n")),
+	{0, Out5} = varp_tc:cli(["bmc","--property","ov3_reach","--k-max","8",File]),
+	?assertEqual(nomatch, string:find(Out5, "counterexample"))
+     end}.

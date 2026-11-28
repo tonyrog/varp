@@ -463,7 +463,13 @@ assert_formula(F, Bs) ->
 	    {varp_nif:bind(Vp, V) andalso varp_nif:bcp(Vp), Bs1};
 	{{uint,1,[V]}, Bs1} ->
 	    Vp = Bs1#bs.vp,
-	    {varp_nif:bind(Vp, V) andalso varp_nif:bcp(Vp), Bs1}
+	    {varp_nif:bind(Vp, V) andalso varp_nif:bcp(Vp), Bs1};
+	{{T,N,_}, _Bs1} ->
+	    %% "next(X) == E & M" is (next(X) == E) & M: & binds looser
+	    %% than == as in C, and a vector is not a condition
+	    erlang:error({not_a_condition, {T,N},
+			  "& | ^ bind looser than == as in C, "
+			  "parenthesize: next(X) == (E & M)"})
     end.
 
 %% A refuted property is a fact: no path of length k satisfies it,

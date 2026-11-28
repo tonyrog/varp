@@ -194,6 +194,56 @@ in the same way as soon as one operand is; the statement form
 `Z = X * Y;` keeps the width of `Z`, the low bits of a wide product or
 the product sign extended.
 
+Arithmetic is exact otherwise: `X + Y` of two 32 bit values is 33 bits
+wide, and `Z == X + Y` with a 32 bit `Z` has no model when the sum
+does not fit, so a run that overflows simply ends.  `wrap(E, T)` is
+the C cast: the low bits of `E` read as the type `T`, two's complement,
+what a store into a `T` sized memory cell keeps.
+
+    declare X:8/signed, Y:8/unsigned;
+    wrap(X + X, 8/signed) == -56 && X == 100      # 200 wraps to -56
+    Y == wrap(X, 8/unsigned) && X == -3           # 253
+    Y = wrap(X + X);                               # the destination says the type
+    Y == wrap(X + X)                               # so does the other side of ==
+
+`T` is what a declaration says after the name: `32/unsigned`,
+`8/signed`, `32/fixpoint`, `16/fixpoint(4)`, `fixpoint(8,8)`,
+`32/float`.  A shorter value is extended first (the sign of a signed
+one).  `fits(E, T)` is the overflow `wrap` hides: true when the exact
+value of `E` is representable in `T`, so `fits(X + X, 8/signed)` holds
+for `X == 60` and fails for `X == 64`; `invariant fits(..)` proves a
+system never wraps, `assume fits(..)` keeps the runs that do not.
+Both are gates over the bits, no arithmetic.  `wrap` to `float754` is an
+error (the bits of an integer are no float); a fixed point or float
+value into an integer type needs `floor`, `ceil`, `round` or `trunc`
+first, as an assignment does.
+
+`cast(E, T)` is the third form: the same bits read as another type of
+the same width, no logic at all, what memory does when a float is
+stored and read back as bytes.  `E/unsigned`, `E/signed` and `E/float`
+are `cast(E, T)` at the width of `E`; `cast(E)` takes the type from
+the destination like `wrap(E)`.  Any type goes, `float754` included,
+and a constant has the bits of its width:
+
+    declare F:32/float754, U:32, Q:32/fixpoint;
+    F == 1.5 && U == F/unsigned                   # U == 0x3FC00000
+    F == cast(0xC0490FDB, 32/float754)            # F == -3.1415927
+    isnan(F) && F/unsigned == 0x7FC00000          # the quiet NaN pattern
+    Q == 1.5 && U == cast(Q, 32/unsigned)         # U == 0x18000, the raw Q16.16
+    U == cast(Q)                                  # the same, typed by U
+
+The widths must agree, `cast(X:16, 32/float754)` is an error (`wrap`
+cuts or extends); a float literal has no bits until it has a type.
+
+`X + 0`, `X - 0`, `X * 1` are `X`, `X * 0` is `0` and `X * 2^n` is
+`X << n`: no adder or multiplier is built for them.
+
+A bitwise operator with a constant costs nothing: `X & 0xFF`,
+`X | 0`, `X ^ ~0` and the field extraction `(X & 0xFFFF0000) | (X & 0xFFFF)`
+are wiring, the constant bits fold in the gates.  `&`, `|` and `^` bind
+looser than `==` (as in C), so `Y == X & M` is `(Y == X) & M`, a vector
+where a formula is expected and an error: write `Y == (X & M)`.
+
 ### Fixed point
 
 A fixed point variable is a two's complement integer read as
@@ -209,7 +259,14 @@ A float literal (`1.5`, `2.5e3`, `1e2`) is a fixed point constant with
 the fraction width of the operand it meets, or `--fixpoint` when it
 meets an integer, so `X * 1.0 / Y` divides two integers in Q16.16.  An
 integer operand is converted exactly, two fixed point operands of
-different widths meet at the wider fraction.  `+ - min max % < == ...`
+different widths meet at the wider fraction.  The arithmetic is exact,
+`X + X` of two Q16.16 values is 33 bits, so `next(X) == X + X` in a
+system has no successor once the sum leaves 32 bits; `wrap(X + X)`
+(or `wrap(X + X, 32/fixpoint)`) keeps the low 32 raw bits as a C
+`int32_t` store does, `20000.0 + 20000.0` wraps to `-25536.0`, and
+`fits(X + X, 32/fixpoint)` tells whether the exact sum would have fit.
+An integer wrapped into a fixed point type is scaled first, so
+`wrap(-3, 16/fixpoint(4))` is `-3.0`.  `+ - min max % < == ...`
 work on the scaled integers, `*` drops the low F bits of the product
 (floor), `/` is `(a << F) / b` truncating toward zero like the signed
 integer division, and `& | ^ << >>` act on the raw bits.  `floor(X)`,

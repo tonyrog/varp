@@ -1115,8 +1115,29 @@ format_error(Err) ->
 			  "A vector is a value, not a condition: there is no "
 			  "implicit truthiness, so compare it.\n"
 			  "  -f \"B(3)\"       is a 4 bit value\n"
-			  "  -f \"B(3) == 4\"  is a condition\n",
+			  "  -f \"B(3) == 4\"  is a condition\n"
+			  "Note that & | ^ bind looser than == as in C: "
+			  "Y == X & M is (Y == X) & M, write Y == (X & M).\n",
 			  [Op, operand_kind_str(Left), operand_kind_str(Right)]);
+	{not_a_condition,{T,N},Msg} ->
+	    io_lib:format("a ~w bit ~w value where a formula is expected: ~s\n",
+			  [N, T, Msg]);
+	{wrap_type_unknown,Msg} -> [Msg, "\n"];
+	{cast_type_unknown,Msg} -> [Msg, "\n"];
+	{cast_literal,V,Msg} -> io_lib:format("cast of ~p: ~s\n", [V, Msg]);
+	{cast_width,{Kind,K},{T,N},Msg} ->
+	    io_lib:format("cast of a ~w bit ~s to ~w bits ~w: ~s\n",
+			  [K, operand_kind_str(Kind), N, T, Msg]);
+	{wrap_float754,Msg} -> [Msg, "\n"];
+	{fits_float754,Msg} -> [Msg, "\n"];
+	{type_expected,Other,Msg} ->
+	    io_lib:format("~p is not a type; expected ~s\n", [Other, Msg]);
+	{fixpoint_to_integer,Kind,Msg} ->
+	    io_lib:format("a fixed point value into ~s: ~s\n",
+			  [operand_kind_str(Kind), Msg]);
+	{float754_to_integer,Kind,Msg} ->
+	    io_lib:format("a float754 value into ~s: ~s\n",
+			  [operand_kind_str(Kind), Msg]);
 	{shift_not_constant,B} ->
 	    BStr = varp_format:format_symbol(B),
 	    ["Shift value ",BStr," must be constant "];

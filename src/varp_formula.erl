@@ -61,6 +61,9 @@
 -define(is_int_type(T),   (((T)=:=int) orelse ((T)=:=uint))).
 %% operators that take booleans and give a boolean, everything else
 %% applied to booleans is arithmetic and widens them to 1 bit vectors
+%% wrap(E) and cast(E) take their type from the destination
+-define(is_typed_by_target(F), ((F) =:= <<"wrap">> orelse (F) =:= <<"cast">>)).
+
 -define(is_bool_op(Op),
 	((Op) =:= 'and' orelse (Op) =:= 'or' orelse (Op) =:= 'xor' orelse
 	 (Op) =:= 'imp' orelse (Op) =:= 'equ' orelse
@@ -916,6 +919,45 @@ bld(X,{p,<<"fma">>,[A,B,C]}, Bs) ->
     {V,Bs7} = float_fma(Af, Bf, Cf, T, Bs6),
     set(X, V, Bs7);
 %% fixed point to integer
+%% wrap(E, T): the low bits of E read as T, two's complement, as a C
+%% cast or a store into a T sized memory cell.  wrap(E) takes the type
+%% of its destination: X = wrap(E), or the other side of == (see the
+%% 'eq' clause of lop).  fits(E, T): the exact value of E is
+%% representable in T, the overflow that wrap would hide.
+bld(X,{p,<<"wrap">>,[A,T]}, Bs) ->
+    Type = type_arg(T, Bs),
+    {Y,Bs1} = bld(A, Bs),
+    {V,Bs2} = wrap_to(Type, Y, Bs1),
+    set(X, V, Bs2);
+bld(X,{p,<<"wrap">>,[A]}, Bs) when is_tuple(X) ->
+    bld(X,{p,<<"wrap">>,[A,{type_of,X}]}, Bs);
+bld(_X,{p,<<"wrap">>,[_A]}, _Bs) ->
+    error({wrap_type_unknown,
+	   "wrap(E) needs a typed destination, X = wrap(E) or "
+	   "X == wrap(E); say the type otherwise, wrap(E, 32/unsigned)"});
+bld(X,{p,<<"fits">>,[A,T]}, Bs) ->
+    Type = type_arg(T, Bs),
+    {Y,Bs1} = bld(A, Bs),
+    {V,Bs2} = fits_in(Type, Y, Bs1),
+    set(X, V, Bs2);
+%% cast(E, T): the same bits read as T, no logic at all, what memory
+%% does; E/unsigned, E/signed and E/float are cast(E, T) at the same
+%% width.  cast(E) takes the type of its destination like wrap(E).
+bld(X,{p,<<"cast">>,[A,T]}, Bs) ->
+    Type = type_arg(T, Bs),
+    {Y,Bs1} = bld(A, Bs),
+    {V,Bs2} = cast_to(Type, Y, Bs1),
+    set(X, V, Bs2);
+%% E/unsigned inside a function argument parses as a type whose size
+%% is E: as a value it is the cast
+bld(X,{type,PType,E}, Bs) ->
+    bld(X,{p,<<"cast">>,[E,{type,PType,same}]}, Bs);
+bld(X,{p,<<"cast">>,[A]}, Bs) when is_tuple(X) ->
+    bld(X,{p,<<"cast">>,[A,{type_of,X}]}, Bs);
+bld(_X,{p,<<"cast">>,[_A]}, _Bs) ->
+    error({cast_type_unknown,
+	   "cast(E) needs a typed destination, X = cast(E) or "
+	   "X == cast(E); say the type otherwise, cast(E, 32/float754)"});
 bld(X,{p,F,[A]}, Bs) when F =:= <<"floor">>; F =:= <<"ceil">>;
 			  F =:= <<"round">>; F =:= <<"trunc">> ->
     {Y,Bs1} = bld(A, Bs),
@@ -1099,12 +1141,30 @@ bld(X,{subst,SList,F},Bs) ->
 bld(_X,{lop,':=',L,R}, Bs) ->
     {Y,Bs1} = bld(R, Bs),
     operation1(':=',L,Y,Bs1);
+bld(_X,{lop,'=',L,R={p,F,[_]}}, Bs) when ?is_typed_by_target(F) ->
+    %% X = wrap(E), X = cast(E): the destination gives the type
+    {Lv,Bs1} = bld(L, Bs),
+    bld(Lv, R, Bs1);
 bld(_X,{lop,'=',L,R}, Bs) ->
     {Y,Bs1} = bld(R, Bs),
     operation1('=',L,Y,Bs1);
 bld(X,{lop,Op,A}, Bs) ->
     {Y,Bs1} = bld(A, Bs),
     operation1(Op, X, Y, Bs1);
+bld(X,{lop,Op,A,{p,F,[E]}}, Bs) when (Op =:= 'eq' orelse Op =:= 'neq'),
+				     ?is_typed_by_target(F) ->
+    %% A == wrap(E), A == cast(E): the other side gives the type
+    case A of
+	{p,G,[_]} when ?is_typed_by_target(G) ->
+	    error({wrap_type_unknown, "wrap(E) or cast(E) on both sides"});
+	_ ->
+	    {Y,Bs1} = bld(A, Bs),
+	    {Z,Bs2} = bld({p,F,[E,{type_of,Y}]}, Bs1),
+	    operation2(Op,X,Y,Z,Bs2)
+    end;
+bld(X,{lop,Op,A={p,F,[_]},B}, Bs) when (Op =:= 'eq' orelse Op =:= 'neq'),
+				      ?is_typed_by_target(F) ->
+    bld(X,{lop,Op,B,A}, Bs);
 bld(X,_Bld={lop,Op,A,B}, Bs) ->
     ?dbg1("op = ~p\n", [_Bld]),
     {Y,Bs1} = bld(A, Bs),
@@ -1572,6 +1632,11 @@ builtin_function(<<"round">>, 1) -> true;
 builtin_function(<<"trunc">>, 1) -> true;
 builtin_function(<<"isnan">>, 1) -> true;
 builtin_function(<<"isinf">>, 1) -> true;
+builtin_function(<<"wrap">>, 1) -> true;
+builtin_function(<<"wrap">>, 2) -> true;
+builtin_function(<<"fits">>, 2) -> true;
+builtin_function(<<"cast">>, 1) -> true;
+builtin_function(<<"cast">>, 2) -> true;
 builtin_function(_, _) -> false.
 
 build_circuit_body([{define,{p,Name,Ps},Def}|Body], Bs) ->
@@ -1864,6 +1929,8 @@ eval_meta({lop,Op,A,B}, Bs) when is_atom(Op) -> eval_meta({op,Op,A,B}, Bs);
 eval_meta({lop,Op,A}, Bs) when is_atom(Op) -> eval_meta({op,Op,A}, Bs);
 eval_meta({p,F,As}, Bs) when is_binary(F) -> eval_meta({call,F,As}, Bs);  %% len(msg) in a define
 eval_meta(ID, Bs) when is_binary(ID) -> eval_id(ID, Bs);
+eval_meta({type,_,_}, _Bs) ->
+    error({type_argument, "a type is an argument of wrap and fits only"});
 eval_meta({call,F,As},Bs) ->
     case {F,eval_meta_list(As,Bs)} of
 	{<<"factorial">>,[N]} -> varp_math:factorial(N);
@@ -3065,6 +3132,156 @@ fix_to_int(Fun, {{fix,F},N,Xs}, Bs) ->
     end;
 fix_to_int(_Fun, V, Bs) ->
     {V, Bs}.   %% already an integer
+
+%%
+%% wrap(E, T) and fits(E, T).  The type argument is what a declaration
+%% says after the name: 32/unsigned, 8/signed, 32/fixpoint,
+%% 16/fixpoint(4), fixpoint(8,8), 32/float754, float754(8,23), 32/float;
+%% the parser leaves the keyword forms as {type,_,_} and the others as
+%% a division or a call.  {type_of,V} is the type of a built value, the
+%% destination of wrap(E).  The result is {Type,Width}.
+%%
+type_arg({type_of,{bool,_}}, _Bs) -> {bool,1};
+type_arg({type_of,{T,N,_}}, _Bs) -> {T,N};
+type_arg({type,PType,same}, _Bs) ->
+    {PType, same};        %% E/unsigned: the width of E, see cast_to/3
+type_arg({type,PType,SExpr}, Bs) ->
+    Size = decl_width(PType, SExpr, Bs),
+    {decl_type(PType, Size, Bs), Size};
+type_arg({op,'div',SExpr,Q}, Bs) when is_binary(Q) ->
+    type_arg_(Q, [], SExpr, Bs);
+type_arg({op,'div',SExpr,{call,Q,As}}, Bs) when is_binary(Q) ->
+    type_arg_(Q, As, SExpr, Bs);
+type_arg({op,'div',SExpr,{p,Q,As}}, Bs) when is_binary(Q) ->
+    type_arg_(Q, As, SExpr, Bs);
+type_arg({call,Q,[A,B]}, Bs) when is_binary(Q) ->
+    type_arg_(Q, [A,B], undefined, Bs);
+type_arg({p,Q,[A,B]}, Bs) when is_binary(Q) ->
+    type_arg_(Q, [A,B], undefined, Bs);
+type_arg(Other, _Bs) ->
+    error({type_expected, Other,
+	   "32/unsigned, 8/signed, 32/fixpoint, 16/fixpoint(4), "
+	   "fixpoint(8,8), 32/float754, float754(8,23) or 32/float"}).
+
+type_arg_(<<"fixpoint">>, [], SExpr, Bs) ->
+    Size = eval_meta(SExpr, Bs),
+    {decl_type({fix,default}, Size, Bs), Size};
+type_arg_(<<"fixpoint">>, [F], SExpr, Bs) ->
+    Size = eval_meta(SExpr, Bs),
+    {decl_type({fix,F}, Size, Bs), Size};
+type_arg_(<<"fixpoint">>, [I,F], undefined, Bs) ->
+    Fv = eval_meta(F, Bs),
+    {{fix,Fv}, eval_meta(I, Bs) + Fv};
+type_arg_(<<"float754">>, [], SExpr, Bs) ->
+    Size = eval_meta(SExpr, Bs),
+    {decl_type({float,default,default}, Size, Bs), Size};
+type_arg_(<<"float754">>, [M], SExpr, Bs) ->
+    Size = eval_meta(SExpr, Bs),
+    {decl_type({float,default,M}, Size, Bs), Size};
+type_arg_(<<"float754">>, [E,M], undefined, Bs) ->
+    Ev = eval_meta(E, Bs), Mv = eval_meta(M, Bs),
+    {{float,Ev,Mv}, 1+Ev+Mv};
+type_arg_(Q, As, SExpr, _Bs) ->
+    error({type_expected, {Q, length(As), SExpr}}).
+
+%% the low N bits of a value as {T,N}: sign extended when the value is
+%% signed and shorter, cut at the top otherwise.  A fixed point target
+%% takes the raw bits at its fraction width, so an integer is scaled
+%% first and a float literal is a constant; a fixed point or float754
+%% value into an integer needs a rounding, as an assignment does.
+wrap_to({{float,_,_},_N}, _V, _Bs) ->
+    error({wrap_float754,
+	   "wrap to float754 has no meaning (the bits of an integer are "
+	   "no float), convert the value instead"});
+wrap_to({{fix,F},N}, V, Bs) ->
+    {Raw,Bs1} = to_raw(V, F, Bs),
+    {int,K,Xs} = varp_arith:iarg(Raw),
+    {{{fix,F},N,low_bits(Xs, K, N, int)}, Bs1};
+wrap_to({T,N}, V, _Bs) when is_tuple(V), element(1,V) =:= flo;
+			    is_tuple(V), ?is_fix(element(1,V)) ->
+    error({fixpoint_to_integer, {T,N}, "use floor, ceil, round or trunc"});
+wrap_to({T,N}, {{float,_,_},_,_}, _Bs) ->
+    error({float754_to_integer, {T,N}, "use floor, ceil, round or trunc"});
+wrap_to({bool,1}, V, Bs) ->
+    {_Vt,_K,Xs} = varp_arith:varg(V),
+    {{bool,hd(Xs)}, Bs};
+wrap_to({T,N}, V, Bs) ->
+    {Vt,K,Xs} = varp_arith:varg(V),
+    {{T,N,low_bits(Xs, K, N, Vt)}, Bs}.
+
+low_bits(Xs, K, N, _Vt) when K >= N ->
+    lists:sublist(Xs, N);
+low_bits(Xs, K, N, Vt) ->
+    Ext = case Vt of int -> lists:last(Xs); _ -> false end,
+    Xs ++ lists:duplicate(N-K, Ext).
+
+%% does the exact value fit in {T,N}: a boolean.  Signed: the bits above
+%% the target all equal its sign bit.  Unsigned: the bits above the
+%% target, and the sign of a signed value, are all zero.
+fits_in({{float,_,_},_N}, _V, _Bs) ->
+    error({fits_float754, "use isinf and isnan for float754"});
+fits_in({{fix,F},N}, V, Bs) ->
+    {Raw,Bs1} = to_raw(V, F, Bs),
+    fits_int(N, varp_arith:iarg(Raw), Bs1);
+fits_in({T,N}, V, _Bs) when is_tuple(V), element(1,V) =:= flo;
+			    is_tuple(V), ?is_fix(element(1,V)) ->
+    error({fixpoint_to_integer, {T,N}, "use floor, ceil, round or trunc"});
+fits_in({T,N}, {{float,_,_},_,_}, _Bs) ->
+    error({float754_to_integer, {T,N}, "use floor, ceil, round or trunc"});
+fits_in({int,N}, V, Bs) ->
+    fits_int(N, varp_arith:iarg(V), Bs);
+fits_in({bool,1}, V, Bs) ->
+    fits_in({uint,1}, V, Bs);
+fits_in({_T,N}, V, Bs) ->
+    {Vt,K,Xs} = varp_arith:varg(V),
+    Above = case Vt of
+		int -> lists:nthtail(min(N, K-1), Xs);  %% the sign too
+		_ when K > N -> lists:nthtail(N, Xs);
+		_ -> []
+	    end,
+    Vp = Bs#bs.vp,
+    {{bool,varp_circuit:all(Vp, [varp_circuit:inv(B) || B <- Above])}, Bs}.
+
+fits_int(N, {int,K,_Xs}, Bs) when K =< N ->
+    {{bool,?T}, Bs};
+fits_int(N, {int,_K,Xs}, Bs) ->
+    Vp = Bs#bs.vp,
+    S = lists:nth(N, Xs),
+    Same = [varp_circuit:equ_gate(Vp, B, S) || B <- lists:nthtail(N, Xs)],
+    {{bool,varp_circuit:all(Vp, Same)}, Bs}.
+
+%% the same bits as another type of the same width: integer <-> fixed
+%% point <-> float754, a float from its bit pattern, a float's bits as
+%% an integer.  A float literal has no bits until it has a format.
+cast_to(_Type, {flo,V}, _Bs) ->
+    error({cast_literal, V, "a float literal has no bits of its own, "
+	   "give it a type first: cast(X, ..) with X == 1.5"});
+cast_to({PType,same}, V, Bs) ->
+    {K,_Xs} = bits_of(V),
+    cast_to({decl_type(PType, K, Bs), K}, V, Bs);
+cast_to({T,N}, V, Bs) ->
+    {K,Xs0} = bits_of(V),
+    %% a constant has only the bits its value needs: cast(0x3FC00000,
+    %% 32/float754) is the 32 bit pattern
+    Xs = case V of
+	     {Vt,_,_} when is_atom(Vt), K < N ->
+		 case varp_arith:vconst(V) of
+		     C when is_integer(C) -> low_bits(Xs0, K, N, Vt);
+		     false -> Xs0
+		 end;
+	     _ -> Xs0
+	 end,
+    case length(Xs) of
+	N when T =:= bool -> {{bool,hd(Xs)}, Bs};
+	N -> {{T,N,Xs}, Bs};
+	_ ->
+	    error({cast_width, {operand_kind(V), K}, {T,N},
+		   "cast keeps the bits, so the widths must agree; "
+		   "wrap(E, T) cuts or extends"})
+    end.
+
+bits_of({bool,X}) -> {1,[X]};
+bits_of({_T,N,Xs}) -> {N,Xs}.
 
 %%
 %% IEEE 754 light, {float,E,M}: a sign bit, E exponent bits and M

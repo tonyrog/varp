@@ -5,6 +5,7 @@
 -module(varp_formula_tests).
 
 -include_lib("eunit/include/eunit.hrl").
+-include("../src/varp.hrl").
 
 count(T) -> varp_tc:count(T).
 models(T) -> varp_tc:models(T).
@@ -562,3 +563,132 @@ meta_as_value_test() ->
     F = "declare A:(isize(n)-1); declare B:((isize(n)+1)/2);"
 	"((A * B) == n) && (A > B) && (B > 1)",
     ?assertEqual(3, varp_tc:count(F, #{meta => #{<<"n">> => 100}})).
+
+%%
+%% wrap(E, T) is the C cast: the low bits of E as T.  fits(E, T) is
+%% the overflow it hides.  2026-11-28.
+%%
+
+%% the number of variables a formula builds
+nvars(Text) ->
+    {_, _, Bs} = varp_tc:run(Text, [{satisfy,[]}]),
+    varp:get_number_of_variables(Bs#bs.vp).
+
+wrap_test() ->
+    ?assertEqual(-56, v("declare X:8/signed, Y:8/signed; X == 100 && Y == wrap(X + X)", "Y")),
+    ?assertEqual(-56, v("declare X:8/signed, Y:8/signed; X == 100 && Y == wrap(X + X, 8/signed)", "Y")),
+    ?assertEqual(-56, v("declare X:8/signed, Y:8/signed; Y = wrap(X + X); X == 100", "Y")),
+    ?assertEqual(-56, v("declare X:8/signed, Y:8/signed; X == 100 && wrap(X + X) == Y", "Y")),
+    ?assertEqual(253, v("declare X:8/signed, Y:8/unsigned; X == -3 && Y == wrap(X, 8/unsigned)", "Y")),
+    ?assertEqual(253, v("declare X:8/signed, Y:8/unsigned; X == -3 && Y == wrap(X)", "Y")),
+    ?assertEqual(4,   v("declare X:8/signed, Y:4/unsigned; X == 100 && Y == wrap(X)", "Y")),
+    %% a shorter value is extended first, with the sign of a signed one
+    ?assertEqual(65533, v("declare X:8/signed, Y:16/unsigned; X == -3 && Y == wrap(X)", "Y")),
+    ?assertEqual(253,   v("declare X:8/unsigned, Y:16/unsigned; X == 253 && Y == wrap(X)", "Y")),
+    ?assertEqual(-3,    v("declare X:8/signed, Y:16/signed; X == -3 && Y == wrap(X)", "Y")),
+    %% a constant wraps too
+    ?assertEqual(44, v("declare Y:8/unsigned; Y == wrap(300, 8/unsigned)", "Y")),
+    %% the type has to come from somewhere, and has to be a type
+    ?assertError({wrap_type_unknown,_}, models("declare X:8; X == 1 && wrap(X)")),
+    ?assertError({wrap_type_unknown,_}, models("declare X:8, Y:8; wrap(X) == wrap(Y)")),
+    ?assertError({wrap_float754,_}, models("declare X:8, Y:8; Y == wrap(X, 8/float754)")),
+    ?assertError({type_expected,_,_}, models("declare X:8, Y:8; Y == wrap(X, 8)")).
+
+fits_test() ->
+    ?assertEqual(1, count("declare X:8/signed; X == 60 && fits(X + X, 8/signed)")),
+    ?assertEqual(0, count("declare X:8/signed; X == 64 && fits(X + X, 8/signed)")),
+    ?assertEqual(1, count("declare X:8/signed; X == -64 && fits(X + X, 8/signed)")),
+    ?assertEqual(0, count("declare X:8/signed; X == -65 && fits(X + X, 8/signed)")),
+    ?assertEqual(0, count("declare X:8/signed; X == -1 && fits(X, 8/unsigned)")),
+    ?assertEqual(1, count("declare X:8/signed; X == 5 && fits(X, 3/unsigned)")),
+    ?assertEqual(0, count("declare X:8/signed; X == 8 && fits(X, 3/unsigned)")),
+    ?assertEqual(1, count("declare X:8/unsigned; X == 200 && fits(X, 8/unsigned)")),
+    ?assertEqual(0, count("declare X:8/unsigned; X == 200 && fits(X, 8/signed)")),
+    ?assertEqual(1, count("declare X:8/unsigned; X == 127 && fits(X, 8/signed)")),
+    %% a wider target always fits, a boolean is one unsigned bit
+    ?assertEqual(256, count("declare X:8/signed; fits(X, 16/signed)")),
+    ?assertEqual(2, count("declare X:8/unsigned; fits(X, 1/unsigned)")),
+    %% the sums that fit: -64..63
+    ?assertEqual(128, count("declare X:8/signed; fits(X + X, 8/signed)")),
+    %% wrap and fits agree: the wrapped sum is the exact sum iff it fits
+    ?assertEqual(0, count("declare X:8/signed; (wrap(X + X, 8/signed) == X + X) != fits(X + X, 8/signed)")),
+    ?assertError({fits_float754,_}, models("declare X:8; fits(X, 8/float754)")).
+
+%% cast(E, T) reads the same bits as another type; E/unsigned,
+%% E/signed, E/float are the forms at the width of E
+cast_test() ->
+    ?assertEqual(255, v("declare X:8/signed, Y:8; X == -1 && Y == X/unsigned", "Y")),
+    ?assertEqual(255, v("declare X:8/signed, Y:8; X == -1 && Y == cast(X, 8/unsigned)", "Y")),
+    ?assertEqual(255, v("declare X:8/signed, Y:8; X == -1 && Y == cast(X)", "Y")),
+    ?assertEqual(-1,  v("declare X:8, Y:8/signed; X == 255 && Y == X/signed", "Y")),
+    ?assertEqual(-1,  v("declare X:8, Y:8/signed; Y = cast(X); X == 255", "Y")),
+    %% the sum is 9 bits, a 9 bit signed value
+    ?assertEqual(0, count("declare X:8, Y:8/signed; X == 255 && Y == (X + 1)/signed")),
+    ?assertEqual(-256, v("declare X:8, Y:16/signed; X == 255 && Y == (X + 1)/signed", "Y")),
+    %% float754 bit patterns both ways, a constant has the bits of its width
+    ?assertEqual(16#3FC00000, v("declare F:32/float754, U:32; F == 1.5 && U == F/unsigned", "U")),
+    ?assertEqual(16#3FC00000, v("declare F:32/float754, U:32; F == 1.5 && U == cast(F)", "U")),
+    ?assertEqual(1.5, v("declare F:32/float754, U:32; U == 0x3FC00000 && F == cast(U)", "F")),
+    ?assertEqual(1.5, v("declare F:32/float754; F == cast(0x3FC00000, 32/float754)", "F")),
+    ?assertEqual(-1.5, v("declare F:32/float754; F == cast(0xBFC00000, 32/float754)", "F")),
+    ?assertEqual(1, count("declare F:32/float754; isnan(F) && F/unsigned == 0x7FC00000")),
+    ?assertEqual(1, count("declare F:32/float754; isinf(F) && F/unsigned == 0x7F800000")),
+    ?assertEqual(0, count("declare F:32/float754; isinf(F) && F/unsigned == 0x7F800001")),
+    %% the next float up is the next bit pattern; the sum is 33 bits
+    %% wide, so it is wrapped to the width first
+    ?assertEqual(1.5000001192092896,
+		 v("declare F:32/float754, G:32/float754; F == 1.5 && G == cast(wrap(F/unsigned + 1, 32/unsigned), 32/float754)", "G")),
+    ?assertError({cast_width,_,_,_}, models("declare F:32/float754, G:32/float754; F == 1.5 && G == cast(F/unsigned + 1, 32/float754)")),
+    %% fixed point raw bits
+    ?assertEqual(16#18000, v("declare Q:32/fixpoint, U:32; Q == 1.5 && U == cast(Q, 32/unsigned)", "U")),
+    ?assertEqual(1.5, v("declare Q:32/fixpoint, U:32; U == 0x18000 && Q == cast(U)", "Q")),
+    ?assertEqual(1.5, v("declare Q:32/fixpoint, U:32; U == 0x18000 && Q == cast(U, fixpoint(16,16))", "Q")),
+    %% a boolean is one bit
+    ?assertEqual(1, v("declare A, B:1; A && B == cast(A, 1/unsigned)", "B")),
+    %% the widths must agree, a literal has no bits, the type has to come from somewhere
+    ?assertError({cast_width,_,_,_}, models("declare X:16, F:32/float754; X == 1 && F == cast(X)")),
+    ?assertError({cast_literal,_,_}, models("declare X:8; X == cast(1.5, 8/unsigned)")),
+    ?assertError({cast_type_unknown,_}, models("declare X:8; X == 1 && cast(X)")).
+
+%% X + 0, X - 0, X * 1 are X, X * 0 is 0 and X * 2^n is a shift: no
+%% adder or multiplier, the variable count of Y == X
+arith_fold_test() ->
+    N0 = nvars("declare X:32, Y:32; Y == X"),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == X + 0")),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == 0 + X")),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == X - 0")),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == X * 1")),
+    ?assert(nvars("declare X:32, Y:32; Y == X * 8") =< N0),
+    ?assert(nvars("declare X:32, Y:32; Y == 8 * X") =< N0),
+    ?assert(nvars("declare X:32, Y:32; Y == X * 0") < N0),
+    ?assert(nvars("declare X:32, Y:32; Y == X * 3") > N0),
+    %% and the values
+    ?assertEqual(5,   v("declare X:4, Y:8; X == 5 && Y == X + 0", "Y")),
+    ?assertEqual(5,   v("declare X:4, Y:8; X == 5 && Y == X - 0", "Y")),
+    ?assertEqual(40,  v("declare X:4, Y:8; X == 5 && Y == X * 8", "Y")),
+    ?assertEqual(40,  v("declare X:4, Y:8; X == 5 && Y == 8 * X", "Y")),
+    ?assertEqual(0,   v("declare X:4, Y:8; X == 5 && Y == X * 0", "Y")),
+    ?assertEqual(-12, v("declare X:4/signed, Y:8/signed; X == -3 && Y == X * 4", "Y")),
+    %% the statement form keeps the width of the target: 20 in 3 bits
+    ?assertEqual(4,   v("declare X:3, Y:3; Y = X * 4; X == 5", "Y")),
+    %% --carry true asks for a carry that X + 0 never has
+    ?assertEqual(0, length(varp_tc:models("declare X:4, Y:4; X == 5 && Y == X + 0", #{carry => true}))),
+    ?assertEqual(16, length(varp_tc:models("declare X:4, Y:4; Y == X + 0", #{carry => false}))).
+
+%% a constant operand of a bitwise operator folds in the gates: the
+%% result is wiring, no new variable per bit (it was one per bit)
+bitwise_fold_test() ->
+    N0 = nvars("declare X:32, Y:32; Y == X"),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == (X & 0xFFFFFFFF)")),
+    %% a mask that clears bits fixes bits of Y too: fewer still
+    ?assert(nvars("declare X:32, Y:32; Y == (X & 0xFF)") < N0),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == (X | 0)")),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == (X ^ 0xFFFFFFFF)")),
+    ?assertEqual(N0, nvars("declare X:32, Y:32; Y == ~X")),
+    ?assert(nvars("declare X:32, Y:32; Y == ((X & 0xFFFF0000) | (X & 0xFFFF))") =< N0),
+    %% and the values are what they were
+    ?assertEqual(16#F0, v("declare X:8, Y:8; X == 0xF3 && Y == (X & 0xF0)", "Y")),
+    ?assertEqual(16#FF, v("declare X:8, Y:8; X == 0xF3 && Y == (X | 0x0F)", "Y")),
+    ?assertEqual(16#0C, v("declare X:8, Y:8; X == 0xF3 && Y == (X ^ 0xFF)", "Y")),
+    ?assertEqual(16#0C, v("declare X:8, Y:8; X == 0xF3 && Y == ~X", "Y")),
+    ?assertEqual(16#F3, v("declare X:8, Y:8; X == 0xF3 && Y == ((X & 0xF0) | (X & 0x0F))", "Y")).

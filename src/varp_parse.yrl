@@ -205,6 +205,12 @@ unary_operator -> '!' : 'not'.
 multiplicative_expr -> unary_expr : '$1'.
 multiplicative_expr -> multiplicative_expr '*' unary_expr : {op,'mul','$1','$3'}.
 multiplicative_expr -> multiplicative_expr '/' unary_expr : {op,'div','$1','$3'}.
+%% a type as a function argument, wrap(E, 32/unsigned), fits(E, 32/float);
+%% 32/fixpoint(8) and float754(8,23) are a division and a call, the
+%% function reads them as a type (varp_formula:type_arg/2)
+multiplicative_expr -> multiplicative_expr '/' 'signed'   : {type,int,'$1'}.
+multiplicative_expr -> multiplicative_expr '/' 'unsigned' : {type,uint,'$1'}.
+multiplicative_expr -> multiplicative_expr '/' 'float'    : {type,{float,default},'$1'}.
 multiplicative_expr -> multiplicative_expr '%' unary_expr : {op,'rem','$1','$3'}.
 
 additive_expr -> multiplicative_expr : '$1'.
@@ -403,6 +409,11 @@ lexpr0 -> lexpr0 '[' expr ':' expr ':' expr ']' :
 lexpr10 -> lexpr0                 : '$1'.
 lexpr10 -> lexpr10 '*' lexpr0     : {lop, 'mul', '$1', '$3'}.
 lexpr10 -> lexpr10 '/' lexpr0     : {lop, 'div', '$1', '$3'}.
+%% E/unsigned, E/signed, E/float: the same bits read as another type of
+%% the same width, cast(E, T) with the width implied
+lexpr10 -> lexpr10 '/' 'unsigned' : {p, <<"cast">>, ['$1', {type,uint,same}]}.
+lexpr10 -> lexpr10 '/' 'signed'   : {p, <<"cast">>, ['$1', {type,int,same}]}.
+lexpr10 -> lexpr10 '/' 'float'    : {p, <<"cast">>, ['$1', {type,{float,default},same}]}.
 lexpr10 -> lexpr10 '%' lexpr0     : {lop, 'rem', '$1', '$3'}.
 
 lexpr20 -> lexpr10                : '$1'.

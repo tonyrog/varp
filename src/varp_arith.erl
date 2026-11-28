@@ -107,11 +107,28 @@ abs(Vp, X, A={int,An,Ax}) ->
 abs(Vp, X, A) -> set(Vp, X, A).
 
 
+%% X + 0 is X (no adder), X * 2^n is X << n (no multiplier): the
+%% carry chain of an adder allocates variables that the constant would
+%% only fix later, and a shift is wiring.  The status is that of the
+%% exact operation: no carry, no overflow.
 add(Vp, Y, B) ->
     Ct = case mix_type(Y,B) of
 	     bool -> uint;
 	     Ct0 -> Ct0
 	 end,
+    case {vconst(Y), vconst(B)} of
+	{_, 0} -> add_zero(Vp, Ct, Y);
+	{0, _} -> add_zero(Vp, Ct, B);
+	_ -> add_(Vp, Ct, Y, B)
+    end.
+
+add_zero(Vp, Ct, Y) ->
+    set_status(Vp, false, varp_nif:getopt(Vp, carry)),
+    set_overflow(Vp, Ct, false, false, varp_nif:getopt(Vp, overflow)),
+    {Yt,Yn,Yx} = xarg(Ct,Y),
+    normalize(Yt,Yn,Yx).
+
+add_(Vp, Ct, Y, B) ->
     {Yt,Yn,Yx} = xarg(Ct,Y),
     {Bt,Bn,Bx} = xarg(Ct,B),
     Cn = erlang:max(Yn,Bn)+1,
@@ -126,6 +143,13 @@ add(Vp, Y, B) ->
 
 add(Vp, undefined, Y, Z) -> add(Vp, Y, Z);
 add(Vp, X, Y, Z) ->
+    case {vconst(Y), vconst(Z)} of
+	{_, 0} -> set(Vp, X, add_zero(Vp, element(1,varg(X)), Y));
+	{0, _} -> set(Vp, X, add_zero(Vp, element(1,varg(X)), Z));
+	_ -> add_to(Vp, X, Y, Z)
+    end.
+
+add_to(Vp, X, Y, Z) ->
     {Xt,Xn,Xx} = varg(X),
     {Yt,Yn,Yx} = xarg(Xt,Y),
     {Zt,Zn,Zx} = xarg(Xt,Z),
@@ -145,6 +169,17 @@ subtract(Vp, Y, Z) ->
 	     uint -> int;
 	     T -> T
 	 end,
+    case vconst(Z) of
+	0 ->
+	    set_status(Vp, false, varp_nif:getopt(Vp, borrow)),
+	    set_overflow(Vp, Xt, false, false, varp_nif:getopt(Vp, overflow)),
+	    {Yt0,Yn0,Yx0} = xarg(Xt,Y),
+	    normalize(Yt0,Yn0,Yx0);
+	_ ->
+	    subtract_(Vp, Xt, Y, Z)
+    end.
+
+subtract_(Vp, Xt, Y, Z) ->
     {Yt,Yn,Yx} = xarg(Xt,Y),
     {Zt,Zn,Zx} = xarg(Xt,Z),
     Xn = erlang:max(Yn,Zn)+1,
@@ -177,6 +212,21 @@ multiply(Vp,A,B) ->
 	     bool -> uint;
 	     Ct0 -> Ct0
 	 end,
+    case {power_of_two(vconst(A)), power_of_two(vconst(B))} of
+	{_, zero} -> {uint,1,[false]};
+	{zero, _} -> {uint,1,[false]};
+	{_, N} when is_integer(N) -> shl(Vp, xarg(Ct,A), uconst(N));
+	{N, _} when is_integer(N) -> shl(Vp, xarg(Ct,B), uconst(N));
+	_ -> multiply_(Vp, Ct, A, B)
+    end.
+
+%% the exponent of a constant power of two, zero for 0, false otherwise
+power_of_two(0) -> zero;
+power_of_two(K) when is_integer(K), K > 0, K band (K-1) =:= 0 ->
+    round(math:log2(K));
+power_of_two(_) -> false.
+
+multiply_(Vp, Ct, A, B) ->
     {At,An,Ax} = xarg(Ct,A),
     {Bt,Bn,Bx} = xarg(Ct,B),
     Cx =
@@ -580,12 +630,13 @@ bitwise_xor(Vp,X,Y,Z) -> bitwise2(Vp,'xor',X,Y,Z).
 bitwise_equ(Vp, Y, Z) -> bitwise2(Vp,'equ',Y,Z).
 bitwise_equ(Vp,X,Y,Z) -> bitwise2(Vp,'equ',X,Y,Z).
 
+%% no result vector: the gates fold constants and return the literal
 bitwise1(Vp, Op, Y) ->
-    {Yt,Yn,_Yx} = varg(Y),
-    Xn = Yn,
-    Xt = Yt,
-    Xx = varp_bitvec:new(Vp, Xn),
-    bitwise1(Vp,Op,{Xt,Xn,Xx},Y).
+    {Yt,Yn,Yx} = varg(Y),
+    Xx = varp_bitvec:bitwise1(Vp,Op,Yx),
+    if Yt =:= bool -> {bool,hd(Xx)};
+       true -> {Yt,Yn,Xx}
+    end.
 
 bitwise1(Vp,Op,X,Y) ->
     {Yt,Yn,Yx} = varg(Y),
@@ -601,12 +652,16 @@ bitwise1(Vp,Op,X,Y) ->
     end.
 
 bitwise2(Vp, Op, Y, Z) ->
-    {Yt,Yn,_Yx} = varg(Y),
-    {Zt,Zn,_Zx} = varg(Z),
+    {Yt,Yn,Yx} = varg(Y),
+    {Zt,Zn,Zx} = varg(Z),
     Xn = erlang:max(Yn,Zn),
     Xt = mix_type(Yt,Zt),
-    Xx = varp_bitvec:new(Vp, Xn),
-    bitwise2(Vp,Op,{Xt,Xn,Xx},Y,Z).
+    Yx1 = vextend(Yt,Yx,Yn,Xn),
+    Zx1 = vextend(Zt,Zx,Zn,Xn),
+    Xx = varp_bitvec:bitwise2(Vp,Op,Yx1,Zx1),
+    if Xt =:= bool -> {bool,hd(Xx)};
+       true -> {Xt,Xn,Xx}
+    end.
 
 bitwise2(Vp,Op,X,Y,Z) ->
     {Yt,Yn,Yx} = varg(Y),

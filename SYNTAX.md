@@ -52,6 +52,8 @@ A fixed point variable is a signed integer read as value / 2^F:
 Float literals (1.5, 2.5e3, 1e2) are fixed point constants.  The
 integer operators and comparisons apply; * and / rescale; sqrt(X)
 rounds down; floor(X), ceil(X), round(X) and trunc(X) give an integer.
+wrap(X + X) and wrap(E, 32/fixpoint) keep the low raw bits like a C
+store; fits(E, 32/fixpoint) is true when the exact value fits.
 See README.md.
 
 # Floating point
@@ -68,6 +70,18 @@ Literals (and inf), comparisons (NaN is unordered), -X, abs, min, max,
 and fixed point; --inf, --nan, --underflow and --fdivz say whether inf,
 NaN, a tiny inexact result and a division by zero may arise.  See
 README.md.
+
+# Casts
+
+    wrap(E, T)     the low bits of E as T, two's complement (a C cast):
+                   wrap(X + X, 8/signed), wrap(X, 32/unsigned),
+                   wrap(E, 32/fixpoint), wrap(E, fixpoint(8,8))
+    wrap(E)        the type is the destination's: Y = wrap(E); or Y == wrap(E)
+    fits(E, T)     true when the exact value of E is representable in T
+    cast(E, T)     the same bits read as T, same width, any type:
+                   cast(X, 32/float754), cast(F, 32/unsigned), cast(Q, 32/fixpoint)
+    E/unsigned     cast(E, T) at the width of E; also E/signed, E/float
+    cast(E)        the type is the destination's: Y == cast(E)
 
 # Integer operators
 
